@@ -35,7 +35,7 @@ class ExtractionWorker:
         extractors: Optional[List[BaseExtractor]] = None,
         max_workers: int = 3,
         max_attempts: int = 3,
-        stop_check: Optional[Callable[[], bool]] = None
+        stop_check: Optional[callable[[], bool]] = None
     ):
         """
         Initialize extraction worker.
