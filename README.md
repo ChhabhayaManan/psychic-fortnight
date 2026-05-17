@@ -1,306 +1,87 @@
-# 🧠 Agentic Engineering Memory System
+# 🧠 Engineering Memory System
 
-> An autonomous system that continuously extracts, connects, and retrieves architectural decisions, incidents, timelines, and organizational knowledge from software development workflows.
+An autonomous system that converts fragmented engineering activity into structured, queryable organizational memory. It automatically ingests data from development platforms, extracts high-value artifacts using LLMs, and builds a connected knowledge graph of decisions, incidents, and architectural evolution.
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+## 🎯 The Problem
 
-## 🎯 What Is This?
+Engineering knowledge is often lost because it's buried in:
+- Thousands of Pull Requests and Issues
+- Fragmented comment threads and code reviews
+- Transient incident discussions
+- Individual developers' memories
 
-Engineering knowledge disappears because:
-- Discussions are fragmented across PRs, issues, and comments
-- Architectural decisions are buried in code reviews
-- Incident context is lost after resolution
-- Team knowledge lives in people's heads
+This system ensures that **why** things were done is as accessible as **what** was done.
 
-**This system converts chaotic engineering activity into structured organizational memory.**
+## ✨ Core Capabilities
 
-## ✨ Key Features
-
-### 🤖 Fully Autonomous
-- **Connect once, forget forever**: Just connect a GitHub repo
-- **Automatic discovery**: Finds all PRs, issues, and discussions
-- **Background processing**: Works continuously without intervention
-- **Self-healing**: Resumes from checkpoints after crashes
-
-### 🎯 What It Remembers
-
-| Memory Type | Examples |
-|------------|----------|
-| **Decisions** | "Why did we switch to microservices?" |
-| **Incidents** | "What caused the auth outage?" |
-| **Timeline** | "How did our architecture evolve?" |
-| **Ownership** | "Who understands the payment service?" |
-| **Relationships** | "What decisions led to this incident?" |
+### 🕵️ Autonomous Extraction
+The system uses specialized LLM agents (supporting Watsonx, Gemini, and Groq) to identify and extract:
+- **Architectural Decisions (ADRs):** Captures the reasoning behind technical choices.
+- **Incidents & Post-mortems:** Identifies root causes and resolutions from bug fixes.
+- **Technical Timeline:** Maps the evolution of the codebase over time.
+- **System Architecture:** Tracks changes to components and dependencies.
+- **Expertise & Ownership:** Identifies which contributors own specific domains.
+- **Unresolved Questions:** Surfaces TBDs and open questions from discussions.
+- **Relationships:** Links related decisions, incidents, and changes.
 
 ### 🔍 Intelligent Retrieval
-- Natural language queries
-- Context-aware answers
-- Source provenance (no hallucinations)
-- Progressive results (query while processing)
+- **Natural Language Querying:** Ask questions like "Why did we choose gRPC over REST?" or "Who should I talk to about the authentication service?"
+- **Context-Aware Answers:** Orchestrated via LangGraph to synthesize answers from vector and graph data.
+- **Traceable Evidence:** Every answer includes direct citations to source PRs and issues.
 
-### 📊 Built for Scale
-- Concurrent processing with worker pools
-- Rate limiting and backoff
-- Checkpoint-based resumption
-- Efficient vector and graph storage
+### ⚡ Production-Ready Pipeline
+- **Generic Repository Support:** Works with any GitHub repository.
+- **One-Click Ingestion:** Fully automated pipeline from discovery to indexing.
+- **Resumable Processing:** Uses persistent state and checkpoints to handle large datasets.
+- **Rate-Limit Aware:** Built-in token bucket rate limiting for stable API interaction.
 
-## 🚀 Quick Start
+## 🛠️ System Architecture
 
-### Prerequisites
+1.  **Ingestion:** Scans repository history, fetches raw JSON data, and stores it locally.
+2.  **Extraction:** Parallel LLM agents process raw data using keyword pre-filtering for cost efficiency.
+3.  **Indexing:** Stores structured artifacts in ChromaDB (Vector) and NetworkX (Graph).
+4.  **Orchestration:** LangGraph-based RAG pipeline for complex multi-hop queries.
+
+## 🚀 Getting Started
+
+### 1. Prerequisites
 - Python 3.11+
-- IBM watsonx.ai account
-- GitHub Personal Access Token (optional)
+- Virtual environment (e.g., `starstruck`)
+- IBM Watsonx.ai, Google Gemini, or Groq API credentials
+- GitHub Personal Access Token (for private repos or higher rate limits)
 
-### Installation
-
+### 2. Installation
 ```bash
-# Clone repository
-git clone <repository-url>
-cd psychic-fortnight
-
-# Create virtual environment
+git clone https://github.com/IBM/mcp-context-forge.git
+cd mcp-context-forge
+# Use your virtual env
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
+source venv/bin/activate  # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your API keys
 ```
 
-### Run
+### 3. Configuration
+Copy `.env.example` to `.env` and fill in your credentials.
+- **Watsonx:** Requires `WATSONX_API_KEY`, `WATSONX_PROJECT_ID`, and `LLM_MODEL`.
+- **GitHub:** `GITHUB_TOKEN` is recommended to avoid rate limits.
 
+### 4. Running the Application
 ```bash
-python main.py
+streamlit run streamlit_app.py
 ```
+Navigate to the **Setup** page in the UI to verify your connection, then use the **Processing Dashboard** to start the autonomous pipeline.
 
-The UI opens at `http://localhost:8501`
+## 🔮 Future Developments
 
-**See [QUICKSTART.md](QUICKSTART.md) for detailed setup instructions.**
+- **MCP Server Integration:** Expose the engineering memory as a Model Context Protocol (MCP) server, allowing AI agents (like Claude or Gemini) to query the knowledge base directly.
+- **Multi-Source Connectors:** Integration with GitLab, Bitbucket, Jira, and Slack for a unified memory across all tools.
+- **Automated ADR Generation:** Automatically drafting ADRs from PR discussions.
+- **Cross-Repository Memory:** Analyzing patterns and dependencies across an entire organization's portfolio.
+- **Deeper Code Analysis:** Integrating AST-based analysis with the conversational history.
 
-## 🏗️ Architecture
+## 📄 License
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        USER INTERFACE                        │
-│                    (Streamlit Dashboard)                     │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────┴────────────────────────────────────┐
-│                   ORCHESTRATION LAYER                        │
-│              (LangGraph Autonomous Workflows)                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │   Discovery  │  │  Processing  │  │  Monitoring  │     │
-│  │    Agent     │  │  Coordinator │  │    Agent     │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────┴────────────────────────────────────┐
-│                    PROCESSING LAYER                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │  Ingestion   │  │  Extraction  │  │  Retrieval   │     │
-│  │   Workers    │  │    Agents    │  │   Engines    │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────┴────────────────────────────────────┐
-│                     STORAGE LAYER                            │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │  Raw Data    │  │   Vector DB  │  │  Knowledge   │     │
-│  │   (JSON)     │  │  (ChromaDB)  │  │    Graph     │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 🔄 How It Works
-
-### 1. Connect Source
-```python
-# User connects GitHub repository
-source = connect_github_repo("owner/repo")
-```
-
-### 2. Autonomous Discovery
-```
-Discovery Agent:
-├── Scans repository
-├── Finds all PRs (open + closed)
-├── Finds all Issues (open + closed)
-├── Queues for processing
-└── Continues monitoring for new items
-```
-
-### 3. Background Processing
-```
-Worker Pool:
-├── Fetches raw data (PR/Issue/Comments)
-├── Stores raw data (provenance)
-├── Extracts memories (LLM agents)
-│   ├── Decisions
-│   ├── Incidents
-│   ├── Timeline events
-│   └── Relationships
-├── Generates embeddings (vector search)
-├── Updates knowledge graph
-└── Creates checkpoints (resumable)
-```
-
-### 4. Intelligent Retrieval
-```
-User Query: "Why did we remove Redis?"
-
-Retrieval Engine:
-├── Vector search (semantic similarity)
-├── Graph traversal (related decisions)
-├── Temporal filtering (timeline context)
-├── Confidence scoring
-└── Returns: Decision + Sources + Related Context
-```
-
-## 📁 Project Structure
-
-```
-psychic-fortnight/
-├── app/
-│   ├── core/              # Autonomous processing core
-│   │   ├── source_manager.py
-│   │   ├── discovery_agent.py
-│   │   ├── orchestrator.py
-│   │   └── checkpoint_manager.py
-│   ├── ingestion/         # Data collection
-│   │   └── github/
-│   ├── extraction/        # Memory extraction
-│   │   ├── decisions/
-│   │   ├── incidents/
-│   │   └── timeline/
-│   ├── orchestration/     # LangGraph workflows
-│   ├── retrieval/         # Search strategies
-│   ├── memory/            # Storage layer
-│   ├── workers/           # Background workers
-│   ├── models/            # Pydantic schemas
-│   ├── config/            # Configuration
-│   ├── ui/                # Streamlit interface
-│   └── utils/             # Utilities
-├── data/                  # Storage (gitignored)
-│   ├── raw/               # Raw source data
-│   ├── extracted/         # Extracted memories
-│   ├── graph/             # Knowledge graph
-│   ├── embeddings/        # Vector database
-│   └── state/             # Processing checkpoints
-├── docs/                  # Documentation
-├── tests/                 # Test suite
-├── main.py                # Entry point
-└── requirements.txt       # Dependencies
-```
-
-## 🛠️ Technology Stack
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Orchestration** | LangGraph | Autonomous workflow management |
-| **Agents** | LangChain | LLM-powered extraction agents |
-| **LLM** | IBM watsonx.ai | Language understanding |
-| **Vector DB** | ChromaDB | Semantic search |
-| **Graph DB** | NetworkX | Relationship storage |
-| **UI** | Streamlit | Interactive dashboard |
-| **Models** | Pydantic | Data validation |
-| **API** | PyGithub | GitHub integration |
-
-## 📖 Documentation
-
-- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
-- **[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)** - Detailed architecture
-- **[docs/AUTONOMOUS_FLOW_DIAGRAM.md](docs/AUTONOMOUS_FLOW_DIAGRAM.md)** - System flow
-- **[docs/WORKFLOWS.md](docs/WORKFLOWS.md)** - Processing workflows
-- **[docs/SETUP.md](docs/SETUP.md)** - Development setup
-
-## 🎯 Use Cases
-
-### For Engineering Teams
-- **Onboarding**: New engineers understand past decisions
-- **Incident Response**: Quick access to similar past incidents
-- **Architecture Reviews**: See evolution of system design
-- **Knowledge Retention**: Preserve institutional knowledge
-
-### For Engineering Managers
-- **Decision Tracking**: Understand why choices were made
-- **Team Insights**: See who owns what knowledge
-- **Risk Assessment**: Identify unresolved technical concerns
-- **Timeline Analysis**: Track architectural evolution
-
-### For Technical Writers
-- **Documentation**: Auto-generate architecture docs
-- **Decision Records**: Extract ADRs from discussions
-- **Incident Reports**: Compile post-mortems
-- **Knowledge Base**: Build searchable knowledge base
-
-## 🔮 Roadmap
-
-### Phase 1: Foundation (Current)
-- [x] Core models and configuration
-- [x] Autonomous processing framework
-- [x] Basic UI
-- [ ] GitHub ingestion
-- [ ] Decision extraction
-- [ ] Vector search
-
-### Phase 2: Intelligence
-- [ ] Incident extraction
-- [ ] Timeline generation
-- [ ] Relationship inference
-- [ ] Advanced search
-- [ ] Graph visualization
-
-### Phase 3: Scale
-- [ ] Multi-repository support
-- [ ] GitLab integration
-- [ ] Jira integration
-- [ ] Export capabilities
-- [ ] API access
-
-### Phase 4: Advanced
-- [ ] Predictive insights
-- [ ] Anomaly detection
-- [ ] Automated documentation
-- [ ] Team analytics
-- [ ] Custom extractors
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
-
-## 📝 License
-
-MIT License - see [LICENSE](LICENSE) for details
-
-## 🙏 Acknowledgments
-
-Built with:
-- [LangGraph](https://github.com/langchain-ai/langgraph) - Autonomous workflows
-- [LangChain](https://github.com/langchain-ai/langchain) - LLM framework
-- [IBM watsonx.ai](https://www.ibm.com/watsonx) - Enterprise LLM
-- [ChromaDB](https://www.trychroma.com/) - Vector database
-- [Streamlit](https://streamlit.io/) - UI framework
-
-## 📧 Contact
-
-Questions? Issues? Ideas?
-- Open an issue on GitHub
-- Check existing documentation
-- Review implementation plan
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ---
-
-**Remember**: This is not a chatbot, not a RAG app, not a GitHub summarizer.
-
-**This is an autonomous engineering memory operating system.** 🧠
-
-Start building your organizational memory today!
+Built with ❤️ by the Psychic Fortnight team for the IBM Watsonx.ai Hackathon.
