@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1972,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1972"
+  },
+  "metadata": {
+    "title": "Migrate OAuth/DCR Services from aiohttp to httpx with Connection Pooling",
+    "state": "closed",
+    "created_at": "2026-01-08T11:33:56+00:00",
+    "updated_at": "2026-01-08T22:42:17+00:00",
+    "closed_at": "2026-01-08T22:42:15+00:00",
+    "merged_at": "2026-01-08T22:42:15+00:00",
+    "author": "MohanLaksh",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# Migrate OAuth/DCR Services from aiohttp to httpx with Connection Pooling\r\n\r\n## Overview\r\nFixes #1929 - Eliminates unnecessary TCP + TLS handshake overhead (10-50ms per request) by migrating from aiohttp to httpx with connection pooling for OAuth and DCR operations.\r\n\r\n## Problem\r\nThe `dcr_service.py` and `oauth_manager.py` modules were creating new `aiohttp.ClientSession()` instances for every HTTP request, causing:\r\n- Repeated TCP handshakes\r\n- Repeated TLS handshakes\r\n- 10-50ms latency overhead per request\r\n- Inefficient resource usage\r\n\r\n## Solution\r\nMigrated to `httpx.AsyncClient` with connection pooling:\r\n- Single shared HTTP client instance per service\r\n- Connection reuse across requests\r\n- Configurable connection limits (20 keepalive, 100 max connections)\r\n- HTTP/2 support enabled by default\r\n\r\n## Changes\r\n\r\n### Production Code (3 files)\r\n1. **`mcpgateway/services/dcr_service.py`**\r\n   - Added `_get_client()` method with connection pooling\r\n   - Added `close()` method for cleanup\r\n   - Replaced all `aiohttp.ClientSession` usage with `httpx.AsyncClient`\r\n\r\n2. **`mcpgateway/services/oauth_manager.py`**\r\n   - Added `_get_client()` method with connection pooling\r\n   - Added `close()` method for cleanup\r\n   - Updated 6 methods: `_client_credentials_flow`, `_exchange_code_for_tokens`, `exchange_code_for_token`, `refresh_token`\r\n\r\n3. **`mcpgateway/cli_export_import.py`**\r\n   - Updated HTTP client usage to httpx\r\n\r\n### Test Code (2 files)\r\n1. **`tests/unit/mcpgateway/services/test_dcr_service.py`**\r\n   - Migrated 5 test methods to httpx mocking patterns\r\n\r\n2. **`tests/unit/mcpgateway/test_oauth_manager.py`**\r\n   - Migrated 42+ test methods to httpx mocking patterns\r\n   - Updated imports and exception types\r\n   - Simplified mocking approach using `patch.object(manager, \"_get_client\")`\r\n\r\n## Key Improvements\r\n- ✅ **Performance**: Eliminates 10-50ms overhead per request through connection reuse\r\n- ✅ **HTTP/2**: Enabled by default for better performance\r\n- ✅ **Resource Efficiency**: Single client instance instead of creating new sessions\r\n- ✅ **Cleaner API**: Simpler httpx API (`response.status_code`, synchronous `response.json()`)\r\n- ✅ **Backward Compatible**: No breaking changes to public APIs\r\n\r\n## Testing\r\n- All aiohttp references removed from codebase\r\n- Test mocking patterns updated to work with httpx\r\n- Maintains full test coverage\r\n\r\n## Performance Impact\r\nExpected improvements:\r\n- **OAuth token requests**: 10-50ms faster per request\r\n- **DCR operations**: 10-50ms faster per request\r\n- **High-volume scenarios**: Significant cumulative savings\r\n\r\n## Migration Notes\r\n- Connection pooling configured with sensible defaults (20 keepalive, 100 max)\r\n- HTTP/2 enabled for modern protocol support\r\n- Proper cleanup via `close()` methods\r\n- No changes required to calling code",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3641607379",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-08T22:41:17+00:00",
+      "body": "Rebased, made some fixes - opened OAuth/DCR services: Connection pooling not fully effective due to per-request instantiation #1987 for the rest"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "bbd9779608e68574cb278924366940d82350118e",
+      "message": "Migrate DCR and OAUTH from aiohttp to httpx\n\nSigned-off-by: Mohan Lakshmaiah <mohalaks@in.ibm.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-01-08T11:04:28+00:00"
+    },
+    {
+      "sha": "5858f3fb5db191d07191dcd1c152973256bad3d2",
+      "message": "Fixing Flake8 issues\n\nSigned-off-by: Mohan Lakshmaiah <mohalaks@in.ibm.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-01-08T14:33:14+00:00"
+    },
+    {
+      "sha": "1c873aeb77936d8613854b8a5fd512af57c35393",
+      "message": "Fix httpx migration issues: redirects, timeouts, and test mocking\n\n- Add follow_redirects=True to all httpx.AsyncClient instances to match\n  aiohttp's default behavior (dcr_service.py, oauth_manager.py, cli_export_import.py)\n- Add explicit 300s timeout to CLI export/import operations to prevent\n  premature timeouts for slow operations\n- Update integration tests to mock httpx instead of aiohttp\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-08T22:28:50+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 832,
+  "deletions": 1074,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:00.695636",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:00.696410",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1972,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1972.json"
+  }
+}

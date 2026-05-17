@@ -1,0 +1,139 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1481,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1481"
+  },
+  "metadata": {
+    "title": "Feat-288:Added mariadb support",
+    "state": "closed",
+    "created_at": "2025-11-20T05:42:13+00:00",
+    "updated_at": "2025-11-27T13:08:24+00:00",
+    "closed_at": "2025-11-27T13:08:22+00:00",
+    "merged_at": "2025-11-27T13:08:22+00:00",
+    "author": "nmveeresh",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "MohanLaksh"
+    ]
+  },
+  "description": "## Context — MariaDB Support\r\n\r\nThis PR implements comprehensive support for MariaDB (10.6+) as a backend for Gateway, alongside existing PostgreSQL and SQLite integration. The goal is to enable runtime compatibility, migrations, test coverage, CI integration, Helm deployment, and updated documentation for users wishing to operate with MariaDB clusters.\r\n\r\n### **Key Objectives**\r\n- **MariaDB Compatibility:** Enable Gateway (and related services) to run on MariaDB by simply switching the SQLAlchemy URL, supporting migrations via Alembic.\r\n- **CI & DevOps:** Update test matrix, Docker Compose samples, and Helm charts to validate MariaDB integration automatically.\r\n- **Documentation:** Refresh README and Database guides to highlight MariaDB, document sample configurations, caveats, and migration guidance.\r\n\r\n---\r\n\r\n### **Implementation Checklist**\r\n\r\n#### 1. **SQLAlchemy Connector**\r\n- Pin `mariadb>=1.1.4` in `requirements.in` and update other dependency files.\r\n- Find and update `config.py` to accept a `DB_DRIVER` environment variable, defaulting to `mariadb+mariadbconnector`.\r\n\r\n#### 2. **Alembic Migrations**\r\n- Add branching logic for MariaDB dialect in `alembic/env.py` (`engine.dialect.name == \"mariadb\"`).\r\n- Replace `postgresql.UUID` with `String(36)` if MariaDB detected.\r\n- Convert JSONB/JSON columns and fallback for old MariaDB versions as required.\r\n\r\n#### 3. **Schema Adjustments**\r\n- Use `naming_convention` or truncation to ensure foreign key constraint names ≤ 64 characters (MariaDB limit).\r\n- Substitute `ARRAY` columns with comma-separated VARCHAR or normalized link-table structures.\r\n\r\n#### 4. **Test & CI Matrix**\r\n- Extend GitHub Actions to run tests against `{ sqlite, postgres, mariadb }` matrix.\r\n- Add MariaDB service container (`mariadb:10.6`) in CI, handle root password via env vars.\r\n- Parametrize pytest engine fixture to spin up for each DB.\r\n\r\n#### 5. **Docker Compose**\r\n- Add `docker-compose.mariadb.yml` with corresponding service, environment variables, and port mappings.\r\n- Gateway setup to default or accept MariaDB URL via environment variable.\r\n\r\n#### 6. **Helm Chart**\r\n- Update `values.yaml` to support `db.type: mariadb`, along with host, port, user, password.\r\n- Use conditional templates for MariaDB driver config and liveness/readiness checks.\r\n\r\n#### 7. **Docs & Guides**\r\n- Create/update \"Supported Databases\" documentation page/section with sample connection URLs, limitations, caveats, and quick-start Compose/Helm instructions.\r\n- Add migration guide for switching from PostgreSQL to MariaDB.\r\n\r\n#### 8. **Observability**\r\n- Ensure DB engine metrics labels indicate `engine=\"mariadb\"` where relevant.\r\n\r\n#### 9. **Release Notes**\r\n- Document new dependencies, environment variables, and breaking changes (if applicable).\r\n\r\n---\r\n\r\n### **Acceptance Criteria (from Issue User Stories)**\r\n- All unit & integration tests are green for sqlite-latest, postgres-16, mariadb-10.6.\r\n- Documentation clearly lists supported engines and config caveats.\r\n\r\n---\r\n\r\n**Relevant Issue:** [IBM/mcp-context-forge#288](https://github.com/IBM/mcp-context-forge/issues/288)\r\n\r\n---\r\n\r\nPlease review code changes against this checklist. If any item is incomplete, tag so it can be addressed before merging.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3513878998",
+      "author": "MohanLaksh",
+      "state": "APPROVED",
+      "submitted_at": "2025-11-27T07:42:43+00:00",
+      "body": "Tested Maria DB implementation.\n\nSteps Followed:\n___________________________________________________________________________________\nsudo apt update\nsudo apt upgrade -y\n\nsudo apt install mariadb-server mariadb-client -y\n\nsudo systemctl start mariadb\nsudo systemctl enable mariadb\n\nsudo mysql_secure_installation\n\n\n \nsudo mysql -u root -p\n\nCREATE DATABASE mcpgw_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n \nCREATE USER 'mcpgw'@'localhost' IDENTIFIED BY 'StrongPassword123';\n \nGRANT ALL PRIVILEGES ON mcpgw_db.* TO 'mcpgw'@'localhost';\n \nFLUSH PRIVILEGES;\n \nEXIT;\n\nexport DATABASE_URL=\"mariadb+pymysql://mcpgw:StrongPassword123@localhost:3306/mcpgw_db\"\n\nrm mcp.db\n\n\npip install pymysql\n\nmake serve\n\n___________________________________________________________________________________\n\n<img width=\"1800\" height=\"317\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/8cf66ba9-53c4-44e1-83ff-1f26e31241d6\" />\n\nAdded container runtime tools and tested sample tools.\n\n### ALL WORKING AS INTENDED!\n\nTest Successful\n\n# GOOD TO MERGE!"
+    },
+    {
+      "id": "3515274175",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-11-27T13:08:10+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "9d8bdfad202ee0b6eaa6cdfabae68f2f1ef1cc44",
+      "message": "added mariadb support\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-19T12:35:54+00:00"
+    },
+    {
+      "sha": "defbe0eca7c4fee947560148610b810a9f586bd3",
+      "message": "lint issues fixed\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-20T05:47:59+00:00"
+    },
+    {
+      "sha": "f6e2ce03e0be5ad58da844d1faf0d8712e85127b",
+      "message": "issues fixed\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-20T07:02:59+00:00"
+    },
+    {
+      "sha": "62b6c25e830dbb15c313b7c4991b69debf585c0c",
+      "message": "fixed lint issue\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-20T09:07:22+00:00"
+    },
+    {
+      "sha": "616fd6797489b87609df5a0006f500ead25c995b",
+      "message": "fixed lint issue\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-20T09:13:27+00:00"
+    },
+    {
+      "sha": "cfe95f69d1675fb160eacdc4d7d3d3d5c35797b9",
+      "message": "fixed error\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-20T09:30:15+00:00"
+    },
+    {
+      "sha": "13bdbea14ae07034df2142c3e28098da7d2d7081",
+      "message": "fixed lint issues\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-20T09:35:04+00:00"
+    },
+    {
+      "sha": "b466c1780d8117514c520e7316b6101dcbcb8b59",
+      "message": "fixed flake issues\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-20T09:55:58+00:00"
+    },
+    {
+      "sha": "5e9d27f7f6cf5c9334e2bc0d6b17b7c724b874db",
+      "message": "fixed flake issues\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-20T10:17:28+00:00"
+    },
+    {
+      "sha": "1e99b162e13aeb794d46c9763aab283391d98981",
+      "message": "fixed postgress error\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-20T13:50:28+00:00"
+    },
+    {
+      "sha": "fe37ce183b61a3744e46c11d4ac8b42883713f97",
+      "message": "added docker-compose-mariadb file\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-21T05:34:32+00:00"
+    },
+    {
+      "sha": "4db5f99cea43376897a8cb0460e8e050a9616703",
+      "message": "fixed lint issue\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-21T06:04:01+00:00"
+    },
+    {
+      "sha": "2085807aa29788458e3b26fdd61459aa9d739871",
+      "message": "fix: correct docker-compose.yml indentation and MariaDB version references\n\n- Fix mariadb service indentation in docker-compose.yml (was at root level, should be under services)\n- Fix MARIADB_DATABASE env var from 'mysecretpassword' to 'mcp'\n- Correct MariaDB version references from non-existent '12.0' to actual '10.6'\n- Fix MySQL version from '8.4+' to '8.0+' (standard version)\n- Remove unsupported MongoDB entry from database support matrix\n\nCloses #288\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-11-27T08:30:58+00:00"
+    },
+    {
+      "sha": "85cb40251b0d668e47521a89111054bdff126613",
+      "message": "docs: fix MariaDB version references across all documentation\n\n- Correct MariaDB version from non-existent '12.0' to '10.6' in all docs\n- Fix MySQL version from '8.4+' to '8.0+' across documentation\n- Remove unsupported MongoDB references from database configuration examples\n- Ensure consistent version information across:\n  - CHANGELOG.md\n  - docs/docs/deployment/compose.md\n  - docs/docs/deployment/kubernetes.md\n  - docs/docs/deployment/local.md\n  - docs/docs/manage/configuration.md\n  - docs/docs/manage/index.md\n  - docs/docs/overview/quick_start.md\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-11-27T12:42:17+00:00"
+    }
+  ],
+  "files_changed": 20,
+  "additions": 710,
+  "deletions": 78,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:48.445074",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:48.445858",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1481,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1481.json"
+  }
+}

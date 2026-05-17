@@ -1,0 +1,46 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2650,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2650"
+  },
+  "metadata": {
+    "title": "Fix: Gateway Tags Serialization Bug & Transport Reset Issue",
+    "state": "closed",
+    "created_at": "2026-02-02T13:04:54+00:00",
+    "updated_at": "2026-02-06T07:27:40+00:00",
+    "closed_at": "2026-02-06T07:27:39+00:00",
+    "merged_at": "2026-02-06T07:27:39+00:00",
+    "author": "rakdutta",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "Closes #2563\r\n\r\nThis PR primarily fixes **Issue #2563**, where Gateway tags were returned as an empty list despite being present in the database.\r\nDuring **unit testing for this fix**, an additional but related issue was discovered in the Gateway update flow, which is also addressed here.\r\n\r\n---\r\n\r\n## Primary Issue (#2563): Gateway Tags Returned as Empty List\r\n\r\n### Problem\r\n\r\nGateway APIs (`GET / PUT / PATCH`) returned `tags: []` even when valid tag data existed in the PostgreSQL JSON column.\r\n\r\n### Root Causes\r\n\r\n1. **Type annotation mismatch**\r\n   `validate_tags_field()` was annotated as returning `List[str]` but actually returned `List[Dict[str, str]]`, causing Pydantic serialization/coercion issues.\r\n\r\n2. **Dict input destruction during validation**\r\n   `TagValidator.validate_list()` stringified dict inputs (e.g. `{\"id\": \"finance\", \"label\": \"Finance\"}`), which then failed validation and were filtered out.\r\n\r\n3. **Missing legacy tag normalization**\r\n   `_prepare_gateway_for_read()` did not convert legacy string tags to dict format before validation.\r\n\r\n### Fixes Implemented\r\n\r\n**`mcpgateway/validation/tags.py`**\r\n\r\n* Corrected `validate_tags_field()` return type to `List[Dict[str, str]]`\r\n* Added passthrough logic for already-formatted tag dictionaries:\r\n\r\n  ```python\r\n  if isinstance(tags[0], dict):\r\n      return [t for t in tags if isinstance(t, dict) and \"id\" in t and \"label\" in t]\r\n  ```\r\n\r\n**`mcpgateway/schemas.py`**\r\n\r\n* Updated `GatewayCreate.tags` and `GatewayUpdate.tags` to accept both legacy and new formats:\r\n\r\n  ```python\r\n  tags: Optional[List[Union[str, Dict[str, str]]]] = Field(...)\r\n  ```\r\n* Aligned validator return type annotations with actual return values\r\n\r\n**`mcpgateway/services/gateway_service.py`**\r\n\r\n* Enhanced `_prepare_gateway_for_read()` to normalize legacy string tags into dict format prior to validation\r\n\r\n### Result\r\n\r\nGateway tags now serialize and deserialize correctly across all API endpoints, preserving both `id` and `label` fields from the database.\r\n\r\n---\r\n\r\n## Additional Issue Found During Unit Testing: Transport Field Reset\r\n\r\n### Problem\r\n\r\nWhile validating the tags fix via unit tests, it was observed that updating a gateway **without explicitly providing `transport`** caused the field to reset to `\"SSE\"` instead of preserving the existing value (e.g. `\"STREAMABLEHTTP\"`).\r\n\r\n> This behavior occurred only via the API; the Admin UI was unaffected.\r\n\r\n### Root Cause\r\n\r\nIn `GatewayUpdate` schema:\r\n\r\n```python\r\ntransport: str = \"SSE\"\r\n```\r\n\r\nThis caused omitted fields in `PUT / PATCH` requests to overwrite existing values, which violates REST API semantics.\r\n\r\n### Fix Implemented\r\n\r\n* Updated `GatewayUpdate.transport` to default to `None`:\r\n\r\n  ```python\r\n  transport: Optional[str] = Field(None, ...)\r\n  ```\r\n* Ensures existing values are preserved unless explicitly provided in the request\r\n\r\n---\r\n\r\n## Testing\r\n\r\nVerified via curl:\r\n\r\n```bash\r\n# Before fix:\r\n# - transport reset to SSE\r\ncurl -X PUT \\\r\n  'http://localhost:4444/gateways/{id}' \\\r\n  -H 'Content-Type: application/json' \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -d '{\"name\":\"updated-name\"}'\r\n```\r\n\r\nAfter the fix:\r\n\r\n* Tags are preserved and correctly returned\r\n* `transport` remains unchanged unless explicitly passed\r\n\r\n---\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "c0bea997986753c616488aff1972ff3cb058cf54",
+      "message": "fix: Gateway tags serialization bug and transport reset issue\n\nCloses #2563\n\nThis commit fixes two issues:\n\n1. Gateway Tags Returned as Empty List (#2563):\n   - Fixed type annotation mismatch in validate_tags_field() to correctly\n     return List[Dict[str, str]] instead of List[str]\n   - Added passthrough logic for already-formatted tag dictionaries in\n     TagValidator.validate_list()\n   - Updated GatewayCreate.tags and GatewayUpdate.tags to accept both\n     legacy string format and new dict format\n   - Fixed parenthesis placement in get_gateway_by_url() to correctly\n     call masked() on GatewayRead instead of DbGateway\n\n2. Transport Field Reset During Gateway Update:\n   - Changed GatewayUpdate.transport from default=\"SSE\" to None to\n     prevent overwriting existing values when field is omitted in\n     PUT/PATCH requests\n\nCo-authored-by: rakdutta <rakhibiswas@yahoo.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-06T07:19:50+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 9,
+  "deletions": 5,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:54.178231",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:54.179623",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2650,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2650.json"
+  }
+}

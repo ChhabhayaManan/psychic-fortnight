@@ -1,0 +1,134 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4737,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4737"
+  },
+  "metadata": {
+    "title": "Fix: Enforce API Token Scope-Based Access Control",
+    "state": "open",
+    "created_at": "2026-05-13T09:13:25+00:00",
+    "updated_at": "2026-05-14T11:45:29+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "rakdutta",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Closes #4671\n\n## 🔒 Security Issue\n\n**Severity:** HIGH  \n**Component:** API Token Authentication & Authorization\n\nAPI tokens completely bypassed scope-based access control, allowing tokens with limited scopes (e.g., `[\"tools.read\"]`) to access any endpoint the user had RBAC permissions for, including A2A endpoints requiring different scopes (e.g., `a2a.read`).\n\n### Impact\n- **Least Privilege Violation**: Tokens intended for limited operations could access all resources\n- **Defense-in-Depth Failure**: Two-layer security model (scopes + RBAC) reduced to one layer (RBAC only)\n- **Silent Failure**: No error logs; tokens \"just worked\" with unintended full permissions\n- **~100+ Protected Endpoints Affected**: All endpoints using `@require_permission` decorator\n\n## 🔍 Root Cause\n\nThree code paths were missing scope validation:\n\n1. **Token Lookup** (`mcpgateway/auth.py:669`): `resource_scopes` field not included in return value\n2. **Authentication Context** (`mcpgateway/auth.py:1719-1750`): Token scopes never stored in `request.state`\n3. **Permission Checking** (`mcpgateway/middleware/rbac.py:665`): `@require_permission` decorator only checked RBAC roles, never token scopes\n\n## ✅ Solution\n\nImplemented complete Layer 1 (Token Scope) enforcement before Layer 2 (RBAC) checks:\n\n### Changes Made\n\n#### 1. Token Lookup Enhancement\n**File:** `mcpgateway/auth.py:713-717`\n\n\\`\\`\\`python\nreturn {\n    \"user_email\": api_token.user_email,\n    \"jti\": api_token.jti,\n    \"resource_scopes\": api_token.resource_scopes or [],  # ✅ ADDED\n}\n\\`\\`\\`\n\n#### 2. Authentication Context Storage\n**File:** `mcpgateway/auth.py:1814-1821`\n\n\\`\\`\\`python\nif request:\n    request.state.auth_method = \"api_token\"\n    request.state.user_email = api_token_info[\"user_email\"]\n    if \"jti\" in api_token_info:\n        request.state.jti = api_token_info[\"jti\"]\n    # Store token scopes for permission checking\n    request.state.token_scopes = api_token_info.get(\"resource_scopes\", [])  # ✅ ADDED\n\\`\\`\\`\n\n**Also added JWT token scope extraction** (`mcpgateway/auth.py:1770-1776`):\n\n\\`\\`\\`python\n# Extract and store token scopes for permission checking (JWT tokens)\nscopes = payload.get(\"scopes\")\nif scopes and isinstance(scopes, dict):\n    permissions = scopes.get(\"permissions\", [])\n    if permissions:\n        request.state.token_scopes = permissions\n\\`\\`\\`\n\n#### 3. User Context Propagation\n**File:** `mcpgateway/middleware/rbac.py:416, 439`\n\n\\`\\`\\`python\ntoken_scopes = getattr(request.state, \"token_scopes\", None)\n\nreturn {\n    # ... other fields ...\n    \"token_scopes\": token_scopes,  # ✅ ADDED\n}\n\\`\\`\\`\n\n#### 4. Permission Checking (Layer 1 Enforcement)\n**File:** `mcpgateway/middleware/rbac.py:680-692`\n\n\\`\\`\\`python\n# SECURITY: Check API token scopes BEFORE RBAC (Layer 1)\ntoken_scopes = user_context.get(\"token_scopes\")\nif token_scopes is not None:  # Only check if this is an API token with scopes\n    if permission not in token_scopes:\n        logger.warning(\n            f\"API token scope check failed: user={user_context['email']}, \"\n            f\"permission={permission}, token_scopes={token_scopes}\"\n        )\n        raise HTTPException(\n            status_code=403,\n            detail=f\"API token missing required scope: {permission}\"\n        )\n\\`\\`\\`\n\n## 🧪 Testing\n\n### Manual Testing\nVerified the fix resolves the original bug report scenario:\n\n\\`\\`\\`bash\n# 1. Create API token with LIMITED scope\ncurl -X POST -H \"Authorization: Bearer $ADMIN_TOKEN\" \\\n  -d '{\"name\": \"scope-test-token\", \"scopes\": [\"tools.read\"], \"expires_in_days\": 30}' \\\n  http://localhost:4444/tokens\n\n# 2. Attempt to access A2A endpoint (requires a2a.read)\ncurl -H \"Authorization: Bearer $TOKEN\" http://localhost:4444/a2a\n\n# ✅ NOW RETURNS: HTTP 403 Forbidden\n# {\"detail\": \"API token missing required scope: a2a.read\"}\n\\`\\`\\`\n\n### Automated Testing\nUpdated test suite:\n- Tests both JWT and database API token paths\n- Verifies Layer 1 enforcement happens before Layer 2 (RBAC)\n- Validates session tokens bypass scope checks (use RBAC only)\n\n## 📚 Documentation\n\n### Added Documentation\n1. **Token Scope Naming Convention** (\\`docs/security/TOKEN_SCOPE_NAMING.md\\`)\n   - Explains why JWT uses \\`scopes.permissions\\` vs database tokens use \\`resource_scopes\\`\n   - Documents unified \\`token_scopes\\` field in user context\n   - Clarifies this is intentional, not a bug\n\n2. **Security Model Alignment**\n   - Implementation follows two-layer model in \\`AGENTS.md\\`\n   - Layer 1 (Token Scoping): Controls what you can SEE\n   - Layer 2 (RBAC): Controls what you can DO\n\n## 🔐 Security Enhancements\n\n1. **Audit Logging**: Scope check failures logged with user email, permission, and token scopes\n2. **Null Safety**: Uses \\`token_scopes is not None\\` to distinguish API tokens from session tokens\n3. **Fail-Closed**: Missing scopes result in 403 Forbidden, not silent bypass\n4. **Consistent Behavior**: Both JWT and database API tokens follow same enforcement path\n\n## 📋 Review Comments Addressed\n\n### ✅ Naming Consistency\n**Comment:** JWT uses \\`permissions\\` while database tokens use \\`resource_scopes\\`\n\n**Resolution:** \n- Added \\`docs/security/TOKEN_SCOPE_NAMING.md\\` explaining this is intentional\n- Both converge to unified \\`token_scopes\\` field in user context\n- Different names reflect different data models (JWT standard vs database schema)\n- No security impact; both paths work correctly\n\n## 🚀 Deployment Notes\n\n### Breaking Changes\nNone. This is a security fix that enforces existing documented behavior.\n\n### Migration Required\nNone. Existing tokens continue to work; scope enforcement is now properly applied.\n\n### Monitoring\nWatch for increased 403 errors in logs with message \"API token missing required scope\" - these indicate tokens that were previously bypassing scope checks.\n\n## 🔗 References\n\n- Issue: #4671\n- AGENTS.md: Authentication & RBAC Overview section\n- Related: Two-layer security model (Token Scoping + RBAC)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "972164499f76478e899e1a5a4905c91c424cc912",
+      "message": " fix(security): enforce API token scope-based access control\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-12T05:49:25+00:00"
+    },
+    {
+      "sha": "3641780251dee154a9b0c187e4fadf38d3a18ceb",
+      "message": "fix: add A2A API endpoint permission patterns and JWT token scope extraction for scoped token authorization\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T07:22:51+00:00"
+    },
+    {
+      "sha": "7821e797d67303fa67217fc6981990975d6196c6",
+      "message": "test: add resource_scopes to API token test mocks",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T09:22:31+00:00"
+    },
+    {
+      "sha": "f115d852564cf3929e46fa1b69524e68f8bb7b32",
+      "message": "token scipe naming\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T09:26:57+00:00"
+    },
+    {
+      "sha": "783cdc21873df5ca0bb027c343b60300f0caa87c",
+      "message": "docs(security): address PR review feedback\n\n- Add comment explaining JWT empty list handling behavior\n- Add token type detection documentation in RBAC middleware\n- Update TOKEN_SCOPE_NAMING.md references to correct line numbers\n- Remove reference to non-existent regression test file\n- Verify A2A route pattern coverage (all endpoints protected)\n\nAll review issues addressed:\n1. JWT empty list handling - Added clarifying comment\n2. A2A route patterns - Verified all 19 endpoints have @require_permission\n3. Token type detection - Added inline documentation\n4. Test file reference - Updated to point to actual test file\n\nRefs: #4671",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T09:34:37+00:00"
+    },
+    {
+      "sha": "41e50ceb4af3c85c5e2e816cb770abdf7e558592",
+      "message": "fix(security): enforce scope checks for JWT tokens with empty permissions list to match database token behavior\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T09:42:13+00:00"
+    },
+    {
+      "sha": "313c000ad6ccf4f7448f09deb9e3b6b698e7a086",
+      "message": "docs(security): add JWT malformed token logging and clarify naming convention permanence\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T09:49:40+00:00"
+    },
+    {
+      "sha": "9af5caa80a62d7ae678cf41a116af350051fa36d",
+      "message": "fix: prevent JWT empty dict scope bypass (empty dict is falsy in Python)\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T09:57:18+00:00"
+    },
+    {
+      "sha": "0c037a29dc04b5ebd03d3d9ec8e9ca925585226c",
+      "message": "test: add comprehensive scope enforcement test coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T10:08:32+00:00"
+    },
+    {
+      "sha": "db71c54c26559a59b0ed4229e564b34f1cba1d08",
+      "message": "remove test file\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T11:10:01+00:00"
+    },
+    {
+      "sha": "2d99c6de89a01684b77ab7e7c787ee8cc693972a",
+      "message": "fix(security): reject malformed JWT scopes and clarify session token design\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T11:19:28+00:00"
+    },
+    {
+      "sha": "1941eaeb33a16fa33ed9bb83af064259bef170f6",
+      "message": "test(security): add layer 1+2 interaction test, reject malformed JWT scopes\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T11:23:38+00:00"
+    },
+    {
+      "sha": "693961cd43a2a88841d93e3d881a9b9f687b1e61",
+      "message": "trailing newline\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T11:28:28+00:00"
+    },
+    {
+      "sha": "8fe068d91669c7c8d1be3ee072b98d2ad407b0f4",
+      "message": "pre-commit\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-13T11:36:23+00:00"
+    },
+    {
+      "sha": "6ccd4ce4f7cedb2cc352ff44e94c3bb32deb8877",
+      "message": "test coverage improve\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-14T11:28:51+00:00"
+    },
+    {
+      "sha": "7c77544c675bfb5273589148cac36715a7e32366",
+      "message": "coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-14T11:45:16+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 634,
+  "deletions": 2,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:04:35.045197",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:35.045618",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4737,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4737.json"
+  }
+}

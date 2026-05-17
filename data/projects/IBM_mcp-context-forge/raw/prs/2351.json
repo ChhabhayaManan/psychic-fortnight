@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2351,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2351"
+  },
+  "metadata": {
+    "title": "fix(db): Guard against inactive transaction during async cleanup",
+    "state": "closed",
+    "created_at": "2026-01-23T14:49:15+00:00",
+    "updated_at": "2026-01-23T17:06:53+00:00",
+    "closed_at": "2026-01-23T17:06:51+00:00",
+    "merged_at": "2026-01-23T17:06:51+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nThis PR fixes two related issues affecting gateway registration with Moody's MCP server:\n\n1. **#2341 - Transaction Inactive Crash:** Gateway crashes with `InvalidRequestError: This transaction is inactive` after successfully fetching tools/resources\n2. **#2352 - Unique Constraint Violation:** Re-adding a gateway fails with `UniqueViolation` on `uq_team_owner_uri_resource`\n\n---\n\n## Root Cause Analysis\n\n### Issue #2341: Transaction Inactive During Async Cleanup\n\n**Timeline from logs:**\n| Timestamp | Event |\n|-----------|-------|\n| 09:42:54.938Z | `Fetched 10 tools from gateway` ✓ |\n| 09:42:55.506Z | `Fetched 53 resources from gateway` ✓ |\n| 09:42:56.024Z | `Fetched 1 resource templates from gateway` ✓ |\n| 09:42:56.378Z | `DELETE .../mcp \"HTTP/1.1 204 No Content\"` ✓ |\n| 09:42:56.416Z | `InvalidRequestError('This transaction is inactive')` ✗ |\n\n**Root Cause:** `CancelledError` during MCP session cleanup (DELETE request) causes the transaction to become inactive. Then `get_db()` tries to `commit()` on the inactive transaction.\n\n**Fix:** Add `db.is_active` checks before `commit()` and `rollback()` in `get_db()`.\n\n### Issue #2352: Unique Constraint Violation on Re-Registration\n\n**The Constraint:**\n```python\n# Resources unique on (team_id, owner_email, uri) - NOT including gateway_id\nUniqueConstraint(\"team_id\", \"owner_email\", \"uri\", name=\"uq_team_owner_uri_resource\")\n```\n\n**Failure Sequence:**\n1. Gateway A registered → resources created with `(team_id, owner_email, uri)`\n2. Gateway A deleted → but #2341 crash leaves orphaned resources\n3. Gateway B registered (same MCP server) → tries to INSERT same resources → **CONFLICT**\n\n**Fix:** Add upsert logic for **orphaned** resources and prompts only:\n- Query for existing records where `gateway_id IS NULL` or points to non-existent gateway\n- Update orphaned records instead of creating duplicates\n- Resources belonging to active gateways are NOT touched\n\n---\n\n## Changes\n\n### `mcpgateway/main.py`\n- Added `db.is_active` guard before `commit()` in `get_db()`\n- Added `db.is_active` guard before `rollback()` in exception handler\n- Added `db.invalidate()` fallback for broken connections\n\n### `mcpgateway/services/gateway_service.py`\n- Added upsert logic for **orphaned** resources only (query by `team_id, owner_email, uri`)\n- Added upsert logic for **orphaned** prompts only (query by `team_id, owner_email, name`)\n- Uses per-resource team/owner overrides when building lookup key\n- Only updates records where `gateway_id IS NULL` or gateway doesn't exist\n\n### `scripts/cleanup_orphaned_resources.py` (NEW)\n- Cleanup script to remove orphaned records from affected databases\n\n### `tests/unit/mcpgateway/services/test_gateway_resources_prompts.py`\n- Added `test_register_gateway_updates_orphaned_resources`\n- Added `test_register_gateway_does_not_update_active_gateway_resources`\n\n---\n\n## Manual Cleanup (For Affected Users)\n\nIf you experienced the #2341 crash, you may have orphaned resources/prompts/tools in your database. A cleanup script is provided:\n\n```bash\n# Dry run (default) - shows what would be deleted\npython scripts/cleanup_orphaned_resources.py\n\n# Actually delete orphaned records\npython scripts/cleanup_orphaned_resources.py --execute\n\n# Filter by team or owner\npython scripts/cleanup_orphaned_resources.py --team-id <team_id>\npython scripts/cleanup_orphaned_resources.py --owner-email <email>\n```\n\n**Note:** The upsert fix will handle orphaned records automatically on re-registration (they get reassigned to the new gateway). The cleanup script is only needed if you want to proactively remove orphaned records without re-registering.\n\n---\n\n## Code Review Findings (Addressed)\n\n| Finding | Severity | Status |\n|---------|----------|--------|\n| Upsert updates any existing resource without verifying it's orphaned | High | ✅ Fixed - now only updates records where `gateway_id IS NULL` or gateway doesn't exist |\n| Resource lookup uses gateway-level keys but inserts use per-resource overrides | Medium | ✅ Fixed - lookup now uses per-resource `team_id` and `owner_email` overrides |\n| No tests for upsert logic | Low | ✅ Fixed - added 2 tests for orphaned resource handling |\n\n---\n\n## Test Plan\n\n- [x] Run gateway service tests: 75 passed\n- [x] Run gateway resources/prompts tests: 6 passed  \n- [x] Run all service tests: 1795 passed, 34 skipped\n- [ ] Integration test with Moody's MCP server\n\nCloses #2341\nCloses #2352",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "aa37ae09b1b1546c17f0034a887ab896f266b671",
+      "message": "fix(db): Guard against inactive transaction during async cleanup\n\nWhen registering MCP servers with long initialization times (like Moody's),\na CancelledError can occur during the MCP session teardown (DELETE request).\nThis causes the database transaction to become inactive before get_db()\nattempts to commit, resulting in:\n\n  sqlalchemy.exc.InvalidRequestError: This transaction is inactive\n\nAdd db.is_active checks before commit() and rollback() to handle cases\nwhere the transaction becomes inactive during async context manager cleanup.\n\nCloses #2341\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-23T14:47:39+00:00"
+    },
+    {
+      "sha": "15d24b8845c6d7dd3ec763810e4caf3bdf1745e3",
+      "message": "fix: Add upsert logic for resources and prompts to prevent unique constraint violations\n\nWhen re-registering a gateway (e.g., after deletion or crash), orphaned resources\nand prompts from previous registrations could cause unique constraint violations\non `(team_id, owner_email, uri)` for resources and `(team_id, owner_email, name)`\nfor prompts.\n\nThis fix adds upsert logic that:\n1. Queries for existing resources/prompts matching the unique constraint\n2. Updates existing records instead of creating duplicates\n3. Creates new records only when no match exists\n\nThis handles scenarios like:\n- Gateway deletion that didn't properly clean up resources (issue #2341)\n- Re-registration of the same MCP server under a new gateway name\n- Race conditions during concurrent operations\n\nCloses #2352\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-23T15:12:04+00:00"
+    },
+    {
+      "sha": "3f1aa1ee9e1b426dd469ee6219ea3fbb2aeb4249",
+      "message": "chore: Add cleanup script for orphaned resources/prompts/tools\n\nAdds a utility script to identify and remove database records that were\nleft orphaned due to incomplete gateway deletions (e.g., #2341 crash).\n\nUsage:\n  # Dry run (default) - shows what would be deleted\n  python scripts/cleanup_orphaned_resources.py\n\n  # Actually delete orphaned records\n  python scripts/cleanup_orphaned_resources.py --execute\n\n  # Filter by team or owner\n  python scripts/cleanup_orphaned_resources.py --team-id <id> --owner-email <email>\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-23T15:15:02+00:00"
+    },
+    {
+      "sha": "948833be3b253ce90f464768b85d33a7f9006699",
+      "message": "fix: Only upsert orphaned resources/prompts, add tests\n\nAddresses code review findings:\n\n1. HIGH: Only update truly orphaned records (gateway_id IS NULL or points\n   to non-existent gateway). Resources belonging to active gateways are\n   no longer at risk of being reassigned.\n\n2. MEDIUM: Use per-resource team/owner overrides when building lookup key,\n   matching exactly what would be inserted to avoid constraint mismatches.\n\n3. LOW: Added tests for orphaned resource upsert logic:\n   - test_register_gateway_updates_orphaned_resources\n   - test_register_gateway_does_not_update_active_gateway_resources\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-23T15:39:54+00:00"
+    },
+    {
+      "sha": "f90fd272555f8cfb1cb0b62f90fc2fa10ba83ce1",
+      "message": "fix: Always call rollback() in exception handler, improve tests\n\nAddresses remaining code review findings:\n\n1. ROLLBACK GUARD FIX:\n   - REMOVED the `if db.is_active:` check before `db.rollback()`\n   - Empirical testing proved that:\n     * After IntegrityError, is_active becomes False\n     * rollback() when is_active=False SUCCEEDS (doesn't fail!)\n     * rollback() restores is_active to True, cleaning up the session\n     * Skipping rollback when is_active=False leaves session unusable\n   - The is_active guard for commit() is CORRECT (commit fails when False)\n   - The is_active guard for rollback() was WRONG (rollback is always safe)\n\n2. TEST ASSERTIONS:\n   - Rewrote orphaned resource tests with proper assertions\n   - Tests now directly verify:\n     * Orphaned resources are detected and added to map\n     * Resource fields are actually updated during upsert\n     * Resources with deleted gateways are detected as orphaned\n     * Resources with active gateways are NOT touched\n     * Per-resource owner/team overrides are used in lookup key\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-23T15:48:14+00:00"
+    },
+    {
+      "sha": "5b3e9f7e73a69cfd5520f880bd28d95dce1b2b44",
+      "message": "chore: Add file encoding header to cleanup script\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-23T16:04:15+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 615,
+  "deletions": 51,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:17.379156",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:17.380654",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2351,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2351.json"
+  }
+}

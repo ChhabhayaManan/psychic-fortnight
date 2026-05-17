@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4214,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4214"
+  },
+  "metadata": {
+    "title": "fix(oauth): honor advisory contract and accept array-shaped scope/scp",
+    "state": "open",
+    "created_at": "2026-04-15T08:27:17+00:00",
+    "updated_at": "2026-05-03T23:28:48+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "kimsehwan96",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4213\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nTwo small regressions in the OAuth token claim validator introduced in #3941 break tool fetching for non-conforming IdPs:\r\n\r\n1. `_validate_scopes` calls `.split()` on the `scope` / `scp` claim, which crashes when the IdP emits an array (Ory Hydra, Keycloak, some Auth0 configurations).\r\n2. `gateway_service.py::fetch_tools_after_oauth` raises `GatewayConnectionError` on any mismatched claim, contradicting the module's own \"advisory — the upstream MCP server remains the authoritative validator\" contract stated in `token_validation_service.py`.\r\n\r\nThis PR:\r\n- Normalizes array-shaped `scope`/`scp` to a space-separated string before tokenization.\r\n- Wraps each `_validate_*` call in its own `try / except` so one crashing validator cannot abort siblings or propagate to the caller; crashes become non-blocking warnings.\r\n- Downgrades the hard-block in `fetch_tools_after_oauth` to a `logger.warning` that preserves the existing operator guidance (`Fix oauth_config(resource/scopes/issuer) …`). The upstream MCP server remains the authoritative validator, per the module docstring.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    pass    |\r\n| Unit tests                | `make test`     |   pass     |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n- Reproduced end-to-end against **Amplitude's public MCP server** (`https://mcp.amplitude.com/mcp`, Ory Hydra-backed, issuer `https://auth.amplitude.com`) which emits `scp` as an array and `aud` as an empty list even when the client sends RFC 8707 `resource=` on both `/authorize` and `/token`. Full decoded JWT claims (from a direct DCR + PKCE flow, bypassing ContextForge) are included in #4213.\r\n- The previous \"Refusing to forward OAuth token … Fix oauth_config …\" diagnostic is preserved as a warning log, so operators still get the remediation hint when a mismatch is genuinely their misconfiguration.\r\n- If reviewers prefer to keep the strict blocking behavior available to deployments that want it, happy to follow up with an opt-in `oauth_config.strict_claim_validation` flag — did not include it here to keep the change focused on the regression.\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "d37e560ca9b52ef5e011378392530abdf14a1851",
+      "message": "fix(oauth): honor advisory contract and accept array-shaped scope/scp\n\nThe OAuth token claim validation added in #3941 and hardened in\nfollow-up commit 143aaf63a has two issues that break tool fetching for\nnon-conforming IdPs:\n\n1. `_validate_scopes` unconditionally calls `.split()` on the `scope` /\n   `scp` claim.  Ory Hydra (used e.g. by Amplitude's MCP server),\n   Keycloak, and some Auth0 configurations emit this claim as a JSON\n   array, which crashed the validator with\n   `AttributeError: 'list' object has no attribute 'split'` and returned\n   400 from `/oauth/fetch-tools`.\n\n2. The `token_validation_service` module docstring declares the\n   validator to be \"best-effort advisory — the upstream MCP server\n   remains the authoritative validator\", but `gateway_service.py`\n   raised `GatewayConnectionError` on any mismatched claim, turning the\n   advisory checks into a hard gate.  IdPs that do not perfectly follow\n   RFC 9068 / RFC 8707 (Amplitude omits the RFC 8707 resource echo,\n   Authentik emits aud=client_id, etc.) became unusable.\n\nChanges:\n\n- Normalize list-shaped `scope` / `scp` claims to a space-separated\n  string before tokenization, so `_normalize_scope` continues to\n  receive a `str`.\n- Wrap each `_validate_*` call in its own try/except so an unexpected\n  claim shape cannot abort sibling checks or propagate to the caller.\n  Crashes are recorded as non-blocking warnings for operator visibility.\n- Replace the `raise GatewayConnectionError(\"Refusing to forward OAuth\n  token …\")` in `fetch_tools_after_oauth` with a warning log that\n  preserves the existing operator-facing guidance (\"Fix oauth_config\n  …\").  The upstream MCP server remains the authoritative validator,\n  consistent with the module docstring.\n\nTests:\n\n- `TestScopeClaimArrayShape`: happy / negative / edge coverage for\n  list-shaped `scope` / `scp`, including URI-prefix normalization and\n  empty-list (treated as absent).\n- `TestValidatorAdvisoryContract`: per-validator crash isolation and\n  non-blocking classification.\n- Update the existing `fetch_tools_after_oauth` audience-mismatch test\n  to verify the advisory forwarding behavior and the warning log\n  content (advisory tag + mismatch detail + remediation hint).\n\nCloses #4213\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-04-15T08:21:16+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 206,
+  "deletions": 37,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:09.043162",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:09.044719",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4214,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4214.json"
+  }
+}

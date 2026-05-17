@@ -1,0 +1,49 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4501,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4501"
+  },
+  "metadata": {
+    "title": "fix(db): add ondelete=\"CASCADE\" to 6 FK constraints that prevented tool/resource/prompt deletion after invocation",
+    "state": "closed",
+    "created_at": "2026-04-28T12:31:26+00:00",
+    "updated_at": "2026-05-06T20:37:41+00:00",
+    "closed_at": "2026-05-06T20:37:39+00:00",
+    "merged_at": "2026-05-06T20:37:39+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "MUST",
+      "api",
+      "release-fix",
+      "db"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4478\r\n\r\n**Related Issues:**\r\n- Addresses similar FK constraint pattern as #4449 (which proposes CASCADE for `server_*_association` tables)\r\n- Both issues stem from missing `ondelete` clauses causing FK constraint violations\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixed a critical bug where DELETE operations on tools, resources, and prompts would fail with `sqlite3.IntegrityError: FOREIGN KEY constraint failed` after the entities had been invoked at least once. The issue was caused by missing `ondelete` clauses on foreign key constraints in metrics and association tables, which defaulted to `NO ACTION` and blocked parent row deletion.\r\n\r\n**Root Cause:**\r\n- `tool_metrics.tool_id`, `resource_metrics.resource_id`, and `prompt_metrics.prompt_id` lacked `ondelete` clauses\r\n- Association tables (`server_tool_association`, `server_resource_association`, `server_prompt_association`) also lacked `ondelete` clauses\r\n- Once metrics were created (after first invocation), the parent entity became permanently un-deletable through the REST API\r\n\r\n**Solution:**\r\n- Added `ondelete=\"CASCADE\"` to all 6 missing foreign key constraints in [`mcpgateway/db.py`](mcpgateway/db.py:2415-2554)\r\n- Created idempotent Alembic migration [`9fb98535724d`](mcpgateway/alembic/versions/9fb98535724d_add_ondelete_cascade_to_metrics_and_.py) to update existing databases\r\n- Metrics and association rows now automatically cascade delete when parent is removed\r\n\r\n**Impact:**\r\n- Tools/resources/prompts can now be deleted via REST API after invocation\r\n- Consistent with existing patterns (`tool_metrics_hourly`, `a2a_agents.tool_id` already use `ondelete=\"SET NULL\"`)\r\n- No manual database manipulation required\r\n\r\n**Scope vs Issue #4449:**\r\n- **Issue #4449** proposes CASCADE for `server_*_association` FKs + cleanup code removal\r\n- **This PR** implements CASCADE for both `*_metrics` AND `server_*_association` FKs\r\n- This PR fully addresses #4478 and partially addresses #4449 (association tables only; cleanup code removal not included)\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n**Manual Verification:**\r\n- Migration successfully created: `9fb98535724d_add_ondelete_cascade_to_metrics_and_.py`\r\n- Migration applied successfully: `alembic upgrade head` ✅\r\n- Single migration head confirmed: `alembic heads` shows `9fb98535724d` ✅\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [x] Documentation updated (migration includes comprehensive docstrings)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Files Changed:**\r\n1. [`mcpgateway/db.py`](mcpgateway/db.py) - Added `ondelete=\"CASCADE\"` to 6 FK constraints\r\n2. [`mcpgateway/alembic/versions/9fb98535724d_add_ondelete_cascade_to_metrics_and_.py`](mcpgateway/alembic/versions/9fb98535724d_add_ondelete_cascade_to_metrics_and_.py) - New migration\r\n\r\n**Migration Details:**\r\n- Idempotent: Checks for table existence before modifying (supports fresh DBs)\r\n- Cross-database: Works with both SQLite and PostgreSQL\r\n- Reversible: Includes complete downgrade path\r\n- Safe: Uses batch operations for SQLite compatibility\r\n\r\n**Cascade Behavior:**\r\n```\r\nDELETE tool → Automatically deletes:\r\n              - All tool_metrics rows\r\n              - All server_tool_association rows\r\n              \r\nDELETE resource → Automatically deletes:\r\n                  - All resource_metrics rows\r\n                  - All server_resource_association rows\r\n                  \r\nDELETE prompt → Automatically deletes:\r\n                - All prompt_metrics rows\r\n                - All server_prompt_association rows\r\n```\r\n\r\n**Follow-up Work (per #4449):**\r\n- Remove redundant explicit cleanup code from `tool_service.py` and `gateway_service.py` (lines 1647, 2436, 3015, 3323, 5176, etc.)\r\n- Add real-DB FK enforcement regression tests for all four entity-delete paths\r\n- These can be addressed in a separate PR focused on code cleanup",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "33ef26ea5563696c2c4afb821074fb130dbaa637",
+      "message": "fix(db): add ondelete=\"CASCADE\" to 6 FK constraints to allow tool/resource/prompt deletion after invocation\n\nThree metrics tables (tool_metrics, resource_metrics, prompt_metrics) and three server-X association tables had FKs without ON DELETE CASCADE, causing IntegrityError on delete after invocation generated metric rows or association links.\n\nUpdates the SQLAlchemy declarations and adds an idempotent batch-mode Alembic migration that replaces the offending FKs with ON DELETE CASCADE versions, with a symmetric downgrade.\n\nCloses #4478\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-06T19:32:02+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 244,
+  "deletions": 9,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:29.780691",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:29.781400",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4501,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4501.json"
+  }
+}

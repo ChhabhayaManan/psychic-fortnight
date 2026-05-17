@@ -1,0 +1,84 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1726,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1726"
+  },
+  "metadata": {
+    "title": "Add provider-specific configuration support for LLM Settings",
+    "state": "closed",
+    "created_at": "2025-12-24T07:17:31+00:00",
+    "updated_at": "2025-12-24T09:29:50+00:00",
+    "closed_at": "2025-12-24T09:29:48+00:00",
+    "merged_at": "2025-12-24T09:29:48+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nCloses #1725\r\n\r\nThis PR fixes the LLM Settings to properly handle provider-specific configuration parameters for all LLM providers. Previously, only generic fields (API key, base URL) were supported, preventing proper configuration of providers like AWS Bedrock, IBM Watson X AI, Azure OpenAI, and Google Vertex AI that require additional provider-specific parameters.\r\n\r\n**Why this matters:**\r\n- Enables enterprise LLM providers (AWS, Azure, IBM, Google) to be properly configured\r\n- Provides type-safe validation for provider-specific parameters\r\n- Improves user experience with dynamic, context-aware forms\r\n- Eliminates configuration errors from missing required parameters\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Navigate to Admin -> LLM Settings -> Add Provider\r\n2. Select \"Azure OpenAI\" as provider type\r\n3. Observe only generic fields shown (no deployment_name, resource_name)\r\n4. Save configuration and attempt API call\r\n5. Call fails due to missing Azure-specific parameters\r\n\r\n## 🐞 Root Cause\r\n**What was wrong:**\r\n1. **Frontend**: UI only rendered static form fields, no dynamic rendering based on provider type\r\n2. **Backend**: No validation or utilization of provider-specific configs from the `config` JSON field\r\n3. **Proxy Service**: Hardcoded or missing provider-specific parameter extraction\r\n4. **Missing Definitions**: No centralized definition of what each provider requires\r\n\r\n**Where:**\r\n- `mcpgateway/static/admin.js` - Static form, no dynamic field rendering\r\n- `mcpgateway/services/llm_proxy_service.py` - Incomplete provider-specific parameter usage\r\n- `mcpgateway/llm_schemas.py` - No provider-specific validation\r\n- Missing: Provider configuration definitions module\r\n\r\n## 💡 Fix Description\r\n\r\n### 1. **New Configuration Module** (`mcpgateway/llm_provider_configs.py`)\r\nCreated centralized provider configuration definitions:\r\n- **Pydantic models** for each provider's specific requirements (AWSBedrockConfig, IBMWatsonXConfig, etc.)\r\n- **ProviderFieldDefinition**: Defines UI field properties (type, label, validation, help text, required status)\r\n- **ProviderConfigDefinition**: Complete provider configuration including all fields and metadata\r\n- **PROVIDER_CONFIGS registry**: Maps provider types to their configurations\r\n\r\n**Supported provider-specific parameters:**\r\n- **AWS Bedrock**: region, access_key_id, secret_access_key, session_token, profile_name\r\n- **IBM Watson X**: project_id, space_id, deployment_id, instance_id, version\r\n- **Azure OpenAI**: deployment_name, resource_name, api_version\r\n- **Google Vertex AI**: project_id, location, credentials_path, credentials_json\r\n- **Anthropic**: anthropic_version\r\n- **Cohere**: truncate strategy\r\n\r\n### 2. **Backend Enhancements**\r\n\r\n**Schema Validation** (`mcpgateway/llm_schemas.py`):\r\n```python\r\ndef validate_provider_config(self) -> None:\r\n    \"\"\"Validate provider-specific configuration based on provider type.\"\"\"\r\n    provider_def = get_provider_config(self.provider_type)\r\n    for field_def in provider_def.config_fields:\r\n        if field_def.required and field_def.name not in self.config:\r\n            raise ValueError(f\"Required field '{field_def.name}' missing\")\r\n```\r\n\r\n**New API Endpoint** (`mcpgateway/routers/llm_admin_router.py`):\r\n```python\r\n@llm_admin_router.get(\"/provider-configs\")\r\nasync def get_provider_configs():\r\n    \"\"\"Get provider-specific configuration definitions for UI rendering.\"\"\"\r\n    return {provider_type: config.model_dump() for provider_type, config in configs.items()}\r\n```\r\n\r\n**Enhanced Proxy Service** (`mcpgateway/services/llm_proxy_service.py`):\r\n- `_build_azure_request()`: Now extracts deployment_name, resource_name from config\r\n- `_build_anthropic_request()`: Uses anthropic_version from config\r\n- Properly utilizes provider-specific parameters when constructing API requests\r\n\r\n### 3. **Frontend Dynamic Rendering**\r\n\r\n**Template** (`mcpgateway/templates/admin.html`):\r\n```html\r\n<div id=\"llm-provider-specific-config\" class=\"space-y-4 hidden\">\r\n  <div id=\"llm-provider-config-fields\" class=\"space-y-4\">\r\n    <!-- Dynamic fields inserted here -->\r\n  </div>\r\n</div>\r\n```\r\n\r\n**JavaScript** (`mcpgateway/static/admin.js`):\r\n\r\n**New function - `renderProviderSpecificFields()`:**\r\n- Fetches provider configs from `/admin/llm/provider-configs`\r\n- Dynamically creates appropriate input elements (text, password, number, select, textarea)\r\n- Applies validation rules, placeholders, help text\r\n- Shows/hides section based on provider selection\r\n\r\n**Enhanced `onLLMProviderTypeChange()`:**\r\n- Triggers dynamic field rendering when provider type changes\r\n- Auto-fills default values for new providers\r\n\r\n**Enhanced `saveLLMProvider()`:**\r\n- Collects all `config_*` fields from dynamic form\r\n- Converts to appropriate types (number, boolean, string)\r\n- Stores in `config` object sent to backend\r\n\r\n**Enhanced `editLLMProvider()`:**\r\n- Renders provider-specific fields when editing\r\n- Populates existing config values into dynamic fields\r\n\r\n### 4. **Key Design Decisions**\r\n\r\n**Why JSON storage:**\r\n- Leverages existing `config` JSON column in database\r\n- No schema migration required\r\n- Flexible for future provider additions\r\n- Backward compatible with existing providers\r\n\r\n**Why dynamic UI:**\r\n- Shows only relevant fields per provider\r\n- Reduces user confusion\r\n- Prevents invalid configurations\r\n- Provides contextual help\r\n\r\n**Why centralized definitions:**\r\n- Single source of truth for provider requirements\r\n- Easy to add new providers\r\n- Consistent validation across frontend/backend\r\n- Self-documenting with help text\r\n\r\n**Why Pydantic models:**\r\n- Type safety and validation\r\n- Auto-generated documentation\r\n- IDE autocomplete support\r\n- Runtime validation\r\n\r\n## 📝 Testing\r\n\r\n**Manual Testing Performed:**\r\n- ✅ Create provider with provider-specific fields (Azure, Watson X)\r\n- ✅ Edit existing provider and modify config fields\r\n- ✅ Save and verify config stored in database\r\n- ✅ Make API calls using provider-specific configurations\r\n- ✅ Validate required field enforcement\r\n- ✅ Test field visibility when switching provider types\r\n- ✅ Verify backward compatibility with existing providers\r\n\r\n## 🔄 Backward Compatibility\r\n\r\n✅ **No breaking changes:**\r\n- Existing providers continue to work\r\n- `config` field already exists in database\r\n- Optional fields don't require migration\r\n- Providers without specific configs work as before\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3610432599",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-24T09:19:45+00:00",
+      "body": "Rebased, linted, test."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2733a02dfd754322d95546782c90f88ff405e090",
+      "message": "llm settings model providers fix\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-24T04:27:27+00:00"
+    },
+    {
+      "sha": "510959ad52ac139b28e979fc9ac95da408f6baf2",
+      "message": "disable llm config until disconnected\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-24T06:26:19+00:00"
+    },
+    {
+      "sha": "4902399a1c97fe2ecde83c3b59ec193fc851277b",
+      "message": "hide model pill once disconnected\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-24T06:44:52+00:00"
+    },
+    {
+      "sha": "e46bed137f1f26c550a556815908c283935d33ea",
+      "message": "web linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-24T06:48:16+00:00"
+    },
+    {
+      "sha": "3689d7cc2fc6ed19c33fe14c2ccfa4a0912f811c",
+      "message": "linting fixes\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-24T07:03:39+00:00"
+    },
+    {
+      "sha": "b072c65c191556af1fecf84ecee8c8d3f12e0eed",
+      "message": "Rebase and lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-24T09:19:13+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 1158,
+  "deletions": 239,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:02.459120",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:02.459937",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1726,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1726.json"
+  }
+}

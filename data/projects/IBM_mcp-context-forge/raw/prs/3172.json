@@ -1,0 +1,143 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3172,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3172"
+  },
+  "metadata": {
+    "title": "fix(rpc): use configurable internal RPC URL for self-calls in hybrid mesh deployments",
+    "state": "closed",
+    "created_at": "2026-02-24T09:30:16+00:00",
+    "updated_at": "2026-05-10T16:33:23+00:00",
+    "closed_at": "2026-05-10T16:32:29+00:00",
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #3070 due to repository maintenance. Your code and branch are intact. @kevalmahajan please verify everything looks good.\n\n# 🐛 Bug-fix PR\r\n\r\nCloses #3049\r\n\r\n## 📌 Summary\r\n\r\nFixed a bug where the MCP Gateway fails to make internal RPC calls in hybrid cloud mesh deployments. The gateway was using client-provided URLs (e.g., `http://192.168.0.10:4444` via mesh gateway) for internal self-calls, which are not resolvable from the gateway's network environment (e.g., `10.x.x.x` internal network). This caused SSE sessions, WebSocket connections, and session pool operations to fail when the gateway needed to call its own `/rpc` endpoint.\r\n\r\n**Why this matters**: In hybrid cloud mesh architectures, clients access the gateway through a mesh gateway URL that is only valid from the client's network perspective. The gateway itself must use its internal network address for self-calls, not the client's external URL.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n**Issue**: Gateway fails in hybrid cloud mesh when making internal RPC calls\r\n\r\n**Minimal reproduction**:\r\n1. Deploy MCP Gateway in a hybrid cloud mesh environment where:\r\n   - Clients access gateway via mesh gateway: `http://192.168.0.10:4444`\r\n   - Gateway's internal network address: `http://10.0.0.5:4444`\r\n2. Client establishes SSE connection to `/sse/{session_id}`\r\n3. Client sends a message that requires the gateway to call its own `/rpc` endpoint\r\n4. **Bug**: Gateway attempts to call `http://192.168.0.10:4444/rpc` (client's URL)\r\n5. **Result**: Connection fails because `192.168.0.10` is not resolvable from gateway's `10.x.x.x` network\r\n\r\n**Affected code paths**:\r\n- SSE session message handling (`session_registry.py`)\r\n- WebSocket message forwarding (`main.py`)\r\n- Session pool RPC forwarding (`mcp_session_pool.py`)\r\n- Streamable HTTP transport (`streamablehttp_transport.py`)\r\n\r\n## 🐞 Root Cause\r\n\r\n### Primary Issue: URL Parsing from Client Context\r\n\r\nIn `mcpgateway/cache/session_registry.py` (lines 1964-1975), the code was parsing the `base_url` parameter (provided by the client) to construct the internal RPC URL:\r\n\r\n```python\r\n# BEFORE (BROKEN):\r\nparsed_url = urlparse(base_url)  # base_url = \"http://192.168.0.10:4444/servers/123\"\r\npath_parts = parsed_url.path.split(\"/\")\r\nif \"/servers/\" in parsed_url.path:\r\n    servers_index = path_parts.index(\"servers\")\r\n    root_path = \"/\" + \"/\".join(path_parts[1:servers_index]).strip(\"/\")\r\nelse:\r\n    root_path = parsed_url.path.rstrip(\"/\")\r\n\r\nroot_url = f\"{parsed_url.scheme}://{parsed_url.netloc}{root_path}\"\r\nrpc_url = root_url + \"/rpc\"  # Results in: http://192.168.0.10:4444/rpc\r\n```\r\n\r\n**Why this fails**:\r\n1. `base_url` comes from the client's HTTP request context\r\n2. In hybrid cloud mesh, this URL is only valid from the client's network\r\n3. The gateway's internal network cannot resolve `192.168.0.10`\r\n4. The gateway needs to use its own internal address: `10.0.0.5`\r\n\r\n### Secondary Issues: Hardcoded Localhost\r\n\r\nSimilar patterns existed in other files using hardcoded `localhost` or `127.0.0.1`:\r\n\r\n- `mcp_session_pool.py`: `f\"http://127.0.0.1:{settings.port}/rpc\"`\r\n- `streamablehttp_transport.py`: `f\"http://127.0.0.1:{settings.port}/rpc\"` (2 locations)\r\n- `main.py`: `f\"http://localhost:{settings.port}{settings.app_root_path}/rpc\"`\r\n\r\nWhile these work in standard deployments, they fail in containerized environments where the service name (e.g., `gateway-service`) must be used instead of `localhost`.\r\n\r\n## 💡 Fix Description\r\n\r\n### Solution: Configurable Internal RPC URL\r\n\r\nIntroduced a new configuration system that separates client-facing URLs from internal self-call URLs:\r\n\r\n#### 1. Configuration Layer (`mcpgateway/config.py`)\r\n\r\n**Added two new configuration elements**:\r\n\r\n```python\r\ninternal_rpc_host: str = Field(\r\n    default=\"127.0.0.1\",\r\n    description=(\r\n        \"Internal host for RPC calls made by the gateway to itself. \"\r\n        \"Use 127.0.0.1 (default) for standard deployments. \"\r\n        \"In containerized environments with custom networking, set to the service's internal hostname. \"\r\n        \"Never use client-provided URLs as they may not be resolvable in the gateway's network.\"\r\n    ),\r\n)\r\n\r\n@property\r\ndef internal_rpc_url(self) -> str:\r\n    \"\"\"Get the internal RPC endpoint URL for self-calls.\"\"\"\r\n    if \"/rpc\" in self.internal_rpc_host:\r\n        return self.internal_rpc_host  # Full URL provided\r\n    return f\"http://{self.internal_rpc_host}:{self.port}{self.app_root_path}/rpc\"\r\n```\r\n\r\n**Design decisions**:\r\n- **Default `127.0.0.1`**: Maintains backward compatibility with existing deployments\r\n- **Property method**: Automatically constructs full URL with port and root path\r\n- **Full URL passthrough**: Supports advanced scenarios where full URL is provided\r\n- **No breaking changes**: Existing deployments work without configuration changes\r\n\r\n#### 2. Session Registry Fix (`mcpgateway/cache/session_registry.py`)\r\n\r\n**Replaced 20+ lines of URL parsing with single line**:\r\n\r\n```python\r\n# AFTER (FIXED):\r\nrpc_url = settings.internal_rpc_url\r\nlogger.info(f\"SSE RPC: Making internal call to {rpc_url} with method={method}, params={params}\")\r\n```\r\n\r\n**Benefits**:\r\n- Eliminates fragile URL parsing logic\r\n- Uses correct internal network address\r\n- Works in all deployment scenarios\r\n- Clear intent: \"internal call\" vs \"client URL\"\r\n\r\n#### 3. Standardization Across Codebase\r\n\r\n**Updated all internal RPC call sites** to use `settings.internal_rpc_url`:\r\n\r\n- `mcp_session_pool.py`: Session pool RPC forwarding\r\n- `streamablehttp_transport.py`: Message and events endpoints (2 locations)\r\n- `main.py`: WebSocket RPC forwarding\r\n\r\n**Consistency benefits**:\r\n- Single source of truth for internal RPC URL\r\n- Easier to maintain and debug\r\n- Uniform behavior across all transports\r\n\r\n#### 4. Environment Configuration (`.env.example`)\r\n\r\n**Added comprehensive documentation**:\r\n\r\n```bash\r\n# Internal RPC host for self-calls (default: 127.0.0.1)\r\n# Use this when the gateway needs to make RPC calls to itself.\r\n# In hybrid cloud mesh scenarios, client URLs may not be resolvable\r\n# from the gateway's network, so we use localhost by default.\r\n# For containerized environments with custom networking, set to the\r\n# service's internal hostname (e.g., \"gateway-service\").\r\n# INTERNAL_RPC_HOST=127.0.0.1\r\n# or\r\n# Complete rpc url for hybird cloud mesh scenarios\r\n# INTERNAL_RPC_HOST=http://gateway-service:4444/rpc\r\n```\r\n\r\n### Key Design Points\r\n\r\n#### 1. Separation of Concerns\r\n- **Client-facing URLs**: Used for external access (from clients)\r\n- **Internal URLs**: Used for self-calls (within gateway's network)\r\n- **Never mix the two**: Client URLs may not be resolvable internally\r\n\r\n#### 2. Deployment Flexibility\r\n- **Standard**: `127.0.0.1` (default, no config needed)\r\n- **Containerized**: Service name (e.g., `gateway-service`)\r\n- **Hybrid cloud mesh**: Internal IP (e.g., `10.0.0.5`)\r\n- **Advanced**: Full URL with custom path\r\n\r\n#### 3. Backward Compatibility\r\n- Default behavior unchanged\r\n- No breaking changes to existing deployments\r\n- Opt-in configuration for advanced scenarios\r\n\r\n#### 4. Code Simplification\r\n- Removed complex URL parsing logic\r\n- Single source of truth for internal RPC URL\r\n- Easier to understand and maintain\r\n\r\n\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "c271525541698607bf049632204cdcc3e45d275f",
+      "message": "use internal rpc url for proxy related use cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T10:35:12+00:00"
+    },
+    {
+      "sha": "325ee622903542f915ee89701448386213b9c41b",
+      "message": "add test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T12:29:16+00:00"
+    },
+    {
+      "sha": "fe9768cb6782be072d0d465e93c8f3a26b2207a7",
+      "message": "lint\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T12:33:44+00:00"
+    },
+    {
+      "sha": "5248e200d4d278d07bf3dcb5b37b8924b9e05232",
+      "message": "update example\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T12:36:54+00:00"
+    },
+    {
+      "sha": "b2c498cd7ec670073b16987070a5b181378300ca",
+      "message": "maintain fallback\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T13:09:57+00:00"
+    },
+    {
+      "sha": "d7e4a1522f37e5b9dcf1e6fb6c0255ff83438496",
+      "message": "lint\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T13:12:06+00:00"
+    },
+    {
+      "sha": "6718b8fc8c0062fa316154eb5f66b74c2e213988",
+      "message": "fix test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T14:58:37+00:00"
+    },
+    {
+      "sha": "4632eb7f7ae51516b9791acd7f10a95c0ccd4e58",
+      "message": "lint\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T15:05:02+00:00"
+    },
+    {
+      "sha": "32ccc9d0537fa97b91ead62adee7abb9409e1a3f",
+      "message": "improved rpc url check\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T16:11:27+00:00"
+    },
+    {
+      "sha": "c1e1c1bd8be2e2d3f06ce53d5d691efbb2808bdd",
+      "message": "removed redundant test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T14:53:12+00:00"
+    },
+    {
+      "sha": "b1506deffcda8ddac3ca3f9b817125dcab2ca112",
+      "message": "fix spelling\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T14:53:39+00:00"
+    },
+    {
+      "sha": "f16caa5aeef770c7fa069725ae92b93546e5b7bf",
+      "message": "improved rpc url check\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T14:54:11+00:00"
+    },
+    {
+      "sha": "6f70550b26e70dd5edbc68bd942de8afa1bc53f5",
+      "message": "remove dead fallback\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T14:54:45+00:00"
+    },
+    {
+      "sha": "2450fbe1f3432b5da08365c8e3da1729cb0f35b4",
+      "message": "lint\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T15:27:11+00:00"
+    },
+    {
+      "sha": "9a696559117468447208b1e255d8eb982e916139",
+      "message": "fix redundant base_url arguments\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T16:19:19+00:00"
+    },
+    {
+      "sha": "5d6d6e61d54f4b138e519c6cf67f58e39d58defb",
+      "message": "fix test cases after rebase\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T16:44:20+00:00"
+    },
+    {
+      "sha": "d03fd2addd17939682c0fddb6a310ad9508ca572",
+      "message": "add coverage\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T17:15:49+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 472,
+  "deletions": 151,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:13:00.447862",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:00.448659",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3172,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3172.json"
+  }
+}

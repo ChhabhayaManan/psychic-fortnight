@@ -1,0 +1,166 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3714,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3714"
+  },
+  "metadata": {
+    "title": "feat: service-account support and pre-invoke security hardening",
+    "state": "closed",
+    "created_at": "2026-03-17T23:35:32+00:00",
+    "updated_at": "2026-03-19T14:40:27+00:00",
+    "closed_at": "2026-03-19T14:40:24+00:00",
+    "merged_at": "2026-03-19T14:40:24+00:00",
+    "author": "jonpspri",
+    "labels": [
+      "performance",
+      "wxo",
+      "MUST",
+      "release-fix",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Add `skip_onboarding` parameter to `EmailAuthService.create_user()` to skip personal team creation, role assignment, and registration event logging for service accounts / synthetic users\n- Add `ensure_user_exists()` idempotent helper with race-condition handling for concurrent user creation\n- Use `!disabled` sentinel hash for passwordless service accounts (non-loginable by design)\n- Inject user identity and tool/gateway metadata into plugin `GlobalContext` during pre-invoke hooks\n- Run `HTTP_PRE_REQUEST` plugin hooks before internal MCP authentication so token-exchange plugins can transform headers\n- Make docker-compose env vars configurable with defaults (`PLUGINS_CAN_OVERRIDE_AUTH_HEADERS`, `STREAMABLE_HTTP_MAX_EVENTS_PER_STREAM`, `LOCUST_WXO_AUTH_ENABLED`, `HTTPX_*`)\n\n## Test plan\n\n- [x] Unit tests for `skip_onboarding` (no team, no role, no registration event)\n- [x] Unit tests for `ensure_user_exists` (create, existing, race condition, re-raise, email normalization, skip_onboarding forwarding)\n- [x] Unit test for failed-registration audit still fires even with `skip_onboarding`\n- [x] Unit tests for pre-invoke user injection and tool/gateway metadata injection into global context\n- [x] Unit test for pre-request plugin hooks running before internal MCP auth\n- [x] All 775 tests pass, linters clean (ruff warnings pre-existing)",
+  "comments": [
+    {
+      "id": "2950086383",
+      "author": "Copilot",
+      "created_at": "2026-03-17T23:39:28+00:00",
+      "body": "`ensure_user_exists()` calls `create_user()` with `password=\"\"` while `skip_onboarding` defaults to `False`. In `create_user()`, empty passwords only bypass hashing when `skip_onboarding=True`; otherwise `hash_password_async(\"\")` raises `ValueError`, so `ensure_user_exists()` will fail for the default case. Consider either (a) forcing `skip_onboarding=True` for this helper, (b) requiring/providing a non-empty password (e.g., generated) when `skip_onboarding=False`, or (c) adding a `password` parameter so callers choose explicitly."
+    },
+    {
+      "id": "2950086393",
+      "author": "Copilot",
+      "created_at": "2026-03-17T23:39:28+00:00",
+      "body": "The `ensure_user_exists()` docstring says `skip_onboarding` skips “audit events”, but `create_user()` still logs a failed registration event on exceptions even when `skip_onboarding=True` (and the PR test plan explicitly expects that auditing). Please adjust the wording to match the actual semantics (e.g., success-path onboarding/audit events are skipped, but failure auditing is still recorded).\n"
+    },
+    {
+      "id": "2950086401",
+      "author": "Copilot",
+      "created_at": "2026-03-17T23:39:28+00:00",
+      "body": "This test intends to verify that `HTTP_PRE_REQUEST` hooks transform headers *before* auth runs, but it currently doesn’t assert that `run_pre_request_hooks()` was invoked (or that the transformed headers were actually used to build the auth scope / passed into `streamable_http_auth`). As written, it could still pass even if pre-request hooks are skipped. Consider capturing the `scope[\"headers\"]` seen by the auth function and/or using an `AsyncMock` to assert `run_pre_request_hooks` was awaited with the original headers and that the downstream auth sees the transformed headers."
+    },
+    {
+      "id": "2950086411",
+      "author": "Copilot",
+      "created_at": "2026-03-17T23:39:29+00:00",
+      "body": "The `ensure_user_exists_creates_new_user` test stubs `create_user()`, so it won’t catch real failures from the current implementation (e.g., empty password hashing when `skip_onboarding` is left at its default). Once `ensure_user_exists()` behavior is finalized, consider adding at least one test that exercises the real `create_user()` path (or asserts the exact args passed to `create_user()`, including the `skip_onboarding`/password interaction) to prevent regressions.\n"
+    },
+    {
+      "id": "2950105114",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T23:45:56+00:00",
+      "body": "Good catch. Fixed in 289c333 — changed the sentinel guard from `not password and skip_onboarding` to `not password and skip_password_validation`. The latter is the actual invariant for non-loginable accounts and correctly covers `ensure_user_exists(skip_onboarding=False)`."
+    },
+    {
+      "id": "2950105179",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T23:45:57+00:00",
+      "body": "Agreed — updated both docstrings in 289c333 to clarify that `skip_onboarding` skips success-path events only; failure-path audit events are always recorded."
+    },
+    {
+      "id": "2950105283",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T23:45:59+00:00",
+      "body": "Good point. Fixed in 289c333 — replaced the plain function with an `AsyncMock` and added an assertion that `run_pre_request_hooks` was awaited with the original headers (`mock_run_hooks.call_args.kwargs[\"headers\"] == original_headers`)."
+    },
+    {
+      "id": "2950105389",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T23:46:01+00:00",
+      "body": "Acknowledged. The existing `test_ensure_user_exists_passes_skip_onboarding` already asserts exact kwargs forwarded to `create_user` (including `password=\"\"`, `skip_password_validation=True`), which catches plumbing regressions. The underlying risk — `hash_password_async(\"\")` failing with default `skip_onboarding=False` — is now eliminated by the sentinel guard fix in 289c333. An integration-style test would add value but is outside scope of this PR."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3964272301",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T23:39:29+00:00",
+      "body": "## Pull request overview\n\nAdds service-account oriented user-creation options and hardens/extends plugin hook coverage, alongside making several docker-compose environment knobs configurable for different deployments.\n\n**Changes:**\n- Extend `EmailAuthService.create_user()` with `skip_onboarding` and introduce `ensure_user_exists()` for idempotent user creation.\n- Add/adjust unit tests for service-account onboarding skips, race-condition handling, and plugin hook/global-context behavior.\n- Make additional docker-compose environment variables configurable via `${VAR:-default}`.\n\n### Reviewed changes\n\nCopilot reviewed 5 out of 5 changed files in this pull request and generated 4 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `mcpgateway/services/email_auth_service.py` | Adds `skip_onboarding` handling and new `ensure_user_exists()` helper for user creation flows. |\r\n| `tests/unit/mcpgateway/services/test_email_auth_service.py` | Adds unit coverage for `skip_onboarding` behavior and `ensure_user_exists()` scenarios. |\r\n| `tests/unit/mcpgateway/test_main_extended.py` | Adds coverage for internal MCP auth path / pre-request hook behavior; includes various test cleanups. |\r\n| `tests/unit/mcpgateway/services/test_tool_service.py` | Adds tests around pre-invoke global-context injection (user + tool/gateway metadata). |\r\n| `docker-compose.yml` | Introduces configurable env vars with defaults for plugins/auth headers, stream limits, locust auth toggle, and HTTPX pool sizing. |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3964289757",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T23:45:56+00:00",
+      "body": ""
+    },
+    {
+      "id": "3964289814",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T23:45:57+00:00",
+      "body": ""
+    },
+    {
+      "id": "3964289902",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T23:45:59+00:00",
+      "body": ""
+    },
+    {
+      "id": "3964289967",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T23:46:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "3975595349",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-19T14:32:27+00:00",
+      "body": "Reviewed and rebased onto main. All 814 tests in affected files pass.\n\n**Changes made during review:**\n\n1. **Rebase conflict resolution** — 3 trivial `docker-compose.yml` conflicts (inline comments on HTTPX env vars, `LOCUST_WXO_AUTH_ENABLED` default `true` → kept `false` as safer default). After rebase, stale diffs from already-merged PRs (session_pool, .env.example, config.py, etc.) dropped off cleanly.\n\n2. **Docstring clarification** — Narrowed the `skip_onboarding` docstring claim from \"failure-path audit events are always recorded\" to specify that only *unexpected*-failure events (`except Exception` path) are always recorded. Duplicate-user rejections (`UserExistsError`, `IntegrityError`) are intentionally not audited — they're normal control flow for idempotent patterns like `ensure_user_exists()`.\n\n**Review findings — all clear:**\n\n- **Security**: `!disabled` sentinel is safe — `verify_password()` catches `InvalidHash` and returns `False`. User injection fallback only populates `GlobalContext.user` when `None`, preventing overwrite. Race-condition handling in `ensure_user_exists` is correct (check → create → catch → re-fetch → re-raise if still missing).\n- **Consistency**: `ensure_user_exists()` follows established `ensure_personal_team()` pattern. Tool/gateway metadata injection matches `invoke_tool()` path. Pre-request hooks placement mirrors Python middleware chain.\n- **Test coverage**: 100% differential coverage — 13 new tests cover all new code paths (skip_onboarding, ensure_user_exists, user/metadata injection, pre-request hooks).\n- **Performance**: No concerns — no new DB queries on hot paths."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "cd12cd627f8d2c663d698c9c239b5b27707ee668",
+      "message": "fix: auth-header override guard bypass with mixed-case keys\n\nThe `overridden` set stored original-case plugin header keys, but the\nfilter compared lowercased keys against it. A plugin returning\n\"Authorization\" (mixed-case) instead of \"authorization\" would bypass\nthe plugins_can_override_auth_headers=false guard and overwrite inbound\nauth headers.\n\nFix: normalize `overridden` to lowercase so the filter comparison is\ncase-insensitive. Add a deny-path test for mixed-case auth headers.\n\nAlso document the known limitation that pre-invoke hooks may run twice\nwhen Rust direct execution fails and falls back to the Python path.\nPre-invoke plugins must be idempotent for correctness on this path.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-17T19:01:35+00:00"
+    },
+    {
+      "sha": "a62cbb151b3a8bd5128cb4d1f960b91117312d19",
+      "message": "fix: plugin context parity and double pre-invoke on Rust fallback\n\nTwo issues addressed:\n\n1. Context parity: prepare_rust_mcp_tool_execution() now accepts\n   plugin_global_context and plugin_context_table from the resolve\n   handler, reusing the middleware-provided GlobalContext (which carries\n   JWT claims state, correlation ID, and user identity). Tool/gateway\n   metadata is injected before pre-invoke hooks run, matching the\n   invoke_tool() pattern. The resolve handler extracts these from\n   request.state and passes them through.\n\n2. Double pre-invoke prevention: When Rust direct execution fails and\n   falls back to /_internal/mcp/tools/call, Rust now injects an\n   x-contextforge-pre-invoke-ran header. invoke_tool() checks for this\n   header and skips re-running TOOL_PRE_INVOKE hooks, preventing double\n   execution for non-idempotent plugins (rate limiters, token exchange,\n   audit hooks).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-17T19:14:00+00:00"
+    },
+    {
+      "sha": "b164f6ebee53f0b6532e8ded0f7f79216fe56bf5",
+      "message": "feat: auth service-layer refactor and pre-invoke security hardening\n\nExtend EmailAuthService for plugin-driven user provisioning:\n- add skip_onboarding parameter to create_user() so auth plugins can\n  create synthetic/service users without onboarding side-effects\n- add ensure_user_exists() for idempotent user creation\n- skip password hashing for empty-password service accounts\n\nHarden pre-invoke plugin hook path:\n- replace header-based skip_pre_invoke derivation with an explicit\n  parameter threaded through the internal RPC path, preventing external\n  callers from spoofing x-contextforge-pre-invoke-ran to bypass\n  TOOL_PRE_INVOKE security plugins\n\nInclude design spec and implementation plan for the broader auth plugin\nservice-layer refactor (eliminating direct DB access from wxo auth\nplugin, replacing wxo_team_tokens SQL table with L1/L2 cache).\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-17T21:04:55+00:00"
+    },
+    {
+      "sha": "4407cc11da618e1054adf4cf7ed93a2c8b3ce483",
+      "message": "fix: address Copilot review — sentinel guard, docstrings, test assertion\n\n- Change password-hash sentinel guard from `skip_onboarding` to\n  `skip_password_validation` so ensure_user_exists works with\n  skip_onboarding=False (empty password + skip_password_validation\n  is the actual invariant for non-loginable accounts)\n- Clarify docstrings: skip_onboarding skips success-path events only;\n  failure auditing is always recorded\n- Strengthen pre-request hook test to assert run_pre_request_hooks\n  was awaited with the original headers\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-17T23:44:28+00:00"
+    },
+    {
+      "sha": "e2faf1a34629488be1172d64f7dafa6dca10605b",
+      "message": "docs: clarify audit event scope in skip_onboarding docstrings\n\nNarrow the \"failure-path audit events are always recorded\" claim to\nspecify that only unexpected-failure events (the except Exception path)\nare always recorded.  Duplicate-user rejections (UserExistsError,\nIntegrityError) are intentionally not audited — they represent normal\ncontrol flow for idempotent creation patterns like ensure_user_exists().\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T14:31:59+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 510,
+  "deletions": 89,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:47.945437",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:47.946673",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3714,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3714.json"
+  }
+}

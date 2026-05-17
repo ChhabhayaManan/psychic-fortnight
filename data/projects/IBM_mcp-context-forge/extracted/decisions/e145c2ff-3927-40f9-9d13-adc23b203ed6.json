@@ -1,0 +1,38 @@
+{
+  "id": "e145c2ff-3927-40f9-9d13-adc23b203ed6",
+  "title": "Fix/alembic migration safety",
+  "summary": "## 🔗 Related Issue\r\nCloses #4429 #4138\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes unsafe Alembic downgrade behaviour and closes the migration testing gaps identified in both issues.\r\n\r\n**From #4429 — Alembic downgrade is unsafe and environment-dependent:**\r\n\r\n- **Root cause 2 fixed — runtime settings dependency in `ba202ac1665f`:** Introduces a `migration_metadata` table (new migration `f9a8b7c6d5e4`) that snapshots the four `DEFAULT_*_ROLE` env-var values at `upgrade()` time. `downgrade()` now reads from this snapshot instead of live `settings`, so the role-remap reversal is deterministic regardless of what env vars are set at rollback time. Falls back to live settings with a prominent warning on pre-existing databases that have no snapshot.\r\n\r\n- **Root cause 4 fixed — irreversible Phase 2 backfill in `ba202ac1665f`:** Phase 2 backfill rows are now tagged with `migration_source = 'migration:ba202ac1665f'` in `user_roles`. `downgrade()` deletes only those rows, leaving all other grants untouched. Previously the docstring acknowledged the rows could not be cleaned up at all.\r\n\r\n- **Root causes 1, 3, 5 not addressed — by design:** Migrations `b77ca9d2de7e` (UUID refactor, destructive base downgrade) and `a706a3320c56` (Argon2id, silent crypto skip on downgrade) shipped in 0.9.0. The practical rollback scenario this issue targets is 1.0.0 → 0.9.0, which never traverses those older migrations.\r\n\r\n- **CI roundtrip validation added:** `scripts/ci/run_upgrade_validation.sh` now runs `run_sqlite_roundtrip` and `run_postgres_roundtrip` (upgrade base→head then downgrade head→base) in addition to the existing fresh-install checks. All 6 checks pass. The alembic-upgrade-validation workflow picks these up automatically on every PR touching migration files.\r\n\r\n**From #4138 — Migration testing gaps:**\r\n\r\n- **Gap 1 — Rollback tests under pytest:** `make migration-test-all` already runs `test_sequential_reverse_migrations` (parametrized via `reverse_version_pair` in `conftest.py`). Added `make migration-test-rollback` as a dedicated target that runs `-k 'reverse or rollback'` on both SQLite and PostgreSQL test files, then runs the full upgrade/downgrade roundtrip harness.\r\n\r\n- **Gap 2 — Cross-DB schema validation:** Added `tests/migration/test_cross_db_schema_consistency.py` — 5 tests that boot the target image with both SQLite and PostgreSQL, introspect schemas via SQLAlchemy Inspector, normalise engine-specific type names, and assert tables/columns/types/PKs/FKs match. All 5 pass (67 tables each engine). Also added `make migration-test-cross-db` target.\r\n\r\n- **Gap 3 — CI coverage decision documented:** Added a comment block to `.github/workflows/alembic-upgrade-validation.yml` explaining why the full suite (rollback, perf, cross-DB) does not run on every PR (runtime cost, risk profile, cold Docker pull cost) and pointing to the three `make` targets for manual/pre-release runs.\r\n\r\n- **AGENTS.md guideline:** Added \"Hermetic Downgrade: Config Snapshot Pattern\" section documenting the rule and providing a copy-paste template for any future migration whose `downgrade()` reads from `settings`.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [x] Feature / Enhancement\r\n- [x] Documentation\r\n- [ ] Refactor\r\n- [x] Chore (deps, CI, tooling)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|---|---|---|\r\n| Lint suite | `make lint` | Not run (no logic changes outside migrations/tests) |\r\n| Unit tests | `make test` | Not run (migration tests require Docker) |\r\n| CI roundtrip (SQLite fresh + upgrade + roundtrip) | `bash scripts/ci/run_upgrade_validation.sh` | ✅ 6/6 pass |\r\n| Cross-DB consistency | `UPGRADE_TARGET_IMAGE=... pytest tests/migration/test_cross_db_schema_consistency.py` | ✅ 5/5 pass |\r\n| Alembic single head | `cd mcpgateway && alembic heads` | ✅ `bb43712cae28` |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (AGENTS.md, workflow comment)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n- The `migration_metadata` table is inserted at `a31c6ffc2239 → f9a8b7c6d5e4 → ba202ac1665f` in the chain. Databases upgraded before this PR have no snapshot rows for `ba202ac1665f` — downgrade on those will fall back to live settings with a warning (same behaviour as before, now surfaced explicitly rather than silently).\r\n- `make migration-test-cross-db` and `make migration-test-rollback` require Docker and the target image to be built locally (`docker build -f Containerfile.lite -t mcpgateway/mcpgateway:upgrade-ci-test .`). Override the image with `UPGRADE_TARGET_IMAGE=mcpgateway/mcpgateway:upgrade-ci-test make migration-test-cross-db`.",
+  "reasoning": "## 🔗 Related Issue\r\nCloses #4429 #4138\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes unsafe Alembic downgrade behaviour and closes the migration testing gaps identified in both issues.\r\n\r\n**From #4429 — Alembic downgrade is unsafe and environment-dependent:**\r\n\r\n- **Root cause 2 fixed — runtime settings dependency in `ba202ac1665f`:** Introduces a `migration_metadata` table (new migration `f9a8b7c6d5e4`) that snapshots the four `DEFAULT_*_ROLE` env-var values at `upgrade()` time. `downgrade()` now reads from this snapshot instead of live `settings`, so the role-remap reversal is deterministic regardless of what env vars are set at rollback time. Falls back to live settings with a prominent warning on pre-existing databases that have no snapshot.\r\n\r\n- **Root cause 4 fixed — irreversible Phase 2 backfill in `ba202ac1665f`:** Phase 2 backfill rows are now tagged with `migration_source = 'migration:ba202ac1665f'` in `user_roles`. `downgrade()` deletes only those rows, leaving all other grants untouched.",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "msureshkumar88",
+    "brian-hussey",
+    "madhu-mohan-jaishankar"
+  ],
+  "tags": [
+    "docker",
+    "database",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "ce56840c-5802-4b63-810e-5d7324fcff47",
+      "source_type": "pr",
+      "source_id": "4479",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/4479",
+      "contributor": "madhu-mohan-jaishankar",
+      "timestamp": "2026-04-27T19:07:29Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4479.json"
+    }
+  ],
+  "timestamp": "2026-04-27T19:07:29Z",
+  "created_at": "2026-05-17T17:23:06.558217",
+  "updated_at": "2026-05-17T17:23:06.558220",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:06.558732",
+    "artifact_type": "decisions",
+    "artifact_id": "e145c2ff-3927-40f9-9d13-adc23b203ed6"
+  }
+}

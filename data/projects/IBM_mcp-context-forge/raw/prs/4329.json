@@ -1,0 +1,76 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4329,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4329"
+  },
+  "metadata": {
+    "title": "[ICACF-15] Add host allowlist validation for gateway test endpoint",
+    "state": "closed",
+    "created_at": "2026-04-20T09:34:09+00:00",
+    "updated_at": "2026-05-09T20:41:14+00:00",
+    "closed_at": "2026-05-09T20:41:13+00:00",
+    "merged_at": "2026-05-09T20:41:13+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "bug",
+      "enhancement",
+      "security",
+      "ica",
+      "pentesting"
+    ],
+    "milestone": null,
+    "assignees": [
+      "ja8zyjits"
+    ]
+  },
+  "description": "## Summary\n\nAdds configuration-based host filtering for the gateway test endpoint to ensure outbound requests only reach approved destinations.\n\n**JIRA:** https://jsw.ibm.com/browse/ICACF-15  \n**GitHub Issue:** Closes #4314\n\n---\n\n## Problem\n\nThe `/admin/gateways/test` endpoint accepted arbitrary user-supplied URLs without proper host validation, which could allow:\n- Unintended access to external hosts\n- Potential access to internal microservices that should remain isolated\n- Host validation bypass via trailing-dot FQDN patterns (e.g., `example.com.`)\n\n---\n\n## Changes\n\n### 1. Configuration (`mcpgateway/config.py`)\n- Added `gateway_test_allowed_hosts` setting for host allowlist\n- Supports wildcards (`*.example.com`) and exact matches\n- Empty list = backwards compatible (existing validation only)\n\n### 2. Validator Enhancement (`mcpgateway/common/validators.py`)\n- **New method:** `SecurityValidator.validate_host_allowlist()` with wildcard support\n- **Enhancement:** Host validation now normalizes FQDNs (strips trailing dots) before checks\n- **Impact:** Closes trailing-dot hostname bypass pattern\n\n### 3. Endpoint Enhancement (`mcpgateway/admin.py`)\n- Enforces allowlist validation after URL validation\n- Returns generic 400 error for non-allowlisted hosts\n- Maintains existing host validation (private IPs, loopback, cloud metadata)\n\n### 4. Test Coverage\n- **8 unit tests** in `tests/security/test_input_validation.py::TestGatewayTestEndpointSecurity`\n- **3 E2E tests** in `tests/e2e/test_admin_apis.py::TestAdminGatewayAPIs`\n- Tests cover: allowlist matching, trailing-dot normalization, private IP filtering, allowlist enforcement\n\n---\n\n## Impact\n\n### Before:\n- ❌ Arbitrary URLs accepted without allowlist validation\n- ❌ Trailing-dot FQDN patterns could bypass host checks\n- ❌ No allowlist enforcement\n\n### After:\n- ✅ Allowlist enforcement restricts outbound requests\n- ✅ Trailing-dot normalization prevents bypass patterns\n- ✅ Private IPs, loopback, and cloud metadata filtered unconditionally\n- ✅ Generic error messages\n\n---\n\n## Testing\n\n### Test Results:\n```\n✅ 17,685 passed, 544 skipped, 2 xfailed, 0 failures (3 new E2E tests added)\n✅ 8/8 unit tests passing (host validation)\n✅ 3/3 E2E tests passing (endpoint integration)\n✅ Coverage ≥95% on modified code (lines 13827-13830 covered)\n✅ make ruff - All checks passed\n✅ All host validation tests verified\n```\n\n### Manual Verification:\n```\n✅ Trailing-dot URLs normalized (169.254.169.254.)\n✅ Allowlist exact matching works\n✅ Allowlist wildcard matching works\n✅ Trailing-dot normalized in allowlist\n✅ Non-allowlisted hosts filtered\n✅ Private IPs filtered unconditionally\n```\n\n---\n\n## Acceptance Criteria\n\n| # | Criterion | Status |\n|---|-----------|--------|\n| ✅ | Server-side allowlist enforced | VERIFIED |\n| ✅ | URL canonicalization/normalization (trailing-dot FQDN) | VERIFIED |\n| ✅ | Private IPs filtered unconditionally (RFC 1918, loopback, link-local) | VERIFIED |\n| ✅ | Generic 400 error messages | VERIFIED |\n| ✅ | Regression test for trailing-dot patterns | VERIFIED |\n| ✅ | OOB callback filtering test | VERIFIED |\n\n---\n\n## Configuration\n\n### Development (Permissive):\n```bash\nGATEWAY_TEST_ALLOWED_HOSTS=[]  # Empty = existing validation only\nSSRF_PROTECTION_ENABLED=true\nSSRF_ALLOW_LOCALHOST=true\nSSRF_ALLOW_PRIVATE_NETWORKS=true\n```\n\n### Production (Strict - Recommended):\n```bash\nGATEWAY_TEST_ALLOWED_HOSTS=[\"api.approved.com\", \"*.allowed.com\"]\nSSRF_PROTECTION_ENABLED=true\nSSRF_ALLOW_LOCALHOST=false\nSSRF_ALLOW_PRIVATE_NETWORKS=false\nSSRF_DNS_FAIL_CLOSED=true\n```\n\n---\n\n## Deployment Notes\n\n1. **Backwards Compatible:** Empty `GATEWAY_TEST_ALLOWED_HOSTS` preserves existing validation behavior\n2. **Recommended:** Set explicit allowlist in production\n3. **Migration:** Audit existing gateway URLs and add to allowlist before enforcing\n4. **Monitoring:** Watch for 400 errors on `/admin/gateways/test` after deployment\n\n---\n\n## Files Changed\n\n- `.env.example` - Added GATEWAY_TEST_ALLOWED_HOSTS documentation\n- `mcpgateway/admin.py` - Allowlist enforcement in admin_test_gateway()\n- `mcpgateway/common/validators.py` - Added validate_host_allowlist() + fixed trailing-dot normalization\n- `mcpgateway/config.py` - Added gateway_test_allowed_hosts setting\n- `tests/security/test_input_validation.py` - Added 8 comprehensive unit tests\n- `tests/e2e/test_admin_apis.py` - Added 3 E2E integration tests\n\n---\n\n## Checklist\n\n- [x] Code follows project style guidelines\n- [x] All tests passing (17,685 passed, 0 failures)\n- [x] Host validation tests added and verified (11 total: 8 unit + 3 E2E)\n- [x] Documentation updated (.env.example)\n- [x] Backwards compatible\n- [x] No new linting issues (make ruff passes)\n- [x] Commit message follows conventional commits\n- [x] All acceptance criteria met\n- [x] Coverage ≥95% on modified code",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "686da0698ae648394fb07d54eb57d45f2f0a92f3",
+      "message": "fix: restrict gateway test endpoint to approved hosts (ICACF-15)\n\nImplement SSRF protection for /admin/gateways/test endpoint to prevent\nopen proxy abuse and internal service access.\n\n**Changes:**\n- Add gateway_test_allowed_hosts config for host allowlist enforcement\n- Add SecurityValidator.validate_host_allowlist() with wildcard support\n- Fix critical FQDN trailing-dot bypass in _validate_ssrf() normalization\n- Enforce allowlist in admin_test_gateway() before outbound requests\n- Add comprehensive security tests (unit + E2E)\n\n**Security Impact:**\n- Fixes CVE-level trailing-dot FQDN bypass vulnerability\n- Prevents SSRF attacks via explicit allowlist enforcement\n- Blocks private IPs, loopback, and link-local unconditionally\n- Returns generic 400 errors (no internal details disclosed)\n\n**Tests:**\n- 8 new unit tests in TestGatewayTestEndpointSecurity\n- 13 E2E tests for SSRF scenarios\n- All tests passing (17/17)\n\n**Acceptance Criteria Met:**\n✅ Server-side allowlist enforced\n✅ URL canonicalization/normalization (trailing-dot fixed)\n✅ Private IPs blocked unconditionally\n✅ Generic 400 error messages\n✅ Regression test for trailing-dot bypass\n✅ OOB callback blocking test\n\nCloses #4314\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-20T08:27:59+00:00"
+    },
+    {
+      "sha": "5df3bcd8a06726900efb8f3ca6314c9e7876664e",
+      "message": "test(security): add E2E tests for ICACF-15 allowlist validation\n\n- Add 3 E2E tests to cover gateway test endpoint allowlist enforcement\n- test_admin_test_gateway_allowlist_blocks_non_allowlisted: Verifies non-allowlisted hosts return 400 error\n- test_admin_test_gateway_allowlist_allows_allowlisted: Verifies allowlisted hosts work correctly\n- test_admin_test_gateway_empty_allowlist_uses_ssrf: Verifies empty allowlist falls back to SSRF protection\n- Tests cover missing lines 13827-13830 in mcpgateway/admin.py for CI/CD coverage requirements\n- All tests use camelCase field names (statusCode, latencyMs) per BaseModelWithConfigDict serialization\n\nAddresses ICACF-15 CI/CD coverage failure\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-20T13:29:40+00:00"
+    },
+    {
+      "sha": "891ce855491d2a1c8050f86668e975c9b25950e6",
+      "message": "fix(security): address code review feedback for gateway test SSRF protection\n\nThis commit addresses all 5 code review items from PR #4329:\n\nCRITICAL fixes:\n- Reorder validation: allowlist check now runs before SSRF check to prevent\n  misconfigured allowlists from bypassing SSRF protection (defense-in-depth)\n- Add interaction tests verifying allowlist cannot bypass SSRF (unit + E2E)\n\nMEDIUM priority:\n- Add IDN/Punycode normalization to prevent Unicode homograph attacks via\n  new _normalize_hostname() helper with wildcard pattern support\n\nLOW priority:\n- Fix wildcard semantics: *.example.com now matches only subdomains per\n  DNS conventions (excludes base domain)\n- Improve .env.example documentation clarifying empty allowlist behavior\n\nTests: 11/11 security tests passing, 5/5 E2E tests passing\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-08T06:45:50+00:00"
+    },
+    {
+      "sha": "fa865e93e95d6073747f28e06e1e2218e7e3521a",
+      "message": "fix(security): address council PR review findings for ICACF-15\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T20:07:12+00:00"
+    },
+    {
+      "sha": "0fa8aba867b943244084c5f795f3a3c816873f13",
+      "message": "chore: update secrets baseline after rebase\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T20:20:30+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 557,
+  "deletions": 65,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:35.372293",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:35.372864",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4329,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4329.json"
+  }
+}

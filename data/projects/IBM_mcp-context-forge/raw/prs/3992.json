@@ -1,0 +1,47 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3992,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3992"
+  },
+  "metadata": {
+    "title": "fix: handle missing expires_in in OAuth token response",
+    "state": "closed",
+    "created_at": "2026-04-02T08:09:47+00:00",
+    "updated_at": "2026-04-27T08:56:38+00:00",
+    "closed_at": "2026-04-26T16:11:00+00:00",
+    "merged_at": null,
+    "author": "ecthelion77",
+    "labels": [
+      "bug",
+      "MUST"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\n\n## 📌 Summary\n\nWhen an OAuth2 provider omits the `expires_in` field from the token response, the gateway crashes with a `TypeError` during token storage. The `expires_in` parameter is **RECOMMENDED** but not **REQUIRED** per [RFC 6749 Section 5.1](https://datatracker.ietf.org/doc/html/rfc6749#section-5.1), so providers may legitimately omit it (e.g., GitHub OAuth Apps, some Azure AD configurations).\n\nFixes #3989\n\n## 🔁 Reproduction Steps\n\n1. Configure a gateway with OAuth2 pointing to a provider that does not return `expires_in` in the token response\n2. Trigger the OAuth authorization code flow\n3. Token exchange succeeds, but storing the token fails with `TypeError: unsupported operand type(s) for +: 'datetime' and 'NoneType'`\n\n## 🐞 Root Cause\n\nIn `oauth_manager.py`, `token_response.get(\"expires_in\", self.settings.oauth_default_timeout)` always returns a value, which hides the issue. However, when the provider returns `expires_in: null` or omits it entirely and the fallback default is also `None`, the code in `token_storage_service.py` tries to compute `datetime.now() + timedelta(seconds=int(None))` which raises `TypeError`.\n\nMore importantly, the current code papers over the absence of `expires_in` by substituting `oauth_default_timeout`, which may not reflect the actual token lifetime — the token could be valid indefinitely.\n\n## 💡 Fix Description\n\n**`oauth_manager.py`**: Extract `expires_in` with `.get()` and explicitly convert to `int` only when present. Pass `None` when the provider does not specify expiration.\n\n**`token_storage_service.py`**: \n- Change `expires_in` parameter type from `int` to `Optional[int]`\n- When `expires_in is None`, set `expires_at = None` and log an informational message\n- When `expires_in` is provided, compute `expires_at` as before\n\nThe existing `_is_token_expired()` method already handles `expires_at=None` correctly (returns `False`, treating the token as non-expired).\n\n## 🧪 Verification\n\n| Check | Command | Status |\n| --- | --- | --- |\n| Lint suite | `make lint` | ⚠️ Not run (no local dev env) |\n| Unit tests | `make test` | ⚠️ Not run (no local dev env) |\n| Coverage ≥ 80 % | `make coverage` | ⚠️ Not run (no local dev env) |\n| Manual regression no longer fails | Tested in production (Kubernetes) for 2+ weeks with Freshservice OAuth (which returns expires_in) and verified graceful handling when expires_in is absent | ✅ |\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted\n- [x] No secrets/credentials committed\n- [x] DCO Signed-off-by included",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "85b93c84eded6021b5cd40a14d80f91ecdc2c598",
+      "message": "fix(oauth): handle missing expires_in in OAuth token response\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-14T14:55:46+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 14,
+  "deletions": 5,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:07:04.582382",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:04.583106",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3992,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3992.json"
+  }
+}

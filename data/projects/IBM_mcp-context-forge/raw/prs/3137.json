@@ -1,0 +1,70 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3137,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3137"
+  },
+  "metadata": {
+    "title": "feat(ui): modularize admin scope into independent modules",
+    "state": "closed",
+    "created_at": "2026-02-24T09:18:18+00:00",
+    "updated_at": "2026-04-02T14:20:42+00:00",
+    "closed_at": "2026-04-02T14:20:40+00:00",
+    "merged_at": "2026-04-02T14:20:40+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "# Admin UI Modularisation\r\n\r\n## The Problem\r\n\r\nThe original `mcpgateway/static/admin.js` was a **33,812-line monolithic file** — all UI logic, state management, API calls, validation, and event handling in one place. It was untestable in isolation, slow to load, and impossible to maintain at scale.\r\n\r\n---\r\n\r\n## What Was Done\r\n\r\n### 1. Decomposition into 44 ES Modules (`mcpgateway/admin_ui/`)\r\n\r\nThe monolith was split into focused, single-responsibility modules across four conceptual layers:\r\n\r\n| Layer | Modules | Purpose |\r\n|---|---|---|\r\n| **Foundation** | `bootstrap.js`, `appState.js`, `utils.js`, `constants.js`, `security.js` | Shared primitives, state, XSS protection |\r\n| **Domain** | `tools.js`, `servers.js`, `teams.js`, `gateway.js`, `tokens.js`, `llmModels.js`, `llmChat.js`, `prompts.js`, `resources.js`, `users.js`, `roots.js`, `a2aAgents.js` | Entity-level CRUD, testing, validation |\r\n| **Features** | `auth.js`, `filters.js`, `search.js`, `tabs.js`, `pagination.js`, `modals.js`, `logging.js`, `metrics.js`, `plugins.js`, `monitoring.js`, etc. | UI concerns, cross-cutting features |\r\n| **Orchestration** | `initialization.js`, `events.js`, `app.js`, `formSubmitHandlers.js` | Startup, HTMX delegation, chart registry |\r\n\r\n### 2. Facade Pattern (`admin_ui/admin.js`)\r\n\r\nA single facade aggregates all 35+ module exports and exposes them onto the `window.Admin` namespace — preserving the existing HTML contract where HTMX/Alpine templates call `Admin.editTool(...)`, `Admin.showTab(...)`, etc. No template changes required.\r\n\r\n```\r\nindex.js\r\n  └─→ admin.js (facade)\r\n        ├─→ bootstrap.js         (window.Admin = {})\r\n        ├─→ utils.js, tools.js, servers.js ... (ES modules → Admin.fn = fn)\r\n        ├─→ events.js            (IIFE, self-registers)\r\n        └─→ app.js               (IIFE, self-registers)\r\n```\r\n\r\n### 3. Vite Build Pipeline\r\n\r\nA new Vite configuration (`vite.config.js`) bundles `admin_ui/index.js` into an **IIFE format** output at `mcpgateway/static/bundle-[HASH].js`. The hash changes on every rebuild, providing automatic cache busting. External libraries (HTMX, Alpine, Chart.js, CodeMirror, DOMPurify) remain CDN-loaded and are declared as globals — not bundled.\r\n\r\nPython's `mcpgateway/admin.py` reads the Vite manifest at startup to resolve the hashed filename, injecting it into the admin template as `{{ bundle_js }}`.\r\n\r\n### 4. Test Suite: 20% → 70%+ Coverage\r\n\r\n**44 new Vitest unit test files** in `tests/unit/js/`, one per module, using:\r\n\r\n- `jsdom` environment to simulate the browser DOM\r\n- `vi.mock()` for clean module isolation\r\n- `AppState.reset()` in `afterEach` to prevent test pollution\r\n- Istanbul as coverage provider (text + JSON + HTML + lcov reporters)\r\n\r\nThe `vitest.config.js` instruments only `mcpgateway/admin_ui/**/*.js` (not the compiled bundle), giving accurate per-module coverage.\r\n\r\n### 5. Playwright Tests Maintained\r\n\r\nEnd-to-end Playwright tests continue to pass at the same success rate — the public API (`window.Admin.*`) is unchanged, so browser-level test contracts were not broken by the refactor.\r\n\r\n---\r\n\r\n## Key Design Decisions\r\n\r\n- **Sequential import order** in the facade: `bootstrap.js` must initialise `window.Admin` before any module tries to write to it.\r\n- **IIFE for stateful orchestration** (`events.js`, `app.js`): modules that need to self-register event listeners at load time use the IIFE pattern rather than pure ES module exports.\r\n- **No circular dependencies**: `appState.js` acts as the shared hub; `utils.js` and `constants.js` have zero app-level dependencies; domain modules only import from the foundation layer.\r\n- **`emptyOutDir: false`** in Vite config: preserves vendor files, images, and other static assets alongside the bundle.\r\n\r\n---\r\n\r\n## File Map\r\n\r\n| Path | Description |\r\n|---|---|\r\n| `mcpgateway/admin_ui/*.js` | 44 source modules (32,224 LOC total) |\r\n| `mcpgateway/admin_ui/index.js` | Build entry point |\r\n| `mcpgateway/admin_ui/admin.js` | Facade — aggregates all exports onto `window.Admin` |\r\n| `mcpgateway/admin.py` | `get_bundle_js_filename()` — resolves hashed name at startup |\r\n| `mcpgateway/templates/admin.html` | References `{{ bundle_js }}` |\r\n| `vite.config.js` | Bundler configuration |\r\n| `vitest.config.js` | Test runner configuration |\r\n| `package.json` | Scripts and dev dependencies |\r\n| `tests/unit/js/*.test.js` | 44 Vitest unit test files |\r\n\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3998797986",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-24T12:35:10+00:00",
+      "body": "One regression I found in the admin UI modularization is that part of the template contract was moved from global/template functions to Admin.* calls, but several handlers were not actually exported onto window.Admin.\n\n  A few examples:\n\n  - mcpgateway/templates/admin.html:14757, mcpgateway/templates/admin.html:14771, mcpgateway/templates/admin.html:14874, and mcpgateway/templates/admin.html:14890 now call Admin.closeInviteUserModal, Admin.submitUserInvitation, Admin.closeRoleAssignmentModal, and Admin.submitRoleAssignment, but the implementations still exist only as local template functions at mcpgateway/templates/admin.html:12341, mcpgateway/templates/admin.html:12359, mcpgateway/templates/admin.html:12534, and mcpgateway/templates/admin.html:12539.\n  - Same pattern for bulk import and log actions: mcpgateway/templates/admin.html:13031, mcpgateway/templates/admin.html:14393, mcpgateway/templates/admin.html:14437, and mcpgateway/templates/admin.html:14445, while the implementations remain local or window.* at mcpgateway/templates/admin.html:13056, mcpgateway/templates/admin.html:13188, and mcpgateway/templates/admin.html:13971.\n\n  This causes runtime failures such as TypeError: Admin.closeInviteUserModal is not a function when exercising those flows. I also noticed a couple of similar mechanical rewrites that look broken for the same reason: mcpgateway/templates/admin.html:12732, mcpgateway/templates/admin.html:12733, and mcpgateway/templates/admin.html:13040 use Admin.window.* / Admin.this.*, which won’t resolve at runtime.\n\n  A simple repro is:\n\n  1. Open “Bulk import\" in tools.\n  2. Observe the console error for missing Admin.* handler.\n\nThe overall modularization direction looks good; I think this just needs one more pass over the template-to-facade wiring, plus a small test covering these template-bound actions so the compatibility promise holds end to end."
+    },
+    {
+      "id": "4049881408",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-02T10:50:56+00:00",
+      "body": "LGTM\n\nRan admin UI locally and all looks okay. "
+    },
+    {
+      "id": "4050367820",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-02T12:36:01+00:00",
+      "body": "LGTM 🚀 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7369c6179828a3a980ddfee1387c989762dfc9f0",
+      "message": "feat(ui): divide admin.js into modules\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-03-13T22:58:59+00:00"
+    }
+  ],
+  "files_changed": 180,
+  "additions": 83843,
+  "deletions": 55502,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:38.184191",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:38.185245",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3137,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3137.json"
+  }
+}

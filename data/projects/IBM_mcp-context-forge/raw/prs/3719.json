@@ -1,0 +1,70 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3719,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3719"
+  },
+  "metadata": {
+    "title": "feat(sso): extract groups claim for generic OIDC providers",
+    "state": "closed",
+    "created_at": "2026-03-18T10:04:31+00:00",
+    "updated_at": "2026-03-22T18:25:54+00:00",
+    "closed_at": "2026-03-22T18:25:54+00:00",
+    "merged_at": "2026-03-22T18:25:53+00:00",
+    "author": "charlieleith",
+    "labels": [
+      "enhancement",
+      "security",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\nThe generic OIDC normalization path in `_normalize_user_info` does not extract group claims from the identity token or userinfo response. This means `_apply_team_mapping` has no groups to work with for any provider that isn't Keycloak or Entra ID — so `team_mapping` on generic OIDC providers (JumpCloud, Okta, Auth0, etc.) silently does nothing.\n\n## Change\n\nAdds groups extraction to the generic OIDC fallback in `_normalize_user_info`, following the exact same pattern already used by the Keycloak and Entra paths:\n\n- Reads `groups_claim` from `provider_metadata` (defaults to `\"groups\"`)\n- Extracts the claim value from `user_data` (handles both list and string)\n- Includes `\"groups\"` key in the normalized return dict\n\n**10 lines added, 0 removed. Single file change.**\n\n## Use case\n\nWe're using ContextForge with JumpCloud as a generic OIDC provider. JumpCloud includes a `groups` claim in the ID token when configured. Without this patch, those groups are silently dropped by `_normalize_user_info`, making `team_mapping` on the SSO provider record non-functional.\n\nWith the patch, setting `provider_metadata: {\"groups_claim\": \"groups\"}` and `team_mapping: {\"Engineering\": \"<team-id>\"}` on the SSO provider works as expected — users are auto-added to teams on login based on their IdP groups.\n\n## Testing\n\n- Verified with JumpCloud OIDC provider on ContextForge 1.0.0-RC-2\n- Confirmed Keycloak and Entra paths remain unchanged (they have their own extraction logic that runs before the generic fallback)\n- The generic path only executes for providers that don't match `keycloak`, `entra`, `github`, or `okta` by ID",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3988411880",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-22T18:20:55+00:00",
+      "body": "Thanks for the contribution, @charlieleith! The core fix is correct and well-scoped — the generic OIDC path was the only one missing groups extraction, which silently broke `team_mapping` for providers like JumpCloud.\n\nI've rebased onto `main` (resolved one conflict where the generic OIDC section was refactored to handle `email_verified` omission safely), removed the AI co-author tag, and added two follow-up commits on top of yours:\n\n### Changes I made\n\n**1. ID token groups merging for generic OIDC** (`sso_service.py:1257-1263`)\n\nThe Entra and Keycloak paths in `_get_user_info()` merge claims from the verified ID token into `user_data` before normalization, but generic OIDC providers didn't. This means providers that emit groups only in the ID token (not the userinfo response) would still get `groups=[]`. Added a merge block that copies the configured `groups_claim` from `verified_id_token_claims` into `user_data` when userinfo doesn't include it. Userinfo takes precedence when present.\n\n**2. Non-string element filtering** (`sso_service.py:1462`)\n\nChanged `groups = gc` to `groups = [g for g in gc if isinstance(g, str)]`. The downstream `_map_groups_to_roles()` does `if group in role_mappings` (dict-key lookup), which would raise `TypeError: unhashable type: 'dict'` if a malformed IdP response included non-string elements in the groups list.\n\n**3. Test coverage** (11 new tests total)\n\n- 8 normalization tests covering all branches: default claim, custom claim, string value, absent claim, None metadata, non-list/non-string, nested structures filtered, email_verified interaction\n- 3 integration tests for `_get_user_info()`: id_token merge, userinfo precedence, custom claim name from id_token\n\nAll 216 SSO tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8357707f891b903c11b02757a707a287965634ef",
+      "message": "feat(sso): extract groups claim for generic OIDC providers\n\nThe generic OIDC normalization path in _normalize_user_info did not\nextract group claims from the identity token or userinfo response.\nThis meant that _apply_team_mapping had no groups to work with for\nany provider that wasn't Keycloak or Entra ID.\n\nThis patch adds groups extraction to the generic OIDC fallback,\nfollowing the same pattern used by the Keycloak and Entra paths:\n- Reads groups_claim from provider_metadata (defaults to \"groups\")\n- Extracts the claim from user_data as list or string\n- Includes groups in the normalized return dict\n\nThis enables team_mapping for providers like JumpCloud, Okta, Auth0,\nand any other generic OIDC provider that includes a groups claim.\n\nSigned-off-by: Charlie Leitheiser <leitch01@orac.localdomain>",
+      "author": "Charlie Leitheiser",
+      "date": "2026-03-18T10:04:02+00:00"
+    },
+    {
+      "sha": "445472141962e5574ba6192ec6299e10efa95f32",
+      "message": "test(sso): add tests for generic OIDC groups claim extraction\n\nCover all branches of the new generic OIDC groups extraction logic:\n- Default 'groups' claim extraction (list)\n- Custom claim via provider_metadata.groups_claim\n- Single string group value wrapped in list\n- Absent groups claim defaults to empty list\n- None provider_metadata falls back to 'groups' claim\n- Non-list/non-string values are safely ignored\n- Groups extraction works alongside email_verified handling\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T17:51:32+00:00"
+    },
+    {
+      "sha": "99014a98841ffc5ae1ec9d8fc03f75d785ef1503",
+      "message": "fix(sso): merge id_token groups for generic OIDC and harden claim parsing\n\nAddress two gaps in the generic OIDC groups extraction:\n\n1. Generic OIDC providers that emit groups only in the verified id_token\n   (not the userinfo response) now have the configured groups_claim merged\n   into user_data before normalization, following the same pattern already\n   used by Keycloak and Entra. Userinfo groups take precedence when present.\n\n2. Non-string elements (dicts, ints, None) in a groups claim list are now\n   filtered out during normalization to prevent downstream TypeError in\n   _map_groups_to_roles, which performs dict-key lookup on each element.\n\nAdds 4 new tests:\n- id_token groups merge for generic OIDC (default and custom claim names)\n- userinfo groups take precedence over id_token\n- nested/non-string list elements are filtered\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T18:17:40+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 201,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:51.025401",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:51.027973",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3719,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3719.json"
+  }
+}

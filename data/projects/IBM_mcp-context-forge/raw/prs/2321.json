@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2321,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2321"
+  },
+  "metadata": {
+    "title": "perf: Optimize response_cache_by_prompt with inverted index",
+    "state": "closed",
+    "created_at": "2026-01-22T06:19:58+00:00",
+    "updated_at": "2026-01-25T04:33:40+00:00",
+    "closed_at": "2026-01-25T04:33:38+00:00",
+    "merged_at": "2026-01-25T04:33:38+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "performance"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": []
+  },
+  "description": "## :rocket: Performance Improvement PR\r\n\r\n## :pushpin: Summary\r\n\r\nOptimizes `response_cache_by_prompt` plugin lookup performance from **O(n)** to **O(k·m)** by implementing an inverted index, achieving **sublinear scaling** with cache size.\r\n\r\n**Complexity Breakdown:**\r\n- **k** = query tokens (constant per query, ~5-20) - does NOT grow with cache size\r\n- **m** = average entries per token (m << n with good token distribution)\r\n- **n** = total cache entries\r\n\r\n**Key Achievement**: While the precise complexity is O(k·m), this delivers **sublinear scaling** because m grows much slower than n. A 10x cache increase might only cause a 2-3x increase in m.\r\n\r\n### :link: Related Issue\r\n\r\nCloses: #1835\r\n\r\n## :chart_with_upwards_trend: Root Cause\r\n\r\nThe plugin performed a linear scan comparing cosine similarity against **all cached entries** on every lookup. As cache size grew, CPU usage and latency increased linearly, dominating request processing time.\r\n\r\n**Evidence**: `_find_best()` vectorized input and computed cosine similarity against all n cache entries per request (O(n) complexity).\r\n\r\n## :wrench: Solution\r\n\r\nImplemented an **inverted index** (token → entry indices mapping) to filter candidates before computing expensive cosine similarity:\r\n\r\n1. **Pre-compute tokens**: Each `_Entry` now stores its token set for efficient index updates\r\n2. **Inverted index**: Map `tool → token → Set[int]` for O(1) candidate lookup per token\r\n3. **Fast filtering**: Only entries sharing at least one token with query are considered for similarity computation\r\n4. **Index maintenance**: \r\n   - Updated atomically on insertion\r\n   - Rebuilt correctly on eviction (fixed critical bug where old indices caused corruption)\r\n\r\n### Critical Bug Fixed\r\n\r\nThe eviction logic was storing old bucket indices `(i, e)` and then rebuilding the bucket, causing index-to-entry misalignment. Fixed by removing index tracking and rebuilding from scratch:\r\n\r\n```python\r\n# Before (buggy)\r\nvalid_entries = [(i, e) for i, e in enumerate(bucket) if e.expires_at > now]\r\nbucket.extend([e for _, e in valid_entries])  # Old indices lost!\r\n\r\n# After (correct)\r\nvalid_entries = [e for e in bucket if e.expires_at > now]\r\nbucket.extend(valid_entries)  # Fresh indices assigned\r\n```\r\n\r\n## :bar_chart: Performance Impact\r\n\r\n**Complexity Analysis:**\r\n- **Before**: O(n) - full linear scan of all cached entries\r\n- **After**: O(k·m) achieving **sublinear scaling** where:\r\n  - **k** = number of unique query tokens (~5-20, constant per query)\r\n  - **m** = average cached entries per token (m << n with good distribution)\r\n  - **n** = total cache size\r\n\r\n**Why This Achieves Sublinear Scaling:**\r\n\r\nWith good token distribution, m grows much slower than n:\r\n- Cache size n = 100 → m ≈ 5-10 entries per token\r\n- Cache size n = 1000 → m ≈ 15-30 entries per token  \r\n- **10x cache increase → only 2-3x increase in candidates**\r\n\r\n**Example Calculation:**\r\n```\r\nCache: 1000 entries, ~10 tokens per entry = 10,000 token instances\r\nUnique vocabulary: ~700 tokens\r\nAverage m = 10,000 / 700 ≈ 14 entries per token\r\n\r\nQuery: 8 tokens (k = 8)\r\nCandidates: k × m = 8 × 14 = ~112 entries (vs 1000 with linear scan)\r\nReduction: 89% fewer similarity computations\r\n```\r\n\r\n**Expected Improvement**: \r\n- **Small caches (10-50 entries)**: 2-5x faster lookups\r\n- **Medium caches (100-500 entries)**: 10-20x faster lookups\r\n- **Large caches (1000+ entries)**: 20-50x faster lookups\r\n- **~90-95% reduction** in expensive cosine similarity computations\r\n\r\n## :page_facing_up: Changes\r\n\r\n**Modified**: `plugins/response_cache_by_prompt/response_cache_by_prompt.py`\r\n\r\n- Added `_index: Dict[str, Dict[str, Set[int]]]` inverted index data structure\r\n- Added `tokens: set[str]` field to `_Entry` dataclass for efficient lookup\r\n- Rewrote `_find_best()` to use index-based candidate filtering instead of linear scan\r\n- Enhanced `tool_post_invoke()` with proper index maintenance and rebuild logic\r\n- Fixed critical index corruption bug in eviction path\r\n\r\n## :white_check_mark: Acceptance Criteria\r\n\r\n- [x] Cache lookup avoids full linear scan for common cases\r\n- [x] CPU cost per request scales **sublinearly** with cache size (O(k·m) where m << n)\r\n- [x] Index correctly maintained across insertions and evictions\r\n- [x] No index corruption bugs",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3703197275",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-25T04:30:56+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a2baf85fea8c3a6df42fc715be794dae593210a6",
+      "message": "optimize response_cache_by_prompt lookup with inverted index\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-20T06:14:26+00:00"
+    },
+    {
+      "sha": "312cef27a582f1664caca4d5bea6ec4620a09251",
+      "message": "fix type hint\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-22T06:05:12+00:00"
+    },
+    {
+      "sha": "7031bce17dd88678ab2b66abf0c8ea89158e11bb",
+      "message": "flake8 fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-22T08:01:56+00:00"
+    },
+    {
+      "sha": "66e732c6128cfbf4a40c75d400498d70220f668c",
+      "message": "test: add unit tests for response_cache_by_prompt inverted index\n\nAdd comprehensive test coverage for the inverted index optimization:\n- Tokenization and vectorization functions\n- Basic cache store and hit functionality\n- Inverted index population and candidate filtering\n- Eviction and index rebuild scenarios\n- Max entries cap with index consistency\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-25T04:21:27+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 436,
+  "deletions": 10,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:09.377454",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:09.378712",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2321,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2321.json"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "86c25a74-46bb-45e6-bc29-be44d8e09490",
+  "title": "fix(security): prevent internal exception details from leaking in HTTP responses",
+  "summary": "## Summary\r\n\r\nAddresses ICACF-20 (Penetration Testing finding): verbose error messages in HTTP responses can expose internal system details — stack traces, library names, database error text, filesystem paths, upstream API responses — that aid an attacker in identifying vulnerabilities or crafting targeted attacks. All changes follow the same pattern: exception text is kept in server-side logs (`logger.error`/`logger.debug`) for operator visibility, while the HTTP response `detail` field returns only a static, generic string.\r\n\r\n## Related Issue\r\n\r\nCloses #4319\r\n\r\n## Changes\r\n\r\n### New Global Safety Net (`mcpgateway/main.py`)\r\n\r\nAdded `@app.exception_handler(Exception)` — a catch-all handler that intercepts any unhandled exception that reaches the ASGI layer and returns a generic 500 response, preventing any accidental exception propagation from unknown paths.\r\n\r\n### Files Modified (13 files, ~75 individual fixes)\r\n\r\n**`mcpgateway/main.py`**\r\n- JSONPath expression errors: removed `{str(e)}` from 4 detail strings; added `logger.debug` for each; key name `'{new_key}'` retained (caller's own input)\r\n- Tags, entities, export, import 500-level catch-alls: static strings\r\n- MCP auth context 400: removed JWT decode internals from detail\r\n\r\n**`mcpgateway/admin.py`**\r\n- Root export, tags retrieval, export (×2), import preview, import: static strings\r\n- `ImportValidationError` detail simplified from `f\"Invalid import data: {str(e)}\"` to `str(e)` (domain exception — developer-authored message retained)\r\n- `ValueError` on JSON parse: static string (orjson parse errors expose byte positions)\r\n- `GrpcServiceError` (×3): static string — this exception wraps TLS certificate paths and filesystem errors from the gRPC reflection client\r\n- `PassthroughHeadersError`: added missing `logger.error`, static detail\r\n- Plugin marketplace list/stats/details (×3): static strings\r\n- System metrics, support bundle, performance metrics: static strings\r\n- Analytics endpoints (×14): latency percentiles, timeseries, slow/volume/error endpoints, latency heatmap, tool/prompt/resource usage and performance — all static\r\n\r\n**`mcpgateway/routers/oauth_router.py`**\r\n- `DcrError`: removed OAuth server response text; kept RFC 7591 configuration hint\r\n- `GatewayConnectionError`: static (wraps upstream HTTP response bodies)\r\n- 6× `except Exception` catch-alls: static strings\r\n\r\n**`mcpgateway/routers/llm_proxy_router.py`**\r\n- `LLMProxyAuthError` → 401: `\"Authentication failed\"` (was `str(e)` — upstream API auth errors can contain account/model details)\r\n- `LLMProxyRequestError` → 502: `\"Upstream request failed\"` (was `str(e)` — upstream API full HTTP error body)\r\n- `except Exception` → 500: static string\r\n\r\n**`mcpgateway/routers/llmchat_router.py`**\r\n- `ValueError` from `build_config` (×2): static strings\r\n- `ConnectionError` on MCP server connect: removed `{str(ce)}`; kept user-facing hint \"Please verify the server URL and authentication\"\r\n- `ValueError` on LLM config init: static string\r\n- `except Exception` (×3): static strings\r\n- `RuntimeError` in chat: `\"Chat service error\"`\r\n- `ConnectionError` in chat: `\"Lost connection to MCP server. Please reconnect.\"`\r\n\r\n**`mcpgateway/routers/log_search.py`**\r\n- Correlation trace, security events, audit trails (×3): all `except Exception` catch-alls on sensitive security/audit endpoints — static strings\r\n\r\n**`mcpgateway/routers/llm_config_router.py`**\r\n- `except Exception` → 500: `\"Failed to create provider\"`\r\n\r\n**`mcpgateway/routers/sso.py`**\r\n- `initiate_sso_login` `ValueError`: static (original message echoed user-supplied scope strings back in the response); added `logger.warning`\r\n- `create_provider`/`update_provider` `ValueError`: **kept as `str(exc)`** — these are admin-only endpoints; messages are developer-authored config validation strings (`\"Provider has no configured scopes\"`, `\"Issuer is not allowed\"`); useful to admins\r\n\r\n**`mcpgateway/routers/observability.py`**\r\n- Invalid request body 400: static; added `logger.debug`\r\n- Export failed 400: static; added `logger.exception`\r\n\r\n**`mcpgateway/routers/reverse_proxy.py`**\r\n- `except Exception` → 500: static; added `logger.debug`\r\n\r\n**`mcpgateway/routers/runtime_admin_router.py`**\r\n- `DcrError` equivalent: static; added `logger.debug`\r\n\r\n**`mcpgateway/utils/time_restrictions.py`**\r\n- Invalid time format 400: static; added missing `logger.debug`\r\n\r\n## What Was NOT Changed (intentional)\r\n\r\nAll `detail=str(e)` on **typed domain exceptions** with developer-authored messages\r\nwere left as-is — these are safe and useful:\r\n\r\n- `ToolNotFoundError`, `ResourceNotFoundError`, `PromptNotFoundError` → 404\r\n- `PermissionError` → 403 (always `\"Only the owner can...\"`)\r\n- `TeamMemberAddError` → 500 (single hardcoded message `\"Failed to add member to team\"`)\r\n- `TeamMemberLimitExceededError`, `TeamManagementError` → 400/409\r\n- `AuthenticationError` → 401 in `email_auth.py` (intentional auth error message)\r\n- `ImportValidationError`, `ImportServiceError`, `ExportError` → 400 (domain layer)\r\n- `GrpcServiceNameConflictError`, `GrpcServiceNotFoundError` → 409/404\r\n- `LLMModelNotFoundError`, `LLMProviderNotFoundError` → 404\r\n- `ValidationError`, `ConflictError` → 422/409 in main.py",
+  "reasoning": "## Summary\r\n\r\nAddresses ICACF-20 (Penetration Testing finding): verbose error messages in HTTP responses can expose internal system details — stack traces, library names, database error text, filesystem paths, upstream API responses — that aid an attacker in identifying vulnerabilities or crafting targeted attacks. All changes follow the same pattern: exception text is kept in server-side logs (`logger.error`/`logger.debug`) for operator visibility, while the HTTP response `detail` field returns only a static, generic string.\r\n\r\n## Related Issue\r\n\r\nCloses #4319\r\n\r\n## Changes\r\n\r\n### New Global Safety Net (`mcpgateway/main.py`)\r\n\r\nAdded `@app.exception_handler(Exception)` — a catch-all handler that intercepts any unhandled exception that reaches the ASGI layer and returns a generic 500 response, preventing any accidental exception propagation from unknown paths.\r\n\r\n### Files Modified (13 files, ~75 individual fixes)\r\n\r\n**`mcpgateway/main.py`**\r\n- JSONPath expression errors: removed `{str",
+  "confidence": 0.75,
+  "related_services": [],
+  "contributors": [
+    "shoummu1"
+  ],
+  "tags": [
+    "security",
+    "pentesting",
+    "rest",
+    "ica",
+    "database",
+    "grpc",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "47e79ada-b5a1-43bc-a0cd-29bc894d9a32",
+      "source_type": "pr",
+      "source_id": "4427",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/4427",
+      "contributor": "shoummu1",
+      "timestamp": "2026-04-24T09:55:39Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4427.json"
+    }
+  ],
+  "timestamp": "2026-04-24T09:55:39Z",
+  "created_at": "2026-05-17T17:23:03.985686",
+  "updated_at": "2026-05-17T17:23:03.985688",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:03.986500",
+    "artifact_type": "decisions",
+    "artifact_id": "86c25a74-46bb-45e6-bc29-be44d8e09490"
+  }
+}

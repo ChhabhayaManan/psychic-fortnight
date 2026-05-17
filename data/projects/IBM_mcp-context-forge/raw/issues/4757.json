@@ -1,0 +1,45 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4757,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4757"
+  },
+  "metadata": {
+    "title": "[BUG]:  DeprecationWarnings in Python 3.11-3.13 compatibility tests",
+    "state": "open",
+    "created_at": "2026-05-14T09:09:25+00:00",
+    "updated_at": "2026-05-15T12:00:46+00:00",
+    "closed_at": null,
+    "author": "vcostin-dev",
+    "labels": [
+      "bug",
+      "triage"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "### 🐞 Bug Summary\nDeprecationWarnings are detected when running `pytest with `-W error::DeprecationWarning` `across all three Python versions tested in compatibility \n\n---\n\n### 🧩 Affected Component\nSelect the area of the project impacted:\n\n- [X] `mcpgateway` - API\n- [ ] `mcpgateway` - UI (admin panel)\n- [ ] `mcpgateway.wrapper` - stdio wrapper\n- [ ] Federation or Transports\n- [X] CLI, Makefiles, or shell scripts\n- [ ] Container setup (Docker/Podman/Compose)\n- [ ] Other (explain below)\n\n---\n\n### 🔁 Steps to Reproduce\n\n1. Set Python version using pyenv:\n   ```bash\n   pyenv local 3.11.9  # Test with 3.11.9, 3.12.4, or 3.13.0\n   ```\n\n2. Verify Python version:\n   ```bash\n   python --version\n   ```\n\n3. Create fresh virtual environment:\n   ```bash\n   python -m venv test-env\n   source test-env/bin/activate  # On Windows: test-env\\Scripts\\activate\n   ```\n\n4. Install package with dev dependencies:\n```bash\n  pip install -e \".[dev]\"\n  pip install uv\n  uv pip install --group dev -e .\n  uv pip install --group dev -e \".[plugins]\"\n```\n\n5. Run pytest with deprecation warnings as errors:\n   ```bash\n   pytest tests/ -W error::DeprecationWarning 2>&1 | grep -i deprecat\n   ```\n\n6. Observe deprecation warnings in output\n\n### 🤔 Expected Behavior\n- **Expected:** Zero deprecation warnings across all Python versions (3.11.9, 3.12.4, 3.13.0)\n- **Actual:** DeprecationWarnings detected in all three versions (cmp01, cmp02, cmp03)\n\nThe test suite should pass cleanly with `-W error::DeprecationWarning` flag, indicating no use of deprecated APIs or patterns that will break in future Python versions.\n\n\n### 📓 Logs / Error Output\n\n[deprecationWarning_3_11_9.txt](https://github.com/user-attachments/files/27752070/deprecationWarning_3_11_9.txt)\n[deprecationWarnings_3_13_0.txt](https://github.com/user-attachments/files/27752069/deprecationWarnings_3_13_0.txt)\n[deprecationWarningv_3_12_4.txt](https://github.com/user-attachments/files/27752071/deprecationWarningv_3_12_4.txt)\n\n---\n\n### 🧠 Environment Info\n\n| Key | Value |\n|-----|-------|\n| Version or commit | `main@<commit-hash>` or `v1.0.0` |\n| Runtime | Python 3.11.9 / 3.12.4 / 3.13.0 |\n| Platform / OS | Ubuntu 22.04 / macOS / Windows 11 |\n| Container | none (bare metal testing) |\n| Test Framework | pytest with `-W error::DeprecationWarning` |\n\n---\n\n### 🧩 Additional Context (optional)\nThis issue was discovered during Python compatibility testing (cmp01-cmp03) which validates ContextForge works across Python 3.11, 3.12, and 3.13.\nhttps://github.com/IBM/mcp-context-forge/issues/2479\n",
+  "comments": [
+    {
+      "id": "4458768356",
+      "author": "vcostin-dev",
+      "created_at": "2026-05-15T09:51:07+00:00",
+      "body": "Depends on **[contextforge-plugins-framework](https://github.com/contextforge-org/contextforge-plugins-framework):**\n\nhttps://github.com/contextforge-org/contextforge-plugins-framework/issues/51\n\n"
+    },
+    {
+      "id": "4458934899",
+      "author": "vcostin-dev",
+      "created_at": "2026-05-15T10:18:21+00:00",
+      "body": "**To resolve deprecation warnings detected with** `pytest -W error::DeprecationWarning`\n\n# **1. tests/fuzz/test_api_schema_fuzz.py** \nChange: `data= `→ `content=`\n\n**Reason:** httpx library deprecated the `data= `parameter for raw string/bytes content in favor of the `content= `parameter. \n\n**Before:**\n`response = client.post(\"/admin/tools\", data=malformed_json, headers={...})`\n\n**After:**\n`response = client.post(\"/admin/tools\", content=malformed_json, headers={...})`\n\n# **2. mcpgateway/auth.py**\nChange: `headers=HttpHeaderPayload(...) `→ `extensions={'http': {'headers': HttpHeaderPayload(...)}}`\n\n**Reason:** cpex 0.1.0 introduced a new extensible API for payloads. Instead of putting headers directly as a field, the new API uses an extensions structure that allows adding other data types in the future (not just HTTP headers).\n\n**Before:**\n```\npayload=HttpAuthResolveUserPayload( \ncredentials=credentials_dict, \nheaders=HttpHeaderPayload(root=headers), # Deprecated API \n...\n)\n```\n\n**After:**\n```\npayload=HttpAuthResolveUserPayload( \ncredentials=credentials_dict, \nextensions={'http': {'headers': HttpHeaderPayload(root=headers)}}, # New API \n...\n)\n```\n\n# **3. mcpgateway/middleware/http_auth_middleware.py** \nChange: `headers=HttpHeaderPayload(...)` → `extensions={'http': {'headers': HttpHeaderPayload(...)}}`\n\n**Reason:** Same as auth.py - migration to new extensible API from cpex 0.1.0.\n\n**Before:**\n```\npayload=HttpPreRequestPayload( \npath=path, \nmethod=method, \nheaders=HttpHeaderPayload(root=headers), # Deprecated API \n...\n)\n```\n\n**After:**\n```\npayload=HttpPreRequestPayload( \npath=path, \nmethod=method, \nextensions={'http': {'headers': HttpHeaderPayload(root=headers)}}, # New API \n...\n)\n```\n\n# **4. mcpgateway/services/tool_service.py** \nChange: `headers=HttpHeaderPayload(...) `→ `extensions={'http': {'headers': HttpHeaderPayload(...)}}`\n\n**Reason:** Migrating to new API for **ToolPreInvokePayload** - same pattern as HTTP payloads.\n\n\n**Before:**\n```\npayload=ToolPreInvokePayload( \nname=name, \nargs=arguments, \nheaders=HttpHeaderPayload(root=headers),  # Deprecated API \n)\n```\n\n**After:**\n```\npayload=ToolPreInvokePayload( \nname=name, \nargs=arguments, \nextensions={'http': {'headers': HttpHeaderPayload(root=headers)}},  # New API \n```"
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:34.534367",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:34.535396",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4757,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4757.json"
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2029,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2029"
+  },
+  "metadata": {
+    "title": "feat: add OAuth 2.0 protected resource metadata for virtual servers (RFC 9728)",
+    "state": "closed",
+    "created_at": "2026-01-11T13:12:51+00:00",
+    "updated_at": "2026-03-23T13:03:55+00:00",
+    "closed_at": "2026-01-19T01:16:08+00:00",
+    "merged_at": "2026-01-19T01:16:08+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\nAdd RFC 9728 OAuth 2.0 Protected Resource Metadata and well-known URI endpoints for virtual servers at `/servers/{server_id}/.well-known/*`.\n\n### Endpoints Added\n\n| Endpoint | Description |\n|----------|-------------|\n| `GET /servers/{server_id}/.well-known/oauth-protected-resource` | RFC 9728 OAuth metadata |\n| `GET /servers/{server_id}/.well-known/robots.txt` | Robot exclusion |\n| `GET /servers/{server_id}/.well-known/security.txt` | Security contact info |\n| `GET /servers/{server_id}/.well-known/ai.txt` | AI usage policies |\n| `GET /servers/{server_id}/.well-known/dnt-policy.txt` | Do Not Track policy |\n\n### Changes\n\n- **New file:** `mcpgateway/routers/server_well_known.py` - Virtual server well-known router\n- **Modified:** `mcpgateway/routers/well_known.py` - Extracted shared helper functions\n- **Modified:** `mcpgateway/main.py` - Added router import/include\n- **New file:** `tests/e2e/test_oauth_protected_resource.py` - 14 E2E test scenarios\n\n### Security\n\n- Only public, enabled servers expose well-known metadata\n- Private/team servers return 404 (no information leakage)\n- Disabled servers return 404\n- Endpoints are publicly accessible per RFC 9728 requirements\n\nCloses #2022",
+  "comments": [
+    {
+      "id": "2701040770",
+      "author": "Copilot",
+      "created_at": "2026-01-17T12:21:32+00:00",
+      "body": "When OAuth is enabled but no authorization_server is provided, oauth_config is set to None instead of an empty dict or validation error. This creates an inconsistent state where oauth_enabled=True but oauth_config=None, which will fail validation when trying to retrieve OAuth metadata. Consider adding validation to ensure authorization_server is required when oauth_enabled is True, or set oauth_enabled=False when no valid config is provided.\n```suggestion\n                    oauth_config[\"token_endpoint\"] = token_endpoint\n            else:\n                # Invalid or incomplete OAuth configuration; disable OAuth to avoid inconsistent state\n                LOGGER.warning(\n                    \"OAuth was enabled for server '%s' but no authorization server was provided; \"\n                    \"disabling OAuth for this server.\",\n                    form.get(\"name\"),\n                )\n                oauth_enabled = False\n                oauth_config = None\n```"
+    },
+    {
+      "id": "2701040787",
+      "author": "Copilot",
+      "created_at": "2026-01-17T12:21:32+00:00",
+      "body": "Module 'mcpgateway.middleware.rbac' is imported with both 'import' and 'import from'."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3673947621",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-17T12:21:32+00:00",
+      "body": "## Pull request overview\n\nThis pull request adds RFC 9728 OAuth 2.0 Protected Resource Metadata support for virtual servers, enabling MCP clients to discover OAuth authorization servers for browser-based SSO authentication. The implementation includes well-known URI endpoints at `/servers/{server_id}/.well-known/*` and updates the database schema to store OAuth configuration per server.\n\n**Changes:**\n- Added OAuth 2.0 configuration fields (`oauth_enabled`, `oauth_config`) to the `servers` table with Alembic migration\n- Implemented RFC 9728 OAuth Protected Resource Metadata endpoints for both root-level and virtual server paths\n- Integrated OAuth capability advertisement in MCP protocol initialization handshake when configured\n- Added comprehensive E2E test coverage with 14 test scenarios for OAuth and well-known endpoints\n\n### Reviewed changes\n\nCopilot reviewed 18 out of 18 changed files in this pull request and generated 2 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| mcpgateway/db.py | Added oauth_enabled and oauth_config columns to Server model |\r\n| mcpgateway/alembic/versions/43c07ed25a24_add_oauth_fields_to_servers.py | Database migration to add OAuth columns with safe defaults |\r\n| mcpgateway/alembic/versions/e796bd5e97c2_merge_migration_heads.py | Merge migration for parallel branch convergence |\r\n| mcpgateway/schemas.py | Added OAuth fields to ServerCreate, ServerUpdate, and ServerRead schemas |\r\n| mcpgateway/services/server_service.py | Implemented get_oauth_protected_resource_metadata method with RFC 9728 compliance |\r\n| mcpgateway/routers/well_known.py | Extracted shared helpers and added root-level OAuth metadata endpoint |\r\n| mcpgateway/routers/server_well_known.py | New router for virtual server well-known endpoints |\r\n| mcpgateway/middleware/token_scoping.py | Added skip pattern for server-specific well-known paths |\r\n| mcpgateway/main.py | Integrated server_well_known router and passed server_id to initialize logic |\r\n| mcpgateway/cache/session_registry.py | Added OAuth capability advertisement in MCP initialization |\r\n| mcpgateway/admin.py | Added OAuth form field processing for server creation |\r\n| mcpgateway/templates/admin.html | Added OAuth configuration UI fields in server create/edit modals |\r\n| tests/e2e/test_oauth_protected_resource.py | New E2E tests with 14 comprehensive test scenarios |\r\n| tests/unit/mcpgateway/test_well_known.py | Added unit tests for OAuth metadata endpoints |\r\n| tests/unit/mcpgateway/test_admin.py | Formatting improvements and user dict updates for RBAC |\r\n| tests/unit/mcpgateway/services/test_server_service.py | Added OAuth configuration test coverage |\r\n| tests/README.md | Enhanced documentation with expanded test suite organization |\r\n| .flake8 | Disabled DAR checks for all test files |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3675945161",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-19T00:53:14+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "aae192143983c07a34888455cf1349da4466315c",
+      "message": "feat: add OAuth 2.0 protected resource metadata for virtual servers (RFC 9728)\n\nAdd support for MCP clients to discover OAuth authorization servers via\nRFC 9728 Protected Resource Metadata. This enables browser-based SSO\nauthentication flows for virtual servers.\n\nChanges:\n- Add oauth_authorization_server and oauth_scopes fields to Server model\n- Implement /.well-known/oauth-protected-resource/{server_name} endpoint\n- Add admin UI fields for configuring OAuth settings on virtual servers\n- Include database migration for new OAuth fields\n\nCloses #2022\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-11T13:12:18+00:00"
+    },
+    {
+      "sha": "dfebd259ab67ccede1cca01b2ac7dac65edd6d24",
+      "message": "Updates to ensure \\'.well-known\\' is published at the virtual_server level\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-12T20:28:53+00:00"
+    },
+    {
+      "sha": "d50ba19e02eba9599fe9562d7acf762eac74e5c3",
+      "message": "feat: add well-known endpoints for virtual servers (RFC 9728)\n\nAdd well-known URI endpoints at /servers/{server_id}/.well-known/* to support:\n- oauth-protected-resource (RFC 9728 OAuth Protected Resource Metadata)\n- robots.txt, security.txt, ai.txt, dnt-policy.txt\n\nChanges:\n- Create mcpgateway/routers/server_well_known.py with virtual server endpoints\n- Extract get_base_url_with_protocol() and get_well_known_file_content() as\n  shared helpers in well_known.py\n- Add comprehensive E2E tests (14 test scenarios)\n\nThe well-known files use the same configuration as the root-level endpoints,\nwith server validation to ensure only public, enabled servers expose metadata.\n\nCloses #2022\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-17T09:46:10+00:00"
+    },
+    {
+      "sha": "7ce16bef1f1e51666f01e44d9e1ca16672f4952e",
+      "message": "fix: update unit tests for get_db override and merge alembic heads\n\n- Fix TestServerRouterOAuthProtectedResource tests to override both\n  main.get_db and db.get_db (workaround for redundant definitions, see #2147)\n- Merge alembic migration heads to resolve \"multiple heads\" error\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-17T10:38:52+00:00"
+    },
+    {
+      "sha": "8faaaecee7153a1657f594f6e5f7f0612e8d53f0",
+      "message": "chore: update flake8 config, fix import, and expand test README\n\n- Add DAR ignore for all test files in .flake8\n- Split import statement in session_registry.py for clarity\n- Expand tests/README.md with comprehensive test suite documentation\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-17T10:40:58+00:00"
+    },
+    {
+      "sha": "b2d01ad018adaf5882e02aa5ff41263cf8937870",
+      "message": "fix: correct user context dict in unit tests for RBAC decorator\n\nFix unit tests that pass user parameter to functions decorated with\n@require_permission. The RBAC decorator expects a dict with \"email\"\nand \"db\" keys, not a simple string.\n\nChanges:\n- test_server_service.py: Fix mock setup for OAuth config update tests\n  to properly mock db.execute() and add permission service patch\n- test_admin.py: Pass user as dict with email and db keys to satisfy\n  RBAC decorator requirements\n- test_admin.py: Fix pre-existing flake8 issues (unused imports/vars)\n\nThese were pre-existing test issues that surfaced during testing.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-17T11:08:15+00:00"
+    },
+    {
+      "sha": "29686d2ff06961d019c30280671893642fb9286c",
+      "message": "fix: add pylint disable for import-outside-toplevel\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-17T11:27:57+00:00"
+    },
+    {
+      "sha": "2eb314b20f2fa3f9d2341519a960f29b97331aa2",
+      "message": "fix: address PR review findings\n\n- Use sa.false() instead of \"0\" for boolean default in migration\n  for PostgreSQL compatibility\n- Move synchronous DB query to threadpool using asyncio.to_thread()\n  to avoid blocking the event loop in async path\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-17T11:45:12+00:00"
+    },
+    {
+      "sha": "939974b082778e352892efe523131011823f5d28",
+      "message": "fix: rebase OAuth migration onto current main alembic head\n\nUpdate down_revision from 77243f5bfce5 to b9e496e91e71 and remove\nthe stale merge migration to maintain linear alembic history.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-17T17:13:24+00:00"
+    },
+    {
+      "sha": "52af2bb88dc2f45fb08981d16c6b4f6ce6a15c33",
+      "message": "fix: disable OAuth when authorization server is missing\n\nPrevent inconsistent state where oauth_enabled=True but oauth_config=None\nby logging a warning and disabling OAuth when no authorization server is\nprovided in the admin form.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-17T17:41:45+00:00"
+    },
+    {
+      "sha": "d30e3641f0f80afde5303e6d9ebbf3722a5121a9",
+      "message": "fix: Address review findings for OAuth protected resource metadata\n\nSecurity fixes:\n- Add well_known_enabled check to server-scoped OAuth endpoint to respect\n  global toggle configuration (server_well_known.py:65-67)\n- Check well_known_enabled before database access in server well-known\n  files to prevent information leakage about server existence\n  (server_well_known.py:114-116)\n\nFeature fixes:\n- Add OAuth field handling to admin server edit handler - previously\n  OAuth settings were silently dropped on edit (admin.py:2210-2248)\n- Populate OAuth fields in JavaScript edit modal from server data\n  (admin.js:6084-6132)\n- Fix OAuth disable logic ordering in server_service to ensure config\n  is cleared when oauth_enabled=False even if oauth_config is also\n  provided in the same update (server_service.py:1225-1240)\n\nTest coverage:\n- Add TestWellKnownDisabledScenarios class with 3 tests for\n  well_known_enabled=false scenarios (test_oauth_protected_resource.py)\n- Add test_disable_oauth_clears_config_even_when_both_provided to\n  verify OAuth disable logic fix (test_server_service.py)\n- Add 3 admin OAuth edit tests: enable, disable, and missing auth\n  server scenarios (test_admin.py)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T00:52:33+00:00"
+    }
+  ],
+  "files_changed": 40,
+  "additions": 2493,
+  "deletions": 152,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:16.417996",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:16.419123",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2029,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2029.json"
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3437,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3437"
+  },
+  "metadata": {
+    "title": "fix(security): fall back to allowed_origins for CSRF origin validation behind reverse proxies",
+    "state": "closed",
+    "created_at": "2026-03-03T14:13:21+00:00",
+    "updated_at": "2026-03-09T01:51:29+00:00",
+    "closed_at": "2026-03-06T13:58:05+00:00",
+    "merged_at": "2026-03-06T13:58:05+00:00",
+    "author": "jonpspri",
+    "labels": [
+      "bug",
+      "security",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Fixes CSRF origin validation failure behind layered reverse proxies where `X-Forwarded-Proto` / `X-Forwarded-Host` headers reflect internal hops rather than the external scheme/host\n- Extends `_request_origin_matches()` to fall back to `settings.allowed_origins` when the forwarded-header same-origin comparison fails\n- Excludes wildcard entries (`*`, `null`, `\"\"`) from the fallback to preserve fail-closed behavior\n\nCloses #3431",
+  "comments": [
+    {
+      "id": "2878543753",
+      "author": "Copilot",
+      "created_at": "2026-03-03T14:19:44+00:00",
+      "body": "`settings.allowed_origins` entries can include leading/trailing whitespace when provided via JSON env (e.g., `[\"https://a.com \"]`), and `validate_cors_origins` doesn’t strip it. In this fallback, a whitespace-padded origin may be silently ignored or mis-parsed, causing CSRF validation to fail unexpectedly. Consider normalizing each `allowed` entry (e.g., `str(...).strip()`, plus a case-insensitive check for `\"null\"`) before the wildcard/parse checks (and ideally precomputing normalized allowed-origin parts once to avoid repeated `urlparse` work per request).\n```suggestion\n        # Normalize each allowed origin to avoid config surprises such as\n        # [\"https://a.com \"] or [\" null \"], which could otherwise be\n        # mis-parsed or skipped.\n        allowed_normalized = str(allowed).strip()\n        if not allowed_normalized or allowed_normalized == \"*\" or allowed_normalized.casefold() == \"null\":\n            continue\n        try:\n            allowed_parsed = urllib.parse.urlparse(allowed_normalized)\n```"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3882895943",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-03T14:19:44+00:00",
+      "body": "## Pull request overview\n\nThis PR fixes admin CSRF origin validation in reverse-proxy deployments by allowing a safe fallback comparison against `settings.allowed_origins` when forwarded-header-based same-origin checks fail (while keeping wildcard origins fail-closed). It also adds unit tests covering the new fallback behavior.\n\n**Changes:**\n- Extend `_request_origin_matches()` to fall back to `settings.allowed_origins` when same-origin (via forwarded headers) does not match.\n- Explicitly exclude wildcard-ish entries (`*`, `null`, `\"\"`) from the fallback.\n- Add unit tests for allowed-origins fallback acceptance/rejection and port normalization behavior.\n\n### Reviewed changes\n\nCopilot reviewed 2 out of 2 changed files in this pull request and generated 1 comment.\n\n| File | Description |\n| ---- | ----------- |\n| `mcpgateway/admin.py` | Adds `allowed_origins` fallback path to CSRF origin validation when forwarded-header same-origin fails. |\n| `tests/unit/mcpgateway/test_admin.py` | Adds regression tests for the new `allowed_origins` fallback behavior in `enforce_admin_csrf`. |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3890300771",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-04T15:50:30+00:00",
+      "body": "Reviewed the changes — code looks good. The allowed_origins fallback in _request_origin_matches() is clean, wildcard/null exclusion preserves fail-closed behavior, and test coverage is solid (6 new cases covering accept, reject, port normalization, empty set, and regression). Nginx header pass-through changes are consistent across all location blocks."
+    },
+    {
+      "id": "3903337758",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T12:03:31+00:00",
+      "body": "## Review — Approve\n\nRebased onto main (clean, no conflicts) and reviewed thoroughly.\n\n### What this PR does\n\n1. **Nginx configs**: Preserves upstream `X-Forwarded-Proto` via `map` directive instead of overwriting with `$scheme`. Adds `X-Forwarded-Host $http_host`. Applied to both `nginx.conf` and the Helm configmap.\n2. **CSRF origin fallback** (`admin.py`): When the forwarded-header same-origin check fails, falls back to `settings.allowed_origins`. Wildcards (`*`, `null`, `\"\"`) are excluded to preserve fail-closed behavior.\n3. **Tests**: 12 new tests covering all fallback branches.\n\n### Changes I made on top of the original commits\n\n- **Aligned schemeless origin handling with SSO**: `_request_origin_matches()` now prepends `https://` for `allowed_origins` entries without a scheme (e.g. bare `example.com`), consistent with `sso.py:_validate_redirect_uri()`. Previously these were silently skipped, meaning `ALLOWED_ORIGINS=example.com` would work for SSO but not for CSRF fallback.\n- **Added 3 new tests**: `null` entry rejection, blank `\"\"` entry rejection, and schemeless origin positive-path acceptance.\n- **Renamed test**: `test_enforce_admin_csrf_skips_schemeless_allowed_origin` → `test_enforce_admin_csrf_rejects_non_matching_bare_host` with updated description to reflect the new behavior.\n\n### Security analysis\n\n- No CSRF bypass: fallback requires exact normalized match against non-wildcard allowlist entries, and the double-submit CSRF token check still gates all mutations independently.\n- Wildcard/null/blank filtering is correct and tested.\n- Fail-closed behavior preserved: empty `allowed_origins` or only-wildcard sets result in rejection.\n\n### Out-of-scope follow-ups\n\n- Other nginx configs (`nginx-tls.conf`, `nginx-performance.conf`, `tls-stack.yaml`) still use `$scheme` — should be addressed in a separate PR.\n- The `map` directive trusts inbound `X-Forwarded-Proto` unconditionally — pre-existing architectural concern, not introduced by this PR."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e801f5d2c7984b6f62899b03a2c4c2fa6c1d2aa0",
+      "message": "fix(security): CSRF origin validation and forwarded-header pass-through for reverse-proxy deployments (#3431)\n\nBehind layered reverse proxies, X-Forwarded-Proto / X-Forwarded-Host\nheaders may reflect internal hops rather than the external scheme,\ncausing the strict same-origin CSRF check to reject legitimate admin\nmutations.\n\n- Extend _request_origin_matches() to fall back to settings.allowed_origins\n  when the forwarded-header comparison fails; wildcard entries (*, null, \"\")\n  are excluded to preserve fail-closed behavior\n- Normalize allowed_origins entries (strip whitespace, case-insensitive null)\n- Add map block to nginx.conf and Helm nginx configmap to preserve upstream\n  X-Forwarded-Proto instead of overwriting with $scheme; pass X-Forwarded-Host\n\nCloses #3431\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-03T14:48:32+00:00"
+    },
+    {
+      "sha": "810bd57245906dce52884664d7ffbecf5de01257",
+      "message": "improve coverage\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-04T17:29:20+00:00"
+    },
+    {
+      "sha": "216ee8a3d8d372a622b61dede2f9e575db6155e3",
+      "message": "fix(security): align CSRF allowed_origins parsing with SSO and add null/blank tests\n\n- Prepend https:// for schemeless allowed_origins entries in CSRF\n  fallback, consistent with sso.py:_validate_redirect_uri()\n- Add tests for null, blank, and schemeless allowed_origins entries\n- Rename test to reflect updated schemeless behavior\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T12:03:06+00:00"
+    },
+    {
+      "sha": "3df4d12e9383bdd3c1934902365816decac38c7f",
+      "message": "test(security): cover empty-scheme-netloc branch in CSRF allowed_origins fallback\n\nAdds test for allowed_origins entry '://' which has the scheme separator\nbut produces empty scheme/netloc after parsing, exercising the defensive\nguard at admin.py:1139-1140.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T12:29:07+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 355,
+  "deletions": 23,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:14.654504",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:14.657032",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3437,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3437.json"
+  }
+}

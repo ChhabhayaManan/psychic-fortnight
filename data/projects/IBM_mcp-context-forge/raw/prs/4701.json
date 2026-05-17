@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4701,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4701"
+  },
+  "metadata": {
+    "title": "fix(tests): resolve UI test suite failures across auth, CSRF, and password policy",
+    "state": "closed",
+    "created_at": "2026-05-11T12:37:28+00:00",
+    "updated_at": "2026-05-11T19:05:46+00:00",
+    "closed_at": "2026-05-11T19:05:44+00:00",
+    "merged_at": "2026-05-11T19:05:44+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nFixes multiple root causes of Playwright UI test failures in the latest test suite run.\n\n### Changes\n\n**Password Policy Compliance**\n- Update all test passwords to 22+ character random strings that meet the strict password policy requirements\n- Fixes the \\\"Password must not be based on your username\\\" validation error that caused the forced password-change flow to fail\n- Resolves the `ERR_TOO_MANY_REDIRECTS` loop that occurred when password change failed and the user was bounced between `/admin/login` and `/admin`\n\n**Admin Authentication & Redirects**\n- Refactor `AdminAuthMiddleware` to use the shared `validate_token_user` from `mcpgateway/auth.py` instead of hand-rolled JWT verification\n- Fix `admin_login_page` to properly check admin access (`is_admin` or RBAC admin permission) before redirecting authenticated users to `/admin`\n- Non-admin users with valid tokens now correctly see the login page instead of being redirected into a permission-denied loop\n\n**CSRF Protection**\n- Add CSRF token to `getAuthHeaders()` in `auth.js` and `fetchWithTimeout()` in `utils.js`\n- Add `/rpc` to `csrf_exempt_paths` in `config.py` — JSON-RPC is a programmatic protocol, not a browser form submission\n- Fixes viewer cookie RPC tools call returning 403 from CSRF middleware\n\n**UI JavaScript Fixes**\n- Guard all `window.Admin` assignments with `typeof` checks to prevent `ReferenceError` when functions are defined inside `DOMContentLoaded` callbacks\n- Add missing `openCreateTeamModal`/`closeCreateTeamModal` to `window.Admin` so delegated click handlers work\n- Fix `toggleDropdownImportMethod` and related dropdown functions\n\n**Infrastructure**\n- Apply nginx `\\$forwarded_host` map to `nginx.conf`, `nginx-tls.conf`, and Helm chart `configmap-nginx-proxy.yaml`\n- Preserves `X-Forwarded-Host` header through the proxy chain for forwarded-host redirect hint tests\n\n**Data & Permissions**\n- Converge permissions on existing system roles in `bootstrap_db.py` instead of skipping them\n- Ensures the `viewer` role receives `servers.use` permission on stale databases\n\n### Testing\n\n- All Playwright UI tests now pass after the password policy fix\n- Verified RPC 403 is resolved after `/rpc` CSRF exemption\n- Verified redirect loop no longer occurs with single replica\n\n### Files Changed\n\n35 files changed, 412 insertions(+), 251 deletions(-)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "c5d98b0d13aac71bcd1cebed80c92aa8f16f1835",
+      "message": "fix(tests): resolve UI test suite failures across auth, CSRF, and password policy\n\nFix multiple root causes of Playwright UI test failures:\n\nPassword Policy Compliance:\n- Update all test passwords to 22+ character random strings meeting policy\n- Fixes \"Password must not be based on your username\" validation error\n- Prevents redirect loop caused by failed password-change flow\n\nAdmin Auth & Redirects:\n- Refactor AdminAuthMiddleware to use shared validate_token_user\n- Fix admin_login_page to check admin access before redirecting to /admin\n- Resolve ERR_TOO_MANY_REDIRECTS on logged-in user login-page access\n\nCSRF Protection:\n- Add CSRF token to getAuthHeaders and fetchWithTimeout\n- Add /rpc to csrf_exempt_paths for JSON-RPC protocol requests\n- Fix viewer cookie RPC tools call 403\n\nUI JavaScript Fixes:\n- Guard window.Admin assignments with typeof checks for DOMContentLoaded\n- Add openCreateTeamModal/closeCreateTeamModal to window.Admin\n- Fix toggleDropdownImportMethod ReferenceError\n\nInfrastructure:\n- Apply forwarded_host map to nginx configs and Helm chart\n- Preserve X-Forwarded-Host header through proxy chain\n\nData & Permissions:\n- Converge permissions on existing system roles in bootstrap_db\n- Ensure viewer role gets servers.use permission\n\nFiles changed:\n- .env.example\n- mcpgateway/admin.py, main.py, auth.py, config.py, bootstrap_db.py\n- mcpgateway/middleware/rbac.py\n- mcpgateway/admin_ui/*.js\n- mcpgateway/templates/*.html\n- infra/nginx/*.conf\n- charts/mcp-stack/templates/configmap-nginx-proxy.yaml\n- tests/playwright/conftest.py and test files\n- tests/js/admin-async.test.js\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-11T12:37:02+00:00"
+    },
+    {
+      "sha": "b748d29ac1138fed7be951c7a49a350488c97d44",
+      "message": "test: add unit tests for diff coverage gaps\n\nAdd tests covering missing lines from the UI test fixes diff:\n\nAdmin login RBAC (admin.py):\n- Non-admin with valid token + RBAC admin permission → redirect to /admin\n- Non-admin with valid token + no RBAC permission → render login page\n- Token revocation success and 404 paths\n\nAuth validation (auth.py):\n- validate_token_user with empty token raises TokenValidationError\n- validate_token_user with generic exception raises TokenValidationError\n\nBootstrap DB (bootstrap_db.py):\n- System role permission convergence when schema changes\n\nAdminAuthMiddleware (main.py):\n- _auth_error_param mappings for disabled/expired/idle timeout\n- Proxy auth platform admin bootstrap\n- Proxy auth user not found → 401\n- Proxy auth disabled user → 403\n- HTTPException and generic exception handling in dispatch\n\nSecurity headers (security_headers.py):\n- root_path stripping for CSP skip check on docs endpoints\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-11T18:08:20+00:00"
+    },
+    {
+      "sha": "0dc1ae04ef81633e8b5eaf24be81e2ab69e504a6",
+      "message": "test: add missing import for admin_reflect_grpc_service\n\nFix NameError in three grpc tests by importing admin_reflect_grpc_service\nfrom mcpgateway.admin in the test file.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-11T18:15:35+00:00"
+    }
+  ],
+  "files_changed": 55,
+  "additions": 995,
+  "deletions": 775,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:25.417782",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:25.418256",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4701,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4701.json"
+  }
+}

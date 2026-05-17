@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2853,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2853"
+  },
+  "metadata": {
+    "title": "feat: add JWT claims extraction plugin (Issue #1439)-sweng5",
+    "state": "closed",
+    "created_at": "2026-02-11T18:51:54+00:00",
+    "updated_at": "2026-02-15T10:53:01+00:00",
+    "closed_at": "2026-02-14T17:37:33+00:00",
+    "merged_at": "2026-02-14T17:37:33+00:00",
+    "author": "yiannis2804",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #1439\r\n\r\n---\r\n## TCD SwEng Group 5\r\n\r\n## 📝 Summary\r\nImplements JWT claims and metadata extraction plugin for downstream authorization plugins (Cedar, OPA, etc.).\r\n\r\nExtracts standard and custom JWT claims after verification and stores them in `global_context.metadata[\"jwt_claims\"]` for use by policy enforcement plugins.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Feature / Enhancement\r\n- [x] Documentation\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ PASS |\r\n| Unit tests                | `make test`     | ✅ 5/5 PASS |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ 92% |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes (5 comprehensive tests)\r\n- [x] Documentation updated (README with Cedar/OPA examples)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Features:**\r\n- Extracts standard JWT claims (sub, iss, aud, exp, iat, nbf, jti)\r\n- Extracts custom claims (roles, permissions, groups, attributes)\r\n- Supports RFC 9396 Rich Authorization Requests\r\n- Non-blocking permissive mode\r\n- Error handling with graceful fallback\r\n\r\n**Implementation:**\r\n- Hooks into `HTTP_AUTH_RESOLVE_USER`\r\n- Uses `PluginContext` correctly to access `global_context`\r\n- Returns `continue_processing=True` for passthrough behavior\r\n\r\n**Related:**\r\n- Issue #1422: [EPIC] Agent and tool authentication and authorization\r\n- RFC 9396: Rich Authorization Requests",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "6b2a1ddf7e6553d9688e1882223c5eeaea0f7839",
+      "message": "feat: add JWT claims extraction plugin (Issue #1439)\n\nImplements JWT claims and metadata extraction plugin for downstream\nauthorization plugins (Cedar, OPA, etc.).\n\nFeatures:\n- Extracts standard JWT claims (sub, iss, aud, exp, iat, nbf, jti)\n- Extracts custom claims (roles, permissions, groups, attributes)\n- Supports RFC 9396 Rich Authorization Requests\n- Non-blocking permissive mode\n- Stores claims in global_context.metadata['jwt_claims']\n\nPlugin hooks into HTTP_AUTH_RESOLVE_USER to extract claims after JWT\nverification and makes them available to policy enforcement plugins.\n\nImplementation:\n- Uses PluginContext correctly to access global_context\n- Proper hook method naming (http_auth_resolve_user)\n- Returns continue_processing=True for passthrough behavior\n- Error handling with graceful fallback\n\nIncludes:\n- Plugin implementation with error handling\n- Configuration file (YAML)\n- Comprehensive test suite (5 tests, all passing)\n- Documentation with usage examples for Cedar/OPA\n\nTesting:\n- All 5 plugin tests passing\n- Linting clean (ruff + flake8)\n- Coverage: 90%\n\nRelated to:\n- Issue #1439: JWT claims and metadata extraction plugin\n- Issue #1422: [EPIC] Agent and tool authentication and authorization\n- RFC 9396: Rich Authorization Requests\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-11T18:29:58+00:00"
+    },
+    {
+      "sha": "56edf869c58652fd0931c1269f0e4ed07688cfcd",
+      "message": "fix: address PR code review feedback\n\nAddressed all 5 review comments from @[reviewer-name]:\n\n1. Security documentation (verify_signature=False):\n   - Added prominent SECURITY NOTE in module docstring\n   - Added Security Considerations section to README\n   - Documented token pre-verification assumption and risks\n\n2. Logging sensitivity (PII leak prevention):\n   - Changed logger.info() to logger.debug() for claim extraction\n   - Only log claim count, not claim contents\n   - Prevents sensitive data exposure in production logs\n\n3. Safer header access pattern:\n   - Replaced hasattr() with getattr(payload.headers, 'root', {})\n   - More robust against header model changes\n   - Fails gracefully with empty dict default\n\n4. Copyright year correction:\n   - Updated from 2025 to 2026 in all files\n\n5. Coverage badge deletion:\n   - File is auto-generated (in .gitignore)\n   - Not present in upstream/main\n   - Correctly excluded from version control\n\nAll tests passing (5/5), linting clean, ready for review.\n\nRelated to: #1439\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-13T09:59:35+00:00"
+    },
+    {
+      "sha": "838946d31301110e6474f7c693fceee17a0841eb",
+      "message": "fix: align JWT claims extraction plugin with framework conventions\n\n- Move plugin from mcpgateway/plugins/ to plugins/ (correct location)\n- Rename plugin.py to jwt_claims_extraction.py, config.yaml to\n  plugin-manifest.yaml (match naming conventions)\n- Fix critical security doc: http_auth_resolve_user fires BEFORE JWT\n  verification, not after — document the actual security model\n- Write to global_context.state instead of metadata (metadata is\n  read-only from plugin perspective per framework docs)\n- Add Pydantic config model (JwtClaimsExtractionConfig) with\n  configurable context_key\n- Add __init__ constructor calling super().__init__(config)\n- Add from __future__ import annotations\n- Add Bearer scheme validation in _extract_token\n- Use lazy logging format strings instead of f-strings\n- Remove unnecessary hasattr check on metadata\n- Remove error string leak from result metadata\n- Fix copyright year consistency (2026 across all files)\n- Fix SPDX-License-Identifier: Apache-2.0 headers\n- Revert unnecessary MANIFEST.in additions\n- Move tests to tests/unit/plugins/ and add new test cases\n  for non-Bearer scheme rejection and custom context_key config\n\nCloses #1439\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T16:22:25+00:00"
+    },
+    {
+      "sha": "f41e9151783469debf5c457efc52cc5ba9679d04",
+      "message": "fix: register JWT claims extraction plugin in config.yaml\n\nAdds disabled-by-default registration entry so the plugin can be\nactivated by setting mode to \"permissive\".\n\nCloses #1439\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T16:47:03+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 537,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:49.685282",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:49.687295",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2853,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2853.json"
+  }
+}

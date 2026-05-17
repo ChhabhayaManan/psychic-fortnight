@@ -1,0 +1,47 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4123,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4123"
+  },
+  "metadata": {
+    "title": "chore: Replace remaining bare uv commands with $(UV_BIN) in Makefile",
+    "state": "closed",
+    "created_at": "2026-04-10T10:24:17+00:00",
+    "updated_at": "2026-04-11T01:17:03+00:00",
+    "closed_at": "2026-04-11T01:17:01+00:00",
+    "merged_at": "2026-04-11T01:17:01+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "release-fix",
+      "ready"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Problem\n\nPR #3886 introduced `$(UV_BIN)` to resolve `uv` from PATH or `~/.local/bin/uv` and converted 16 call sites. However, ~70 bare `uv` commands remained in the Makefile, all subject to the same \"No such file or directory\" failure when `uv` isn't on PATH inside an activated venv or in certain installation layouts.\n\n**Impact:** Build failures across multiple make targets when uv is not directly accessible on PATH.\n\nCloses #3946\n\n## Root Cause\n\nWhen PR #3886 added the `UV_BIN` variable to fix uv resolution issues, it only converted the 16 most problematic call sites. The remaining ~70 bare `uv` commands (tool install, run, pip, build) were not systematically converted at that time.\n\n## Solution\n\nMechanical find-and-replace of all remaining bare `uv` commands with `$(UV_BIN)`, following the established pattern from PR #3886.\n\n**Why this approach:** Simple, consistent with existing pattern, no logic changes required, maintains backward compatibility with all existing developer setups.\n\n**Categories replaced:**\n- `uv tool install` → `$(UV_BIN) tool install` (highest priority - runs outside venv)\n- `uv run` → `$(UV_BIN) run`\n- `uv pip` → `$(UV_BIN) pip`\n- `uv build` → `$(UV_BIN) build`\n\n## Implementation Details\n\n- **uv tool install:** 2 instances (lines 4730, 4735)\n  - `sonar-deps-podman` target\n  - `sonar-deps-docker` target\n  - Highest priority as these run outside any venv\n\n- **uv run:** 31 instances\n  - Test targets: test-mcp-cli, test-mcp-rbac, test-mcp-access-matrix, etc.\n  - Demo scripts: demo-a2a-agent-auth targets\n  - Formatter/linter targets: black, isort, pylint, ruff\n\n- **uv pip:** 35 instances  \n  - Package installations: grpcio-tools, playwright, mutmut, handsdown, code2flow, etc.\n  - Dev dependencies: pytest-xdist, radon, yamllint, tomlcheck, etc.\n  - Special cases: devpi, local PyPI, fuzzing dependencies\n\n- **uv build:** 3 instances (lines 4904, 4920, 4932)\n  - `dist` target (full build)\n  - `wheel` target (wheel only)\n  - `sdist` target (source distribution only)\n\n**Total:** 71 replacements\n\n## Testing\n\n✅ **Syntax validation:** Verified make targets parse correctly\n```bash\nmake -n sonar-deps-podman  # UV_BIN expanded correctly\n```\n\n✅ **Pattern verification:** Confirmed all bare uv commands replaced\n```bash\n# Only comments and target dependencies remain (no command invocations)\ngrep -n \" uv \" Makefile | grep -v \"UV_BIN\" | grep -v \"^[0-9]*:#\"\n```\n\n✅ **Category breakdown verified:**\n- uv tool install: 2 ✅\n- uv run: 31 ✅\n- uv pip: 35 ✅\n- uv build: 3 ✅\n- **Total: 71** ✅\n\n✅ **Git diff verified:** 71 deletions, 71 additions (1:1 replacement)\n\n## Breaking Changes\n\nNone - this maintains backward compatibility with all existing developer setups.\n\n## Checklist\n\n- [x] All 71 bare uv commands replaced with $(UV_BIN)\n- [x] Makefile syntax validation passes\n- [x] No unintended changes to comments or help text\n- [x] Follows pattern established in PR #3886\n- [x] Closes #3946",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "50c9009f8d7946f3d3189ffd66c64e02bf5c1540",
+      "message": "chore: Replace remaining bare uv commands with $(UV_BIN) in Makefile\n\nReplaced 71 bare uv commands with $(UV_BIN) for consistent resolution across different installation layouts, following the pattern established in PR #3886.\n\nChanges by category:\n- uv tool install: 2 instances (highest priority - runs outside venv)\n- uv run: 31 instances\n- uv pip: 35 instances\n- uv build: 3 instances\n\nThis ensures uv is correctly resolved from PATH or ~/.local/bin/uv in all make targets, preventing \"No such file or directory\" failures.\n\nCloses #3946\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-10T10:23:00+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 36,
+  "deletions": 36,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:46.835229",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:46.839270",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4123,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4123.json"
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4019,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4019"
+  },
+  "metadata": {
+    "title": "[FEATURE]: Add logic to decrypt bearer token before sending to a2a agents",
+    "state": "closed",
+    "created_at": "2026-04-03T08:38:22+00:00",
+    "updated_at": "2026-04-04T09:49:50+00:00",
+    "closed_at": "2026-04-04T09:49:48+00:00",
+    "merged_at": "2026-04-04T09:49:48+00:00",
+    "author": "ChrisPC-39",
+    "labels": [
+      "a2a",
+      "ica"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nFixes bearer token decryption issue mentioned in #4017\r\n\r\n---\r\n\r\n## 📝 Summary\r\nPreviously, encrypted tokens were being sent directly to A2A agents, causing authentication to fail. This PR introduces logic to decrypt bearer tokens before forwarding them to A2A agents.\r\n\r\n**Note:** This PR addresses **User Story 1** (bearer token decryption). **User Story 2** (async A2A response polling via `statusUrl`) is **not included** in this PR.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🔧 Changes Made\r\n\r\n### Fixed: Bearer Token Decryption in `_call_a2a_agent`\r\n- Added proper `decode_auth()` call to decrypt stored bearer tokens before forwarding to A2A agents\r\n- Aligned implementation with `a2a_service.py` pattern (lines 1513-1521)\r\n- Added error handling for decryption failures with descriptive logging\r\n- Supports `api_key`, `bearer`, and `authheaders` authentication types\r\n\r\n### Code Location\r\n- **File:** `mcpgateway/services/tool_service.py`\r\n- **Method:** `_call_a2a_agent` (lines 5852-5949)\r\n- **Lines Modified:** 5914-5927\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | pass |\r\n| Unit tests                | `make test`     | pass |\r\n| Coverage ≥ 80%            | `make coverage` | pass |\r\n\r\n### Manual Testing\r\n- [x] Verified bearer token is decrypted before forwarding\r\n- [x] Confirmed A2A agent receives valid authentication headers\r\n- [x] Validated error handling for decryption failures\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n- [x] Signed commits (`git commit -s`)\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### What's Fixed\r\n✅ **User Story 1:** Bearer token decryption now works correctly\r\n- Tokens are decrypted using `decode_auth()` before being sent to A2A agents\r\n- Authentication headers are properly extracted and added to HTTP requests\r\n- Error handling prevents silent failures\r\n\r\n### What's NOT in This PR\r\n❌ **User Story 2:** Async A2A response polling via `statusUrl`\r\n- The current implementation still makes synchronous HTTP POST requests\r\n- No polling mechanism for `statusUrl` responses\r\n- This should be addressed in a separate PR/issue",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4057432416",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-03T21:50:01+00:00",
+      "body": "Good fix — the core issue (encrypted tokens forwarded as-is to A2A agents) is real and the `decode_auth()` approach is the right one, consistent with the existing pattern in `a2a_service.py`.\n\nI rebased onto main (resolved `.secrets.baseline` timestamp conflicts) and made a few review fixes:\n\n**Changes made during review:**\n\n1. **Removed debug `logger.info`** — the `[DEBUG TOOL]` line in `_invoke_a2a_tool` shouldn't ship in production code.\n\n2. **Added `basic` to the auth type tuple** — the DB model (`A2AAgent.auth_type`) documents `basic` as a valid type and the `a2a_service.py` reference uses `(\"basic\", \"bearer\", \"authheaders\")`. Kept `api_key` for backward compat with existing data.\n\n3. **`raise ToolInvocationError` instead of `raise Exception`** — the module defines `ToolInvocationError` for exactly this purpose. Generic exceptions can't be caught reliably by callers. Also sanitized the error message to not leak internal decryption details.\n\n4. **Fixed duplicate `ToolInvocationError`** in the `invoke_tool` docstring Raises section.\n\n5. **Added missing test coverage** — `authheaders` auth type was untested at both levels, `basic` was missing at the `invoke_tool` level. Added `test_authheaders_auth`, `test_a2a_with_basic_auth`, and `test_a2a_with_authheaders_auth`. 323 tests pass.\n\nNice work on the implementation — the decrypt + dict fallback pattern and the error handling are solid. Thanks for the contribution!"
+    },
+    {
+      "id": "4058372966",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-04T09:31:01+00:00",
+      "body": "Rebased, reviewed, and verified — looks good.\n\n## What the PR fixes\n\nEncrypted A2A agent auth tokens stored in the DB were being forwarded as-is (e.g., `Bearer <encrypted_blob>`) instead of being decrypted first. This affected both `invoke_tool` (MCP `tools/call` path) and `_call_a2a_agent` (`/a2a/{name}/invoke` path). The fix calls `decode_auth()` to decrypt before forwarding, consistent with the same fix applied to `a2a_service.py` in #2024.\n\n## Review changes\n\n1. **Removed debug `logger.info(\"[DEBUG TOOL]...\")`** from `_invoke_a2a_tool`\n2. **Added `basic` to auth type tuple** — matches DB model (`A2AAgent.auth_type` supports `basic`) and `a2a_service.py` reference pattern. Kept `api_key` for backward compat.\n3. **`raise ToolInvocationError` instead of `raise Exception`** — proper exception type, sanitized error message (no internal details leaked to caller)\n4. **Fixed duplicate `ToolInvocationError`** in `invoke_tool` docstring; added `ToolInvocationError` to `_call_a2a_agent` docstring\n5. **Added missing test coverage** — `authheaders` at both levels, `basic` at `invoke_tool` level. 323 unit tests pass.\n6. **Fixed E303 (extra blank line) and DAR401 (missing Raises docstring)**\n\n## Verification\n\nVerified end-to-end against a live Docker deployment (localhost:8080) with a local echo server. All 8 tests pass across both code paths:\n\n- Bearer, basic, authheaders: tokens correctly decrypted and forwarded on both `/a2a/{name}/invoke` and MCP `tools/call`\n- No-auth control: no spurious headers injected\n- Confirmed DB stores only encrypted blobs (direct PostgreSQL query)\n- Confirmed `decode_auth()` round-trips all stored values back to original tokens\n\nThe behavioral change (plaintext auth values now raise `ToolInvocationError` instead of being forwarded raw) is intentional and consistent with `a2a_service.py` which has had the same behavior since #2024 (Jan 12). Schema validators always call `encode_auth()`, so plaintext rows cannot exist through normal API usage."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e8654ae8fb8b0d4f548ec03101cbdc23051475da",
+      "message": "Add logic to decrypt bearer token before sending to a2a agents\n\nSigned-off-by: Chris PC <chrispc@li-4dc2bf4c-325d-11b2-a85c-b68e8b1fc307.ibm.com>",
+      "author": "Chris PC",
+      "date": "2026-04-03T07:56:44+00:00"
+    },
+    {
+      "sha": "eeff314073cf4d64dcd2da707986a18a911534bf",
+      "message": "Linting\n\nSigned-off-by: Chris PC <chrispc@li-4dc2bf4c-325d-11b2-a85c-b68e8b1fc307.ibm.com>",
+      "author": "Chris PC",
+      "date": "2026-04-03T08:24:14+00:00"
+    },
+    {
+      "sha": "287924ef48fa51db10582dd49a200b5f01237c1f",
+      "message": "Update a2a unit tests\n\nSigned-off-by: Chris PC <chrispc@li-4dc2bf4c-325d-11b2-a85c-b68e8b1fc307.ibm.com>",
+      "author": "Chris PC",
+      "date": "2026-04-03T08:36:18+00:00"
+    },
+    {
+      "sha": "d40962b27365bf4ef429c7e96661c4d28175c987",
+      "message": "Fix unit tests failing\n\nSigned-off-by: Chris PC <chrispc@li-4dc2bf4c-325d-11b2-a85c-b68e8b1fc307.ibm.com>",
+      "author": "Chris PC",
+      "date": "2026-04-03T09:03:18+00:00"
+    },
+    {
+      "sha": "9953286e166f3a4e7b1f9048f7e8b953a7102794",
+      "message": "Fix linter errors\n\nSigned-off-by: Chris PC <chrispc@li-4dc2bf4c-325d-11b2-a85c-b68e8b1fc307.ibm.com>",
+      "author": "Chris PC",
+      "date": "2026-04-03T09:24:18+00:00"
+    },
+    {
+      "sha": "c83e5b74cc820f3018a36f17572c656b87bca53f",
+      "message": "Add unit tests\n\nSigned-off-by: Chris PC <chrispc@li-4dc2bf4c-325d-11b2-a85c-b68e8b1fc307.ibm.com>",
+      "author": "Chris PC",
+      "date": "2026-04-03T09:42:30+00:00"
+    },
+    {
+      "sha": "7840ed053cfc7759a523d807c7615941be7266f7",
+      "message": "Update pre-commit hook\n\nSigned-off-by: Chris PC <chrispc@li-4dc2bf4c-325d-11b2-a85c-b68e8b1fc307.ibm.com>",
+      "author": "Chris PC",
+      "date": "2026-04-03T09:46:28+00:00"
+    },
+    {
+      "sha": "d920f5eab36335cb1a593499bc1bc499e27a2e1a",
+      "message": "fix: review fixes for A2A bearer token decryption\n\n- Remove debug logger.info left in production code\n- Add 'basic' auth type to match DB model and a2a_service.py pattern\n- Use ToolInvocationError instead of generic Exception\n- Add test for basic auth type decryption\n- Fix duplicate @pytest.mark.asyncio decorator\n- Update secrets baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T20:52:34+00:00"
+    },
+    {
+      "sha": "1ab69192da60675d81a11c1d9508c2a20d2a971d",
+      "message": "fix: address codex review findings for A2A auth decryption\n\n- Fix duplicate ToolInvocationError in invoke_tool docstring\n- Add authheaders test for _call_a2a_agent\n- Add basic and authheaders tests for invoke_tool A2A path\n- Update secrets baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T21:34:04+00:00"
+    },
+    {
+      "sha": "791bcbae58cd4f43869ecaf8d51e6136da100b8d",
+      "message": "fix: flake8 DAR401 and E303 in A2A auth changes\n\n- Add ToolInvocationError to _call_a2a_agent docstring Raises section\n- Remove extra blank line in test file\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T22:13:46+00:00"
+    },
+    {
+      "sha": "dbf770be2c9a98f1ba4822b57383ca9d91e06e5b",
+      "message": "chore: update secrets baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T22:17:06+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 304,
+  "deletions": 35,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:11.715768",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:11.716382",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4019,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4019.json"
+  }
+}

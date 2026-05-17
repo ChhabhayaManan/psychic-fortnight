@@ -1,0 +1,171 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2909,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2909"
+  },
+  "metadata": {
+    "title": "Replace hardcoded user roles with configurable settings",
+    "state": "closed",
+    "created_at": "2026-02-13T09:42:24+00:00",
+    "updated_at": "2026-02-14T01:26:33+00:00",
+    "closed_at": "2026-02-14T01:26:31+00:00",
+    "merged_at": "2026-02-14T01:26:31+00:00",
+    "author": "madhav165",
+    "labels": [
+      "ica"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2908\r\n\r\n---\r\n\r\n## Summary\r\n\r\n- Replace hardcoded role names (`platform_admin`, `platform_viewer`, `team_admin`) in `email_auth_service` with configurable settings (`DEFAULT_ADMIN_ROLE`, `DEFAULT_USER_ROLE`, `DEFAULT_TEAM_OWNER_ROLE`, `DEFAULT_TEAM_MEMBER_ROLE`)\r\n- Add Alembic data migration to update existing `user_roles` assignments when configured roles differ from previous hardcoded defaults\r\n- Add RBAC role assignment when team members are added/removed via `team_management_service`\r\n- Add corresponding Helm chart values and `.env.example` documentation\r\n\r\n## Changes\r\n\r\n### `mcpgateway/config.py`\r\n\r\n- Added `default_admin_role`, `default_user_role`, `default_team_owner_role`, `default_team_member_role` settings with backward-compatible defaults\r\n\r\n### `mcpgateway/services/email_auth_service.py`\r\n\r\n- `create_user`: Uses `settings.default_admin_role` / `settings.default_user_role` for global role and `settings.default_team_owner_role` for personal team role\r\n- `update_user`: Uses `settings.default_admin_role` / `settings.default_user_role` for promotion/demotion logic\r\n\r\n### `mcpgateway/services/team_management_service.py`\r\n\r\n- Added lazy-initialized `role_service` property to avoid circular imports\r\n- `add_member_to_team`: Assigns team-scoped RBAC role (`DEFAULT_TEAM_MEMBER_ROLE`) to new/reactivated members\r\n- `remove_member_from_team`: Revokes team-scoped RBAC role when members are removed\r\n- `update_member_role`: Transitions RBAC roles when membership role changes (member ↔ owner)\r\n- `approve_join_request`: Assigns team-scoped RBAC role to approved join request members\r\n\r\n### `mcpgateway/alembic/versions/ba202ac1665f_migrate_user_roles_to_configurable_.py`\r\n\r\n- Data migration that updates existing `user_roles` when configured defaults differ from previous hardcoded values\r\n- No-op when settings match old defaults (backward compatible)\r\n- Supports both PostgreSQL and SQLite (uses Python uuid generation instead of `gen_random_uuid()`)\r\n- Creates team-scoped roles for existing team members who don't have any\r\n\r\n### `charts/mcp-stack/values.yaml`\r\n\r\n- Added `DEFAULT_ADMIN_ROLE`, `DEFAULT_USER_ROLE`, `DEFAULT_TEAM_OWNER_ROLE`, `DEFAULT_TEAM_MEMBER_ROLE` under new \"Default Role Configuration\" section\r\n\r\n### `.env.example`\r\n\r\n- Documented all four new environment variables with defaults\r\n\r\n## 🧪 Verification\r\n\r\n| Check            | Command                                                                                                                           | Status |\r\n| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------ |\r\n| Unit tests       | `pytest tests/unit/mcpgateway/services/test_email_auth_service.py tests/unit/mcpgateway/services/test_team_management_service.py` | pass   |\r\n| Migration syntax | `python -m py_compile`                                                                                                            | pass   |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Code formatted\r\n- [x] No secrets/credentials committed\r\n- [x] Backward compatible (defaults match previous hardcoded values)\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3800187469",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T23:53:07+00:00",
+      "body": "## Review: Rebased onto main & fixed critical issues\n\nRebased the branch onto current `main` (no conflicts). During code review, I found and fixed the following issues in commit `2da05348`:\n\n### Critical fixes applied\n\n1. **Alembic migration `down_revision` was wrong** — pointed to `c1c2c3c4c5c6` instead of the actual head `a31c6ffc2239`, creating two alembic heads which would break `alembic upgrade head`.\n\n2. **Duplicate code block in migration** — lines 146-161 contained a copy-pasted duplicate UPDATE that always returned 0 rows. Removed the duplicate and scoped the remaining block to only target non-self-granted rows (self-granted are already handled by `_migrate_role`).\n\n3. **`remove_member_from_team` only revoked member role, never owner role** — when an owner was removed from a team, only `default_team_member_role` was revoked. The `default_team_owner_role` RBAC role was left dangling, allowing removed owners to retain team-admin permissions. Fixed to check `membership.role` and revoke the correct RBAC role.\n\n4. **Migration INSERT missing `granted_at`** — the raw SQL INSERT for backfilling team member roles omitted the `granted_at` column, which is `NOT NULL` without a server-side default. Would fail at runtime. Added `datetime.now(timezone.utc)`.\n\n5. **SSO service still hardcoded `\"platform_admin\"`** — 4 instances in `sso_service.py` were not updated to use `settings.default_admin_role`, making the SSO admin group mapping ignore the new configuration. Fixed + updated test mocks.\n\n6. **Incomplete migration downgrade** — `upgrade()` creates new rows (`granted_by='system_migration'`) and migrates non-self-granted roles, but `downgrade()` didn't reverse either. Added both.\n\n### Test results\n\n- **11,304 passed**, 224 skipped, 2 failed (pre-existing in `test_tool_service_coverage.py`, unrelated)\n- Alembic: single head confirmed\n- Flake8: clean"
+    },
+    {
+      "id": "3800403441",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-14T01:26:09+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "aa8bb215350f864fab0b0b70a78d9c7b3851c268",
+      "message": "roles from env\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T09:35:49+00:00"
+    },
+    {
+      "sha": "daeff2a085c785dbf93b86d91acef2d6c996e282",
+      "message": "rename alembic script\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T11:16:35+00:00"
+    },
+    {
+      "sha": "2a6114ab49343ee9c1f1502016159279864b3124",
+      "message": "update migration to only auto assigned roles\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T11:42:29+00:00"
+    },
+    {
+      "sha": "aea0b0d397c4a4bedd51495fb4fc5c9c8999c9cf",
+      "message": "fix test failures\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T12:13:08+00:00"
+    },
+    {
+      "sha": "ed3df8ac1693c557275d73c96ac7170b4b7926ff",
+      "message": "flake8 fixes\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T12:21:08+00:00"
+    },
+    {
+      "sha": "fbe9cd7f9989124d6b8ab308d8cda56b3c0d07db",
+      "message": "improve coverage\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T12:39:41+00:00"
+    },
+    {
+      "sha": "58a0f2e4ca88585f6a55389df87bbc38bc0db466",
+      "message": "feat: assign RBAC roles when team members are added or removed\n\n- Add RoleService lazy initialization to TeamManagementService\n- Assign team-scoped RBAC role when adding members via add_member_to_team\n- Assign team-scoped RBAC role when approving join requests\n- Revoke team-scoped RBAC role when removing team members\n- Add unit tests for role assignment and revocation\n- Fix existing test to mock role service\n\nThis closes the gap where DEFAULT_TEAM_MEMBER_ROLE was not applied\nwhen users were added to teams through admin UI or join requests.",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T15:59:00+00:00"
+    },
+    {
+      "sha": "22c209ab9d12cc137a17f8eb2383a6a6dff9fee9",
+      "message": "feat: update migration to include team member role\n\n- Add team member role to migration (viewer -> DEFAULT_TEAM_MEMBER_ROLE)\n- Create team-scoped roles for existing team members who don't have any\n- Update downgrade to handle team member role",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T16:02:17+00:00"
+    },
+    {
+      "sha": "59a5eea5daa366b6ae7d94630cf2aa10fdcd4ac3",
+      "message": "test: add coverage for RBAC role edge cases\n\n- Add tests for role not found scenarios\n- Add tests for role assignment exceptions\n- Add tests for reactivate membership path\n- Add tests for approve_join_request role assignment\n- Add test for role revocation exception",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T16:08:19+00:00"
+    },
+    {
+      "sha": "a3ee517d8055adb33fd8c9c031682d5e89d79ca7",
+      "message": "remove plan\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T16:09:12+00:00"
+    },
+    {
+      "sha": "c39057b392b9d346b82f993316d555c7b1beeccd",
+      "message": "feat: update RBAC roles when team member role changes\n\n- Add RBAC role transitions in update_member_role\n- member -> owner: revoke member role, assign owner role\n- owner -> member: revoke owner role, assign member role\n- Add tests for RBAC role transition scenarios",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T16:15:03+00:00"
+    },
+    {
+      "sha": "1ff9837bc67bdb1131d1bc9e47fe00164b3d4f8f",
+      "message": "bug fixes\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T16:26:54+00:00"
+    },
+    {
+      "sha": "acd40d4f864f18726bf32bd0149bcf994625d023",
+      "message": "flake8 fix\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T16:58:34+00:00"
+    },
+    {
+      "sha": "63f802d786eee4f13892c03d68f91a3126da3d9e",
+      "message": "fix tests\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T17:43:17+00:00"
+    },
+    {
+      "sha": "b096f3c1a576e4ed439ee2696e6b1201afc8fc28",
+      "message": "flake8 fix\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T18:01:30+00:00"
+    },
+    {
+      "sha": "2da05348742839b27def02313e67c0503367a056",
+      "message": "fix: resolve critical issues in configurable role settings implementation\n\n- Fix alembic migration down_revision to point to actual head (a31c6ffc2239)\n  eliminating multiple-heads breakage\n- Remove duplicate UPDATE block in migration upgrade (copy-paste bug)\n- Add missing granted_at to migration INSERT avoiding NOT NULL violation\n- Fix remove_member_from_team to revoke correct RBAC role based on\n  membership.role (owner vs member) instead of always revoking member role\n- Replace hardcoded \"platform_admin\" in sso_service with\n  settings.default_admin_role for consistency\n- Fix incomplete migration downgrade: revert non-self-granted roles and\n  clean up system_migration rows\n- Update SSO test mocks with default_admin_role setting\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T23:52:45+00:00"
+    },
+    {
+      "sha": "00e8af687d3db8a2078c031df9f2568242a35103",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T00:04:22+00:00"
+    },
+    {
+      "sha": "300a8fbe65d53e78a7376e35d572800280b3a8a6",
+      "message": "fix: disable plugin manager in tool lookup tests\n\nThe invoke_tool tests that reach the plugin metadata section\n(line 2940) fail because PydanticTool.model_validate() cannot\nvalidate MagicMock attributes. Set _plugin_manager = None since\nthese tests exercise lookup prioritization logic, not plugins.\n\nCherry-picked from 473f0f65 (lost during squash merge of #2924).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T00:05:24+00:00"
+    },
+    {
+      "sha": "52f9635a4505ccd440053dff162d41e4d84759d8",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T01:11:40+00:00"
+    }
+  ],
+  "files_changed": 16,
+  "additions": 1159,
+  "deletions": 45,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:16.019157",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:16.024390",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2909,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2909.json"
+  }
+}

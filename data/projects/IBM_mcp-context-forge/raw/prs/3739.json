@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3739,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3739"
+  },
+  "metadata": {
+    "title": "fix(session-pool): isolate cancel scopes via background task ownership",
+    "state": "closed",
+    "created_at": "2026-03-19T12:51:53+00:00",
+    "updated_at": "2026-03-19T14:05:24+00:00",
+    "closed_at": "2026-03-19T14:05:21+00:00",
+    "merged_at": "2026-03-19T14:05:21+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "revisit"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\nFixes the MCP session pool cancel scope leak that caused ~20-45% tool call failures across all servers and transports when pooling was enabled.\r\n\r\n- Run transport/session lifecycle in a dedicated `asyncio.Task` per pooled session, isolating anyio cancel scopes from request handler tasks\r\n- Add transport-aware `is_closed` detection (incorporates PR #3605)\r\n- Replace `asyncio.wait_for` with `anyio.fail_after` at 9 MCP SDK call sites\r\n- Fix `release()` dead-owner leak and `_create_session()` `CancelledError` leak\r\n- Add 18 lifecycle/regression tests\r\n\r\nCloses #3737\r\nCloses #3520\r\nCloses #3605\r\n\r\nSupersedes #3520\r\nIncorporates #3605\r\n\r\n## Test plan\r\n\r\n- [x] 258 unit/e2e pool tests pass (including 18 new cancel scope tests)\r\n- [x] 607K+ requests at 200-1000 concurrent users, 0% pool-related failures\r\n- [x] All servers (Fast Test, Fast Time), all transports (StreamableHTTP, SSE) verified\r\n- [x] pylint 10.00/10, zero W0212, flake8/black/isort/bandit clean",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "570f4761d437199532b04d3cb2e03c8377cf5fbf",
+      "message": "fix(session-pool): isolate cancel scopes via background task ownership (#3737)\n\nThe MCP session pool manually called transport_ctx.__aenter__() and\nsession.__aenter__(), attaching anyio cancel scopes to the HTTP request\nhandler task. When a child task in the transport's TaskGroup failed, it\ncancelled the request handler, causing ~20-45% tool call failures.\n\nChanges:\n- Run transport/session lifecycle in dedicated asyncio.Task per pooled\n  session so cancel scopes bind to the owner task, not request handlers\n- Add transport-aware is_closed detection (write stream state, owner\n  task health, receive channel count) from PR #3605\n- Replace asyncio.wait_for with anyio.fail_after for MCP SDK calls in\n  tool_service.py (4 sites), mcp_session_pool.py health checks (4),\n  and gateway_service.py explicit health RPC (1)\n- Fix release() to clean up dead-owner sessions instead of leaking\n  them in _active with consumed semaphore slots\n- Fix _create_session() to clean up owner task on CancelledError via\n  finally block (not just Exception)\n- Add 18 tests for owner task lifecycle, transport-aware is_closed,\n  release with dead owner, cancellation cleanup, and prompt pooled\n  regression coverage\n\nTested: 607K+ requests across 200-1000 concurrent users with 0%\npool-related failures. All servers (Fast Test, Fast Time), all\ntransports (StreamableHTTP, SSE) verified.\n\nCloses #3737\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T12:51:32+00:00"
+    },
+    {
+      "sha": "8b8016a2fa8db30948815b36f1ffd0de9cffb47e",
+      "message": "fix(test): exercise actual PromptService fallback path in prompt pooled regression test\n\nThe prompt fallback test was only asserting that get_mcp_session_pool()\nraises RuntimeError, not that PromptService._fetch_gateway_prompt_result()\nactually falls through to the non-pooled sse_client path. Now calls the\nreal method with mocked pool unavailability and verifies the SSE fallback\nsession is initialized and get_prompt is invoked.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T13:30:40+00:00"
+    },
+    {
+      "sha": "6a8e78edafeed628909fd935bb6008c02bea21ba",
+      "message": "fix(test): improve diff coverage for session pool cancel scope fix\n\n- Add test for is_closed graceful degradation when SDK internals raise\n- Exercise actual PromptService._fetch_gateway_prompt_result fallback\n  path when pool is unavailable (not just bare get_mcp_session_pool)\n- Improve force-cancel timeout test with shorter cleanup timeout\n- Add test for _create_session finally-block BaseException handling\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T14:03:56+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 815,
+  "deletions": 148,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:57.841817",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:57.843504",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3739,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3739.json"
+  }
+}

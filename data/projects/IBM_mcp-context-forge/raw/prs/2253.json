@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2253,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2253"
+  },
+  "metadata": {
+    "title": "2251 - Resolve server deactivation error for servers with email teams",
+    "state": "closed",
+    "created_at": "2026-01-20T15:51:18+00:00",
+    "updated_at": "2026-01-21T10:42:56+00:00",
+    "closed_at": "2026-01-21T10:42:54+00:00",
+    "merged_at": "2026-01-21T10:42:54+00:00",
+    "author": "gcgoncalves",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nThis PR fixes a critical bug that prevented the deactivation of a virtual server when it was associated with an email notification team. The action would fail due to a database error, making it impossible to disable certain servers through the Admin UI or API. This fix ensures the deactivation process is robust and reliable, regardless of the server's associations\r\n\r\nCloses #2251\r\n\r\n## 🔁 Reproduction Steps\r\n1. Create a virtual server.\r\n2. Create an email notification team and associate it with the server.\r\n3. Navigate to the Admin UI and attempt to deactivate the server.\r\n4. Observe the operation fails with an internal server error.\r\n\r\n## 🐞 Root Cause\r\nThe root cause of the issue was a psycopg.errors.FeatureNotSupported error from PostgreSQL, stating: \"FOR UPDATE cannot be applied to the nullable side of an outer join\".\r\n\r\nThis occurred because the set_server_state service method used SQLAlchemy's joinedload strategy to fetch the server along with its related email_team. This created a LEFT OUTER JOIN in the SQL query. When the database\r\ntransaction attempted to lock the server row for the update using FOR UPDATE, it conflicted with the outer join, as PostgreSQL does not support locking on the nullable side of such joins.\r\n\r\n## 💡 Fix Description\r\nThe fix replaces the data loading strategy for the email_team relationship within `ServerService`. The `joinedload` has been replaced with `selectinload`.\r\n\r\nselectinload resolves the problem by issuing a separate `SELECT` statement to load the related email_team after the server has been retrieved. This decouples the queries, avoiding the problematic `LEFT OUTER JOIN` in the initial\r\n`SELECT ... FOR UPDATE` statement and allowing the row lock to be acquired without error.\r\n\r\nIn addition to the core fix, this PR introduces comprehensive unit tests for the `set_server_state` method and the corresponding admin API endpoint. These tests cover activation, deactivation, permission handling, and\r\nspecifically verify that the fix works correctly when an email team is present, preventing future regressions.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 90 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3686512614",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-21T10:40:49+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "708e24e2d839a97fcc3582405f1daab79f5002b1",
+      "message": "2251 - Resolve server deactivation error for servers with email teams\n\nThis commit fixes a bug where deactivating a virtual server associated with an email notification team would fail with a database error.\n\nThe root cause was the use of `joinedload` to fetch the `email_team` relationship when retrieving the server to be updated. This resulted in a `LEFT OUTER JOIN` in the underlying SQL query. When the query also included a\n`FOR UPDATE` clause to lock the server row, PostgreSQL raised a `FeatureNotSupported` error because it cannot apply a lock to the nullable side of an outer join.\n\nThis fix changes the SQLAlchemy loading strategy from `joinedload` to `selectinload` for the `DbServer.email_team` relationship within the `set_server_state` method. `selectinload` resolves the issue by loading the relate\n`email_team` in a separate `SELECT` statement, thus avoiding the problematic `JOIN` in the initial `SELECT ... FOR UPDATE` query.\n\nAdditionally, comprehensive unit tests have been added for both the `ServerService` and the admin panel routes to cover server activation, deactivation, and to verify that the fix works as expected, preventing future\nregressions.\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-01-20T14:57:40+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 154,
+  "deletions": 3,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:59.253943",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:59.254624",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2253,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2253.json"
+  }
+}

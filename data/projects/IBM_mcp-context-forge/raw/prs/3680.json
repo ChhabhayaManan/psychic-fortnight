@@ -1,0 +1,216 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3680,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3680"
+  },
+  "metadata": {
+    "title": "chore(testing): make ContextForge benchmarks reproducible and CI-friendly",
+    "state": "closed",
+    "created_at": "2026-03-14T12:01:42+00:00",
+    "updated_at": "2026-04-24T08:41:07+00:00",
+    "closed_at": "2026-04-24T08:40:45+00:00",
+    "merged_at": null,
+    "author": "lucarlig",
+    "labels": [
+      "triage",
+      "chore",
+      "experimental",
+      "COULD"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": []
+  },
+  "description": "## Summary\nThis PR adds a Rust-native, scenario-driven benchmark suite for ContextForge and wires it into the repo as a committed testing artifact instead of an ad hoc collection of scripts and flags.\n\nThe new benchmark flow centers on:\n- committed TOML scenarios under `crates/contextforge_benchmark_runner/assets/scenarios/`\n- a Rust benchmark runner for validate/run/report/compare workflows\n- an interactive TUI launcher exposed via `make benchmark`\n- a Goose-based load driver that can hit real REST and MCP JSON-RPC paths\n- a benchmark container image with optional Rust plugin wheels and profiling tools\n\nThe result is a benchmark setup that is easier to rerun, compare, extend, and eventually automate in CI.\n\n---\n\n## Type of Change\n- [ ] Bug fix\n- [x] Feature / Enhancement\n- [x] Documentation\n- [ ] Refactor\n- [x] Chore (deps, CI, tooling)\n- [ ] Other (describe below)\n\n---\n\n## What Changed\n\n### 1. Added Rust benchmark crates in the workspace layout\nThis PR introduces three new direct workspace crates under `crates/`:\n- `crates/contextforge_benchmark_runner` for scenario loading, stack orchestration, run execution, report regeneration, and comparison output\n- `crates/contextforge_benchmark_console` for the interactive TUI launcher and scenario template generator\n- `crates/contextforge_goose` for the Goose load driver used by benchmark scenarios\n\n### 2. Added committed TOML benchmark scenarios\nThis PR checks in a suite of benchmark scenarios under `crates/contextforge_benchmark_runner/assets/scenarios/`, including coverage for:\n- A2A invoke flows\n- admin plugin inventory\n- REST discovery\n- MCP protocol and MCP runtime paths\n- MCP prompts, resources, and tools\n- rate limiter behavior and scaling\n- secret detection\n- spin detector and delay-oriented cases\n- other runtime comparison and smoke-oriented suites\n\nThese scenario files now act as the benchmark contract for runtime, load, execution, profiling, and comparison settings.\n\n### 3. Added real MCP payload fixtures\nThis PR adds payload fixtures under `crates/contextforge_benchmark_runner/assets/payloads/` for benchmark traffic that exercises:\n- `tools/list`\n- `tools/call`\n- `resources/list`\n- `resources/read`\n- `prompts/list`\n- `prompts/get`\n\nThat lets the load driver benchmark real MCP JSON-RPC prompt/resource/tool paths instead of only health or admin endpoints.\n\n### 4. Added a benchmark-specific container image and entrypoints\nThis PR adds `crates/contextforge_benchmark_runner/assets/Containerfile` plus supporting entrypoint scripts so benchmark runs can build and launch a dedicated image that supports:\n- optional Rust plugin wheel builds via `maturin`\n- optional profiling tools\n- multiple HTTP server modes (`gunicorn`, `granian`, `uvicorn`)\n- the benchmark assets needed by the runner and load driver\n\n### 5. Added docs, Make target, and workspace-alignment follow-up\nThis PR adds benchmark documentation in `docs/docs/testing/benchmark-suite.md` and exposes the TUI launcher through:\n- `make benchmark`\n\nIt also rebases the work onto current `main` and aligns the benchmark code with the repository’s current `crates/*` Rust workspace layout instead of the older `tools_rust/` placement.\n\n---\n\n## Why This Matters\nBefore this change, benchmark configuration was spread across scripts, flags, and implicit defaults. This PR moves the suite toward committed, repeatable scenarios with explicit runtime/load settings and reusable tooling around them.\n\nThat makes it easier to:\n- rerun a benchmark consistently\n- compare runs across branches or images\n- extend the suite by authoring scenario files instead of bespoke scripts\n- keep new Rust benchmark code in the same workspace model used by current `main`\n- capture richer benchmark/report artifacts for future regression tracking\n\n---\n\n## Usage / Verification Commands\nRelevant commands introduced or documented by this PR:\n\n```bash\nmake benchmark\ncargo run --manifest-path crates/contextforge_benchmark_runner/Cargo.toml -- validate --scenario rust-mcp-runtime-300\ncargo run --manifest-path crates/contextforge_benchmark_runner/Cargo.toml -- run --scenario a2a-invoke-300 --smoke\ncargo run --manifest-path crates/contextforge_benchmark_runner/Cargo.toml -- run --scenario rust-mcp-runtime-300\ncargo run --manifest-path crates/contextforge_benchmark_runner/Cargo.toml -- regenerate-report --run-dir reports/benchmarks/<run-dir>\ncargo run --manifest-path crates/contextforge_benchmark_runner/Cargo.toml -- compare-run --run-dir reports/benchmarks/<run-dir>\ncargo test -p contextforge_benchmark_runner -p contextforge_benchmark_console -p contextforge_goose\nuv run pytest tests/unit/test_rust_workspace_layout.py\n```\n\n---\n\n## Notes\n- This PR is broader than a TOML-config cleanup. It adds the runner, launcher, load driver, benchmark image, scenarios, payload fixtures, docs, and the repo entrypoint for using them.\n- Several scenarios compare benchmark images with and without optional Rust plugin artifacts. Those suites are not claiming that the underlying product runtime has moved wholesale to Rust; they are measuring the benchmarked paths described in each scenario.\n- Benchmark reports are written under `reports/benchmarks/<profile>_<timestamp>/`.\n\n---\nRefs #2473\n",
+  "comments": [
+    {
+      "id": "3117546607",
+      "author": "dawid-nowak",
+      "created_at": "2026-04-21T12:54:56+00:00",
+      "body": "What is this about ?? \n/Users/luca"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4099344614",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-13T14:16:30+00:00",
+      "body": "- The code is well-structured and modular\n- Documentation is comprehensive\n- Test coverage is extensive\n"
+    },
+    {
+      "id": "4147783282",
+      "author": "dawid-nowak",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-21T12:54:56+00:00",
+      "body": ""
+    },
+    {
+      "id": "4147788549",
+      "author": "dawid-nowak",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-21T12:55:44+00:00",
+      "body": "There a quite a few harcoded folder names such as  \"/Users/luca\""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7ade0d03088202383e65c0466c13636631e9a29c",
+      "message": "feat: add benchmark suite and ui\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-16T09:14:12+00:00"
+    },
+    {
+      "sha": "f04bba2abd74299d4787f394de478ba8008e63bc",
+      "message": "refactor: move contextforge benchmarks fully to rust\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-25T14:49:06+00:00"
+    },
+    {
+      "sha": "98d2ac5e76e1e59de05228456190614762df3f99",
+      "message": "refactor: consolidate rust benchmark tooling\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-26T09:49:20+00:00"
+    },
+    {
+      "sha": "baf8701ecf5fe9f0bcb68b95acf91e7d8e274230",
+      "message": "docs: add benchmark console multiview design\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-26T11:24:23+00:00"
+    },
+    {
+      "sha": "0c1dd057cbb2346684285172fed7a65f7822e68e",
+      "message": "refactor: improve rust benchmark console UX\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-26T14:29:11+00:00"
+    },
+    {
+      "sha": "b9deee792507b6a8b8f78a6be35578765fede018",
+      "message": "docs: align benchmark scenario descriptions\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T10:20:51+00:00"
+    },
+    {
+      "sha": "d035a3ca9f14b622b953644a411445d65a46f91b",
+      "message": "docs: align benchmark scenario descriptions\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T10:22:39+00:00"
+    },
+    {
+      "sha": "07bf75414806e4e0232d88d64e145c789118f76d",
+      "message": "docs: fix benchmark suite contract\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T10:48:06+00:00"
+    },
+    {
+      "sha": "fdf056732052799599f2195b2b08797fc1b03bc0",
+      "message": "refactor: modularize benchmark tooling and add suite parity\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-08T12:40:36+00:00"
+    },
+    {
+      "sha": "b941fa9f984611290e1bd0a7f0517f55aeba7345",
+      "message": "fix: address benchmark review findings\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-08T13:00:11+00:00"
+    },
+    {
+      "sha": "4fa7fdb9f612593034b763bd48ca85c08d75f501",
+      "message": "refactor: move benchmark crates into workspace layout\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T14:17:44+00:00"
+    },
+    {
+      "sha": "6c596e52bbb95d5b91e33c7b302bbcd31b72bcdd",
+      "message": "fix: address benchmark CI failures\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T14:40:38+00:00"
+    },
+    {
+      "sha": "2af61c880e644508ecb8658f6113c7aeae1730c1",
+      "message": "fix: satisfy workspace clippy\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T15:19:03+00:00"
+    },
+    {
+      "sha": "b5afdaf0fed0113f87fd5653ab5e8cdf2a12274e",
+      "message": "chore: trim benchmark branch scope\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T10:05:43+00:00"
+    },
+    {
+      "sha": "96825814fc6550b0b05c0ffb7de3fba00df270c9",
+      "message": "fix: include benchmark Containerfile in sdist\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T10:16:03+00:00"
+    },
+    {
+      "sha": "e82002531c2c68d9b82d03b91bdb357dbbbc88c6",
+      "message": "fix: resolve baseline drift and vet exemptions\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T10:49:43+00:00"
+    },
+    {
+      "sha": "54d744f397830da543aca8843c4ac8a902460a09",
+      "message": "fix: refresh detect-secrets baseline\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T11:13:34+00:00"
+    },
+    {
+      "sha": "9261f77ab312c5b8b0e26bd36f0ddaca7ebac753",
+      "message": "feat: add multi-gateway benchmark topology\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T12:16:57+00:00"
+    },
+    {
+      "sha": "2c6fbb62492b8fc294610c31a71b056ce734edec",
+      "message": "fix: default valid multi-gateway generator values\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T12:22:34+00:00"
+    },
+    {
+      "sha": "a94a16e5cb93d5ba5f7363f671de66b185e40a97",
+      "message": "fix: tighten multi-gateway validation\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T12:25:19+00:00"
+    },
+    {
+      "sha": "4f6da3871d3cc17df719c86d221c2c2972eb1b5e",
+      "message": "fix: align benchmark images with current plugin layout\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T13:06:03+00:00"
+    },
+    {
+      "sha": "bc26c358469cceb5b5dbe37e58fc59f7f06a2984",
+      "message": "docs: restore superpowers docs from main\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T13:25:33+00:00"
+    },
+    {
+      "sha": "8e21cb3caa66798004b1455b778a0c7074741cd3",
+      "message": "docs: refresh benchmark suite guide\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T13:35:40+00:00"
+    },
+    {
+      "sha": "c6cf01426b7bcbba7d3c9883b9f7d9d0e7695f50",
+      "message": "feat: verify multi-gateway benchmark cold-start scenarios\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T14:16:24+00:00"
+    }
+  ],
+  "files_changed": 83,
+  "additions": 19321,
+  "deletions": 99,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:09:30.390387",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:30.391169",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3680,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3680.json"
+  }
+}

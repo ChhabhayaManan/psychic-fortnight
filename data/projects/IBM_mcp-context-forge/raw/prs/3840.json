@@ -1,0 +1,205 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3840,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3840"
+  },
+  "metadata": {
+    "title": "fix(pii_filter): add comprehensive Rust implementation hardening and regression tests",
+    "state": "closed",
+    "created_at": "2026-03-24T14:49:12+00:00",
+    "updated_at": "2026-03-27T14:06:43+00:00",
+    "closed_at": "2026-03-27T14:06:00+00:00",
+    "merged_at": "2026-03-27T14:06:00+00:00",
+    "author": "lucarlig",
+    "labels": [
+      "bug",
+      "security",
+      "rust",
+      "plugins",
+      "wxo",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": [
+      "dima-zakharov"
+    ]
+  },
+  "description": "## 📌 Summary\nThis PR hardens the Rust PII filter implementation with comprehensive validation, error handling, detection improvements, and regression test coverage to ensure robust security behavior. It also tightens loopback passthrough header filtering so internal loopback requests do not forward hop-by-hop, routing, or MCP session headers from the inbound client request.\n\n## 🔁 Reproduction Steps\nIssues were identified through internal security review and testing that revealed gaps in validation, detection patterns, error handling, and loopback header filtering.\n\n## 🐞 Root Cause\nThe Rust PII filter implementation needed hardening in several areas:\n1. **Mask strategy handling**: Strategies and nested keys required proper preservation\n2. **Detection patterns**: Patterns needed expansion for better coverage\n3. **Input validation**: Missing validation and error handling in core logic\n4. **Configuration limits**: Resource limits needed proper bounds and validation\n5. **Test coverage**: Missing regression tests for edge cases\n6. **Loopback passthrough filtering**: Internal loopback requests still allowed transport and routing headers that should be regenerated or blocked by the gateway\n\n## 💡 Fix Description\nImplemented comprehensive improvements across the branch:\n\n1. **Mask strategy preservation and nested key support** (`16a9930c0`)\n   - Added proper handling of mask strategies across detection types\n   - Implemented nested JSON key support\n   - Added tests for strategy preservation\n\n2. **Comprehensive detection patterns and protection** (`b6860120d`)\n   - Expanded PII detection patterns for better coverage\n   - Added pattern complexity validation\n   - Implemented protection against pathological regex behavior\n   - Added 400+ lines of detection logic\n\n3. **Input validation and error handling** (`56e85f82e`)\n   - Added validation for masking inputs\n   - Implemented proper error messages and handling\n   - Added 90+ lines of validation logic\n\n4. **Resource limits and config validation** (`e886de2a6`)\n   - Added configuration validation with proper bounds\n   - Implemented resource limit enforcement\n   - Added config validation tests\n\n5. **Comprehensive test coverage** (`415ba377f`)\n   - Added 90+ lines of test coverage for edge cases\n   - Implemented regression tests for detection gaps\n   - Added error path testing\n\n6. **Documentation** (`e77106295`)\n   - Documented protection limits and constraints\n   - Added upper bounds to resource limit fields\n   - Updated README with security considerations\n\n7. **Loopback passthrough header hardening**\n   - Expanded the loopback skip list to drop hop-by-hop and routing headers such as `Connection`, `Transfer-Encoding`, `TE`, `Trailer`, `Upgrade`, `Host`, and `Content-Length`\n   - Prevented inbound clients from influencing internal loopback request framing, routing, or MCP session propagation\n   - Added deny-path coverage for the filtered header set\n\n## 🧪 Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Lint suite                            | `make lint`          | ✅     |\n| Unit tests                            | `make test`          | ✅     |\n| Coverage ≥ 80 %                       | `make coverage`      | ✅     |\n| Rust tests                            | `cargo test`         | ✅     |\n| Manual regression no longer fails     | Verified all edge cases | ✅     |\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed\n- [x] Tests added for all changes\n- [x] Documentation updated\n",
+  "comments": [
+    {
+      "id": "2982950722",
+      "author": "dawid-nowak",
+      "created_at": "2026-03-24T16:46:59+00:00",
+      "body": "Should these be **const** and follow the same pattern as  for example  ```const MAX_TEXT_BYTES_LIMIT: usize = 100 * 1024 * 1024;```"
+    },
+    {
+      "id": "2988689199",
+      "author": "lucarlig",
+      "created_at": "2026-03-25T14:37:41+00:00",
+      "body": "Fixed on the branch. Those defaults now use the shared `DEFAULT_MAX_*` constants in `plugins_rust/pii_filter/src/config.rs`, so they follow the same pattern as the limit constants and stay in sync with the validation bounds."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4000735033",
+      "author": "dawid-nowak",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-24T16:46:59+00:00",
+      "body": ""
+    },
+    {
+      "id": "4006964065",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-25T14:06:22+00:00",
+      "body": "Looks good"
+    },
+    {
+      "id": "4007196689",
+      "author": "lucarlig",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-25T14:37:41+00:00",
+      "body": ""
+    },
+    {
+      "id": "4012872953",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-26T10:17:05+00:00",
+      "body": "Fixes Applied                                                                                                                                    \n     - Documented custom pattern trust boundary in plugins_rust/pii_filter/src/patterns.rs and READMEs                                                \n     - Improved UTF-8 boundary error message in plugins_rust/pii_filter/src/masking.rs                                                                \n     - Documented hash mask output length change in READMEs                                                                                           \n     - Fixed SSN generation in performance tests to skip invalid SSA area codes                                                                       \n     - Correction: Rust regex engine does not suffer from traditional ReDoS attacks                                                                   \n                                                                                                                                                      \n\n                                                                                                                                                      \nRecommendation                                                                                                                                   \n     Ready to merge "
+    },
+    {
+      "id": "4020020737",
+      "author": "dawid-nowak",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-27T09:42:33+00:00",
+      "body": "As as suggestion... From looking at the [code](https://github.com/IBM/mcp-context-forge/blob/a7b9c7eb8072127e742df5283cc426e8b2fc3ab9/plugins_rust/pii_filter/src/detector.rs#L27), it seems that all pattern matching is executed one-by-one. It might be good to try to parallelize the execution with [Rayon](https://docs.rs/rayon/latest/rayon/)/parallel streams.\n\nAssuming that Rayon is going to work with Python that is..\n\n"
+    },
+    {
+      "id": "4021352140",
+      "author": "dima-zakharov",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-27T13:55:26+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ffd00d0f338e8eda11e6cbf911e498c40fcd98c4",
+      "message": "fix(pii_filter): add mask strategy preservation and nested key support in Rust implementation\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T11:49:47+00:00"
+    },
+    {
+      "sha": "7b5f9fc656861ae35cb11b0772301e816eee666d",
+      "message": "fix(pii_filter): add comprehensive detection patterns and ReDoS protection to Rust implementation\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T12:43:33+00:00"
+    },
+    {
+      "sha": "5c34afcbe219734fdf18349495da671b2168c48a",
+      "message": "fix(pii_filter): add input validation and error handling to Rust masking logic\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T13:43:36+00:00"
+    },
+    {
+      "sha": "865cee6f60e9ace783235e03b4e44e0f9d56b3c7",
+      "message": "fix(pii_filter): add resource limits and config validation to Rust detector\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T14:05:23+00:00"
+    },
+    {
+      "sha": "655f6908e77ef2aba57af0be183eb5c26786348a",
+      "message": "fix(pii_filter): add comprehensive test coverage for Rust detection edge cases\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T14:25:35+00:00"
+    },
+    {
+      "sha": "b5ad872535515780199b192f041361798a6aff80",
+      "message": "docs(pii_filter): document ReDoS protection limits and add resource limit upper bounds\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T14:40:11+00:00"
+    },
+    {
+      "sha": "c31f18d07265270371f5a39f9e77c0ed44967aa0",
+      "message": "fix(pii_filter): resolve clippy warnings in Rust implementation\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T15:03:18+00:00"
+    },
+    {
+      "sha": "c0c7b3f5e3197f5aedb5d2b54e1f1c3cebcd0763",
+      "message": "fix(pii_filter): tighten rust ssn and limit validation\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T15:11:35+00:00"
+    },
+    {
+      "sha": "40c43e19f11be8c6577de244c779c320451d65e7",
+      "message": "fix(pii_filter): restore benchmark config build\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T15:22:15+00:00"
+    },
+    {
+      "sha": "b8a3ff3aa12cb1ab36a3bf021f4be62a463f5110",
+      "message": "fix: raise default rust pii text limit\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T15:32:03+00:00"
+    },
+    {
+      "sha": "9819d081de3b25a711b3ed521d69d61f6632a7af",
+      "message": "docs: clarify rust pii filter coverage\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T15:44:16+00:00"
+    },
+    {
+      "sha": "bb73fa358603b955a85918495967598aaf93968f",
+      "message": "fix: restore rust pii coverage edge cases\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T15:46:21+00:00"
+    },
+    {
+      "sha": "38eddbc1776cb9252f6e3b3ab106c0e50bdb3879",
+      "message": "fix: harden loopback passthrough and ssn validation\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T15:58:12+00:00"
+    },
+    {
+      "sha": "afe0a57fc927a46ba82d72fb56e04581f7ae5141",
+      "message": "fix(pii_filter): address rust review follow-ups\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-25T10:00:09+00:00"
+    },
+    {
+      "sha": "deaa1502ac0f1cc03b82d092782852a6c0c130db",
+      "message": "fix: address pii filter review follow-ups\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-25T14:23:45+00:00"
+    },
+    {
+      "sha": "cd6ed0f4d7d9fde168ad4ff81e873629ea0995cc",
+      "message": "fix: audit detect-secrets baseline for pii filter tests\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-27T11:30:42+00:00"
+    },
+    {
+      "sha": "89bcfc38d78adae474296aa706cfc2a2a82d3360",
+      "message": "Merge branch 'main' into fix/pii-filter-regression-tests",
+      "author": "Luca",
+      "date": "2026-03-27T11:55:31+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 1778,
+  "deletions": 136,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:18.767731",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:18.769183",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3840,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3840.json"
+  }
+}

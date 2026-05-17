@@ -1,0 +1,146 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3165,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3165"
+  },
+  "metadata": {
+    "title": "feat(transport): complete direct_proxy gateway mode for streamable HTTP",
+    "state": "open",
+    "created_at": "2026-02-24T09:29:13+00:00",
+    "updated_at": "2026-04-10T08:05:54+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "mcp-protocol",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.3.0",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #3041 due to repository maintenance. Your code and branch are intact. @madhav165 please verify everything looks good.\n\n# ✨ Feature / Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\nCloses #2332\r\n\r\n---\r\n\r\n## 🚀 Summary (1-2 sentences)\r\nCompletes `direct_proxy` gateway mode support for `prompts/list`, `prompts/get`, and `completion/complete` in the streamable HTTP transport, closing the feature gap that existed relative to tools and resources. `_meta` (carrying `progressToken`) is forwarded to upstream MCP servers via `PaginatedRequestParams` where the SDK exposes a `params` arg, and via raw `session.send_request()` where it does not.\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n### What changed\r\n\r\nThree new proxy helpers added to `mcpgateway/transports/streamablehttp_transport.py`, each following the same pattern already established for tools and resources:\r\n\r\n| Helper | Method | `_meta` forwarding |\r\n|--------|--------|--------------------|\r\n| `_proxy_list_prompts_to_gateway` | `prompts/list` | `PaginatedRequestParams(_meta=meta)` |\r\n| `_proxy_get_prompt_to_gateway` | `prompts/get` | `session.send_request(GetPromptRequest(...))` |\r\n| `_proxy_complete_to_gateway` | `completion/complete` | `session.send_request(CompleteRequest(...))` |\r\n\r\nThe `list_prompts`, `get_prompt`, and `complete` handlers each received a direct_proxy path that: extracts `X-Context-Forge-Gateway-Id` from request headers → looks up the gateway → checks `gateway_mode == \"direct_proxy\"` → enforces RBAC via `check_gateway_access` → delegates to the proxy helper. Falls through to cache mode when no matching direct_proxy gateway is found.\r\n\r\n`ClientSession.get_prompt()` and `ClientSession.complete()` have no `params` argument in the MCP Python SDK, so `_meta` is injected via `send_request()` — the same pattern already used by `_proxy_read_resource_to_gateway`.\r\n\r\n**Out of scope:** SSE, WebSocket, and stdio transports have no direct_proxy infrastructure at all — that is a separate effort.\r\n\r\n```mermaid\r\nflowchart TD\r\n    C[MCP Client] -->|prompts/list, prompts/get, completion/complete| G(MCPGateway\\nStreamable HTTP)\r\n    G -->|gateway_mode == cache| DB[(Database)]\r\n    G -->|gateway_mode == direct_proxy| U[Upstream MCP Server]\r\n    U -->|_meta forwarded| U\r\n```\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3852385956",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-25T07:23:54+00:00",
+      "body": "Looks fine."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8103e1a1e403339992c7a234187e9f3d0ae263b6",
+      "message": "feat(transport): add _proxy_list_prompts_to_gateway with _meta forwarding\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-18T15:23:03+00:00"
+    },
+    {
+      "sha": "09cf27a7c610d9b6f507807a877482a10c6ffeb8",
+      "message": "feat(transport): add direct_proxy path to list_prompts with _meta forwarding\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-18T15:46:26+00:00"
+    },
+    {
+      "sha": "0f43ada8214934be0470ab73ca23718314c122ed",
+      "message": "feat(transport): add _proxy_get_prompt_to_gateway with _meta via send_request\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-18T15:48:57+00:00"
+    },
+    {
+      "sha": "f942856ffa3c9d9ddce691655f37feb915ee3b9c",
+      "message": "feat(transport): add direct_proxy path to get_prompt\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-18T17:12:15+00:00"
+    },
+    {
+      "sha": "503e9172229e92a11ab617377a283a6dc4eca4d8",
+      "message": "feat(transport): add _proxy_complete_to_gateway with _meta via send_request\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-18T17:13:33+00:00"
+    },
+    {
+      "sha": "cfd822b886f27eb2fbd44c10c29d586d33f3af04",
+      "message": "feat(transport): add direct_proxy path to completion/complete\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-18T17:15:11+00:00"
+    },
+    {
+      "sha": "2a2073ff1ebd7d2371d80bf5892aa5df38032625",
+      "message": "chore: apply isort and black formatting to streamablehttp_transport\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-18T17:22:41+00:00"
+    },
+    {
+      "sha": "e5fe077eaafea3a4bde7161416b2bf2c5631032a",
+      "message": "Improve coverage\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T08:50:22+00:00"
+    },
+    {
+      "sha": "58da2d7178afdc33edc1affc7f6b348d41078c45",
+      "message": "fix: correct function call arguments in proxy_get_prompt tests",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T08:55:25+00:00"
+    },
+    {
+      "sha": "e583f153d44538085a0e7e0fda824ed87ba9199d",
+      "message": "Revert \"fix: correct function call arguments in proxy_get_prompt tests\"\n\nThis reverts commit 7ee8f14cb59818aac8d25adefac410e1d0ed0ed7.",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T09:57:21+00:00"
+    },
+    {
+      "sha": "a142464b4ed7cdc389db5989d3cedc810990aa2b",
+      "message": "update prompt return type and add helper\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T17:13:57+00:00"
+    },
+    {
+      "sha": "d00de6fab3d3f5d012c7b34604306d2d20e29067",
+      "message": "flake8 and pylint fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T17:52:16+00:00"
+    },
+    {
+      "sha": "18420f11be172a63ff146e610ba065d527ddcf92",
+      "message": "pylint fix\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T17:57:42+00:00"
+    },
+    {
+      "sha": "169d0871c8778302d42046323ab6284c846722ed",
+      "message": "test(transport): add missing _meta propagation tests for prompts and complete paths\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-23T12:50:43+00:00"
+    },
+    {
+      "sha": "1207a9b058c9bbbe9aa64bbc28197cdde9ebe158",
+      "message": "flake8 fix\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-04T14:07:29+00:00"
+    },
+    {
+      "sha": "fd816116e601c74304d088c09509fcb57502c60e",
+      "message": "fix(transport): address review feedback on direct_proxy prompt and completion paths\n\n- Fix get_prompt cache path to return GetPromptResult instead of [] on empty/error\n- Remove duplicate passthrough header loop in _proxy_read_resource_to_gateway\n- Convert f-string logger calls to percent-style in new proxy helpers and handlers\n- Fix update_headers_with_passthrough_headers def to remain async (revert accidental sync conversion)\n- Remove duplicate section header comment in test file\n- Add missing blank line between test functions (E302)\n- Add complete gateway-not-found and fallthrough-to-cache test coverage\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-08T13:08:04+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 1459,
+  "deletions": 92,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:56.392142",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:56.393883",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3165,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3165.json"
+  }
+}

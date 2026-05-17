@@ -1,0 +1,123 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3882,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3882"
+  },
+  "metadata": {
+    "title": "feat(rbac): add tools.execute permission to team-scoped viewer role",
+    "state": "closed",
+    "created_at": "2026-03-27T01:13:47+00:00",
+    "updated_at": "2026-04-03T17:12:10+00:00",
+    "closed_at": "2026-04-03T17:12:10+00:00",
+    "merged_at": "2026-04-03T17:12:10+00:00",
+    "author": "kimsehwan96",
+    "labels": [
+      "enhancement",
+      "security",
+      "rbac",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "\r\n<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3881 \r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nAdd tools.execute permission to the team-scoped viewer role so team members can invoke MCP tools without requiring the developer role (which also grants create/update/delete permissions). platform_viewer (global) is not modified.\r\n\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   pass     |\r\n| Unit tests                | `make test`     |    pass    |\r\n| Coverage ≥ 80%            | `make coverage` |   pass    |\r\n\r\nI also checked e2e / playwright test in local environment.\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n- Migration follows the same pattern established in #3390 (abf8ac3b6008)\r\n- E2E and Playwright tests verified on full docker-compose stack with fast_time_server\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4044526561",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-01T14:15:55+00:00",
+      "body": "## Summary\n\nThis PR addresses issue #3881 by adding `tools.execute` permission to the team-scoped `viewer` role. This enables team members to execute MCP tools without requiring the `developer` role, which grants full CRUD permissions.\n\n---\n\n## ✅ Technical Implementation: Excellent\n\n## ✅ Security Model: Correct Design\n\nThis is a **least-privilege security enhancement**, not a breaking change. Here's why:\n\n### Context from Issue #3881\n\nPR #3390 added `servers.use` to viewer roles, allowing them to connect to Virtual Servers. However, without `tools.execute`, this permission was effectively useless for MCP workflows. The only alternative was granting the `developer` role, which includes full CRUD permissions—creating unnecessary operational risk.\n\n### This PR's Approach\n\n- **Team-scoped only:** `viewer` (team members) gains `tools.execute`\n- **Global unchanged:** `platform_viewer` (auto-assigned, no team membership) remains read-only\n- **Visibility filtering enforced:** Team viewers can only execute:\n  - Own team's tools ✅\n  - Public tools ✅\n  - NOT other teams' private tools (blocked by Layer 1 scoping) ❌\n\n### Operational Benefits\n\n- Prevents forcing admins to grant `developer` role just for tool execution\n- Reduces risk of accidental configuration changes\n- Enables safe MCP tool usage for team members\n- Addresses real multi-team deployment needs\n\n---\n\n## ✅ Test Coverage: Comprehensive\n\nUpdated tests verify:\n- Team-scoped viewer can execute tools via `/rpc tools/call` ✅\n- Cookie-based session tokens work correctly ✅\n- Cross-team isolation maintained (Layer 1 scoping) ✅\n- Permission matrix tests updated ✅\n- E2E MCP RBAC transport tests updated ✅\n\n---\n\n## 📝 Minor Suggestion\n\nConsider adding a note in `CHANGELOG.md` for release notes:\n\n```markdown\n### Enhanced\n- **RBAC:** Added `tools.execute` permission to team-scoped `viewer` role, enabling team members to execute MCP tools without requiring `developer` role (which grants full CRUD permissions). Addresses #3881. `platform_viewer` (global scope) remains read-only.\n```\n\nOtherwise LGTM 🚀 \n\n"
+    },
+    {
+      "id": "4049143023",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-02T08:27:08+00:00",
+      "body": "LGTM 🚀 "
+    },
+    {
+      "id": "4054679953",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-03T07:43:23+00:00",
+      "body": "### Summary\n\nThis PR adds `tools.execute` permission to the team-scoped `viewer` role, allowing team members to invoke MCP tools without requiring the `developer` role (which also grants mutation permissions). The `platform_viewer` role is intentionally NOT modified.\n\n### Architecture Alignment\n\nThe change correctly maintains the **two-layer security model**:\n\n- **Layer 1 (Token Scoping)**: Controls visibility - unchanged\n- **Layer 2 (RBAC)**: Controls actions - viewer now has `tools.execute` in team scope\n\n### ✅ Appropriate Scope Limitation\n\n- ✅ Team-scoped `viewer` gets `tools.execute`\n- ✅ Global `platform_viewer` does NOT get `tools.execute`\n- ✅ Maintains principle of least privilege for unauthenticated/public access\n\n### ✅ Test Coverage\n\n- **Positive path**: Developer and viewer can execute team tools\n- **Deny path**: Cross-team isolation maintained\n- **Cookie session auth**: Tested for both developer and viewer\n- **RPC endpoint**: `/rpc tools/call` tested with proper error codes\n\n### Migration File\n\n```python\n# mcpgateway/alembic/versions/cbedf4e580e0_add_tools_execute_to_viewer_role.py\nrevision: str = \"cbedf4e580e0\"\ndown_revision: Union[str, Sequence[str], None] = \"a7f3c9e1b2d4\"  # ✅ Correct head\n\nROLE_PERMISSION_ADDITIONS = {\n    \"viewer\": [\"tools.execute\"],  # Only viewer, not platform_viewer\n}\n```\n\n### Bootstrap Changes\n\n```python\n# mcpgateway/bootstrap_db.py\n{\n    \"name\": \"viewer\",\n    \"description\": \"Read access and tool execution within team scope\",  # Updated\n    \"scope\": \"team\",\n    \"permissions\": [\n        # ... existing permissions ...\n        \"tools.execute\",  # ✅ Added\n        # ...\n    ],\n}\n```\n\n### Conclusion\n\nThis is a **well-implemented feature** that appropriately extends the `viewer` role capabilities while maintaining security boundaries. The change is:\n\n- ✅ Backward-compatible\n- ✅ Properly tested with comprehensive coverage\n- ✅ Follows all project conventions\n- ✅ Maintains security invariants\n- ✅ Includes proper documentation updates\n- ✅ Uses idempotent migration pattern\n\nLGTM 🚀 \n"
+    },
+    {
+      "id": "4056437577",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-03T16:53:02+00:00",
+      "body": "Nice work, @kimsehwan96 — clean implementation overall. The design makes sense: letting team-scoped viewers execute tools without promoting them to developer (which also grants mutation permissions) is the right least-privilege move, and keeping `platform_viewer` read-only is the correct call.\n\nI rebased onto main (one commit behind, trivial `.secrets.baseline` conflict) and added a few commits on top during review:\n\n### What I changed\n\n**Critical fix — Playwright test payloads (`visibility` placement)**\n\nAll six Playwright tests that create team-scoped tools via `POST /tools` (JSON API) were placing `visibility: \"team\"` at the request body top level instead of inside the nested `tool` object. The `create_tool` endpoint parses `tool: ToolCreate` as a nested body param, so top-level `visibility` is silently ignored and `register_tool` falls back to `visibility=\"public\"`. I verified this against the live deployment — top-level produces a public tool, inside-tool produces a team-scoped one. Moved `visibility` into the `tool` object for all six payloads (4 from this PR, 2 pre-existing).\n\n**Migration scope safety**\n\nThe role lookup query used `WHERE name = :name LIMIT 1` without filtering by scope. If an operator had created a custom role also named \"viewer\" at global scope, the migration could modify the wrong one. Added `AND scope = :scope` and changed the config from a dict to `(name, scope, permissions)` tuples.\n\n**Stronger viewer allow-path assertions**\n\nThe viewer tests asserted `error_code != -32003`, which passes on any non-RBAC error (including tool-not-found or internal errors). Strengthened to assert `visibility == \"team\"` on the created tool, HTTP 200 on the RPC response, and `\"result\" in body` to prove successful execution.\n\n**Deny-path coverage for `platform_viewer`**\n\nSince `tools.execute` is now in `VIEWER_PERMISSIONS`, it drops out of `MUTATION_PERMISSIONS` (which excludes viewer perms). The parametrized `test_platform_viewer_denies_mutation` no longer covers it. Added an explicit `test_platform_viewer_denied_tools_execute` enforcement-level test.\n\n**Doc drift**\n\nUpdated three docs that still described viewer as read-only / unable to execute tools: `multitenancy.md`, `sso-entra-role-mapping.md`, `sso-microsoft-entra-id-tutorial.md`. Also fixed stale \"Read-Only\" section headers in the permission matrix test.\n\n### What looks good as-is\n\n- Migration is idempotent, uses parameterized queries, handles both SQLite and PostgreSQL, and downgrade correctly reverses the upgrade.\n- `bootstrap_db.py` and migration agree on the change. All permission sources of truth (bootstrap, migration, AGENTS.md, rbac.md, test constants) are consistent.\n- The e2e test `test_viewer_denied_tools_execute_on_default_endpoint` correctly preserves the deny-path on the global `/mcp` endpoint.\n- The meta-test `test_bootstrap_roles_match_test_constants` now explicitly verifies `viewer_set - platform_viewer_set == {\"tools.execute\"}`.\n- No privilege escalation path — `tools.execute` gates only tool invocation and does not chain into write access or admin capabilities.\n\n282 unit tests pass. LGTM."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "4312540b3ef84678643dc108d1b56cc058fd2708",
+      "message": "feat(rbac): add tools.execute permission to team-scoped viewer role\n\nAllow team members with the viewer role to execute MCP tools within\ntheir team scope without requiring the developer role, which also\ngrants mutation permissions (create/update/delete).\n\nplatform_viewer (global, auto-assigned) is intentionally not modified.\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-03-27T01:07:39+00:00"
+    },
+    {
+      "sha": "7c121042f04632be1dab05d90de71060e206175e",
+      "message": "docs: update changelog (#3882)\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-04-01T22:28:10+00:00"
+    },
+    {
+      "sha": "eb70ab93563ac2a53531d0bbe733feffcf5fcd8f",
+      "message": "fix: sync alembic down_revision to latest upstream head and update secrets baseline\n\nUpdate the viewer tools.execute migration (cbedf4e580e0) down_revision\nfrom 615af4ab94b4 to a7f3c9e1b2d4 to resolve the multiple-heads issue\nafter upstream main advanced. Refresh .secrets.baseline line numbers.\n\nSigned-off-by: kimsehwan96 <kimsehwan96@gmail.com>\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-04-02T12:56:00+00:00"
+    },
+    {
+      "sha": "26443267f0ac937d35eba336108af7de70bbe894",
+      "message": "test(rbac): add deny-path test for platform_viewer tools.execute\n\nThe MUTATION_PERMISSIONS list excludes permissions in VIEWER_PERMISSIONS,\nso tools.execute (now granted to team-scoped viewer) was no longer\ncovered by the parametrized platform_viewer deny test. Add an explicit\nenforcement-level test to verify platform_viewer is denied tools.execute.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T14:59:10+00:00"
+    },
+    {
+      "sha": "9256d8bc883cb40df1ce008c5894e99b6c740373",
+      "message": "fix(test): move visibility inside tool object in Playwright RBAC tests\n\nThe POST /tools JSON API expects visibility as a field on the nested\nToolCreate schema (tool.visibility), not at the request body top level.\nWhen placed at the top level, FastAPI ignores it and register_tool\nfalls back to visibility=\"public\", so the tests were inadvertently\ncreating public tools instead of team-scoped ones. Move visibility\ninside the tool object for all four affected test payloads (developer\nand viewer, both Bearer and cookie variants).\n\nAlso apply Black formatting to the migration text() calls.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T16:29:49+00:00"
+    },
+    {
+      "sha": "ceae885cfe400dbf7c36a457d583752a45b0a7fc",
+      "message": "docs: update viewer role description across docs and test comments\n\nSeveral docs still described the team-scoped viewer role as read-only\nor unable to execute tools, which is no longer accurate after adding\ntools.execute. Update multitenancy architecture doc, SSO Entra role\nmapping, SSO Entra ID tutorial, and stale test section comments.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T16:29:55+00:00"
+    },
+    {
+      "sha": "8b12fd46fdfc2a7fc53e3815e395841e8f98be84",
+      "message": "fix(test): fix remaining visibility placement in Playwright RBAC tests\n\nTwo more pre-existing tests (developer list-visibility and cross-team\nisolation) also had visibility at the request body top level instead\nof inside the tool object. Apply the same fix so all six tool-creation\npayloads in the file now place visibility inside the ToolCreate schema.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T16:33:38+00:00"
+    },
+    {
+      "sha": "be258c7fde407849229db488775b981959d8ff03",
+      "message": "fix(rbac): scope-safe migration query and stronger viewer allow-path assertions\n\nMigration: add AND scope = :scope to the role lookup query so the\nmigration cannot accidentally modify a custom role named \"viewer\" at\na different scope.  Change ROLE_PERMISSION_ADDITIONS from a dict to a\nlist of (name, scope, permissions) tuples to carry the scope through.\n\nPlaywright viewer allow-path tests: assert the created tool has\nvisibility=\"team\" (guards against the top-level-visibility regression),\nassert HTTP 200, and assert a JSON-RPC \"result\" key is present instead\nof merely checking error_code != -32003.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T16:48:28+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 232,
+  "deletions": 51,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:31.751561",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:31.753381",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3882,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3882.json"
+  }
+}

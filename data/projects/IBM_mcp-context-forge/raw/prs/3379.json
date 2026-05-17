@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3379,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3379"
+  },
+  "metadata": {
+    "title": "fix(plugins): encoded exfil detector regex and boundary handling",
+    "state": "closed",
+    "created_at": "2026-03-02T10:30:43+00:00",
+    "updated_at": "2026-03-03T14:00:03+00:00",
+    "closed_at": "2026-03-03T14:00:01+00:00",
+    "merged_at": "2026-03-03T14:00:01+00:00",
+    "author": "lucarlig",
+    "labels": [
+      "bug",
+      "rust",
+      "plugins",
+      "MUST",
+      "release-fix",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai",
+      "lucarlig"
+    ]
+  },
+  "description": "## fix: encoded exfil detector regex and boundary handling\r\n\r\n**Problem**  \r\nThe encoded exfil detector’s Rust code used lookbehind/lookahead in regexes (`(?<!...)`, `(?![...])`). The Rust `regex` crate doesn’t support these, so the patterns could fail to compile or behave incorrectly.\r\n\r\n**Changes**\r\n- **Rust** (`plugins_rust/encoded_exfil_detection/src/lib.rs`): Use core-only patterns for base64, base64url, and hex; add `has_valid_boundaries()` so boundaries are enforced in code and adjacent encoded strings are both detected. Fix `printable_ratio` filter (`.contains(*byte)`). Add unit test `test_scan_text_detects_adjacent_matches`.\r\n- **Python tests**: Add tests for word-boundary behavior, base64url, percent encoding, escaped hex, and no false positives on URLs / plain alphanumeric strings; all run in both Python and Rust modes.\r\n\r\n**Testing**  \r\n`cargo test` in `plugins_rust/encoded_exfil_detection`; `pytest tests/unit/plugins/test_encoded_exfil_detector.py`.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3882767117",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-03T13:59:26+00:00",
+      "body": "## Review: Approved\n\n### Summary\nThis PR correctly fixes a real runtime panic in the Rust encoded exfil detector. The Rust `regex` crate does not support lookbehind/lookahead assertions, so the old patterns would crash on first use via the `LazyLock` + `.expect()`.\n\n### Changes Reviewed\n\n**Regex fix**: Replaces unsupported `(?<!...)` / `(?!...)` with simpler core patterns and code-based boundary validation via `has_valid_boundaries()` — consistent with how other Rust plugins in this codebase handle boundaries.\n\n**`printable_ratio` fix**: Corrects `.contains(byte)` → `.contains(*byte)` for proper type dereferencing in the filter closure.\n\n**Boundary validation**: `has_valid_boundaries()` correctly handles start/end-of-string edges, strips `=` from boundary chars to allow adjacent match detection, and uses ASCII-only checks that are safe for multi-byte UTF-8 input.\n\n**Tests**: Comprehensive coverage — word boundaries (space, start, end, punctuation), false positive rejection (URLs, alphanumeric), base64url/percent-encoding/escaped-hex detection, and adjacent match detection. All parametrized for both Python and Rust modes.\n\n### Notes\n- Minor: `core_chars.replace('=', \"\")` allocates per call in `has_valid_boundaries` — could be precomputed, but negligible for a security scanner.\n- The Rust boundary check intentionally excludes `=` from boundary chars (unlike Python's lookahead which includes it), making the Rust path slightly more permissive — this is a net security improvement (fewer false negatives).\n- No security, performance, or consistency concerns.\n\nRebased onto main and all tests pass (Rust 4/4, Python 16/16)."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b3972b585d8300ff87ad973cd9ed794fc96835bd",
+      "message": "fix: encoded exfil detector regex and boundary validation\n\n- Use core-only regex patterns for base64, base64url, hex (Rust regex crate\n  does not support lookbehind/lookahead).\n- Add has_valid_boundaries() and validate in scan_text so adjacent encoded\n  strings are both detected and false positives avoided.\n- Fix printable_ratio filter for current Rust.\n- Add Rust test test_scan_text_detects_adjacent_matches.\n- Add Python tests: word boundaries, base64url, percent/escaped hex,\n  no false positives (URLs, alphanumeric); run in Python and Rust modes.\n\nSigned-off-by: Luca <lucarlig@protonmail.com>",
+      "author": "Luca",
+      "date": "2026-03-02T10:00:18+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 137,
+  "deletions": 16,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:11.382694",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:11.386311",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3379,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3379.json"
+  }
+}

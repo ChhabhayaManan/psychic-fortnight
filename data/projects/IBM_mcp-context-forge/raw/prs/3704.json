@@ -1,0 +1,174 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3704,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3704"
+  },
+  "metadata": {
+    "title": "feat: add Rust A2A 1.0 runtime support",
+    "state": "closed",
+    "created_at": "2026-03-17T09:28:37+00:00",
+    "updated_at": "2026-04-16T11:54:44+00:00",
+    "closed_at": "2026-04-16T11:54:41+00:00",
+    "merged_at": "2026-04-16T11:54:41+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "experimental",
+      "rust",
+      "a2a",
+      "COULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "jonpspri",
+      "crivetimihai",
+      "lucarlig",
+      "brian-hussey"
+    ]
+  },
+  "description": "## Summary\n- add an experimental Rust A2A sidecar and gateway delegation path for registered A2A agents\n- normalize A2A v1 and legacy JSON-RPC payloads through a shared outbound protocol adapter\n- move the example and compose testing path to A2A 1.0.0 by default while retaining legacy interop\n\n## Details\n- add `tools_rust/a2a_runtime` with health and invoke endpoints, plus container and entrypoint wiring for `RUST_A2A_MODE=off|shadow|edge|full`\n- route A2A service and A2A tool invocations through shared request preparation and optional Rust-side delegation\n- rewrite the Go echo agent to serve a v1 card and task surface without the old Go SDK dependency, while still accepting legacy aliases\n- replace the integration fixture with direct v1 coverage and update load and compose flows to exercise the v1 default path through the managed Rust sidecar\n\n\n---\nRefs #1624\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "8a7bc66a8ec67a24f7f4b7524aca89ba12dc6a59",
+      "message": "feat: add Rust A2A 1.0 runtime support\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-17T09:23:59+00:00"
+    },
+    {
+      "sha": "75da08144143e150d8db3c885ffc1f358679000b",
+      "message": "fix: resolve pylint warnings and update tests for A2A protocol refactor\n\n- Remove redundant local `from mcpgateway.config import settings`\n  re-imports in a2a_service.py (W0404/W0621)\n- Add pylint disable for unused `interaction_type` parameter in\n  build_a2a_jsonrpc_request (W0613) - part of public API\n- Add missing docstrings for interrogate coverage (8 functions)\n- Update test patches to target module-level settings binding at\n  mcpgateway.services.a2a_service.settings\n- Redirect decode_auth/apply_query_param_auth test patches to\n  mcpgateway.services.a2a_protocol where prepare_a2a_invocation\n  now calls them\n- Update admin test assertion for simplified test_params format\n\nSigned-off-by: Jon Spriggs <github@sprig.gs>\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-18T08:26:27+00:00"
+    },
+    {
+      "sha": "6c8bebc4d48f7d1ae854c8dadef085179d9b73a9",
+      "message": "fix: harden A2A protocol layer and Rust runtime after review\n\n- Restore query-param credential redaction in error messages by exposing\n  sensitive_query_param_names on PreparedA2AInvocation\n- Route Rust sidecar 504 (upstream timeout) through the timeout\n  accounting path (counter, circuit-breaker, ToolTimeoutError)\n- Disable redirect following in the Rust reqwest client to match the\n  Python path and prevent credential forwarding on redirects\n- Handle v/V-prefixed protocol version strings (e.g. \"v1\", \"V1.0\")\n  so they correctly resolve to A2A v1 semantics\n- Add full docstrings to a2a_protocol.py and rust_a2a_runtime.py\n  (resolves flake8 DAR101/DAR201/DAR401 warnings)\n- Add version.py A2A runtime diagnostic docstrings\n- Fix 6 test mock targets for module-level settings import\n- Add 100% coverage tests for a2a_protocol.py, rust_a2a_runtime.py,\n  and version.py A2A diagnostics\n- Update .secrets.baseline for test fixture false positives\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-31T07:50:05+00:00"
+    },
+    {
+      "sha": "949315329543158cf8b32d5bc01e36c4ec860929",
+      "message": "feat(a2a-runtime): complete A2A v1.0 runtime with streaming, sessions, and caching\n\nProduction-grade Rust A2A sidecar with full v1.0 method dispatch, SSE\nstreaming, Redis-backed sessions, three-layer caching, and virtual\nserver federation. Implements all 20 items from the A2A implementation\nplan across 5 phases.\n\nCore engine (17 Rust modules, 122 tests):\n- Circuit breaker with per-endpoint per-tenant isolation\n- Lock-free per-agent metrics with P95 adaptive timeouts\n- Bounded job queue with request coalescing\n- AES-GCM auth decryption matching Python services_auth contract\n- Trust validation via loopback + HMAC shared secret\n\nA2A v1.0 method dispatch:\n- SendMessage, SendStreamingMessage (SSE with event store + reconnect)\n- GetTask, ListTasks, CancelTask (proxied to Python RPC)\n- GetExtendedAgentCard (cached agent cards)\n- Push notification CRUD (4 methods) + Rust webhook dispatch\n- All methods accept both v1 (PascalCase) and legacy (slash) names\n\nStreaming and sessions:\n- SSE passthrough from agent through Rust to client\n- Redis ring buffer event store (Lua atomic scripts) + async PG flush\n- Client reconnect via Last-Event-ID with Redis/PG replay\n- Redis-backed session management with auth fingerprinting and TTL\n- Session fast-path skips Python authenticate on reuse\n\nThree-layer caching:\n- L1 in-process DashMap, L2 Redis, L3 PG via Python RPC\n- Redis pub/sub invalidation for cross-worker L1 eviction\n- Graceful degradation when Redis unavailable\n\nInfrastructure:\n- Nginx a2a_upstream with Rust-primary/Python-backup failover\n- 15 Python /_internal/a2a/* RPC endpoints\n- Virtual server federation (servers exposed as A2A agents)\n- Shadow mode dual-dispatch with response comparison logging\n- Progressive rollout via RUST_A2A_MODE=off|shadow|edge|full\n\nDomain models:\n- A2ATask, ServerTaskMapping, ServerInterface, A2AAgentAuth,\n  A2APushNotificationConfig, A2ATaskEvent (6 models, 3 migrations)\n- ADR-048 (A2A v1 protocol migration), ADR-049 (multi-protocol servers)\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-02T12:09:05+00:00"
+    },
+    {
+      "sha": "a4386b84ea950bdb30bcc9978b2546a90ac70974",
+      "message": "test(a2a): fill testing gaps in push, config, and integration edge cases\n\nAdd unit tests for previously untested modules and integration tests\nfor error handling edge cases.\n\nUnit tests:\n- push.rs: webhook config filtering (enabled, events match, case-insensitive)\n- config.rs: listen_target parsing, UDS preference, invalid address, defaults\n\nIntegration tests:\n- Trust chain: authentication failure (401→403), empty method fallthrough\n- Streaming: agent error (500), agent timeout (502/504)\n- Malformed requests: invalid JSON body, empty endpoint URL\n- Method routing: unknown method falls through to agent invoke\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-02T13:45:43+00:00"
+    },
+    {
+      "sha": "75f3c59888b1a2ac604977108223ce039ae26607",
+      "message": "test(a2a): add Python unit tests for federation, service methods, and endpoints\n\nAdd 75 new Python tests covering previously untested A2A code:\n\n- A2AServerService (12 tests): get_server_agent_card, resolve_server_agent,\n  select_downstream_agent, create/resolve_task_mapping\n- a2a_service new methods (24 tests): cancel_task, push config CRUD,\n  flush/replay events, shadow mode comparison, invalidation publishing\n- /_internal/a2a/* endpoints (39 tests): untrusted 403 gate for all 16\n  endpoints, happy-path delegation for tasks, push, events, resolve, card\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-02T16:57:59+00:00"
+    },
+    {
+      "sha": "ff6c7b8dd5bae396e071c66ecbe1621b02cfe5cc",
+      "message": "feat(core): add title field support and SSO ADFS integration\n\nAdd title column to tools, resources, and prompts tables following MCP\n2025-11-25 spec precedence (title → annotations.title → name). Implement\n_resolve_tool_title() helper with comprehensive doctests.\n\nSSO enhancements:\n- Add ADFS integration with tutorial documentation\n- Expand SSO service test coverage (775+ new test lines)\n- Add integration tests for ADFS flows\n\nPerformance improvements:\n- Optimize gateway listings with eager-loaded tool counts\n- Add selectinload for tools relationship in admin queries\n\nTesting:\n- Add unit tests for demo_a2a_agent.py script\n- Expand gateway_service and sso_service test coverage\n- Add ADFS integration test suite\n\nDocumentation:\n- Add comprehensive ADFS SSO tutorial\n- Update A2A agent documentation\n- Remove duplicate config.schema.json files\n\nDatabase:\n- Migration a7f3c9e1b2d4: add title column (idempotent)\n- Update schemas to include title field validation\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-07T10:17:59+00:00"
+    },
+    {
+      "sha": "13b773f402126150e28f65d0b915f275c9cdebfa",
+      "message": "fix: tighten A2A runtime authz and queue handling\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-09T08:31:23+00:00"
+    },
+    {
+      "sha": "3cf618b52302fa718125d94a7157d7183dc27908",
+      "message": "test: expand rust a2a runtime coverage\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-09T09:25:26+00:00"
+    },
+    {
+      "sha": "87dac4abe0ec0df255846cf3c28cdd6eddd6ac7c",
+      "message": "test: tighten rust a2a coverage checks\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-09T11:50:51+00:00"
+    },
+    {
+      "sha": "2d62070302a84ed03d3037374d0ea9719c38ec16",
+      "message": "fix: harden A2A runtime security and fix lint issues\n\n- Scope agent cache keys by caller's teams to prevent cross-tenant\n  cache poisoning in the Rust A2A runtime\n- Add visibility scoping to task get/list endpoints so callers only\n  see tasks owned by agents they have access to\n- Check agent access before building agent card to avoid loading\n  sensitive data for unauthorized callers\n- Truncate error detail in Rust runtime client logging to avoid\n  leaking auth blobs\n- Tighten protocol matching in A2AServerService to exact match\n  instead of substring contains\n- Validate task_id/agent_id/state parameter types in task proxy\n  endpoints\n- Fix stale migration docstring (Revises: field)\n- Fix clippy warnings (single_match, too_many_arguments)\n- Run cargo fmt, isort, and black on PR-touched files\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-12T16:06:33+00:00"
+    },
+    {
+      "sha": "09ac81aa05ebe0a168fcc933c61963870d0449d3",
+      "message": "fix(security): add visibility scoping to remaining internal A2A endpoints\n\nTask cancel, push config CRUD (create/get/list/delete), and events\nreplay endpoints were missing scope-aware authorization checks. A\ncaller could operate on tasks and configs belonging to agents outside\ntheir team visibility.\n\n- cancel_task now checks agent visibility before allowing cancellation\n- Push config create/get/list/delete endpoints verify the caller can\n  access the owning agent via _check_agent_access_by_id\n- Events replay checks the task's owning agent visibility before\n  returning event data\n- Events flush is left unscoped (trusted sidecar write path, not a\n  read path exposing data to callers)\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-12T16:43:15+00:00"
+    },
+    {
+      "sha": "04d3e956947edb7b83f9feacccf0317a53561701",
+      "message": "perf: fix cache stampede, reduce queue allocations, and optimize visibility query\n\n- Add single-flight deduplication to resolve_agent: concurrent cache\n  misses for the same scoped agent key now share one Python resolve\n  call instead of each hitting the backend independently\n- Wrap ResolvedRequest in Arc in the job queue to avoid deep-cloning\n  headers and JSON body on every request submission\n- Rewrite _visible_agent_ids to push visibility filtering into SQL\n  instead of loading all enabled agents into Python and filtering\n  in a loop\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-12T16:56:50+00:00"
+    },
+    {
+      "sha": "d4df5b2fad8480ab92a39b513a58e332acc92675",
+      "message": "fix(security): harden A2A runtime trust boundaries, scoping, and validation\n\nSecurity fixes:\n- Add authentication to the /invoke endpoint (HMAC trust header gate)\n- Add authentication to the A2A proxy catch-all before forwarding\n- Require non-empty A2A_RUST_AUTH_SECRET at startup to prevent\n  predictable trust headers\n- Use server-derived owner_email/team_id in agent registration instead\n  of trusting client-provided values\n- Add visibility scoping to the flush_events internal endpoint\n- Close visibility bypass on events/replay when task row is absent\n- Close visibility bypass on push config get/list when agent_id omitted\n- Validate webhook URL through Pydantic schema (SSRF protection) in\n  internal push config creation endpoint\n- Add webhook URL validation via validate_core_url on\n  A2APushNotificationConfigCreate schema\n- Exclude auth_token from A2APushNotificationConfigRead (Field exclude)\n- Change _check_agent_access_by_id to fail-closed for deleted agents\n- Make encode_auth_context a hard error instead of silent empty fallback\n- Sanitize all error responses to external callers — strip internal\n  backend URLs, Python response bodies, and reqwest error details\n- Redact Redis URL credentials in logs\n- Use constant-time comparison for session fingerprint validation\n- Warn at startup if HTTP listener is non-loopback\n\nCorrectness fixes:\n- Pass actual JSON-RPC method name through full_authenticate\n- Add explicit authz match arms for cancel, delete, create, and stream\n- Remove x-forwarded-for from default session fingerprint headers\n- Fix cargo fmt conflicts with pragma allowlist comments\n- Cap retry backoff at 60 seconds to prevent runaway delays\n\nError handling improvements:\n- Replace expect() in queue worker with graceful error handling for\n  semaphore closure, panicked JoinSet tasks, and missing results\n- Add logger.exception + db.invalidate fallback to all 11 internal\n  A2A endpoint exception handlers\n- Upgrade query param decryption failure log from debug to warning\n- Log warning on auth decoding failure during agent update\n- Return None from event_store.store_event on serialization failure\n- Replace .ok() with logged match on proxy response JSON parsing\n- Replace mutex expect(\"poisoned\") with unwrap_or_else recovery\n- Upgrade shadow mode payload mismatch log to warning with traceback\n- Upgrade Redis cache invalidation failure log to warning\n- Bound resolve_inflight DashMap to prevent unbounded memory growth\n\nComment and code cleanup:\n- Fix handle_a2a_proxy doc (does not inject trust headers)\n- Fix coalesce_jobs doc (does not match on timeout)\n- Fix proxy_task_method doc (also handles cancel, not just reads)\n- Clarify trust header as keyed SHA-256, not formal HMAC\n- Renumber handle_a2a_invoke steps sequentially (1-2-3-3a-4-5)\n- Document _visible_agent_ids admin-bypass divergence\n- Remove leftover logger.info debug statements from register_agent\n- Remove commented-out dead code from register_agent\n- Remove duplicate TOOLS_MANAGE_PLUGINS constant\n- Remove constant-comparison test (test_version_endpoint_redis_conditions)\n\nTest coverage:\n- Add visibility tests for cancel_task (wrong team, admin, public-only)\n- Add deny-path tests for events/replay (inaccessible agent, missing task)\n- Add 32 tests for _check_agent_access_by_id, _visible_agent_ids,\n  get_task, list_tasks, and _check_server_access\n- Add tests for auth_secret startup rejection (unit + binary)\n- Update integration tests for trust-gated /invoke and authenticated\n  proxy endpoints\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-12T17:08:55+00:00"
+    },
+    {
+      "sha": "d53e0224172dc9a4297a62f3381656becaf742eb",
+      "message": "refactor: move a2a runtime into crates workspace\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T14:16:00+00:00"
+    },
+    {
+      "sha": "ac954b9ca3ab16b62c6c8f0e435f4c1d8ba2a36b",
+      "message": "fix: resolve remaining a2a ci failures\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T14:40:43+00:00"
+    },
+    {
+      "sha": "45f08824cb90a2898feff972227399ad1820eddf",
+      "message": "chore: update rust supply-chain vet exemptions\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T14:50:51+00:00"
+    },
+    {
+      "sha": "dddd41df06743cecc649dd041571c47757845f05",
+      "message": "test: fix a2a diff-cover regressions\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T15:24:07+00:00"
+    },
+    {
+      "sha": "4a681191c1f90328f44d837c716580d924e8a4ae",
+      "message": "fix(a2a): address PR #3704 review findings — security, observability, type design\n\nSecurity-critical:\n- Resolve A2A task lookup ambiguity: Rust runtime pre-resolves agent from\n  URL path and injects agent_id into task-method proxy params; Python\n  service refuses to guess when (task_id, no agent_id) matches multiple\n  rows. Prevents cross-agent task read/cancel via shared task_id.\n- Encrypt push webhook auth_token at rest via services_auth.encode_auth;\n  new list_push_configs_for_dispatch returns decrypted tokens for the\n  trusted Rust sidecar only. Fixes secret-at-rest leak.\n- Upsert semantics on push-config re-registration: mutable fields\n  (auth_token, events, enabled) update in place instead of silently\n  keeping stale config. Key rotations now take effect.\n- Fail-closed on query-param auth decrypt failure (matches header path).\n- Refuse empty/missing A2A_RUST_AUTH_SECRET at startup; add cross-field\n  RuntimeConfig validation (retry budget, TTL ordering, session TTL).\n- Feature-flag gate on internal A2A endpoints: reject trusted requests\n  when MCPGATEWAY_A2A_ENABLED=false (defense-in-depth).\n- events/flush rejects events for unknown task_ids (400) to prevent\n  visibility bypass.\n\nObservability:\n- logger.exception on _authorize_internal_a2a_method errors.\n- logger.warning on agent-visibility denial across 7 internal endpoints.\n- warn! on JSON parse failures in 4 proxy sites (server.rs) and\n  malformed Last-Event-ID headers.\n- warn! on session fingerprint mismatch (security-relevant signal).\n- MetricsCollector.webhook_retry_exhausted counter + record method.\n- Log Rust-cache invalidation scheduling failures instead of silent pass.\n- Rollback-after-failure in task persistence now logs and calls invalidate.\n\nType design / schema:\n- New A2ATaskState enum with terminal-state validator on A2ATaskUpdate.\n- Unknown task-state protocol values now warn (passed through for\n  forward-compat).\n- Alembic: tenant=String(255), icon_url=String(767) match the ORM\n  (prevents Postgres VARCHAR-length drift between fresh and migrated DBs).\n- Rename two A2A migration files to hash-first convention matching the\n  rest of the project.\n- trust.rs doc/comment clarifies the header is SHA256, not HMAC.\n- BTreeMap for query-param merge ensures deterministic ordering.\n- encode_auth_context uses .expect() — empty header would look anonymous.\n\nTest coverage:\n- Deny-path regressions for internal A2A endpoints: RBAC denied,\n  wrong-team, feature-disabled (20 new cases).\n- Rust↔Python bridge: ConnectError/ConnectTimeout/ReadTimeout/PoolTimeout\n  now wrap as RustA2ARuntimeError with correct is_timeout flag.\n- Push config: encryption round-trip, token rotation, upsert semantics,\n  undecryptable-legacy heal path, dispatch-listing SQL visibility scope.\n- Rust concurrency: session concurrent lookup/invalidate leaves storage\n  consistent; concurrent create produces unique IDs; queue overflow\n  under concurrent producers rejects with Full.\n- RuntimeConfig cross-field validation (5 scenarios).\n- Rust push: webhook retry-exhaustion metric increments.\n- Binary startup refuses without auth_secret.\n- select_downstream_agent: ORDER BY name + enabled filter assertions.\n\nDeferred to follow-up issues:\n- Typestate wrappers for trust-boundary types (IBM/mcp-context-forge#4233)\n- SSE client-disconnect integration test (IBM/mcp-context-forge#4234)\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-15T18:52:25+00:00"
+    },
+    {
+      "sha": "120e8c9fbfe6240d4222148b65e8c489436cc5f6",
+      "message": "test: expand a2a runtime parity coverage\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-16T10:01:39+00:00"
+    },
+    {
+      "sha": "d69bb1a2e4838e81890a38f983bac055814594f9",
+      "message": "fix: resolve rust ci regressions\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-16T10:30:37+00:00"
+    }
+  ],
+  "files_changed": 79,
+  "additions": 25151,
+  "deletions": 1809,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:43.152654",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:43.153844",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3704,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3704.json"
+  }
+}

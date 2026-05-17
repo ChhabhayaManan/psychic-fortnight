@@ -1,0 +1,85 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2963,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2963"
+  },
+  "metadata": {
+    "title": "feat: implement Subresource Integrity (SRI) for CDN resources",
+    "state": "closed",
+    "created_at": "2026-02-16T09:19:55+00:00",
+    "updated_at": "2026-02-22T00:18:12+00:00",
+    "closed_at": "2026-02-22T00:18:10+00:00",
+    "merged_at": "2026-02-22T00:18:10+00:00",
+    "author": "suciu-daniel",
+    "labels": [
+      "security",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": []
+  },
+  "description": "## Summary\n\nImplements comprehensive Subresource Integrity (SRI) protection for all external CDN resources to prevent tampering and ensure content integrity.\n\n## Changes\n\n### Infrastructure\n- Pin 15 CDN resources to specific versions (HTMX 1.9.10, Alpine.js 3.14.1, Chart.js 4.4.1, etc.)\n- Generate SHA-384 integrity hashes for all CDN resources\n- Create shared `scripts/cdn_resources.py` module as single source of truth\n- Implement hash generation script (`scripts/generate-sri-hashes.py`)\n- Implement hash verification script (`scripts/verify-sri-hashes.py`)\n- Store hashes in `mcpgateway/sri_hashes.json`\n\n### Templates\n- **admin.html**: Add SRI to HTMX (using canonical /dist/htmx.min.js URL), Alpine.js, Chart.js, Marked, DOMPurify, CodeMirror\n- **login.html**: Add SRI to Font Awesome (fixed invalid HTML closing tag)\n- **change-password-required.html**: Add SRI to Font Awesome\n- Add Tailwind JIT exclusion comments (dynamic content incompatible with SRI)\n\n### Code Quality\n- Use `@lru_cache(maxsize=1)` for efficient hash loading (no global variables)\n- All integrity attributes include `crossorigin=\"anonymous\"` for CORS compliance\n\n### CI/CD\n- Add `make sri-generate` and `make sri-verify` targets\n- Integrate hash verification into GitHub Actions pipeline\n- Automated detection of CDN content changes\n\n### Documentation\n- Update `docs/docs/manage/securing.md` with SRI section\n- Update ADR-0014 with SRI integration details\n- Document upgrade workflow for library updates\n\n## Testing\n\nAll 15 CDN resources verified:\n```bash\nmake sri-verify\n# ✅ All 15 SRI hashes verified successfully!\n```\n\n## Security Impact\n\n- Prevents CDN tampering attacks\n- Ensures content integrity with cryptographic verification\n- Follows W3C SRI specification (SHA-384)\n- Maintains backward compatibility with airgapped mode\n\nCloses #2558",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3825403618",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-19T12:01:23+00:00",
+      "body": "Solid security enhancement. SRI for all 15 CDN resources is exactly the right approach.\n\n**Strengths:**\n- Clean architecture: `cdn_resources.py` as single source of truth, `generate-sri-hashes.py` and `verify-sri-hashes.py` as separate scripts\n- `load_sri_hashes()` with `lru_cache(maxsize=1)` — file read once per process\n- CI pipeline includes `sri-verify` step — catches CDN drift on every build\n- Tailwind JIT compiler excluded with clear comment — correct, SRI doesn't work with dynamic content\n- Version pinning: Alpine.js from `@3.x.x` → `@3.14.1`, Chart.js from generic URL to `@4.4.1` — necessary for SRI\n- SHA-384 per W3C recommendation\n- Airgapped mode unaffected — SRI only added to CDN paths\n- Good test coverage for `load_sri_hashes` (caching, file not found, invalid JSON, permission error)\n\n**Minor observations:**\n\n1. **`load_sri_hashes` catches all exceptions** (`admin.py:274`) — while this prevents startup failures, it also silently masks file system issues. Consider logging at `error` level instead of `warning` for `PermissionError` cases specifically.\n\n2. **HTMX URL changed** from `https://unpkg.com/htmx.org@1.9.10` to `https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js` — this is the canonical path (the old URL redirects). Good fix.\n\n3. **MANIFEST.in update** (`recursive-include mcpgateway *.json`) — needed for `sri_hashes.json` to be included in package distributions.\n\n4. **Documentation updates** in ADR and securing.md are comprehensive and include the update workflow.\n\nLGTM."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d50ef48a612f2a399e84eed67f67be7bdec88f15",
+      "message": "feat: implement Subresource Integrity (SRI) for CDN resources\n\nImplements comprehensive SRI protection for all external CDN resources\nto prevent tampering and ensure content integrity.\n\nChanges:\n- Pin 15 CDN resources to specific versions (HTMX 1.9.10, Alpine.js 3.14.1, etc.)\n- Generate SHA-384 integrity hashes for all CDN resources\n- Add integrity and crossorigin attributes to all CDN script/link tags\n- Create shared scripts/cdn_resources.py module for DRY configuration\n- Implement hash generation (scripts/generate-sri-hashes.py)\n- Implement hash verification (scripts/verify-sri-hashes.py)\n- Add CI pipeline verification (make sri-verify)\n- Document SRI in security guide and ADR-0014\n- Add Tailwind JIT exclusion comments (dynamic content incompatible with SRI)\n- Use @lru_cache for efficient hash loading (no global variables)\n\nTemplates updated:\n- admin.html: HTMX with canonical /dist/htmx.min.js URL\n- login.html: Font Awesome with corrected closing tag\n- change-password-required.html: Font Awesome\n\nAll 15 CDN resources now protected with cryptographic integrity verification.\n\nCloses #2558\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-16T09:07:49+00:00"
+    },
+    {
+      "sha": "276e7323b4748c4ea0d61d1de452dddc8a438890",
+      "message": "style: add blank line before lru_cache decorator for PEP 8 compliance\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-16T09:26:32+00:00"
+    },
+    {
+      "sha": "150cbb36727d655eeb32b190dd0c27ae0560541c",
+      "message": "test: add comprehensive test coverage for load_sri_hashes()\n\n- Add 8 test cases covering all code paths in load_sri_hashes()\n- Test success case, file not found, invalid JSON, permission errors\n- Test lru_cache behavior and integration with admin endpoints\n- Test edge cases: empty file, unicode content\n- Remove shebang from scripts/cdn_resources.py (library module)\n\nCloses #2558\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-16T10:01:44+00:00"
+    },
+    {
+      "sha": "d7b69ad633c86185ba7c9c807f08cbf396d8f6d5",
+      "message": "fix: review fixes for SRI implementation\n\n- Fix docs referencing wrong file (generate-sri-hashes.py -> cdn_resources.py)\n- Add *.json to pyproject.toml package-data for wheel builds\n- Add sri_hashes context to forgot-password and reset-password endpoints\n- Fix HTMX script tag indentation in admin.html\n- Use %s logger format instead of f-string in load_sri_hashes\n- Remove unused monkeypatch parameter from SRI tests\n- Add Tailwind JIT exclusion comments to forgot-password and reset-password\n\nCloses #2558\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-21T21:17:18+00:00"
+    },
+    {
+      "sha": "fffbbb98661b29daeee98b1956dc6f0adb69f74d",
+      "message": "Makefile update\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-21T23:18:38+00:00"
+    },
+    {
+      "sha": "9edde4a00d18d481619128bf33b97aa9f2b38f75",
+      "message": "fix(test): remove Authorization header from cookie injection to fix CORS\n\nThe SRI PR added crossorigin=\"anonymous\" to CDN resources (required by\nthe W3C SRI spec for cross-origin integrity checks). This changed CDN\nfetch mode from no-cors to cors. Playwright's set_extra_http_headers\nsends the Authorization header on ALL requests including cross-origin\nCDN fetches, triggering CORS preflight failures on CDNs that don't\nwhitelist Authorization — blocking Alpine.js, CodeMirror, and other\nscripts from loading.\n\nFix: use cookie-only auth in _inject_jwt_cookie and\n_set_admin_jwt_cookie. The JWT cookie alone is sufficient for\nsame-origin page navigation and HTMX requests.\n\nCloses #2558\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-21T23:30:25+00:00"
+    }
+  ],
+  "files_changed": 20,
+  "additions": 759,
+  "deletions": 30,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:44.622535",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:44.624082",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2963,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2963.json"
+  }
+}

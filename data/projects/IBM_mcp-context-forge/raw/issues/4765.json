@@ -1,0 +1,33 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4765,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4765"
+  },
+  "metadata": {
+    "title": "[BUG]: `make serve` fails with `ModuleNotFoundError: No module named 'cpex'`",
+    "state": "closed",
+    "created_at": "2026-05-14T11:49:21+00:00",
+    "updated_at": "2026-05-14T13:36:33+00:00",
+    "closed_at": "2026-05-14T13:36:33+00:00",
+    "author": "Lang-Akshay",
+    "labels": [
+      "bug"
+    ],
+    "milestone": null,
+    "assignees": [
+      "Lang-Akshay"
+    ]
+  },
+  "description": "### Summary\n\n`make serve` crashes immediately with `HaltServer: Worker failed to boot.` because `run-gunicorn.sh` activates a **stale** `~/.venv/mcpgateway` that is missing the `cpex>=0.1.0` core dependency added in the 1.0.x release cycle.\n\n---\n\n### Environment\n\n- **OS**: macOS (Darwin 25.3.0, arm64)\n- **Branch**: `main`\n- **Commit**: `16f8d1a00` (`[Chore] Changes for release of 1.0.1`)\n\n---\n\n### Steps to Reproduce\n\n```bash\nmake serve\n```\n\n---\n\n### Actual Behavior\n\nAll gunicorn workers crash on boot:\n\n```\n[ERROR] Exception in worker process\nTraceback (most recent call last):\n  ...\n  from cpex.plugins import ToolHookType, ResourceHookType, PromptHookType, ...\nModuleNotFoundError: No module named 'cpex'\n[ERROR] Worker (pid:XXXX) exited with code 3.\ngunicorn.errors.HaltServer: <HaltServer 'Worker failed to boot.' 3>\n```\n\n---\n\n### Expected Behavior\n\n`make serve` should start the production Gunicorn server on `:4444` without errors.\n\n---\n\n### Root Cause\n\n**Two-part failure:**\n\n#### 1. Wrong venv priority in `run-gunicorn.sh` (lines 131–156)\n\nThe script resolves the virtual environment in this order:\n\n```\n1. ~/.venv/mcpgateway   ← PREFERRED (user global, potentially stale)\n2. ${SCRIPT_DIR}/.venv  ← FALLBACK  (project dir, freshly installed by `make install`)\n```\n\nThis is the **inverse** of what makes sense for a repo-local development workflow. `make serve` calls `make install` first, which installs all packages into the project's `.venv`. Then `run-gunicorn.sh` ignores that freshly-populated venv and picks up the user's global `~/.venv/mcpgateway` instead.\n\n#### 2. `cpex>=0.1.0` added as a new core dependency\n\n`cpex` was added as a mandatory package in `pyproject.toml` (timestamps: `2026-05-11`). Any pre-existing `~/.venv/mcpgateway` created before that date does not have `cpex` and cannot boot the application.\n\n**Affected dependency list** (all missing from stale venv):\n\n```\ncpex>=0.1.0\n```\n\n---\n\n### Evidence\n\n```bash\n# ~/.venv/mcpgateway has gunicorn but NOT cpex:\n$ ~/.venv/mcpgateway/bin/pip show cpex\nWARNING: Package(s) not found: cpex\n\n# project .venv (created by `make install`) HAS cpex:\n$ grep cpex make serve output\n + cpex==0.1.0  ✓ installed\n\n# run-gunicorn.sh activates the wrong venv:\n+ source /Users/akshayshinde/.venv/mcpgateway/bin/activate   ← stale venv chosen\n```\n\n---\n\n### Impact\n\n`make serve` is **completely broken** for any user who has a pre-existing `~/.venv/mcpgateway` from before the `cpex` dependency was introduced. The `make install` step (which correctly installs `cpex` into the project `.venv`) is silently bypassed.\n\n---\n\n### Fix Options\n\n#### Option A — Reverse venv priority in `run-gunicorn.sh` (recommended)\n\nChange `run-gunicorn.sh` lines 133–142 to check the project `.venv` **first**:\n\n```bash\n# Check for virtual environment in script directory (development setup) FIRST\nif [[ -f \"${SCRIPT_DIR}/.venv/bin/activate\" ]]; then\n    echo \"🔧  Activating virtual environment in script directory\"\n    source \"${SCRIPT_DIR}/.venv/bin/activate\"\n\n# Fall back to user home directory venv\nelif [[ -f \"${HOME}/.venv/mcpgateway/bin/activate\" ]]; then\n    echo \"🔧  Activating virtual environment: ${HOME}/.venv/mcpgateway\"\n    source \"${HOME}/.venv/mcpgateway/bin/activate\"\n```\n\nThis makes `make install` + `make serve` work as a coherent workflow.\n\n#### Option B — Immediate workaround (no code change)\n\nInstall `cpex` into the existing global venv:\n\n```bash\n~/.venv/mcpgateway/bin/pip install \"cpex>=0.1.0\"\nmake serve\n```\n\nOr force the project venv explicitly:\n\n```bash\nVIRTUAL_ENV=$(pwd)/.venv make serve\n```\n\n---",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:35.841876",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:35.842874",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4765,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4765.json"
+  }
+}

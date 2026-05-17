@@ -1,0 +1,109 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3678,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3678"
+  },
+  "metadata": {
+    "title": "fix(gateway): preserve per-resource visibility on gateway refresh",
+    "state": "closed",
+    "created_at": "2026-03-14T11:00:41+00:00",
+    "updated_at": "2026-03-20T13:16:36+00:00",
+    "closed_at": "2026-03-20T09:15:00+00:00",
+    "merged_at": "2026-03-20T09:15:00+00:00",
+    "author": "gandhipratik203",
+    "labels": [
+      "bug",
+      "testing",
+      "python",
+      "security",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "gandhipratik203"
+    ]
+  },
+  "description": "## Related Issue\n\nCloses #3524\n\n## Summary\n\n`_update_or_create_resources()` forced `gateway.visibility` on every gateway refresh, silently overwriting resource-specific visibility overrides that were correctly set during initial registration via `register_gateway()`.\n\n<details>\n<summary>Change details</summary>\n\n**The inconsistency**\n\n| Path | Visibility logic | Behaviour |\n|---|---|---|\n| `register_gateway()` (line 961) | `getattr(r, \"visibility\", None) or visibility` | Respects per-resource override ✅ |\n| `_update_or_create_resources()` — update (line 4227) | `gateway.visibility` | Overwrites override ❌ |\n| `_update_or_create_resources()` — create (line 4240) | `gateway.visibility` | Ignores override ❌ |\n\n**Fix**\n\nBoth the update and create paths in `_update_or_create_resources()` now use:\n\n```python\ngetattr(resource, \"visibility\", None) or gateway.visibility\n```\n\nmatching the existing behaviour in `register_gateway()`. When a resource carries no visibility override, gateway visibility is used as before.\n\n**Tests**\n\nUpdated existing tests to explicitly set `resource.visibility = None` where gateway visibility should win. Added two regression tests:\n- Per-resource visibility is preserved on update when `update_visibility=True`\n- Per-resource visibility is used on create in `_update_or_create_resources()`\n\n</details>\n\n---\n\n## Scope\n\n| Requirement | Status |\n|---|---|\n| `_update_or_create_resources()` update path respects per-resource visibility | ✅ |\n| `_update_or_create_resources()` create path respects per-resource visibility | ✅ |\n| Consistent with `register_gateway()` behaviour | ✅ |\n| Regression tests added | ✅ |\n\n---\n\n## 🔬 Steps to Test\n\n```bash\nuv run pytest tests/unit/mcpgateway/services/test_gateway_service.py tests/unit/mcpgateway/services/test_gateway_service_extended.py tests/unit/mcpgateway/services/test_gateway_service_helpers.py -v\n```\n\n---\n\n## 🏷️ Type of Change\n\n- [x] Bug fix\n\n---\n\n## ✅ Checklist\n\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] Tests added/updated for changes\n- [x] No secrets or credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3980185547",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-20T08:30:15+00:00",
+      "body": "Approved. The original resource visibility fix is correct and has been extended to cover the full surface: pre-propagation guard, all three entity types (resources, tools, prompts), both update and create paths, schema defaults, and input validation. Verified end-to-end on Docker with PostgreSQL."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "3a342c519a0bebeb990f1ec7da8457c80409657a",
+      "message": "fix(gateway): preserve per-resource visibility on gateway refresh\n\n_update_or_create_resources() previously forced gateway.visibility on\nevery refresh, silently overwriting resource-specific visibility overrides\nset during initial registration via register_gateway().\n\nBoth the update and create paths now use:\n  getattr(resource, \"visibility\", None) or gateway.visibility\n\nmatching the existing behaviour in register_gateway() (line 961).\n\nUpdated existing tests to explicitly set resource.visibility = None where\ngateway visibility should win, and added two regression tests:\n- resource-specific visibility is preserved on update (update_visibility=True)\n- resource-specific visibility is used on create in _update_or_create_resources\n\nCloses #3524\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-14T10:59:11+00:00"
+    },
+    {
+      "sha": "28b5c8e971cb2b30191d1238abfcdea8e28b3dee",
+      "message": "fix(schemas): set ResourceCreate.visibility default to None for correct fallback\n\nResourceCreate.visibility defaulted to \"public\", which caused the\ngetattr(resource, \"visibility\", None) or gateway.visibility pattern\nto always evaluate to \"public\" for MCP-discovered resources—never\nfalling through to gateway.visibility. This was a security regression:\nresources on team/private gateways would silently get public visibility.\n\nChange the default to None so the or-fallback works correctly everywhere:\n- _update_or_create_resources() create & update paths\n- register_gateway() per-resource visibility logic (pre-existing fix)\n\nAlso update resource_service.register_resource() to handle the None\ndefault with an explicit or \"public\" fallback.\n\nAdd regression test using actual ResourceCreate (not MagicMock) to\nverify MCP-discovered resources inherit gateway visibility.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T00:12:18+00:00"
+    },
+    {
+      "sha": "67187d640cb62b794387c7fcf005830fa2f68d0d",
+      "message": "fix(gateway): preserve per-resource visibility during pre-propagation and validate values\n\nAddress three findings from Codex review:\n\n1. (Major) Pre-propagation at line 1913 blindly set all linked resources\n   to the new gateway visibility, destroying per-resource overrides before\n   _update_or_create_resources() could preserve them. Now captures the old\n   gateway visibility and only propagates to items that inherited it;\n   per-item overrides are preserved.\n\n2. (Minor) Change detection in _update_or_create_resources compared\n   existing_resource.visibility against gateway.visibility instead of the\n   effective target visibility. Fixed to use the same getattr-or-fallback\n   expression used in the assignment.\n\n3. (Minor) ResourceCreate accepted arbitrary visibility strings with no\n   validation. Added @field_validator(\"visibility\") matching the pattern\n   already used in ServerCreate, PromptCreate, and A2AAgentCreate.\n\nTests: added test_update_gateway_visibility_preserves_per_resource_overrides\ncovering the full update_gateway flow with a mix of inherited and overridden\nresource visibility.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T07:42:14+00:00"
+    },
+    {
+      "sha": "a5d8bc1f612bb0f3e2dca7031f14c14b63e41c63",
+      "message": "fix(gateway): only update resource visibility from explicit upstream values\n\nWhen _update_or_create_resources processes existing resources, only update\nvisibility if the upstream resource explicitly sets one (not None). When\nthe upstream has no visibility (typical for MCP-discovered resources),\npreserve the existing DB value — the pre-propagation in update_gateway\nalready handles updating inherited resources.\n\nPreviously, the helper fell back to gateway.visibility when upstream was\nNone, which overwrote per-resource overrides that the pre-propagation\nhad correctly preserved.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T07:52:20+00:00"
+    },
+    {
+      "sha": "be755ca78fe11e04291a8e30977ce9fdb8b98905",
+      "message": "fix(gateway): extend per-item visibility preservation to tools and prompts\n\nApply the same upstream_visibility guard to _update_or_create_tools and\n_update_or_create_prompts: only update visibility when the upstream object\nexplicitly sets one. MCP-discovered tools/prompts carry no visibility, so\nthe helpers now preserve existing DB values — the pre-propagation in\nupdate_gateway already handles updating inherited items.\n\nAlso change ToolCreate.visibility and PromptCreate.visibility defaults\nfrom \"public\" to None (matching ResourceCreate), and add visibility\nvalidators to both schemas. Update tool_service and prompt_service\nfallback lines to handle None with explicit or \"public\" fallback.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T08:04:10+00:00"
+    },
+    {
+      "sha": "c0edb4cbc8dcd43c680669c1bb15a7dc7be69617",
+      "message": "fix(schemas): add full docstrings to ToolCreate and PromptCreate visibility validators\n\nflake8 DAR requires Args, Returns, and Raises sections in docstrings.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T08:13:02+00:00"
+    },
+    {
+      "sha": "b2a470895e903c3d89fd1b314f0cbe63785ccac3",
+      "message": "fix(gateway): respect per-item visibility on tool and prompt create paths\n\nThe create paths in _create_db_tool() and _update_or_create_prompts()\nstill hardcoded gateway.visibility for new items. Now use the same\ngetattr(item, \"visibility\", None) or gateway.visibility pattern already\nused for resources, so explicit upstream visibility is honored.\n\nAlso set visibility=None on all MagicMock server objects in tests to\ncorrectly simulate MCP-discovered items without per-item visibility.\nAdded test_create_db_tool_respects_explicit_tool_visibility to cover\nthe explicit override path.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T08:25:40+00:00"
+    },
+    {
+      "sha": "5124c44d8970175e994a4b765f443b38a52bbe38",
+      "message": "chore: bump max-bool-expr from 6 to 7 in ruff config\n\nThe visibility change detection in _update_or_create_resources uses\n4 field comparisons + 1 compound visibility check (3 and-chained\nsub-expressions), totaling 7 boolean ops. Raise the limit by 1.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T08:39:19+00:00"
+    },
+    {
+      "sha": "35b9c6beb5bde120813bbf11e4692921b1b87b2a",
+      "message": "test: cover visibility validator rejection and explicit upstream tool/prompt updates\n\nAdd tests for the 5 uncovered lines:\n- schemas.py:418,1637,2208: parametrized test that ToolCreate, ResourceCreate,\n  and PromptCreate all reject invalid visibility strings with ValueError\n- gateway_service.py:4163: test that explicit upstream tool visibility is\n  applied to existing tools when update_visibility=True\n- gateway_service.py:4344: test that explicit upstream prompt visibility is\n  applied to existing prompts when update_visibility=True\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T09:06:22+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 383,
+  "deletions": 38,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:29.431772",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:29.433339",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3678,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3678.json"
+  }
+}

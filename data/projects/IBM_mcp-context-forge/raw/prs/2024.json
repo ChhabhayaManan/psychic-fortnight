@@ -1,0 +1,118 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2024,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2024"
+  },
+  "metadata": {
+    "title": "fix(#2002): properly decode and pass A2A agent authentication credentials",
+    "state": "closed",
+    "created_at": "2026-01-10T18:51:16+00:00",
+    "updated_at": "2026-01-12T02:43:31+00:00",
+    "closed_at": "2026-01-12T02:43:30+00:00",
+    "merged_at": "2026-01-12T02:43:30+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Fixes authentication credential handling in A2A agent invocation - credentials were stored encrypted but never decrypted before being passed to backend agents\n- Adds regression tests for Basic Auth, Bearer Token, and X-API-Key authentication\n- Adds demo A2A agent script with CLI support for all authentication types\n\n**Depends on:** #2001 (must be merged first)\n\nCloses #2002\n\n## Changes\n\n### Core Fix (`mcpgateway/services/a2a_service.py`)\n- Import `decode_auth` (was commented out)\n- Check for any configured auth type (not just `api_key` and `bearer`)\n- Decrypt `auth_value` using `decode_auth()` before applying headers\n\n### Tests (`tests/unit/mcpgateway/services/test_a2a_service.py`)\n- `test_invoke_agent_with_basic_auth` - verifies Basic Auth header is decoded and passed\n- `test_invoke_agent_with_bearer_auth` - verifies Bearer token is decoded and passed\n- `test_invoke_agent_with_custom_headers` - verifies X-API-Key headers are decoded and passed\n\n### Demo Script (`scripts/demo_a2a_agent_auth.py`)\n- New CLI-based demo agent supporting `--auth-type {none,basic,bearer,apikey}`\n- Auto-generates secure credentials when not provided\n- Supports auto-registration with ContextForge via `--auto-register`\n\n### Makefile\n- `make demo-a2a-up` - Start 3 demo agents (basic, bearer, apikey) with auto-registration\n- `make demo-a2a-down` - Stop all demo agents\n- `make demo-a2a-status` - Show agent status\n\n## Test plan\n\n- [ ] Run `make test-unit` - all tests pass\n- [ ] Run `make demo-a2a-up` with dev server running\n- [ ] Verify agents appear in Admin UI under A2A Agents\n- [ ] Use \"Test\" button to invoke each agent type\n- [ ] Verify HTTP 200 responses (not 401)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+  "comments": [
+    {
+      "id": "2678900874",
+      "author": "Copilot",
+      "created_at": "2026-01-10T18:58:18+00:00",
+      "body": "The type hint `str | None` uses Python 3.10+ union syntax. For compatibility with Python 3.9, this should use `Optional[str]` from the typing module instead. The same issue exists on line 206 in scripts/demo_a2a_agent.py.\n```suggestion\ndef register_agent(port: int) -> Optional[str]:\n```"
+    },
+    {
+      "id": "2678900879",
+      "author": "Copilot",
+      "created_at": "2026-01-10T18:58:18+00:00",
+      "body": "The type hint `str | None` uses Python 3.10+ union syntax. For compatibility with Python 3.9, this should use `Optional[str]` from the typing module instead. Note that `Optional[str]` is already imported at the top of the file.\n```suggestion\ndef register_agent(port: int) -> Optional[str]:\n```"
+    },
+    {
+      "id": "2678900882",
+      "author": "Copilot",
+      "created_at": "2026-01-10T18:58:19+00:00",
+      "body": "The comment \"# Standard\" appears to be misplaced here. It seems like it should be associated with the import statement on line 92, but the import is inside an except block. This comment placement is confusing and should either be moved to line 74 before the import logging statement, or removed if it's not adding value in this context.\n```suggestion\n\n```"
+    },
+    {
+      "id": "2678900884",
+      "author": "Copilot",
+      "created_at": "2026-01-10T18:58:19+00:00",
+      "body": "The comment \"# Standard\" appears to be misplaced here. It seems like it should be associated with the import statement on line 74, but the import is inside an except block. This comment placement is confusing and should either be moved to line 61 before other imports, or removed if it's not adding value in this context.\n```suggestion\n\n```"
+    },
+    {
+      "id": "2678900892",
+      "author": "Copilot",
+      "created_at": "2026-01-10T18:58:20+00:00",
+      "body": "Module 'datetime' is imported with both 'import' and 'import from'."
+    },
+    {
+      "id": "2678910047",
+      "author": "jonpspri",
+      "created_at": "2026-01-10T19:11:56+00:00",
+      "body": "Minimum Python version is 3.11"
+    },
+    {
+      "id": "2678910250",
+      "author": "jonpspri",
+      "created_at": "2026-01-10T19:12:15+00:00",
+      "body": "Do not make any changes."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3647139451",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-10T18:58:20+00:00",
+      "body": "## Pull request overview\n\nThis PR fixes a critical authentication bug where A2A agent credentials were stored encrypted but never decrypted before being passed to backend agents, causing HTTP 401 errors. The fix adds proper credential decryption using `decode_auth()` before applying authentication headers.\n\n**Changes:**\n- Core authentication fix: Import and use `decode_auth()` to decrypt stored credentials before HTTP requests\n- Comprehensive regression tests for Basic Auth, Bearer Token, and X-API-Key authentication\n- New demo A2A agent scripts with CLI support for all authentication types and auto-registration\n- Enhanced admin UI with modal dialog for testing A2A agents with custom queries\n- Makefile targets for managing demo agents\n\n### Reviewed changes\n\nCopilot reviewed 14 out of 14 changed files in this pull request and generated 5 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| mcpgateway/services/a2a_service.py | Core fix: imports decode_auth, checks for any auth type, decrypts auth_value before applying headers; adds error handling for tool creation |\r\n| tests/unit/mcpgateway/services/test_a2a_service.py | Adds three regression tests for Basic Auth, Bearer Token, and custom header authentication |\r\n| tests/unit/mcpgateway/test_issue_840_a2a_agent.py | New comprehensive test suite for Issue #840 covering A2A agent testing and tool listing |\r\n| scripts/demo_a2a_agent_auth.py | New demo agent supporting multiple auth types with CLI interface and auto-registration |\r\n| scripts/demo_a2a_agent.py | New basic demo agent for Issue #840 testing |\r\n| mcpgateway/templates/admin.html | Adds A2A test modal with query input field for user-provided test queries |\r\n| mcpgateway/static/admin.js | Implements A2A test modal functionality with proper event handling and cleanup |\r\n| mcpgateway/admin.py | Updates test endpoint to accept user-provided query from request body |\r\n| mcpgateway/services/tool_service.py | Ensures A2A tools default to \"public\" visibility for Global Tools Tab |\r\n| Makefile | Adds demo-a2a-up/down/status targets for managing demo agents |\r\n| mcpgateway/services/gateway_service.py | Code formatting improvements (line length) |\r\n| mcpgateway/services/export_service.py | Code formatting improvements (line length) |\r\n| mcpgateway/services/event_service.py | Adds misplaced comment marker |\r\n| mcpgateway/version.py | Adds misplaced comment marker |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3647146848",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-10T19:11:56+00:00",
+      "body": ""
+    },
+    {
+      "id": "3647146966",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-10T19:12:15+00:00",
+      "body": ""
+    },
+    {
+      "id": "3648982943",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-12T02:08:53+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "86789028746651431ab5b1d0917cfeb61eae0021",
+      "message": "fix(#2002): properly decode and pass A2A agent authentication credentials\n\nA2A agents configured with Basic Auth, Bearer Token, or X-API-Key\nauthentication were failing with HTTP 401 because credentials were\nnot being decrypted and passed to the backend agent.\n\nChanges:\n- Fix a2a_service.py to decode auth_value using decode_auth() before\n  making HTTP requests (follows gateway_service pattern)\n- Handle all auth types (basic, bearer, authheaders) not just api_key/bearer\n- Fail fast with A2AAgentError if auth decryption fails (don't silently\n  proceed with empty headers)\n- Add 3 regression tests for authenticated invocation\n- Add demo_a2a_agent_auth.py script for manual testing with CLI args\n- Add Makefile targets: demo-a2a-up, demo-a2a-down, demo-a2a-status\n- Fix pre-existing flake8 errors (unused variables, comparison to False)\n\nCloses #2002\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-10T18:46:43+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 1093,
+  "deletions": 29,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:15.445500",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:15.448044",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2024,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2024.json"
+  }
+}

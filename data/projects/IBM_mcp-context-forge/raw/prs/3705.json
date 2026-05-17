@@ -1,0 +1,287 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3705,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3705"
+  },
+  "metadata": {
+    "title": "feat: Rust MCP runtime pre-invoke plugin hooks and WXO auth support",
+    "state": "closed",
+    "created_at": "2026-03-17T10:10:38+00:00",
+    "updated_at": "2026-03-17T20:28:50+00:00",
+    "closed_at": "2026-03-17T20:28:48+00:00",
+    "merged_at": "2026-03-17T20:28:48+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Add pre-tool hook plugin capability to the Rust MCP runtime, enabling plugins (e.g. WXO connections) to inject credentials and transform arguments on the Rust direct execution path\n- Extract `run_pre_request_hooks()` as a shared function so both the Python middleware chain and the Rust internal auth path run identical HTTP_PRE_REQUEST plugin hooks\n- Add `plugins_can_override_auth_headers` config setting (default `false`) to guard against plugins overwriting inbound auth headers unless explicitly trusted\n- Disable plan caching when pre-invoke hooks ran, since hook results depend on per-call context\n- Extend load test with multi-tenant identity and WXO auth JWT claims\n- Document the two-phase resolve-then-execute model, plugin execution by mode, and direct execution eligibility\n\n## Test plan\n\n- [x] Existing `TestRustMcpExecutionPlan` tests pass with updated fallback reason\n- [x] WebSocket transport test updated for scoped log capture\n- [x] HTTP auth middleware tests pass\n- [x] Ruff and bandit pass on all changed files\n- [ ] Integration test with WXO plugin enabled (manual/CI)\n- [ ] Load test with multi-tenant JWT claims against deployed stack",
+  "comments": [
+    {
+      "id": "2945765569",
+      "author": "Copilot",
+      "created_at": "2026-03-17T10:23:14+00:00",
+      "body": "EchoDelayUser falls back to BEARER_TOKEN when WXO_AUTH_ENABLED is false, but if MCPGATEWAY_BEARER_TOKEN isn’t set this silently proceeds without an Authorization header (and the load test will fail in a less obvious way). Consider failing fast here with a clear error when WXO_AUTH_ENABLED is false and BEARER_TOKEN is empty, mirroring the previous _get_auth_token() behavior.\n"
+    },
+    {
+      "id": "2945765607",
+      "author": "Copilot",
+      "created_at": "2026-03-17T10:23:14+00:00",
+      "body": "NUM_TENANTS is used to build TENANT_IDS and then random.choice(TENANT_IDS). If NUM_TENANTS is set to 0 (or negative) this will raise at runtime in a non-obvious place. Add a small validation after parsing NUM_TENANTS to enforce >= 1 with a clear error message.\n"
+    },
+    {
+      "id": "2945765641",
+      "author": "Copilot",
+      "created_at": "2026-03-17T10:23:14+00:00",
+      "body": "ToolHookType.TOOL_PRE_INVOKE is invoked with headers built from the inbound request (hook_headers = request_headers), but in the normal invoke_tool() flow the pre-invoke hook receives the outbound headers that will be sent upstream (gateway/tool auth + passthrough). This mismatch can break plugins that expect to see/modify the actual upstream header set. Consider passing the computed outbound header dict (runtime_headers/headers) into ToolPreInvokePayload.headers instead of request_headers, then applying the modified headers back onto runtime_headers case-insensitively."
+    },
+    {
+      "id": "2945765670",
+      "author": "Copilot",
+      "created_at": "2026-03-17T10:23:14+00:00",
+      "body": "In prepare_rust_mcp_tool_execution(), the pre-invoke hook’s modified_payload.name is being applied to remoteToolName (via tool_name_original). In the normal Python invoke_tool() path, ToolPreInvokePayload.name mutations do not affect the upstream MCP tool name (call_tool uses tool_name_original computed from DB), so this changes behavior between Rust-direct and Python fallback. To keep parity, either ignore modified_payload.name here (and only apply modified args/headers), or update the Python execution path so that tool_name_original used for the upstream call is also updated when pre-invoke modifies the name (with corresponding tests).\n"
+    },
+    {
+      "id": "2945765695",
+      "author": "Copilot",
+      "created_at": "2026-03-17T10:23:15+00:00",
+      "body": "runtime_headers/plugin_headers merging is currently case-sensitive (e.g., existing \"Authorization\" plus plugin-provided \"authorization\" will both be emitted). When Rust deserializes the JSON object into a HashMap and then builds a HeaderMap, iteration order is nondeterministic, so the effective auth header value can be flaky. Normalize header names case-insensitively before merging (e.g., lower-case keys), and ensure plugin-provided values deterministically override prior values when intended."
+    },
+    {
+      "id": "2945765733",
+      "author": "Copilot",
+      "created_at": "2026-03-17T10:23:15+00:00",
+      "body": "run_pre_request_hooks() merges headers with a plain dict spread ({**headers, **modified_headers_dict}). Because HTTP headers are case-insensitive, this can yield duplicate logical headers when only casing differs (e.g., \"Authorization\" vs \"authorization\"); when written back to request.scope[\"headers\"], this becomes multiple ASGI header entries with the same lowercased name and ambiguous precedence. Consider normalizing keys (lowercasing) for both input + plugin headers before applying the override guard and merging, so there is exactly one value per header name and plugin overrides behave deterministically when enabled."
+    },
+    {
+      "id": "2945765766",
+      "author": "Copilot",
+      "created_at": "2026-03-17T10:23:15+00:00",
+      "body": "The overridden-header check recomputes `{h.lower() for h in headers}` inside the set comprehension, which is unnecessary work and makes the logic harder to read. Precompute the inbound lowercased header-name set once (e.g., original_lower = {h.lower() for h in headers}) and reuse it when determining which auth-protected headers were overridden.\n"
+    },
+    {
+      "id": "2945765797",
+      "author": "Copilot",
+      "created_at": "2026-03-17T10:23:16+00:00",
+      "body": "_run_internal_mcp_authentication() uses the raw string literal \"http_pre_request\" in has_hooks_for(). Elsewhere the codebase consistently uses HttpHookType.HTTP_PRE_REQUEST; using the constant avoids typos and keeps refactors safer (the hook type is a public API surface for plugins).\n"
+    },
+    {
+      "id": "2945834242",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T10:34:48+00:00",
+      "body": "Agreed. Added a fail-fast `RuntimeError` when `WXO_AUTH_ENABLED=false` and `BEARER_TOKEN` is empty, mirroring the previous `_get_auth_token()` behavior. Fixed in 50aa249."
+    },
+    {
+      "id": "2945834364",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T10:34:49+00:00",
+      "body": "Agreed. Added a `ValueError` guard enforcing `NUM_TENANTS >= 1` at module load time. Fixed in 50aa249."
+    },
+    {
+      "id": "2945834621",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T10:34:52+00:00",
+      "body": "Good catch. The Python `invoke_tool()` path passes the computed outbound headers (gateway auth + passthrough) into the pre-invoke hook, but this code was passing the inbound `request_headers`. Changed to pass `runtime_headers` (which already has gateway auth, OAuth tokens, and passthrough headers applied) for parity. Fixed in 50aa249."
+    },
+    {
+      "id": "2945834729",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T10:34:53+00:00",
+      "body": "This finding is incorrect. The Python `invoke_tool()` path **does** apply tool name changes from pre-invoke hooks — see `tool_service.py:3704`: `name = payload.name`. Both paths already have the same behavior, so no change is needed."
+    },
+    {
+      "id": "2945834915",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T10:34:55+00:00",
+      "body": "Agreed. Plugin-provided header keys are now lowercased on merge (`runtime_headers[str(hk).lower()] = str(hv)`) to ensure deterministic override behavior regardless of casing. Fixed in 50aa249."
+    },
+    {
+      "id": "2945835071",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T10:34:57+00:00",
+      "body": "Agreed. Both the original and plugin-provided headers are now normalized to lowercase keys before merging, preventing duplicate logical headers from casing differences. Fixed in 50aa249."
+    },
+    {
+      "id": "2945835220",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T10:34:58+00:00",
+      "body": "Agreed. Precomputed `original_lower = {h.lower() for h in headers}` once and reused it in the override check. Fixed in 50aa249."
+    },
+    {
+      "id": "2945835333",
+      "author": "jonpspri",
+      "created_at": "2026-03-17T10:35:00+00:00",
+      "body": "Agreed. Changed to `HttpHookType.HTTP_PRE_REQUEST` and merged the import with the existing `from mcpgateway.plugins.framework import ...` line. Fixed in 50aa249."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3959663291",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T10:23:16+00:00",
+      "body": "## Pull request overview\n\nThis PR extends the Rust MCP runtime’s direct `tools/call` execution path to support Python-executed plugin hooks (notably pre-invoke transformations and WXO auth-related header injection), and documents the resulting two-phase resolve-then-execute architecture.\n\n**Changes:**\n- Add `TOOL_PRE_INVOKE` hook execution during plan resolution in Python, passing modified args/headers to Rust for direct upstream execution; force fallback when post-invoke hooks are configured.\n- Add shared `run_pre_request_hooks()` so both the Python HTTP middleware chain and Rust internal auth path run identical `HTTP_PRE_REQUEST` hooks with an auth-header override guard.\n- Update load test to simulate multi-tenant identities and WXO JWT claims; expand architecture documentation for plugin execution, caching behavior, and direct execution eligibility.\n\n### Reviewed changes\n\nCopilot reviewed 16 out of 16 changed files in this pull request and generated 8 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| tools_rust/mcp_runtime/src/lib.rs | Add plan fields for pre-invoke hook results and apply `modifiedArgs` on direct/RMCP execution; disable plan caching when hooks ran. |\r\n| tools_rust/mcp_runtime/README.md | Document the two-phase resolve-then-execute `tools/call` model and plugin behavior. |\r\n| tests/unit/mcpgateway/transports/test_websocket_transport.py | Tighten log capture scope for ping timeout test. |\r\n| tests/unit/mcpgateway/services/test_tool_service.py | Update fallback reason expectation for post-invoke hook configuration. |\r\n| tests/loadtest/locustfile_echo_delay.py | Add tenant simulation and WXO-claim JWT generation in the load test. |\r\n| mcpgateway/transports/rust_mcp_runtime_proxy.py | Add debug logging explaining why requests fall back to Python. |\r\n| mcpgateway/services/tool_service.py | Execute tool pre-invoke hooks during Rust plan resolution and return modified args/headers in the plan. |\r\n| mcpgateway/middleware/token_scoping.py | Formatting-only change to internal auth header helper call. |\r\n| mcpgateway/middleware/http_auth_middleware.py | Extract shared `run_pre_request_hooks()` and add auth-header override guard configuration. |\r\n| mcpgateway/main.py | Run `HTTP_PRE_REQUEST` hooks in internal Rust ingress authentication flow; add plugin manager init diagnostics; pass tool arguments into resolve. |\r\n| mcpgateway/config.py | Add `plugins_can_override_auth_headers` setting (default false). |\r\n| llms/mcpgateway.md | Mention Rust MCP runtime location in project overview. |\r\n| docs/docs/architecture/rust-mcp-runtime.md | Document plugin execution flow, internal RPC endpoints, caching implications, and eligibility. |\r\n| docs/docs/architecture/plugins.md | Document plugin behavior when Rust runtime handles `tools/call` in edge/full mode. |\r\n| docs/docs/architecture/adr/043-rust-mcp-runtime-sidecar-mode-model.md | Update ADR with internal endpoint table and two-phase `tools/call` model including plugin interactions. |\r\n| AGENTS.md | Point contributors to Rust MCP runtime development guide. |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3959741259",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T10:34:48+00:00",
+      "body": ""
+    },
+    {
+      "id": "3959741440",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T10:34:49+00:00",
+      "body": ""
+    },
+    {
+      "id": "3959741746",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T10:34:52+00:00",
+      "body": ""
+    },
+    {
+      "id": "3959741878",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T10:34:53+00:00",
+      "body": ""
+    },
+    {
+      "id": "3959742076",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T10:34:55+00:00",
+      "body": ""
+    },
+    {
+      "id": "3959742199",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T10:34:57+00:00",
+      "body": ""
+    },
+    {
+      "id": "3959742334",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T10:34:58+00:00",
+      "body": ""
+    },
+    {
+      "id": "3959742471",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-17T10:35:00+00:00",
+      "body": ""
+    },
+    {
+      "id": "3963447703",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-17T20:02:59+00:00",
+      "body": "Rebased, reviewed, and fixed 4 issues (2 security, 2 design). All Rust (121) and Python (14681) tests pass. Lints clean across both languages."
+    },
+    {
+      "id": "3963580534",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-17T20:28:35+00:00",
+      "body": "Re-approved after test fix (848a959). All 14,795 Python tests pass, 121 Rust tests pass, all lints clean."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "002bd70f36923926072b8d37e6422287efda5db8",
+      "message": "Add pre_tool_hook plugin capability to rust mcp\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-13T09:02:30+00:00"
+    },
+    {
+      "sha": "10c6f9993a491c5272bdd5613067e0a4550a78f4",
+      "message": "feat: run pre-request plugin hooks on Rust MCP auth path\n\nExtract run_pre_request_hooks() from HttpAuthMiddleware into a shared\nfunction and call it from _run_internal_mcp_authentication() so that\nHTTP_PRE_REQUEST plugins (e.g. WXO auth token exchange) fire on the\nRust MCP ingress path, not just the Python middleware chain.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-16T12:32:06+00:00"
+    },
+    {
+      "sha": "f317a0bc90eacfe4612eacf89106276dcee2703e",
+      "message": "Support of wxo Plugins and testing\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-12T19:49:38+00:00"
+    },
+    {
+      "sha": "b90d4c5686f00fe1928b510de671ee7085beef54",
+      "message": "docs: document Rust runtime plugin execution and tools/call flow\n\nThe two-phase resolve-then-execute model, plugin hook handling by mode,\ninternal RPC endpoints, and direct execution eligibility criteria were\nundocumented. Add coverage across ADR-043, the runtime architecture page,\nthe plugin framework spec, and the crate README.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-17T08:27:04+00:00"
+    },
+    {
+      "sha": "2d68a320ef9ed88d25443757d0bf79f376757302",
+      "message": "fix: correct two failing tests, clean up diagnostic logging, and document tools_rust\n\n- Fix two failing tests (rustfmt, websocket ping_loop warning filter)\n- Replace [DIAG] warning-level diagnostic logs with proper severity levels\n  (debug/info/error) across main.py and http_auth_middleware.py\n- Remove private _initialized attribute access in middleware logging\n- Use module-level uuid import instead of redundant function-level import\n  in tool_service.py\n- Fix f-string lint in locustfile_echo_delay.py\n- Document tools_rust/mcp_runtime in AGENTS.md and llms\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-17T09:27:05+00:00"
+    },
+    {
+      "sha": "8ae667c475e2c9a153f2bd020e7a4c1d6cc27619",
+      "message": "fix: address Copilot review findings on PR #3705\n\n- Use HttpHookType.HTTP_PRE_REQUEST enum instead of raw string in\n  _run_internal_mcp_authentication for type safety and refactor resilience\n- Normalize header keys to lowercase in run_pre_request_hooks and\n  tool_service pre-invoke header merging to prevent duplicate logical\n  headers from casing differences\n- Precompute lowercased original header set for auth-override guard\n- Pass outbound runtime_headers (not inbound request_headers) to\n  pre-invoke hook payload for parity with the Python invoke_tool path\n- Validate NUM_TENANTS >= 1 at load test startup\n- Fail fast when WXO auth is disabled and no BEARER_TOKEN is set\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-17T10:33:13+00:00"
+    },
+    {
+      "sha": "ad13e9556f385ddc065da36b49095bc4df7602b0",
+      "message": "test: add coverage for run_pre_request_hooks and pre-invoke hook execution\n\nAdd 15 new tests covering previously untested code paths:\n\nTestRunPreRequestHooks (9 tests):\n- No hooks registered returns original headers unchanged\n- Plugin-modified headers are merged correctly\n- No modification when plugin returns no payload\n- Auth header override stripped by default (deny path)\n- Auth header override allowed when plugins_can_override_auth_headers=True\n- Exception in hook returns original headers safely\n- Merged headers normalized to lowercase keys\n- GlobalContext created when not provided\n- Provided GlobalContext reused\n\nTestRustMcpExecutionPlan (6 tests):\n- Post-invoke hooks force fallback (using side_effect for hook type branching)\n- Active trace forces fallback\n- Pre-invoke only returns eligible plan with hasPreInvokeHooks and modifiedArgs\n- Pre-invoke hook can rename tool in plan\n- No hook fields in plan when no pre-invoke hooks registered\n- Pre-invoke hook receives outbound runtime headers, not inbound request headers\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-17T10:52:34+00:00"
+    },
+    {
+      "sha": "cf0e78b75246b5ece223b80c5366c2496fac2913",
+      "message": "fix: remove duplicate @pytest.mark.asyncio decorator in test_tool_service\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-17T18:12:41+00:00"
+    },
+    {
+      "sha": "c30051c72977ca7d8ef230383a96f149226eab6b",
+      "message": "fix: auth-header override guard bypass with mixed-case keys\n\nThe `overridden` set stored original-case plugin header keys, but the\nfilter compared lowercased keys against it. A plugin returning\n\"Authorization\" (mixed-case) instead of \"authorization\" would bypass\nthe plugins_can_override_auth_headers=false guard and overwrite inbound\nauth headers.\n\nFix: normalize `overridden` to lowercase so the filter comparison is\ncase-insensitive. Add a deny-path test for mixed-case auth headers.\n\nAlso document the known limitation that pre-invoke hooks may run twice\nwhen Rust direct execution fails and falls back to the Python path.\nPre-invoke plugins must be idempotent for correctness on this path.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-17T19:01:35+00:00"
+    },
+    {
+      "sha": "0d2062175fdb4f3049598b6a35ea3be0df00b182",
+      "message": "fix: plugin context parity and double pre-invoke on Rust fallback\n\nTwo issues addressed:\n\n1. Context parity: prepare_rust_mcp_tool_execution() now accepts\n   plugin_global_context and plugin_context_table from the resolve\n   handler, reusing the middleware-provided GlobalContext (which carries\n   JWT claims state, correlation ID, and user identity). Tool/gateway\n   metadata is injected before pre-invoke hooks run, matching the\n   invoke_tool() pattern. The resolve handler extracts these from\n   request.state and passes them through.\n\n2. Double pre-invoke prevention: When Rust direct execution fails and\n   falls back to /_internal/mcp/tools/call, Rust now injects an\n   x-contextforge-pre-invoke-ran header. invoke_tool() checks for this\n   header and skips re-running TOOL_PRE_INVOKE hooks, preventing double\n   execution for non-idempotent plugins (rate limiters, token exchange,\n   audit hooks).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-17T19:14:00+00:00"
+    },
+    {
+      "sha": "1f0bc2abb303590c3e63c2a527bb602b3e025f0c",
+      "message": "fix: prevent external callers from spoofing x-contextforge-pre-invoke-ran\n\nThe skip_pre_invoke flag was derived from raw request headers, which\nmeant any external client could send x-contextforge-pre-invoke-ran:true\nto bypass TOOL_PRE_INVOKE security/policy plugins.\n\nFix: replace header-based derivation with an explicit skip_pre_invoke\nparameter threaded through _execute_rpc_tools_call() → invoke_tool().\nOnly the trusted internal /_internal/mcp/tools/call endpoint (which is\nauthenticated via shared-secret and not exposed to external clients)\nreads the header and sets the flag. The public RPC path never sets it.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-17T19:24:24+00:00"
+    },
+    {
+      "sha": "848a9593592bd3b6223881f93e378d0a5b710666",
+      "message": "fix: update test_rpc_tool_invocation for skip_pre_invoke parameter\n\nThe mock assertion was missing the new skip_pre_invoke=False kwarg\nadded to invoke_tool() in the spoofing prevention commit.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-17T20:23:39+00:00"
+    }
+  ],
+  "files_changed": 17,
+  "additions": 1039,
+  "deletions": 139,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:44.814004",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:44.815450",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3705,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3705.json"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3628,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3628"
+  },
+  "metadata": {
+    "title": "fix: handle ResourceNotFoundError when the resource is not found",
+    "state": "closed",
+    "created_at": "2026-03-11T16:35:21+00:00",
+    "updated_at": "2026-03-12T15:00:32+00:00",
+    "closed_at": "2026-03-12T15:00:30+00:00",
+    "merged_at": "2026-03-12T15:00:30+00:00",
+    "author": "marekdano",
+    "labels": [
+      "api",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nThe bug was found during manual testing of the issue https://github.com/IBM/mcp-context-forge/issues/2419\r\n\r\nThe except `ValueError` on line 6329 never catches the actual exception thrown by resource_service.read_resource(), which is `ResourceNotFoundError` (inherits from `ResourceError` → `Exception`, not `ValueError`). So the exception falls through to the generic catch-all at line ~6763, which returns:\r\n\r\n```bash\r\n{\"code\": -32000, \"message\": \"Internal error\", \"data\": \"Resource template not found for '...'\"}\r\n```\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Make a request to \r\n```bash\r\ncurl -s -X POST http://localhost:8080/rpc \\\r\n    -H \"Content-Type: application/json\" \\\r\n    -H \"Authorization: Bearer $TOKEN\" \\\r\n    -d '{\r\n      \"jsonrpc\": \"2.0\",\r\n      \"method\": \"resources/read\",\r\n      \"params\": {\r\n        \"uri\": \"file:///nonexistent/bad-resource\"\r\n      },\r\n      \"id\": 1\r\n    }' | python -m json.tool\r\n```\r\n\r\n2. Returns\r\n\r\n**BEFORE**\r\n```bash\r\n{\r\n    \"jsonrpc\": \"2.0\",\r\n    \"error\": {\r\n        \"code\": -32000,\r\n        \"message\": \"Internal error\",\r\n        \"data\": \"Resource template not found for 'file:///nonexistent/bad-resource'\"\r\n    },\r\n    \"id\": 1\r\n}\r\n```\r\n\r\n**AFTER**\r\n```bash\r\n{\r\n    \"jsonrpc\": \"2.0\",\r\n    \"error\": {\r\n        \"code\": -32002,\r\n        \"message\": \"Resource not found: file:///nonexistent/bad-resource\",\r\n        \"data\": {\r\n            \"uri\": \"file:///nonexistent/bad-resource\"\r\n        }\r\n    },\r\n    \"id\": 1\r\n}\r\n```\r\n\r\n\r\n## 💡 Fix Description\r\n\r\nChanged except `ValueError` → `except (ValueError, ResourceNotFoundError)` so the handler now properly catches the service-layer exception and returns the clear error:\r\n```bash\r\n  {\"code\": -32002, \"message\": \"Resource not found: file:///nonexistent/bad-resource\", \"data\": {\"uri\": \"file:///nonexistent/bad-resource\"}}\r\n```\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅     |\r\n| Unit tests                            | `make test`          |    ✅     |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅     |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3935459639",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T10:24:52+00:00",
+      "body": "Clean and neat."
+    },
+    {
+      "id": "3935821195",
+      "author": "ja8zyjits",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T11:27:05+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "3937241841",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T14:47:21+00:00",
+      "body": "LGTM — clean, well-scoped fix with proper test coverage."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a6888f4015b6e0e302dc042b86bddba54420d6f0",
+      "message": "fix: handle ResourceNotFoundError when the resource is not found\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-11T16:27:02+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 23,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:11.232162",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:11.232922",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3628,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3628.json"
+  }
+}

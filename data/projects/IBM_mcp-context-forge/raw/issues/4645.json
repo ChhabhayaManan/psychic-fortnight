@@ -1,0 +1,35 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4645,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4645"
+  },
+  "metadata": {
+    "title": "[BUG]: DB_POOL_SIZE and DB_MAX_OVERFLOW are per-worker, not per-gateway — actual connections = workers × (pool_size + max_overflow)",
+    "state": "open",
+    "created_at": "2026-05-07T12:06:01+00:00",
+    "updated_at": "2026-05-08T11:23:39+00:00",
+    "closed_at": null,
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "triage",
+      "performance"
+    ],
+    "milestone": null,
+    "assignees": [
+      "bogdanmariusc10"
+    ]
+  },
+  "description": "## Summary\n\nSetting `DB_POOL_SIZE=15` and `DB_MAX_OVERFLOW=30` results in the gateway establishing ~200 database connections instead of the expected ~45. This is because each gunicorn worker gets its own independent connection pool, and additionally the observability pattern opens many simultaneous sessions per request.\n\n## Root Cause\n\nTwo compounding factors make the actual connection count unintuitive:\n\n### 1. Per-worker pool multiplication (architecture)\n\nWith gunicorn multi-worker deployment:\n- Each forked worker gets its own **independent** copy of the SQLAlchemy `QueuePool` (via OS copy-on-write semantics after fork)\n- Pool size limits are enforced **per-worker**, not per-gateway\n- `run-gunicorn.sh` auto-detects workers: `min(2×CPU+1, 16)`\n\n**Actual max connections = `GUNICORN_WORKERS × (DB_POOL_SIZE + DB_MAX_OVERFLOW)`**\n\n| Workers | DB_POOL_SIZE | DB_MAX_OVERFLOW | Expected (intuitive) | Actual Max |\n|---------|-------------|-----------------|---------------------|------------|\n| 4 | 15 | 30 | 45 | **180** |\n| 5 | 15 | 30 | 45 | **225** |\n| 16 | 15 | 30 | 45 | **720** |\n\n### 2. Observability session proliferation (amplifier)\n\nWhen `OBSERVABILITY_ENABLED=true`, each traced request creates **4-6 independent sessions** via `_get_or_create_observability_session()` in `observability_service.py`:\n- `start_trace()` → 1 session\n- `start_span()` → 1 session\n- `end_span()` → 1 session\n- `end_trace()` → 1 session\n- Optional: `add_event()`, `record_metric()` → 1-2 more\n\nAdditionally, SQL instrumentation (`instrumentation/sqlalchemy.py`) opens **3 sessions per SQL query** (start_span + end_span + duration update). A single request running 10 queries → 30 additional sessions from instrumentation alone.\n\nUnder even modest concurrency (3-5 concurrent requests per worker), a single worker can saturate all 15 pool connections and eat through all 30 overflow connections.\n\n### 3. Missing `engine.dispose()` in `post_fork` (minor)\n\n`gunicorn.config.py:post_fork()` resets Redis but does NOT call `engine.dispose()`. When `preload_app=True` (Linux default), the parent process creates pool connections that become invalid in children. SQLAlchemy handles this gracefully (invalidates stale connections by PID check), but calling `dispose()` would be cleaner and follow SQLAlchemy's official multi-process guidance.\n\n## Reproduction\n\n```bash\n# Set small pool size\nexport DB_POOL_SIZE=15\nexport DB_MAX_OVERFLOW=30\nexport OBSERVABILITY_ENABLED=true\n\n# Start with multiple workers\nmake serve  # auto-detects workers\n\n# Check PostgreSQL connection count\npsql -c \"SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE '%mcpgateway%';\"\n# Shows ~150-200+ instead of expected 45\n```\n\n## Proposed Fixes\n\n1. **Add startup log warning** showing the actual max connection formula:\n   ```\n   WARNING: Total max DB connections = workers(N) × (pool_size + max_overflow) = N × 45 = M\n   Ensure PostgreSQL max_connections >= M\n   ```\n\n2. **Reduce observability session proliferation**: Batch `start_trace`/`start_span`/`end_span`/`end_trace` into fewer sessions (reuse a single session per observability lifecycle)\n\n3. **Fix SQL instrumentation**: `_write_span_to_db()` opens 3 sessions — consolidate into 1\n\n4. **Add `engine.dispose()` in `post_fork`** for clean pool separation per worker (SQLAlchemy best practice)\n\n5. **Consider a dedicated smaller pool for observability writes** or rate-limit observability session creation when pool is near capacity\n\n## Affected Files\n\n- `mcpgateway/config.py:1920-1921` — default pool size settings\n- `mcpgateway/db.py:226` — module-level engine creation\n- `mcpgateway/services/observability_service.py:192-218` — independent session creation\n- `mcpgateway/instrumentation/sqlalchemy.py:43-88` — 3 sessions per SQL query span\n- `gunicorn.config.py:118-128` — `post_fork` missing `engine.dispose()`\n- `run-gunicorn.sh:235-248` — worker count auto-detection\n\n## Environment\n\n- SQLAlchemy >= 2.0.49\n- Gunicorn with UvicornWorker\n- PostgreSQL backend with QueuePool (non-PgBouncer)",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:47.884037",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:47.885115",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4645,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4645.json"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1659,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1659"
+  },
+  "metadata": {
+    "title": "GUNICORN settings in .env",
+    "state": "closed",
+    "created_at": "2025-12-19T00:28:22+00:00",
+    "updated_at": "2025-12-19T00:52:49+00:00",
+    "closed_at": "2025-12-19T00:52:47+00:00",
+    "merged_at": "2025-12-19T00:52:47+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\r\n\r\nAdd comprehensive Gunicorn configuration support via environment variables with consistent defaults across all deployment methods. Includes fix for database migration race condition.\r\n\r\n**Key changes:**\r\n- Gunicorn settings now configurable via `.env` file and environment variables\r\n- Default `GUNICORN_WORKERS=auto` (2×CPU+1, capped at 16) for optimal performance\r\n- Default `GUNICORN_PRELOAD_APP=true` to save memory and run migrations once\r\n- Default `DISABLE_ACCESS_LOG=true` for better throughput\r\n- Added file locking to `bootstrap_db.py` to prevent migration race conditions\r\n\r\n## Changes\r\n\r\n### Gunicorn Environment Variables\r\n\r\n| Variable | Default | Description |\r\n|----------|---------|-------------|\r\n| `GUNICORN_WORKERS` | `auto` | Worker count (`auto` = 2×CPU+1, capped at 16) |\r\n| `GUNICORN_TIMEOUT` | `600` | Worker timeout in seconds |\r\n| `GUNICORN_MAX_REQUESTS` | `100000` | Max requests per worker before restart |\r\n| `GUNICORN_MAX_REQUESTS_JITTER` | `100` | Random jitter to prevent thundering herd |\r\n| `GUNICORN_PRELOAD_APP` | `true` | Preload app before forking (saves memory) |\r\n| `GUNICORN_DEV_MODE` | `false` | Enable hot reload (development only) |\r\n| `DISABLE_ACCESS_LOG` | `true` | Disable access logging for performance |\r\n\r\n### SSL/TLS Settings\r\n\r\n| Variable | Default | Description |\r\n|----------|---------|-------------|\r\n| `SSL` | `false` | Enable TLS/SSL |\r\n| `CERT_FILE` | `certs/cert.pem` | Path to SSL certificate |\r\n| `KEY_FILE` | `certs/key.pem` | Path to SSL private key |\r\n| `KEY_FILE_PASSWORD` | - | Passphrase for encrypted key |\r\n| `FORCE_START` | `false` | Bypass lock file check |\r\n\r\n### Files Changed\r\n\r\n- **`.env.example`** - Added Gunicorn configuration section with all settings\r\n- **`run-gunicorn.sh`** - Updated defaults, fixed documentation\r\n- **`gunicorn.config.py`** - Aligned defaults with run-gunicorn.sh\r\n- **`mcpgateway/bootstrap_db.py`** - Added file locking to prevent migration race conditions\r\n- **`charts/mcp-stack/values.yaml`** - Added new settings, aligned defaults\r\n- **`charts/mcp-stack/values.schema.json`** - Added schema entries with updated defaults\r\n- **`charts/mcp-stack/README.md`** - Regenerated with new settings\r\n- **`docs/docs/manage/configuration.md`** - Added Gunicorn Production Server documentation\r\n\r\n## Migration Race Condition Fix\r\n\r\nWhen multiple Gunicorn workers start simultaneously (especially with `GUNICORN_PRELOAD_APP=false`), they can race to run database migrations, causing errors like:\r\n- `UNIQUE constraint failed: alembic_version.version_num`\r\n- `duplicate column name: original_name`\r\n\r\n**Solution:**\r\n1. Changed default to `GUNICORN_PRELOAD_APP=true` - master process runs migrations once before forking workers\r\n2. Added `FileLock` to `bootstrap_db.py` with 5-minute timeout - serializes migrations within a pod\r\n3. If lock times out, waits for schema to be ready before continuing with bootstrap\r\n\r\n**How it works in different scenarios:**\r\n\r\n| Scenario | How it's handled |\r\n|----------|-----------------|\r\n| Single pod, preload=true | Master runs migrations once, workers inherit |\r\n| Single pod, preload=false | FileLock serializes migrations across workers |\r\n| Multiple pods (K8s Helm) | Migration Job runs first via Helm hook; pods wait via startup probe |\r\n| Multiple pods (no Helm) | Each pod's FileLock + idempotent `alembic upgrade head` |\r\n\r\n## Why These Defaults?\r\n\r\n- **`GUNICORN_WORKERS=auto`**: Automatically scales based on available CPU cores\r\n- **`GUNICORN_PRELOAD_APP=true`**: Saves memory, runs migrations once before forking workers\r\n- **`DISABLE_ACCESS_LOG=true`**: Access logs create massive I/O overhead under high concurrency\r\n- **`GUNICORN_MAX_REQUESTS=100000`**: Prevents memory leaks by recycling workers\r\n\r\n## Usage Examples\r\n\r\n```bash\r\n# Use defaults (auto workers, preload, no access logs)\r\n./run-gunicorn.sh\r\n\r\n# Fixed worker count\r\nGUNICORN_WORKERS=8 ./run-gunicorn.sh\r\n\r\n# Disable preload for development (each worker loads independently)\r\nGUNICORN_PRELOAD_APP=false ./run-gunicorn.sh\r\n\r\n# Enable access logging for debugging\r\nDISABLE_ACCESS_LOG=false ./run-gunicorn.sh\r\n\r\n# With TLS\r\nSSL=true ./run-gunicorn.sh\r\n```\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "dd0b64222476e2f4907645ceeb988987b34f9cbb",
+      "message": "GUNICORN settings in .env\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-19T00:21:35+00:00"
+    },
+    {
+      "sha": "0f8836004f47aa863a66f15f167c3276c7551239",
+      "message": "GUNICORN settings in .env\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-19T00:42:03+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 477,
+  "deletions": 171,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:46.104630",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:46.106453",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1659,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1659.json"
+  }
+}

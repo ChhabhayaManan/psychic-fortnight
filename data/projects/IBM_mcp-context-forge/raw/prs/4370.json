@@ -1,0 +1,118 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4370,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4370"
+  },
+  "metadata": {
+    "title": "feat: Add E2E test infrastructure for PII filter plugin",
+    "state": "open",
+    "created_at": "2026-04-21T12:56:31+00:00",
+    "updated_at": "2026-05-03T00:50:25+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "prakhar-singh1928",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #4221\r\n\r\n---\r\n\r\n## 📝 Summary\r\nThis PR implements automated end-to-end test infrastructure for the PII filter plugin (cpex-pii-filter) that exercises the full plugin lifecycle through the plugin management API. The test suite validates PII detection and redaction across multiple categories (emails, phone numbers, SSNs, credit cards) in both prompt and tool invocation paths, with full observability integration.\r\n\r\n**Key additions:**\r\n\r\nDocker Compose overlay for E2E testing with observability enabled\r\nComprehensive test suite with reusable fixtures for plugin testing\r\nMakefile targets for both local development and Docker-based testing\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [X] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    ✅ Pass (test-specific bandit findings acceptable)    |\r\n| Unit tests                | `make test`     |    ✅ Pass   |\r\n| Coverage ≥ 80%            | `make coverage` |    ✅ Pass    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [ ] No secrets or credentials committed\r\n\r\n##🎯 What's New\r\n**Test Infrastructure**\r\ntests/e2e/plugins/conftest.py - Reusable fixtures for plugin E2E testing\r\n\r\n**plugin_harness** - Provisions isolated team, server, and token\r\n**invoke_tool / invoke_prompt** - Helper functions for MCP calls\r\n**query_observability_traces** - Queries observability data\r\n**verify_plugin_execution** - Validates plugin execution via traces\r\ntests/e2e/plugins/test_pii_filter_e2e.py - PII filter test suite\r\n\r\n- Tests PII detection across 6 categories (email, phone, SSN, credit card, combinations)\r\n- Validates both prompt and tool hook paths\r\n- Includes placeholder tests for future plugin binding API features\r\n- tests/e2e/plugins/test_observability_verification.py - Observability integration tests\r\n\r\n**Docker Support**\r\n\r\n- docker-compose.plugin-e2e.yml - Docker Compose overlay\r\n- Enables OBSERVABILITY_ENABLED=true\r\n- Enables PLUGINS_ENABLED=true\r\n- Mounts test configuration and plugin source code\r\n- Sets up metrics and structured logging\r\n- Makefile Targets\r\n- plugin-e2e-dev - Run dev server with plugin E2E configuration\r\n- test-e2e-plugins - Run E2E tests against live gateway (auto-detects port)\r\n- plugin-e2e-docker-up - Start Docker stack with E2E configuration\r\n- plugin-e2e-docker-down - Stop Docker stack\r\n- plugin-e2e-docker-logs - View gateway logs\r\n- test-e2e-plugins-docker - Run tests against Docker (auto-starts if needed)\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4188848258",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-28T12:44:39+00:00",
+      "body": "Findings:\n\n- P1: Observability verification cannot find spans. `tests/e2e/plugins/conftest.py:645` queries `/observability/traces`, then scans `trace[\"spans\"]`, but that route returns trace summaries without spans. Use `/observability/spans` with `resource_type/resource_name`, or fetch `/observability/traces/{trace_id}`.\n\n- P1: Observability tests pass without verifying execution. `tests/e2e/plugins/test_observability_verification.py:120` logs whether plugin execution was detected but does not assert it, so broken plugin spans, disabled observability, or bad filtering can still pass.\n\n- P1: Harness can target the wrong gateway. `Makefile:883` overwrites caller-supplied `MCP_CLI_BASE_URL` by probing local ports. `tests/e2e/plugins/conftest.py:219` also probes one gateway, while token creation and MCP calls use module `BASE_URL` at lines 309, 479, and 519. Setup and execution can hit different stacks.\n\n- P1: `plugin-e2e-compose` does not apply the overlay it advertises. `Makefile:6051` runs base compose only. Base `docker-compose.yml` hardcodes `OBSERVABILITY_ENABLED=false`, and the overlay mounts/config are missed. Use the same `-f docker-compose.yml -f docker-compose.plugin-e2e.yml` path as `plugin-e2e-docker-up`.\n\n- P1: PII matrix accepts access-denied as success. `tests/e2e/plugins/test_pii_filter_e2e.py:175` treats messages containing `denied` as policy blocks. Config has `block_on_detection=false`, so RBAC/access failures can pass without proving redaction.\n\n- P2: New E2E suite is excluded from CI with no replacement job. `.github/workflows/pytest.yml:99` and the rust workflow ignore `tests/e2e/plugins`, but no CI target runs `make test-e2e-plugins`.\n\n- P2: Placeholder tests inflate coverage. `tests/e2e/plugins/test_pii_filter_e2e.py:266-380` includes TODO tests with `assert True`.\n\n- P2: Tool E2E path depends on external Postman echo. `tests/e2e/plugins/conftest.py:363` posts to `https://postman-echo.com/post`, adding network flake and risking synthetic PII egress if plugin fails open. Use a local in-stack echo endpoint.\n\n- P2: Hardcoded admin login plus `verify=False`. `tests/e2e/plugins/conftest.py:41` sends default admin credentials to `BASE_URL` with TLS verification disabled. Restrict to loopback/test-only endpoints or require explicit opt-in credentials.\n\n- P3: Generated attribution remains in diff. `tests/e2e/plugins/test_observability_verification.py:392` has `# Made with Bob`. Project rules say no assistant/branding in diffs.\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "cfb65cad6220daf64813e6ccef5c734508c8b0aa",
+      "message": "feat: Add E2E test infrastructure for PII filter plugin\n\n- Add docker-compose.plugin-e2e.yml overlay for E2E testing\n- Add comprehensive test suite for PII filter plugin\n- Add Makefile targets: plugin-e2e-dev, test-e2e-plugins, plugin-e2e-docker-*\n- Add error handling for plugin installation\n\nCloses #4221\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-21T12:52:23+00:00"
+    },
+    {
+      "sha": "640aefac7716cb1478efdbc35c31219b5c34b243",
+      "message": "fix pre-commits\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-21T18:17:37+00:00"
+    },
+    {
+      "sha": "db7e9d11a27d5f59aec5b06657178bd921a69ac5",
+      "message": "Merge branch 'main' into tests_e2e_plugins_harness_piifilter",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-21T18:33:37+00:00"
+    },
+    {
+      "sha": "f5ae2fe275c7bcf3796c779a3484071c27a77214",
+      "message": "removed trailing white spaces\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-21T20:53:43+00:00"
+    },
+    {
+      "sha": "25ba08fa2dbdc98c0c4a83b7903ca262a9e7bb97",
+      "message": "removed trailing white spaces\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-21T20:55:03+00:00"
+    },
+    {
+      "sha": "7a06fa6cc51cbb3b19becfd48ebd1c910baa141f",
+      "message": "fix pre-commit\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-21T21:09:14+00:00"
+    },
+    {
+      "sha": "077420f322e88e261eb05421f18ddc60027f3f44",
+      "message": "fix: Resolve linting and CI issues for E2E plugin tests\n\n- Fix implicit string concatenation in tool_plugin_binding_service.py\n- Add pragma comments for test credentials in conftest.py\n- Remove trailing whitespace from all test files\n- Exclude tests/e2e/plugins from CI pytest runs (requires live gateway)\n- Fix observability adapter test assertions (db -> obs_db parameter rename)\n\nCloses #4221\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-21T21:51:36+00:00"
+    },
+    {
+      "sha": "769998be56d17425c58f59f9bf184fe1621b4b53",
+      "message": "add detect-secretsbaseline\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-22T13:24:14+00:00"
+    },
+    {
+      "sha": "a0bdbfd3519d380abd55cddbc57e472442a7b33f",
+      "message": "Merge branch 'main' into tests_e2e_plugins_harness_piifilter",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-22T13:28:24+00:00"
+    },
+    {
+      "sha": "e33ea714c9c91a9339b87af8b0e58b6a89ea333c",
+      "message": "add detect-secretsbaseline\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-22T13:57:06+00:00"
+    },
+    {
+      "sha": "dd6545065df25f76562ab6145ef54729c0f4131c",
+      "message": "Merge branch 'main' into tests_e2e_plugins_harness_piifilter",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-23T08:03:11+00:00"
+    },
+    {
+      "sha": "ba456655d1c3454d07be4641ceb322a289b9d690",
+      "message": "Merge branch 'main' into tests_e2e_plugins_harness_piifilter",
+      "author": "prakhar-singh1928",
+      "date": "2026-04-23T10:04:36+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 1760,
+  "deletions": 29,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:48.917561",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:48.919142",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4370,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4370.json"
+  }
+}

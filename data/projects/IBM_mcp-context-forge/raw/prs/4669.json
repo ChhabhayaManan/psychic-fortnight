@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4669,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4669"
+  },
+  "metadata": {
+    "title": "fix(chore): centralize Layer-1 visibility filter in streamablehttp_transport.py and fix SSO admin bypass",
+    "state": "closed",
+    "created_at": "2026-05-08T11:36:09+00:00",
+    "updated_at": "2026-05-10T13:44:28+00:00",
+    "closed_at": "2026-05-10T13:44:26+00:00",
+    "merged_at": "2026-05-10T13:44:26+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "chore",
+      "security",
+      "mcp-protocol"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4452\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR centralizes Layer-1 visibility filtering in the StreamableHTTP transport and fixes a critical bug where SSO users with `platform_admin` RBAC role were denied admin bypass on MCP HTTP endpoints.\r\n\r\n**Root Cause:** The `_auth_jwt` authentication handler computed effective admin status from both DB (`is_admin` flag) and RBAC (`platform_admin` role) but only stored the raw JWT `is_admin` claim in `user_context`. This caused SSO platform_admins (who have the RBAC role but not the DB flag) to be treated as regular users for Layer-1 visibility filtering.\r\n\r\n**Solution:** \r\n1. Fixed `_auth_jwt` to use `effective_is_admin = db_user_is_admin or jwt_is_admin` for both `is_admin` and `permission_is_admin` fields in `user_context`\r\n2. Created `get_scoped_visibility_from_user_context()` helper in `auth_context.py` that implements the admin-bypass + public-only-secure-default pattern\r\n3. Replaced 8 scattered inline derivations across MCP handlers with centralized helper calls\r\n4. Fixed `_normalize_jwt_payload` fallback path to compute effective admin via `is_user_admin()` for stateful sessions\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix (SSO platform_admin Layer-1 bypass)\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [x] Refactor (centralize inline derivations)\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes (10 new tests)\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Changes Made\r\n\r\n**1. `mcpgateway/auth_context.py` (lines 465-523)**\r\n- Added `get_scoped_visibility_from_user_context(user_context)` helper\r\n- Implements secure default: empty/None contexts return `(None, [])` not `(None, None)`\r\n- Handles admin bypass: `is_admin=True` with `teams=None` returns `(None, None)`\r\n- Documented with examples and security notes\r\n\r\n**2. `mcpgateway/transports/streamablehttp_transport.py`**\r\n\r\n*Primary auth path fix (lines 5162-5175):*\r\n```python\r\n# Before (buggy):\r\nauth_user_ctx = {\r\n    \"is_admin\": is_admin,  # Raw JWT claim only\r\n    ...\r\n}\r\n\r\n# After (fixed):\r\neffective_is_admin = db_user_is_admin or is_admin\r\nauth_user_ctx = {\r\n    \"is_admin\": effective_is_admin,  # DB + JWT + RBAC\r\n    \"permission_is_admin\": effective_is_admin,\r\n    ...\r\n}\r\n```\r\n\r\n*Fallback path fix (lines 2097-2128):*\r\n```python\r\n# Added DB admin check for stateful sessions\r\ndb_user_is_admin = False\r\nif email:\r\n    from mcpgateway.utils.admin_check import is_user_admin\r\n    with SessionLocal() as db:\r\n        db_user_is_admin = is_user_admin(db, email)\r\n\r\neffective_is_admin = db_user_is_admin or jwt_is_admin\r\n```\r\n\r\n*Replaced 8 inline derivations:*\r\n- `call_tool` (line 1647)\r\n- `read_resource` (line 2176)\r\n- `list_tools` (line 2297)\r\n- `get_prompt` (line 2363)\r\n- `list_prompts` (line 2440)\r\n- `list_resources` (line 2546)\r\n- `list_resource_templates` (line 2670)\r\n- `completion` (line 2814)\r\n\r\n**3. `tests/unit/mcpgateway/transports/test_streamablehttp_transport.py` (lines 16700-16922)**\r\n- 4 tests for `get_scoped_visibility_from_user_context` helper (empty context, admin bypass, public-only, team scoping)\r\n- 2 tests for SSO platform_admin via `_auth_jwt` (JWT admin, DB admin)\r\n- 2 tests for basic-auth/dev-mode admin scenarios\r\n- 2 tests for `_normalize_jwt_payload` effective admin computation\r\n\r\n### Impact\r\n\r\n**Before:**\r\n- ❌ SSO users with `platform_admin` RBAC role: denied Layer-1 admin bypass on StreamableHTTP transport\r\n- ✅ Basic-auth admins with `is_admin=True`: worked correctly\r\n- ✅ REST API endpoints: worked for both (already using `get_scoped_resource_access_context`)\r\n\r\n**After:**\r\n- ✅ SSO users with `platform_admin` RBAC role: now get Layer-1 admin bypass on StreamableHTTP transport\r\n- ✅ Basic-auth admins with `is_admin=True`: continue to work\r\n- ✅ REST API endpoints: unchanged (already working)\r\n- ✅ Security maintained: unauthenticated/empty contexts get public-only access, never admin bypass\r\n\r\n### Why This Matters\r\n\r\nContextForge has two separate admin concepts:\r\n1. **`is_admin` flag** - Legacy database field (`EmailUser.is_admin`)\r\n2. **`platform_admin` role** - Modern RBAC role with `[\"*\"]` permissions\r\n\r\nSSO users get the RBAC role but not the database flag. This fix ensures both mechanisms are checked for Layer-1 visibility filtering, maintaining backward compatibility while supporting SSO properly.\r\n\r\n### Related Work\r\n\r\n- Issue #4070: Parent SSO platform_admin bug (admin UI team editing)\r\n- PR #4080: Original fix that bundled this refactor (reverted due to scope creep)\r\n- PR #4654: Companion refactor for `main.py` REST endpoints (already merged)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "dfb0879e39642805c666af23eb28e67a8b4643d8",
+      "message": "refactor(streamablehttp): centralize Layer-1 visibility filter and fix SSO admin bypass\n\nCloses #4452\n\nThis commit addresses two related Layer-1 hygiene issues in the StreamableHTTP\ntransport that prevented SSO platform_admins from getting proper admin bypass:\n\nIssue A: Eight near-identical inline copies of the admin-bypass + public-only\nsecure-default derivation scattered across MCP handlers (call_tool, list_tools,\nlist_prompts, read_resource, list_resources, list_resource_templates,\ncompletion, get_prompt).\n\nIssue B: The primary auth path (_StreamableHttpAuthHandler._auth_jwt) computed\neffective DB/RBAC admin status but stored the raw JWT is_admin claim in\nuser_context, causing SSO platform_admins to be treated as non-admins for\nLayer-1 visibility filtering.\n\nChanges:\n\n1. Created get_scoped_visibility_from_user_context() helper in auth_context.py\n   - Implements secure default: empty/None contexts return (None, []) not (None, None)\n   - Handles admin bypass: is_admin=True with teams=None returns (None, None)\n   - Documented with examples and security notes\n\n2. Fixed _auth_jwt primary path (lines 5162-5175)\n   - Computes effective_is_admin = db_user_is_admin or jwt_is_admin\n   - Uses effective admin for both is_admin and permission_is_admin fields\n   - Ensures SSO platform_admins get Layer-1 admin bypass\n\n3. Fixed _normalize_jwt_payload fallback path (lines 2097-2128)\n   - Added DB admin check via is_user_admin() for stateful sessions\n   - Computes effective_is_admin = db_user_is_admin or jwt_is_admin\n   - Maintains parity with primary auth path\n\n4. Replaced 8 inline derivations with centralized helper calls:\n   - call_tool (line 1647)\n   - read_resource (line 2176)\n   - list_tools (line 2297)\n   - get_prompt (line 2363)\n   - list_prompts (line 2440)\n   - list_resources (line 2546)\n   - list_resource_templates (line 2670)\n   - completion (line 2814)\n\n5. Added comprehensive test coverage (10 new tests, all passing):\n   - Empty/None context security tests\n   - Admin bypass scenarios (JWT admin, DB admin, combined)\n   - SSO platform_admin regression tests (issue #4070)\n   - Basic-auth/dev-mode admin tests\n   - _normalize_jwt_payload effective admin tests\n\nSecurity Impact:\n- Fixes issue #4070: SSO users with platform_admin RBAC role now get Layer-1\n  admin bypass on StreamableHTTP transport, matching REST API behavior\n- Maintains secure defaults: unauthenticated/empty contexts get public-only\n  access, never admin bypass\n- Preserves backward compatibility: basic-auth admins continue to work in dev mode\n\nRelated: #4070, #4080\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-08T11:32:38+00:00"
+    },
+    {
+      "sha": "6212085425b194888e73a8369c347f3057f76c0d",
+      "message": "fix pylint issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-08T11:50:41+00:00"
+    },
+    {
+      "sha": "27ffed1a01f83971ad65b0bafe9f89b41bb4d665",
+      "message": "fix: address council review findings for Layer-1 visibility filter\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T11:49:45+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 423,
+  "deletions": 101,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:10.622191",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:10.623581",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4669,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4669.json"
+  }
+}

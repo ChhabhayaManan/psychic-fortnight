@@ -1,0 +1,140 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3594,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3594"
+  },
+  "metadata": {
+    "title": "feat(api): add embedding and semantic search services",
+    "state": "open",
+    "created_at": "2026-03-10T16:59:37+00:00",
+    "updated_at": "2026-03-20T14:00:01+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "AbdulR11",
+    "labels": [
+      "tcd",
+      "COULD"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": []
+  },
+  "description": "\r\n\r\n## 🔗 Related Issue\r\nCloses #2229 \r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR implements **semantic tool discovery** powered by vector embeddings and similarity search. Users can now query tools using natural language (e.g., \"weather tools\", \"database operations\") and receive ranked results based on semantic relevance rather than exact keyword matches.\r\n\r\n### Key Components Added\r\n\r\n**1. Embedding Service (`mcpgateway/services/embedding_service.py`)**\r\n- Integrates OpenAI, Mistral, and Ollama embedding providers via LangChain\r\n- Supports configurable models (e.g., `text-embedding-3-small`, `text-embedding-3-large`)\r\n- Auto-initialization with dimension validation to catch model/config mismatches\r\n- Batch embedding support for efficient bulk operations\r\n- Fire-and-forget auto-indexing on tool create/update (configurable)\r\n- CLI command for re-indexing existing tools: `mcpgateway --reindex-embeddings`\r\n\r\n**2. Vector Search Service (`mcpgateway/services/vector_search_service.py`)**\r\n- **PostgreSQL**: Uses pgvector's native `<=>` cosine distance operator with HNSW indexing\r\n- **SQLite**: Fallback to numpy-based in-memory cosine similarity for dev/test\r\n- Configurable HNSW parameters: `m` (max connections), `ef_construction` (build quality)\r\n- Supports similarity thresholds and result limits\r\n\r\n**3. Semantic Search Orchestration (`mcpgateway/services/semantic_search_service.py`)**\r\n- Coordinates embedding generation and vector search\r\n- Two-tier caching: Redis (primary) + in-memory fallback\r\n- Query normalization and result deduplication\r\n- Configurable 60-second TTL for cached results\r\n\r\n**4. REST API Endpoint**\r\n```http\r\nGET /tools/semantic?query=weather&limit=10&threshold=0.7\r\n```\r\n- Natural language query support\r\n- Configurable result limit (1-50, default: 10)\r\n- Optional similarity threshold (0-1)\r\n- Rate limiting: 10 requests/minute per IP (configurable)\r\n- Requires `tools.read` permission\r\n\r\n**5. Database Infrastructure**\r\n- New `tool_embeddings` table with foreign key cascade to `tools`\r\n- **PostgreSQL**: pgvector extension with HNSW index for fast ANN search\r\n- **SQLite**: JSON column fallback for development\r\n- Two Alembic migrations:\r\n  - `bab4694b3e90`: Creates `tool_embeddings` table with pgvector support\r\n  - `c3d4e5f6a7b8`: Upgrades from IVFFlat to HNSW indexing\r\n- Idempotent migrations safe for both fresh installs and upgrades\r\n\r\n**6. Configuration Options**\r\n```bash\r\n# Embedding provider settings\r\nEMBEDDING_PROVIDER=openai              # openai, mistral, ollama\r\nEMBEDDING_MODEL=text-embedding-3-small # Model name\r\nEMBEDDING_API_KEY=sk-...               # Provider API key\r\nEMBEDDING_DIM=1536                     # Vector dimension (validated)\r\n\r\n# Auto-indexing\r\nEMBEDDING_AUTO_INDEX_ENABLED=false     # Auto-embed on tool CRUD\r\n\r\n# HNSW tuning (PostgreSQL only)\r\nHNSW_M=16                              # Max connections per node\r\nHNSW_EF_CONSTRUCTION=64                # Construction search depth\r\n\r\n# Rate limiting\r\nSEMANTIC_SEARCH_RATE_LIMIT=10          # Requests per minute per IP\r\n```\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n### Test Coverage\r\n- **Unit tests**: `test_embedding_service.py`, `test_vector_search_service.py`, `test_semantic_search.py`\r\n- **Integration tests**: `test_vector_search_integration.py` with real SQLite database\r\n- Tests cover:\r\n  - Embedding generation (single/batch)\r\n  - Tool text preparation with parameters/tags\r\n  - Vector similarity ordering (deterministic with known embeddings)\r\n  - Threshold filtering and limit enforcement\r\n  - Empty database handling\r\n  - Disabled tool exclusion\r\n  - Cache hit/miss scenarios\r\n  - Error handling (empty queries, invalid parameters)\r\n\r\n\r\n\r\n---\r\n\r\n## 🔄 Migration Path\r\n\r\n### Fresh Installations\r\nMigrations run automatically on startup. No manual intervention required.\r\n\r\n### Existing Deployments\r\n\r\n**For PostgreSQL:**\r\n```bash\r\n# 1. Install pgvector extension (requires superuser)\r\npsql -d your_database -c \"CREATE EXTENSION IF NOT EXISTS vector;\"\r\n\r\n# 2. Run migrations\r\ncd mcpgateway && alembic upgrade head\r\n\r\n# 3. Generate embeddings for existing tools\r\nmcpgateway --reindex-embeddings\r\n```\r\n\r\n**For SQLite:**\r\n```bash\r\n# 1. Run migrations (no extensions needed)\r\ncd mcpgateway && alembic upgrade head\r\n\r\n# 2. Generate embeddings for existing tools\r\nmcpgateway --reindex-embeddings\r\n```\r\n\r\n---\r\n\r\n## 📊 Performance Characteristics\r\n\r\n- **HNSW index**: Sub-millisecond similarity search for 10K+ tools\r\n- **Batch embedding**: Single API call for multiple tools (vs. N sequential calls)\r\n- **Redis caching**: ~60s TTL reduces API costs for repeated queries\r\n- **Auto-indexing**: Fire-and-forget background task (no latency impact on tool CRUD)\r\n\r\n---\r\n\r\n\r\n## 📓 Architecture Notes\r\n\r\n### Design Decisions\r\n\r\n1. **Lazy Initialization**: Embedding service only loads models on first use to avoid startup delays\r\n2. **Dimension Validation**: Probes model output at init to catch config errors early (prevents silent data corruption)\r\n3. **Dual Backend**: pgvector for production, numpy fallback for dev/test (no pgvector dependency in CI)\r\n4. **Idempotent Migrations**: Check table/index existence before operations (safe for multiple runs)\r\n5. **Fire-and-forget Indexing**: Auto-indexing uses `asyncio.create_task()` with independent DB sessions (zero impact on request latency)\r\n\r\n### Security Considerations\r\n\r\n- Rate limiting on `/tools/semantic` (expensive: embedding generation + vector search)\r\n- API keys stored as `SecretStr` in config (never logged in plaintext)\r\n- Embedding service extracts secrets only at initialization (not in `__init__`)\r\n- Standard RBAC: requires `tools.read` permission\r\n\r\n### Future Enhancements\r\n\r\n- [ ] Hybrid search (BM25 + semantic) for better recall\r\n- [ ] Embedding model versioning and migration\r\n- [ ] Query expansion and synonym handling\r\n- [ ] Cross-server federated semantic search\r\n\r\n---\r\n\r\n## 📎 Files Changed\r\n\r\n### Core Services\r\n- `mcpgateway/services/embedding_service.py` (new)\r\n- `mcpgateway/services/vector_search_service.py` (new)\r\n- `mcpgateway/services/semantic_search_service.py` (new)\r\n\r\n### API & Infrastructure\r\n- `mcpgateway/main.py` (added `/tools/semantic` endpoint + rate limiting)\r\n- `mcpgateway/schemas.py` (added `ToolSearchResult`, `SemanticSearchResponse`)\r\n- `mcpgateway/db.py` (added `ToolEmbedding` model)\r\n- `mcpgateway/config.py` (added embedding settings + HNSW config)\r\n- `mcpgateway/cli.py` (added `--reindex-embeddings` command)\r\n\r\n### Database\r\n- `mcpgateway/utils/pgvector.py` (new)\r\n- `mcpgateway/alembic/versions/bab4694b3e90_add_tool_embedding_table.py` (new)\r\n- `mcpgateway/alembic/versions/c3d4e5f6a7b8_add_hnsw_index_to_tool_embeddings.py` (new)\r\n\r\n### Tests\r\n- `tests/unit/mcpgateway/services/test_embedding_service.py` (new)\r\n- `tests/unit/mcpgateway/services/test_vector_search_service.py` (new)\r\n- `tests/unit/mcpgateway/routers/test_semantic_search.py` (new)\r\n- `tests/integration/test_vector_search_integration.py` (new)\r\n\r\n### Dependencies\r\n- `pyproject.toml` (added `pgvector>=0.3.6` to `postgres-vector` extra)\r\n\r\n---\r\n\r\n## 🎯 Example Usage\r\n\r\n### Semantic Tool Discovery\r\n```bash\r\n# Find weather-related tools\r\ncurl -H \"Authorization: Bearer $TOKEN\" \\\r\n  \"http://localhost:4444/tools/semantic?query=weather%20forecast&limit=5\"\r\n\r\n# High-precision search (threshold filtering)\r\ncurl -H \"Authorization: Bearer $TOKEN\" \\\r\n  \"http://localhost:4444/tools/semantic?query=database%20operations&threshold=0.8\"\r\n```\r\n\r\n**Response:**\r\n```json\r\n{\r\n  \"results\": [\r\n    {\r\n      \"toolName\": \"weather-api\",\r\n      \"description\": \"Get current weather information for any city\",\r\n      \"serverId\": \"gateway-1\",\r\n      \"serverName\": \"Weather Gateway\",\r\n      \"similarityScore\": 0.95\r\n    },\r\n    {\r\n      \"toolName\": \"forecast-tool\",\r\n      \"description\": \"Retrieve 7-day weather forecast\",\r\n      \"serverId\": \"gateway-1\", \r\n      \"serverName\": \"Weather Gateway\",\r\n      \"similarityScore\": 0.87\r\n    }\r\n  ],\r\n  \"query\": \"weather forecast\",\r\n  \"totalResults\": 2\r\n}\r\n```\r\n\r\n### Manual Re-indexing\r\n```bash\r\n# Re-generate embeddings for all enabled tools\r\nmcpgateway --reindex-embeddings\r\n```\r\n",
+  "comments": [
+    {
+      "id": "2913233044",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:29+00:00",
+      "body": "OAuthToken.access_token and refresh_token are now stored as plain Text, and the EncryptedText TypeDecorator was removed earlier in this diff. This is a security regression because OAuth tokens are high-value secrets at rest. Restore encryption-at-rest for these columns (or an equivalent storage-layer encryption mechanism) and add/keep migrations consistent with the chosen approach."
+    },
+    {
+      "id": "2913233098",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:30+00:00",
+      "body": "before_commit_handler swallows exceptions from session.flush(). This can hide the original flush error and make debugging/handling harder (commit will fail later with a different exception/transaction state). It's safer to let the flush exception propagate (or log and re-raise) so callers see the real cause.\n```suggestion\n        # If flush fails, log the error and re-raise so callers see the real cause.\n        logging.exception(\"Session flush failed in before_commit_handler; aborting commit\")\n        raise\n```"
+    },
+    {
+      "id": "2913233128",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:30+00:00",
+      "body": "VectorSearchService builds ToolSearchResult.server_name via tool.gateway.name. Because the query only joins ToolEmbedding->Tool, accessing tool.gateway will trigger lazy-load queries per result (N+1) on both PostgreSQL and SQLite backends. Consider eager-loading Gateway (join/select it, or use joinedload) or denormalizing server_name into the embeddings table/result query to keep search latency predictable."
+    },
+    {
+      "id": "2913233157",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:30+00:00",
+      "body": "The comment on the numpy import says it is a transitive dependency of pgvector and not declared in pyproject.toml, but this PR adds numpy as a direct dependency. Update or remove the comment to avoid misleading future maintainers about dependency management.\n```suggestion\n    import numpy as np  # noqa: E402  # Lazy import for SQLite fallback to avoid importing numpy unless needed\n```"
+    },
+    {
+      "id": "2913233198",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:31+00:00",
+      "body": "EmbeddingService.initialize() always builds an OpenAIEmbeddingConfig regardless of settings.embedding_provider. If provider is set to ollama/mistral/litellm, EmbeddingProviderFactory will instantiate a different provider class but receive the wrong config type, causing runtime failures. Build provider-specific config objects (or pass a dict and rely on EmbeddingConfig coercion) based on the selected provider.\n```suggestion\n                config={\n                    \"model\": self._model_name,\n                    \"api_key\": settings.embedding_api_key,\n                },\n```"
+    },
+    {
+      "id": "2913233227",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:31+00:00",
+      "body": "batch_store_tool_embeddings() bypasses the validation performed in store_tool_embedding (non-empty, numeric values, and dimension consistency). This can silently insert malformed or wrong-dimension vectors and break similarity search. Consider reusing the same validation logic for each entry (or validating once per batch) before writing to the DB."
+    },
+    {
+      "id": "2913233251",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:31+00:00",
+      "body": "The semantic search service tests call SemanticSearchService.search_tools(...) without providing the required db parameter. As implemented, this will raise a TypeError before exercising validation/caching logic. Update tests to pass a dummy db session (or adjust the service signature to make db optional and raise a descriptive error when missing)."
+    },
+    {
+      "id": "2913233272",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:31+00:00",
+      "body": "Migration creates an index named idx_tool_embeddings_hnsw but uses postgresql_using=\"ivfflat\". The follow-up migration looks for idx_tool_embeddings_vector to drop and for idx_tool_embeddings_hnsw to decide whether to create HNSW, so it will never replace the IVFFlat index created here. Align the index names and types (e.g., create idx_tool_embeddings_vector for IVFFlat, or create the correct HNSW index here)."
+    },
+    {
+      "id": "2913233302",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:32+00:00",
+      "body": "SSRF protection defaults were weakened: ssrf_allow_localhost and ssrf_allow_private_networks now default to True, and ssrf_dns_fail_closed defaults to False. This materially increases the risk of SSRF reaching internal services in default deployments. If these relaxed defaults are needed for dev, consider keeping secure defaults and allowing opt-in via env vars (or gate them behind dev_mode)."
+    },
+    {
+      "id": "2913233318",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:32+00:00",
+      "body": "SemanticSearchService uses an unbounded in-memory cache dict and only evicts expired entries on read of the same key. With many unique queries, this can grow without bound. Consider adding a max-size/LRU cache, periodic pruning, or pruning a few expired entries on each write to avoid memory growth in long-running processes."
+    },
+    {
+      "id": "2913233344",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:32+00:00",
+      "body": "Tests patch get_redis_client with return_value=None, but get_redis_client is async and is awaited in SemanticSearchService. Patching it with a non-async mock will cause 'await None' TypeError. Patch with AsyncMock(return_value=None) (or patch the resolved client object) so the await path behaves correctly.\n```suggestion\n        with patch(\n            \"mcpgateway.services.semantic_search_service.get_redis_client\",\n            new_callable=AsyncMock,\n        ) as mock_get_redis:\n            mock_get_redis.return_value = None\n            # Act - First call\n            results1 = await service.search_tools(query=\"test\", limit=10)\n\n            # Second call should hit memory cache\n            results2 = await service.search_tools(query=\"test\", limit=10)\n\n            # Assert\n            assert results1 == results2\n            assert len(results1) == 1\n```"
+    },
+    {
+      "id": "2913233362",
+      "author": "Copilot",
+      "created_at": "2026-03-10T17:11:33+00:00",
+      "body": "The tool_embeddings.embedding column is hard-coded to PgVector(1536) in the migration, but the app configuration/model supports EMBEDDING_DIM (and the PR description mentions configurable dimensions, e.g. 3072). With PostgreSQL pgvector, the vector dimension is part of the column type, so this will break when EMBEDDING_DIM != 1536. The migration should use the configured dimension at migration time or document/support only a fixed dimension (and handle upgrades for model changes)."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3924051257",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-10T17:11:33+00:00",
+      "body": "## Pull request overview\n\nThis PR introduces semantic tool discovery to MCP Gateway by generating/storing tool embeddings and performing similarity search (pgvector/HNSW on PostgreSQL, numpy fallback on SQLite), exposed via a new `/tools/semantic` endpoint and supported by new services, models, migrations, and tests.\n\n**Changes:**\n- Add embedding generation + storage pipeline (including batch operations and reindex CLI support).\n- Add vector similarity search service with PostgreSQL/SQLite backends.\n- Add semantic search orchestration with Redis + in-memory caching and a new API response schema.\n\n### Reviewed changes\n\nCopilot reviewed 17 out of 17 changed files in this pull request and generated 12 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| mcpgateway/services/embedding_service.py | Implements embedding generation, dimension probing/validation, and DB storage helpers. |\r\n| mcpgateway/services/vector_search_service.py | Provides PostgreSQL (pgvector) and SQLite (numpy) similarity search. |\r\n| mcpgateway/services/semantic_search_service.py | Orchestrates embedding + vector search with Redis/memory caching. |\r\n| mcpgateway/utils/pgvector.py | Adds centralized pgvector availability detection/type fallback. |\r\n| mcpgateway/alembic/versions/bab4694b3e90_add_tool_embedding_table.py | Creates `tool_embeddings` table and initial index. |\r\n| mcpgateway/alembic/versions/c3d4e5f6a7b8_add_hnsw_index_to_tool_embeddings.py | Attempts to upgrade the vector index to HNSW. |\r\n| mcpgateway/db.py | Adds `ToolEmbedding` ORM model and pgvector extension initialization. |\r\n| mcpgateway/config.py | Adds embedding + HNSW + semantic-search rate-limit settings (also includes unrelated security-default changes). |\r\n| mcpgateway/schemas.py | Adds `ToolSearchResult` / `SemanticSearchResponse` schemas. |\r\n| mcpgateway/cli.py | Adds `--reindex-embeddings` CLI command. |\r\n| tests/unit/mcpgateway/services/test_embedding_service.py | Adds unit coverage for EmbeddingService initialization, validation, storage, and helpers. |\r\n| tests/unit/mcpgateway/services/test_vector_search_service.py | Adds unit coverage for vector search dispatch and helper behavior. |\r\n| tests/unit/mcpgateway/routers/test_semantic_search.py | Adds endpoint + service/cache tests for semantic search. |\r\n| tests/integration/test_vector_search_integration.py | Adds SQLite-backed integration tests for ordering/threshold/limits. |\r\n| pyproject.toml | Adds pgvector extra + numpy dependency, but also includes broad unrelated dependency/tooling changes. |\n</details>\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (1)</summary>\n\n**pyproject.toml:90**\n* This PR includes substantial non-semantic-search changes in pyproject.toml (e.g., downgrading core deps like fastapi/sqlalchemy/uvicorn, changing pytest addopts, and reducing ruff lint rule selection). These changes are not described in the PR summary and increase risk of unrelated breakages; consider splitting them into a separate PR or justifying them explicitly.\n```\n# ----------------------------------------------------------------\n# Runtime dependencies\n# ----------------------------------------------------------------\ndependencies = [\n    \"alembic>=1.18.4\",\n    \"argon2-cffi>=25.1.0\",\n    \"cryptography>=46.0.5\",\n    \"fastapi>=0.128.8\",\n    \"filelock>=3.20.3\",\n    \"gunicorn>=25.0.3\",\n    \"httpx>=0.28.1\",\n    \"httpx[http2]>=0.28.1\",\n    \"jinja2>=3.1.6\",\n    \"jq>=1.11.0\",\n    \"jsonpath-ng>=1.7.0\",\n    \"jsonschema>=4.26.0\",\n    \"mcp>=1.26.0\",\n    \"numpy>=2.4.2\",\n    \"orjson>=3.11.7\",\n    \"parse>=1.21.0\",\n    \"oauthlib>=3.3.1\",\n    \"prometheus-fastapi-instrumentator>=7.1.0\",\n    \"prometheus_client>=0.24.1\",\n    \"psutil>=7.2.2\",\n    \"pydantic>=2.12.5\",\n    \"pydantic[email]>=2.12.5\",\n    \"pydantic-settings>=2.12.0\",\n    \"pyjwt>=2.11.0\",\n    \"python-json-logger>=4.0.0\",\n    \"PyYAML>=6.0.3\",\n    \"requests-oauthlib>=2.0.0\",\n    \"sqlalchemy>=2.0.46\",\n    \"sse-starlette>=3.2.0\",\n    \"starlette>=0.52.1\",\n    \"starlette-compress>=1.7.0\",\n    \"typer>=0.23.0\",\n    \"uvicorn[standard]>=0.40.0\",\n]\n\n# ----------------------------------------------------------------\n# Development dependencies (for contributors and maintainers)\n# ----------------------------------------------------------------\n[dependency-groups]\ndev = [\n    \"a2a-sdk[http-server]\",\n    \"aiohttp>=3.13.3\",\n```\n</details>\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "757d0e0b94f5da969d0537bf4989c1e6f0c31b03",
+      "message": "Update embedding + semantic search services from GitLab",
+      "author": "AbdulR11",
+      "date": "2026-03-10T12:11:46+00:00"
+    },
+    {
+      "sha": "e9878a13b402bb3f079b1e4f22b5389746ea3ea1",
+      "message": "Merge branch 'main' into feat/Tool-embedding-semantic-search-service",
+      "author": "AbdulR11",
+      "date": "2026-03-10T17:01:36+00:00"
+    },
+    {
+      "sha": "2246f0737885c7ce4083d68b78a6402c366e8689",
+      "message": "Merge branch 'main' into feat/Tool-embedding-semantic-search-service",
+      "author": "AbdulR11",
+      "date": "2026-03-12T12:43:26+00:00"
+    }
+  ],
+  "files_changed": 17,
+  "additions": 5952,
+  "deletions": 953,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:04.973144",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:04.973936",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3594,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3594.json"
+  }
+}

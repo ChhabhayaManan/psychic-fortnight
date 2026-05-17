@@ -1,0 +1,65 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3178,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3178"
+  },
+  "metadata": {
+    "title": "fix(api): remove shared db session from audit trail calls to prevent inactive transaction errors",
+    "state": "open",
+    "created_at": "2026-02-24T09:31:45+00:00",
+    "updated_at": "2026-05-10T22:53:42+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #3084 due to repository maintenance. Your code and branch are intact. @Lang-Akshay please verify everything looks good.\n\n# fix: Resolve \"transaction is inactive\" error in tool/resource/gateway/prompt registration\r\n\r\n## Description\r\nFixes issue #2871 where REST tool registration and other resource operations fail with **\"This transaction is inactive\"** error.\r\n\r\n## Root Cause\r\nThe issue occurred due to **multiple database commits on the same SQLAlchemy session**:\r\n\r\n1. **Tool creation commits** (line 1149 in tool_service.py): `db.commit()` completes the transaction\r\n2. **Audit logging reuses same session**: `audit_trail.log_action(db=db)` attempts to use the already-committed session\r\n3. **Transaction state becomes inactive**: SQLAlchemy marks the session as post-commit, making it unable to execute further operations\r\n4. **Error cascade**: When errors occur, `db.rollback()` fails because the transaction is already inactive\r\n\r\nThis issue was **intermittent** because:\r\n- Timing and concurrent access patterns affected when connections became deassociated\r\n- Only manifested when transaction state was interrupted during the audit logging phase\r\n\r\n## Solution\r\n**Use separate database sessions for audit logging** instead of reusing the already-committed main session.\r\n\r\n### Changes made:\r\n- Removed `db=db` parameter from **22 audit_trail.log_action()** calls across:\r\n  - `tool_service.py` (5 calls): create, bulk operations, delete, state changes, updates\r\n  - `resource_service.py` (5 calls): create, bulk operations, delete, state changes, updates\r\n  - `gateway_service.py` (4 calls): create, delete, state changes, updates\r\n  - `server_service.py` (1 call): view server\r\n  - `prompt_service.py` (7 calls): create, bulk operations, delete, state changes, updates, view\r\n\r\nEach audit log now creates its own isolated session that:\r\n- ✅ Commits independently without affecting the main transaction\r\n- ✅ Handles cleanup automatically via context managers\r\n- ✅ Doesn't exhaust connection pools (quick INSERT → COMMIT → release)\r\n- ✅ Provides better error isolation\r\n\r\n## Performance Impact\r\n**Positive impact:**\r\n- Eliminates error-prone cascading failures\r\n- Improves reliability of concurrent operations\r\n- Follows SQLAlchemy best practices for session isolation\r\n- No connection pool exhaustion (sessions are short-lived INSERT operations)\r\n\r\n## Testing\r\n- ✅ Tool table entry created successfully without requiring application restart\r\n- ✅ Code follows existing patterns in structured_logger.py (uses `fresh_db_session()`)\r\n- ✅ No breaking changes to public APIs\r\n\r\n## Files Changed\r\n- `mcpgateway/services/tool_service.py` - 5 audit calls updated\r\n- `mcpgateway/services/resource_service.py` - 5 audit calls updated\r\n- `mcpgateway/services/gateway_service.py` - 4 audit calls updated\r\n- `mcpgateway/services/prompt_service.py` - 7 audit calls updated\r\n- `mcpgateway/services/server_service.py` - 1 audit call updated\r\n\r\n## Closes\r\nCloses #2871",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "95261b931cc98ed4f36a8facfe3a017752597bcc",
+      "message": "fix: remove unnecessary db parameter from service methods forcing it to use separate database session\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-20T14:17:43+00:00"
+    },
+    {
+      "sha": "152c3f524c4a101b5614b9b45830789199886e69",
+      "message": "test: add regression tests to ensure audit_trail.log_action does not receive db session\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-27T14:39:26+00:00"
+    },
+    {
+      "sha": "4305e2b6be511502a0f3018ba50a606737ce4141",
+      "message": "fix: replace db.flush() with db.commit() in GatewayService and update tests accordingly\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-27T14:40:27+00:00"
+    },
+    {
+      "sha": "0eef2be9c8bfe05af9f84cb0650fd1c2fe387299",
+      "message": "fix: remove db=db from audit_trail.log_action() calls and add regression tests\n\nRemove shared db session parameter from all audit_trail.log_action() calls\nacross gateway, prompt, resource, server, and tool services to prevent\ninactive-transaction errors.\n\nAlso fix admin.py log_audit() call that still forwarded db session.\n\nAdd regression test suites for all 5 services ensuring audit_trail\nnever receives db= parameter (keyword or positional).\n\nCloses #2871\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T22:48:32+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 674,
+  "deletions": 26,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:13:04.413632",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:04.414502",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3178,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3178.json"
+  }
+}

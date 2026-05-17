@@ -1,0 +1,141 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2868,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2868"
+  },
+  "metadata": {
+    "title": "feat(ui): unified admin search with tags + global search",
+    "state": "closed",
+    "created_at": "2026-02-12T08:35:33+00:00",
+    "updated_at": "2026-02-16T12:28:04+00:00",
+    "closed_at": "2026-02-16T10:13:59+00:00",
+    "merged_at": "2026-02-16T10:13:58+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "ui",
+      "ica"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\nImplements a unified, consistent search experience across the MCP Gateway Admin UI, including tag-based filtering, server-side panel search, and a global cross-entity\r\nsearch modal (Ctrl/Cmd+K).\r\n\r\n## Key Changes\r\n\r\n- Standardized search behavior and payloads across admin search endpoints\r\n- Unified response shape includes items, count, entity_type, query, filters_applied, while preserving legacy keys (tools, gateways, etc.) for backwards compatibility.\r\n- Added tag filtering support via tags query param using comma=OR and plus=AND semantics.\r\n- Server-side search for main Admin UI panels (no more “current page only” client filtering)\r\n- Panels now reload via HTMX against their /admin/*/partial endpoints with debounced search.\r\n- Search and tag filters persist via namespaced URL params (<table>_q, <table>_tags) and are preserved through pagination and “include inactive” toggles.\r\n- Global search (Ctrl/Cmd+K)\r\n- New GET /admin/search endpoint aggregates results across:\r\n    - servers, gateways, tools, resources, prompts, agents, plus teams and users.\r\n- Supports entity_types filtering and limit_per_type (alias for per-entity limit).\r\n- Admin header now includes a Search button and modal; click or Ctrl/Cmd+K to open, Esc to close, Enter opens the first result.\r\n- Clicking results navigates to the correct tab and opens the relevant details/edit modal.\r\n- Teams search response standardized\r\n- /admin/teams/search now returns a wrapped payload (consistent with other search endpoints) and supports matching on name, slug, and description.\r\n- Minor docs\r\n- Roadmap entry quote normalization (existing file change included in this PR).\r\n\r\n## Tag Filter Syntax\r\n\r\n- tags=prod,staging matches items with prod OR staging\r\n- tags=prod+api matches items with BOTH prod AND api\r\n- Tags-only search is supported (empty q + non-empty tags)\r\n\r\n## Tests / Verification\r\n\r\n- make flake8\r\n- make pylint\r\n- make lint-web\r\n- pytest -q tests/unit/mcpgateway/test_admin.py tests/unit/mcpgateway/test_admin_module.py\r\n- npx vitest run\r\n\r\n## Notes\r\n\r\n- API change: /admin/teams/search no longer returns a bare array; it now returns a wrapped unified payload.\r\n\r\nCloses #2076\r\nCloses #2109\r\n\r\nAlso closes #2965 found during testing.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3807832696",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-16T10:30:10+00:00",
+      "body": " This is a solid, well-tested feature PR that significantly improves the admin search experience. The main concerns are:\n\n  - inconsistent admin_search_teams response shape \n  - remaining inline oninput handler in the template \n  - sequential entity queries in unified search \n\nI will file an issue for follow-up on these items.\n\n  None of these are blockers. The security improvements (LIKE escaping, XSS prevention, token team scoping) are all correct and well-tested."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0b38cb8c7fafeb32410e7dfceb7c26a84a5296c5",
+      "message": "feat(ui): unified admin search with tags + global search\n\nImplement a unified, consistent search experience across the Admin UI:\n\n- Standardize search endpoints with unified response shape (items, count,\n  entity_type, query, filters_applied) while preserving legacy keys\n- Add tag filtering via comma=OR and plus=AND semantics with bounds\n  (max 20 groups, 10 terms per group)\n- Server-side panel search for all entity panels via HTMX partial reloads\n  with debounced input and namespaced URL params for shareability\n- Global search modal (Ctrl/Cmd+K) aggregating results across servers,\n  gateways, tools, resources, prompts, agents, teams, and users\n- Escape SQL LIKE wildcards in all search filters to prevent injection\n- Consistent search field coverage between search and partial endpoints\n\nCloses #2076\nCloses #2109\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T19:37:28+00:00"
+    },
+    {
+      "sha": "5c7876991c35e2d0bb79d83ddda744c243769091",
+      "message": "fix(metrics): prevent duplicate Prometheus metric registration in multi-app tests\n\nGuard setup_metrics() against re-registration errors when multiple\nFastAPI apps are instantiated in the same process (e.g., test suites).\nUses best-effort registry lookup via _get_registry_collector() to\nreuse existing collectors instead of crashing on ValueError.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T19:37:35+00:00"
+    },
+    {
+      "sha": "20104ec5842b0562c21d2a7f3b2faf91b3a9cd6c",
+      "message": "fix(admin): eliminate redundant get_user_teams calls in unified search\n\nAdd _get_user_team_ids helper with caching support. The unified search\nendpoint pre-fetches team IDs once and injects them into the user context,\navoiding 6 redundant database lookups (one per entity type).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T20:17:51+00:00"
+    },
+    {
+      "sha": "5af7c857aaf378d8da542dae0400a8b1196295cc",
+      "message": "fix(admin): use ESCAPE clause for LIKE queries and update Playwright search waits\n\nSQLAlchemy .contains() does not add an ESCAPE clause, so escaped\nwildcards (\\_) are treated as literal two-character sequences on SQLite.\nReplace all .contains(_escape_like(...)) calls with _like_contains()\nwhich generates .like(..., escape='\\\\') for correct behaviour on all\ndatabase backends.\n\nUpdate Playwright page objects and tests to wait for the HTMX partial\nresponses now that search is server-side instead of client-side.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T22:02:10+00:00"
+    },
+    {
+      "sha": "bdf808fdf8138b806f45e8455a40ce0c60a383b7",
+      "message": "format\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T22:18:32+00:00"
+    },
+    {
+      "sha": "27bbdc804fee1e6e8e4d80aee72f4b5a65a640c4",
+      "message": "fix(tests): use networkidle wait for HTMX search in Playwright tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T22:23:19+00:00"
+    },
+    {
+      "sha": "059f4ef02138bd12d73cd31fdc6985ca7d315ce4",
+      "message": "fix(admin): format replaceChild call for Prettier compliance\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T23:37:51+00:00"
+    },
+    {
+      "sha": "fd887989887979280c00b9114e94d23ab9360b60",
+      "message": "Code review\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T00:07:18+00:00"
+    },
+    {
+      "sha": "f40c53269304b9e96f1571c96a2e09d386b99480",
+      "message": "Code review\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T00:09:18+00:00"
+    },
+    {
+      "sha": "4743ebe8a3a0331e69eb9d792a7dbf95b744ce9c",
+      "message": "Code review\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T00:51:58+00:00"
+    },
+    {
+      "sha": "a95d57410c91a26568126b85a1da92e48dcf5b8b",
+      "message": "Test networkwait fix\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T07:30:56+00:00"
+    },
+    {
+      "sha": "f8f7a76be28c9c4b825cb9a224dc0f7bbc925007",
+      "message": "Linting and permissions updates\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T07:59:14+00:00"
+    },
+    {
+      "sha": "9983421af7148d3b5b8ac9c3378936d9ba72d607",
+      "message": "Linting and permissions updates\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T08:32:18+00:00"
+    },
+    {
+      "sha": "fdf3d8f8463d12340e3273af8f1ada40402e6442",
+      "message": "Linting and test updates + fix UI logout issue\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T09:20:03+00:00"
+    },
+    {
+      "sha": "686ac27a070e2ca9dd3f18bb3c512f1a04454976",
+      "message": "flake8\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T09:59:08+00:00"
+    }
+  ],
+  "files_changed": 23,
+  "additions": 2859,
+  "deletions": 446,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:00.423307",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:00.424569",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2868,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2868.json"
+  }
+}

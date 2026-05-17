@@ -1,0 +1,123 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3796,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3796"
+  },
+  "metadata": {
+    "title": "fix: hardening auth for SSE and message endpoints",
+    "state": "closed",
+    "created_at": "2026-03-23T09:28:26+00:00",
+    "updated_at": "2026-03-24T11:48:31+00:00",
+    "closed_at": "2026-03-24T11:48:26+00:00",
+    "merged_at": "2026-03-24T11:48:26+00:00",
+    "author": "prakhar-singh1928",
+    "labels": [
+      "security",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nPartially Closes #2395 \r\nCloses [#47](https://github.ibm.com/contextforge-org/mcp-context-forge/issues/47) \r\n\r\n---\r\n\r\n## 📝 Summary\r\nThis PR hardens the authentication logic in the `/mcp/sse` and `/mcp/message` endpoints. The fix updates the path matching logic. \r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅     |\r\n| Coverage ≥ 80%            | `make coverage` | ✅     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n### Changes Made\r\n- **Enhancement**: Hardened authentication bypass in `/mcp/sse` and `/mcp/message` endpoints\r\n- **Path Matching**: Updated authentication middleware to include SSE and message transport paths\r\n- **Test Coverage**: Added 5 comprehensive test cases validating the authentication fix:\r\n  - Unauthenticated request rejection\r\n  - Authenticated request acceptance\r\n  - Invalid token handling\r\n  - Path matching validation\r\n  - OAuth integration tests\r\n- **OAuth Tests**: Fixed existing OAuth test cases to align with the updated authentication flow\r\n",
+  "comments": [
+    {
+      "id": "2974444518",
+      "author": "cafalchio",
+      "created_at": "2026-03-23T11:26:30+00:00",
+      "body": "thanks for removing the 'Not'"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3991077451",
+      "author": "cafalchio",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-23T11:26:30+00:00",
+      "body": ""
+    },
+    {
+      "id": "3991111186",
+      "author": "madhu-mohan-jaishankar",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-23T11:33:53+00:00",
+      "body": "can we have tests for \n1. `mcp_require_auth = False` - requests to /mcp/sse and /mcp/message are allowed without a token\n2. Invalid tokens - /mcp/sse and /mcp/message should return 401"
+    },
+    {
+      "id": "3991813723",
+      "author": "cafalchio",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-23T13:41:29+00:00",
+      "body": "The fix solves the problem. I have just some comments on the tests.\n\nThere are few tests that re-import libs. perhaps it can be moved to import once on the top of the file.\nline 801 for example, but there are other places.\n\nAlso, I dont think we need Try, Finally inside the new tests."
+    },
+    {
+      "id": "3997579621",
+      "author": "cafalchio",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-24T09:22:35+00:00",
+      "body": "Thanks for cleaning the tests. LGTM"
+    },
+    {
+      "id": "3997999995",
+      "author": "madhu-mohan-jaishankar",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-24T10:28:09+00:00",
+      "body": ""
+    },
+    {
+      "id": "3998404527",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-24T11:36:02+00:00",
+      "body": "## Review: APPROVED\n\n### Summary\n\nGood security fix. The original `authenticate()` path matching only checked for paths ending in `/mcp` or `/mcp/`, which meant `/mcp/sse` and `/mcp/message` (legacy SSE transport sub-paths) **bypassed authentication entirely**. Verified the vulnerability was real — unauthenticated requests to these paths returned `True` (auth skipped) on the old code.\n\n### Changes during review\n\nRebased onto main (removed merge commits), then added three commits:\n\n1. **Trailing-slash auth bypass** — Found that `/mcp/sse/` and `/mcp/message/` (with trailing slash) could also bypass auth. Fixed by normalizing the path with `rstrip(\"/\")` before matching. Added 4 parametrized regression tests.\n\n2. **Docstring update** — The `authenticate()` docstring still documented only `/mcp` and `/mcp/` as protected paths. Updated to list all protected paths including `/mcp/sse`, `/mcp/message`, and `/servers/{id}/...` variants.\n\n3. **Missing test + unused import** — Added a deny-path test for `/servers/{id}/mcp/message` (non-trailing-slash variant was missing). Removed unused `user_context_var` import in `test_call_tool_oauth_enforcement_with_authenticated_context`.\n\n### Verification\n\n- **Unit tests**: 395 passed (was 390 on main)\n- **Integration tests against running instance** (localhost:8080): All 12 unauthenticated MCP path variants correctly return 401. All authenticated MCP operations (initialize, tools/list, resources/list, tool call) work. Full MCP SDK client session completes end-to-end. Non-MCP paths (`/health`, `/.well-known/`) unaffected.\n- **No regressions**: Admin UI loads, API endpoints work, docker logs clean."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "1cc990aeed3a2353c0cae16c28dabc1c1569f86b",
+      "message": "fix: hardening auth for SSE and message endpoints\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-03-23T09:17:40+00:00"
+    },
+    {
+      "sha": "f561fcd3955af7f64b8f2867c999d2628a4d5989",
+      "message": "fixed imports and removed try catch\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-03-24T08:51:42+00:00"
+    },
+    {
+      "sha": "b3a3c854c0a7ac887315716795955d9e55050da2",
+      "message": "fix: prevent trailing-slash auth bypass on /mcp/sse and /mcp/message\n\nNormalize path with rstrip(\"/\") before matching to prevent\nauthentication bypass via /mcp/sse/ or /mcp/message/ (trailing slash).\nAdd parametrized regression tests for all trailing-slash variants.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-24T10:35:33+00:00"
+    },
+    {
+      "sha": "31e139a3c55a6c46fbbdfd1a99da687a62d66820",
+      "message": "fix: update authenticate() docstring and add missing /servers/{id}/mcp/message test\n\nUpdate docstring to document all protected paths (/mcp, /mcp/,\n/mcp/sse, /mcp/message) and add deny-path regression test for\n/servers/{id}/mcp/message without trailing slash.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-24T11:05:11+00:00"
+    },
+    {
+      "sha": "0c076cabe25aad4fbd7d6f2058dac2a9233ef260",
+      "message": "fix: remove unused user_context_var import in test_call_tool_oauth_enforcement\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-24T11:08:58+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 242,
+  "deletions": 99,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:07.665695",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:07.667052",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3796,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3796.json"
+  }
+}

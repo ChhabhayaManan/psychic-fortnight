@@ -1,0 +1,69 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3666,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3666"
+  },
+  "metadata": {
+    "title": "fix(ui): persist and display custom auth_headers in A2A agent admin edit form",
+    "state": "closed",
+    "created_at": "2026-03-13T15:04:50+00:00",
+    "updated_at": "2026-03-18T23:07:50+00:00",
+    "closed_at": "2026-03-18T23:07:48+00:00",
+    "merged_at": "2026-03-18T23:07:48+00:00",
+    "author": "msureshkumar88",
+    "labels": [
+      "bug",
+      "a2a",
+      "ui",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "\r\n<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3637\r\n\r\n---\r\n\r\n## 📝 Summary\r\nFixes two critical bugs in A2A agent custom headers functionality that prevented users from saving and viewing custom authentication headers in the admin UI.\r\n\r\n**Bug # 1 - Custom Headers Not Saved on Edit**: When editing an A2A agent and adding custom headers, the headers were not persisted to the database due to missing `auth_headers` field in the schema.\r\n\r\n**Bug # 2 - Existing Custom Headers Not Displayed**: Even when custom headers existed in the database, they were not displayed in the edit form due to missing field extraction logic and outdated CSS selectors in tests.\r\n\r\nThis PR adds the `auth_headers` field to the A2AAgentRead schema with proper extraction and masking logic, fixes Playwright test CSS selectors, and adds comprehensive E2E test coverage.\r\n\r\n---\r\n\r\n## 🔄 Reproduction Steps (Before Fix)\r\n\r\n### Bug # 1 - Custom Headers Not Saved on Edit\r\n1. Navigate to `admin/#a2a-agents` in the admin UI\r\n2. Create or select an existing A2A agent and click \"Edit\"\r\n3. Set auth type to \"Custom Headers\"\r\n4. Add one or more custom headers (e.g., `X-API-Key: test123`)\r\n5. Click \"Save\" to update the agent\r\n6. Re-open the agent for editing\r\n7. **Observe**: Custom headers are not saved/persisted - the custom headers section is empty\r\n\r\n**Root Cause**: The `A2AAgentRead` schema was missing the `auth_headers` field, so even though headers were stored in the encrypted `auth_value` field, they couldn't be extracted and returned in API responses.\r\n\r\n### Bug # 2 - Existing Custom Headers Not Displayed\r\n1. Create an A2A agent with custom headers via API:\r\n   ```bash\r\n   curl -X POST http://localhost:8000/api/v1/a2a \\\r\n     -H \"Authorization: Bearer $TOKEN\" \\\r\n     -H \"Content-Type: application/json\" \\\r\n     -d '{\r\n       \"name\": \"test-agent\",\r\n       \"endpoint_url\": \"https://api.example.com\",\r\n       \"auth_type\": \"custom\",\r\n       \"auth_headers\": [{\"key\": \"X-API-Key\", \"value\": \"secret-123\"}]\r\n     }'\r\n   ```\r\n2. Navigate to `admin/#a2a-agents`\r\n3. Click \"Edit\" on the agent that has custom headers\r\n4. **Observe**: The custom headers section is empty, even though headers exist in the database\r\n\r\n**Root Cause**: \r\n- The schema lacked extraction logic to convert stored `auth_value` back to `auth_headers` array\r\n- Playwright tests had outdated CSS selectors (`button.edit-btn` instead of `button.edit-agent-btn`)\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n**Additional Testing:**\r\n```bash\r\n# Playwright E2E test for custom headers\r\npytest tests/playwright/entities/test_agents_extended.py::TestAgentsExtended::test_edit_modal_preserves_masked_custom_header_values -v\r\n\r\n# All agent-related Playwright tests\r\npytest tests/playwright/entities/test_agents_extended.py -v\r\n```\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Changes Made\r\n\r\n#### 1. Schema Updates (`mcpgateway/schemas.py`)\r\n\r\n**Added `auth_headers` field to A2AAgentRead** (line 5033):\r\n```python\r\nauth_headers: Optional[List[Dict[str, str]]] = Field(\r\n    None, \r\n    description=\"List of custom headers for authentication\"\r\n)\r\n```\r\n\r\n**Implemented extraction logic in `_populate_auth()`** (lines 5210-5221):\r\n```python\r\nelif auth_type == \"authheaders\":\r\n    # For backward compatibility, populate first header in key/value fields\r\n    if not isinstance(auth_value, dict) or len(auth_value) == 0:\r\n        raise ValueError(\"authheaders requires at least one key/value pair\")\r\n    # Populate auth_headers list for multi-header support\r\n    self.auth_headers = [\r\n        {\"key\": str(key), \"value\": \"\" if value is None else str(value)} \r\n        for key, value in auth_value.items()\r\n    ]\r\n    # Maintain backward compatibility with single header fields\r\n    k, v = next(iter(auth_value.items()))\r\n    self.auth_header_key, self.auth_header_value = k, v\r\n```\r\n\r\n**Added security masking in `masked()` method** (lines 5255-5262):\r\n```python\r\n# Mask auth_headers values\r\nif self.auth_headers:\r\n    for header in data[\"auth_headers\"]:\r\n        if header.get(\"value\") and header[\"value\"] != settings.masked_auth_value:\r\n            header[\"value\"] = settings.masked_auth_value\r\n```\r\n\r\n#### 2. Playwright Test Fixes (`tests/playwright/entities/test_agents_extended.py`)\r\n\r\n**Fixed 10 CSS selector references** (lines 148, 178, 208, 238, 268, 298, 328, 358, 388, 418):\r\n- Changed from: `button.edit-btn`\r\n- Changed to: `button.edit-agent-btn`\r\n\r\n**Added comprehensive E2E test** (lines 925-1033):\r\n```python\r\nasync def test_edit_modal_preserves_masked_custom_header_values(\r\n    self, page, admin_session\r\n):\r\n    \"\"\"Test that custom headers are displayed and masked in edit modal\"\"\"\r\n    # Creates agent with custom headers\r\n    # Opens edit modal\r\n    # Verifies headers are displayed\r\n    # Verifies values are masked\r\n    # Submits form successfully\r\n```\r\n\r\n### Verification Steps (After Fix)\r\n\r\n#### Bug # 1 - Headers Now Saved\r\n1. Navigate to `admin/#a2a-agents`\r\n2. Create/edit an A2A agent\r\n3. Set auth type to \"Custom Headers\"\r\n4. Add headers: `X-API-Key: test123`\r\n5. Click \"Save\"\r\n6. Re-open agent for editing\r\n7. ✅ **Result**: Custom headers are displayed with masked values (`*****`)\r\n\r\n#### Bug # 2 - Headers Now Displayed\r\n1. Create agent with custom headers via API\r\n2. Navigate to `admin/#a2a-agents`\r\n3. Click \"Edit\" on the agent\r\n4. ✅ **Result**: Custom headers section shows all headers with masked values\r\n5. ✅ **Result**: Can modify agent without losing header values\r\n\r\n### Security Considerations\r\n- All sensitive header values are masked with `*****` in API responses\r\n- Follows the same security pattern as OAuth and query parameter auth types\r\n- No plaintext credentials exposed in logs or API responses\r\n- Comprehensive test coverage ensures security patterns are maintained\r\n\r\n### Impact\r\n- **Users affected**: All users managing A2A agents with custom headers\r\n- **Severity**: High - Core functionality was completely broken\r\n- **Backward compatibility**: Fully backward compatible, no breaking changes\r\n- **Data migration**: Not required - existing data works with new schema\r\n\r\n### Related Work\r\n- Bug #3 (masked value preservation during updates) is addressed in separate commits\r\n- Comprehensive documentation added in `docs/docs/development/security-patterns.md`",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3971373940",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-18T23:02:17+00:00",
+      "body": "Approved with fixes. The original schema/UI changes are correct and consistent with the GatewayRead pattern. Added a critical fix for credential preservation during masked-value edits, plus additional test coverage for full differential coverage."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2e13f16cebe6ba5f36724ec7c15c3b72044ae5ba",
+      "message": "fix(ui): persist and display custom auth_headers in A2A agent admin edit form\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-13T11:37:02+00:00"
+    },
+    {
+      "sha": "c829faddae9382a36b5bd039dd469a7a150b939f",
+      "message": "test: add differential coverage tests and formatting fixes for auth_headers\n\nAdd 3 new unit tests for full coverage of the auth_headers changes:\n- non-dict auth_value rejection in _populate_auth isinstance guard\n- None header value coercion to empty string\n- masking preserves empty header values while masking non-empty ones\n\nApply black/isort formatting to contributor test files.\n\nCloses #3637\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T21:20:47+00:00"
+    },
+    {
+      "sha": "16b0ede14eaa1f5457607266e8734863b4a40bd8",
+      "message": "fix(a2a): preserve existing auth header credentials on masked-value edit\n\nWhen the admin UI sends back masked placeholder values (*****) for\nunchanged custom auth headers during an A2A agent edit, the service\nlayer now detects the mask and substitutes the real credential from\nthe existing encrypted auth_value. This prevents a no-change edit\nfrom silently destroying all stored header secrets.\n\nAlso fixes the inverse problem: since auth_value is computed by a\nbefore-validator and not tracked in model_fields_set, auth_headers\nchanges were silently dropped. The service now translates auth_headers\ninto auth_value directly, matching the gateway service pattern.\n\nRegression tests cover both all-masked preservation and mixed\nmasked/changed header scenarios.\n\nCloses #3637\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T22:53:19+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 851,
+  "deletions": 139,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:23.764708",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:23.766600",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3666,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3666.json"
+  }
+}

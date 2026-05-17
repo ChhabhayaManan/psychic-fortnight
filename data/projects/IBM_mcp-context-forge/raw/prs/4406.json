@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4406,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4406"
+  },
+  "metadata": {
+    "title": "fix(security): Implement X-Force Red session token security fixes (ICACF-22)",
+    "state": "closed",
+    "created_at": "2026-04-23T07:21:12+00:00",
+    "updated_at": "2026-05-11T10:51:46+00:00",
+    "closed_at": "2026-05-11T10:51:45+00:00",
+    "merged_at": null,
+    "author": "MohanLaksh",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Problem Statement\n\nX-Force Red penetration testing identified critical session token vulnerabilities (ICACF-22):\n\n1. **Token Replay Attacks**: Session tokens remained valid after logout, allowing attackers to reuse stolen tokens\n2. **Excessive Token Lifetime**: 7-day session token expiry increased attack surface for token theft\n3. **No Server-Side Revocation**: Logout only cleared client-side cookies, tokens remained valid server-side\n\n**Security Impact**: An attacker who steals a session token (via XSS, network sniffing, etc.) can continue using it even after the user logs out, potentially for up to 7 days.\n\n## Solution Overview\n\nThis PR implements comprehensive server-side token revocation and reduces session token lifetime per X-Force Red recommendations:\n\n### 1. Reduced Token Lifetime (15 minutes)\n- Changed `TOKEN_EXPIRY` from 10080 minutes (7 days) to **15 minutes** for session tokens\n- Added security warnings for excessive token expiry values (>20 min, >24 hours)\n- Distinguished session tokens (short-lived, interactive) from API tokens (long-lived, automation)\n\n### 2. Server-Side Token Revocation\n- New `POST /auth/logout` endpoint that revokes session tokens server-side\n- `TokenRevocation` database table tracks revoked tokens with audit trail (jti, revoked_by, revoked_at, reason)\n- Auth middleware checks revocation status and rejects revoked tokens with 401 Unauthorized\n- Redis-cached revocation for performance optimization\n- Idempotent logout operations (DoS prevention)\n\n### 3. Admin UI Logout Enhancement\n- Admin UI logout now calls server-side revocation before clearing cookies\n- Best-effort revocation (doesn't block logout on failure)\n\n## Technical Implementation\n\n### Files Modified\n\n**Core Implementation:**\n- `mcpgateway/config.py` - Token expiry configuration and security warnings\n- `mcpgateway/routers/auth.py` - New logout endpoint with revocation logic\n- `mcpgateway/admin.py` - Admin UI logout with server-side revocation\n- `.env.example` - Updated TOKEN_EXPIRY documentation with migration guidance\n\n**Configuration:**\n- `pyproject.toml` - Added `security` pytest marker registration\n- `CHANGELOG.md` - Breaking changes documentation with migration examples\n\n**Database:**\n- Reuses existing `TokenRevocation` table (jti, revoked_by, revoked_at, reason)\n\n### Test Coverage (32 Tests Total)\n\n**Unit Tests (10)** - `tests/unit/mcpgateway/test_auth.py`\n- Token lifetime validation (3 tests)\n- Token revocation enforcement (2 tests)\n- Logout endpoint functionality (3 tests)\n- Admin UI logout with revocation (2 tests)\n\n**Security Tests (15)** - `tests/security/test_session_token_security.py`\n- Token lifetime security guidelines (4 tests)\n- Token revocation and audit trail (3 tests)\n- Logout endpoint security properties (4 tests)\n- Revocation persistence requirements (2 tests)\n- Token replay attack mitigation scenarios (3 tests)\n\n**Integration Tests (7)** - `tests/integration/test_auth_logout_flow.py`\n- E2E login → logout → rejection flow (4 tests)\n- Database persistence verification (2 tests)\n- Token expiry enforcement (1 test)\n\n**Test Fixes (2)**\n- `tests/unit/mcpgateway/test_config.py` - Updated warning assertion\n- `tests/unit/mcpgateway/test_admin_module.py` - Fixed logout test mocks\n\n### Security Properties Validated\n\n✅ Revoked tokens rejected immediately (no replay attacks)  \n✅ Token expiry ≤20 minutes (X-Force Red guideline)  \n✅ Logout only accepts session tokens (not API tokens)  \n✅ Idempotent logout (DoS prevention)  \n✅ Complete audit trail (jti, revoked_by, revoked_at, reason)  \n✅ Database persistence (cache failures don't bypass revocation)  \n✅ Unauthenticated logout rejected (401 Unauthorized)  \n\n## Breaking Changes\n\n**Session Token Lifetime Reduced**: 7 days → 15 minutes\n\n**Migration Required** for automation/long-running tasks:\n\n**Before (session tokens, now invalid after 15 min):**\n```python\nresponse = requests.post(\"https://gateway/auth/login\", json={\n    \"email\": \"automation@example.com\",\n    \"password\": \"SecurePassword123!\"  # pragma: allowlist secret\n})\ntoken = response.json()[\"access_token\"]  # Valid for 15 minutes only\n```\n\n**After (use API tokens for automation):**\n```python\nresponse = requests.post(\"https://gateway/tokens\", json={\n    \"name\": \"CI/CD Pipeline\",\n    \"expires_in_days\": 90\n}, headers={\"Authorization\": f\"Bearer {admin_session_token}\"})\napi_token = response.json()[\"token\"]  # Valid for 90 days  # pragma: allowlist secret\n```\n\nSee `CHANGELOG.md` for complete migration guide.\n\n## Verification\n\n### Quality Checks (All Passed)\n```bash\n✅ 17,881 tests passed (pytest)\n✅ 0 linting issues (ruff)\n✅ 10.00/10 rating (pylint)\n✅ 0 security issues (bandit)\n✅ 100% docstring coverage (interrogate)\n✅ All doctests passed\n✅ Code formatted (black, isort, autoflake)\n```\n\n### Test Coverage\n```bash\npytest tests/unit/mcpgateway/test_auth.py -v           # 10 unit tests\npytest tests/security/test_session_token_security.py -v  # 15 security tests\npytest tests/integration/test_auth_logout_flow.py -v    # 7 integration tests\n```\n\n### Manual Testing\n```bash\n# 1. Login and get session token\ncurl -X POST http://localhost:4444/auth/login \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"email\": \"test@example.com\", \"password\": \"password123\"}'  # pragma: allowlist secret\n\n# 2. Use token to access protected endpoint (should succeed)\ncurl http://localhost:4444/servers \\\n  -H \"Authorization: Bearer <token>\"\n\n# 3. Logout (revoke token server-side)\ncurl -X POST http://localhost:4444/auth/logout \\\n  -H \"Authorization: Bearer <token>\"\n\n# 4. Try to use token again (should fail with 401)\ncurl http://localhost:4444/servers \\\n  -H \"Authorization: Bearer <token>\"\n# Expected: {\"detail\": \"Token has been revoked\"}\n```\n\n## Security Audit Compliance\n\n**X-Force Red Findings Addressed:**\n\n| Finding | Status | Implementation |\n|---------|--------|----------------|\n| Token replay after logout | ✅ Fixed | Server-side revocation with TokenRevocation table |\n| Excessive token lifetime | ✅ Fixed | Reduced to 15 minutes (within 5-20 min guideline) |\n| No token invalidation | ✅ Fixed | Auth middleware checks revocation status |\n\n**Threat Model Coverage:**\n\n- ✅ Token theft → user logout → attacker blocked (replay attack prevention)\n- ✅ Concurrent logout requests → idempotent operations (DoS prevention)\n- ✅ Cache poisoning → database fallback (cache bypass protection)\n- ✅ Long-lived tokens → reduced attack window (15 min vs 7 days)\n\n## Deployment Notes\n\n### Configuration Changes Required\n```bash\n# .env file\nTOKEN_EXPIRY=15  # Changed from 10080 (7 days)\n```\n\n### Database Migration\nNo new migrations required - reuses existing `TokenRevocation` table from schema.\n\n### Backward Compatibility\n- ✅ API tokens unaffected (still long-lived for automation)\n- ✅ Existing session tokens will expire naturally (no forced logout)\n- ⚠️ Users with 7-day session tokens will be logged out after 15 minutes on new deployments\n- ⚠️ Automation using session tokens must migrate to API tokens (see Breaking Changes)\n\n### Rollback Plan\n```bash\n# If issues arise, revert TOKEN_EXPIRY in .env:\nTOKEN_EXPIRY=10080  # Restore 7-day expiry\n\n# Existing revocation logic will continue to work but won't be triggered\n# No database rollback needed\n```\n\n## References\n\n- X-Force Red Penetration Test Report (ICACF-22)\n- Issue: #4324\n- X-Force Red Session Token Recommendations: 5-20 minutes for interactive sessions\n\n🚀 Ready for Review",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "3c11257f9b9653150f5f0df2dd7ac8eb7c32472a",
+      "message": "fix(security): implement X-Force Red session token security fixes (ICACF-22)\n\nAddresses X-Force Red penetration testing findings for session token\nvulnerabilities. Implements comprehensive security improvements to prevent\ntoken replay attacks after logout.\n\nChanges:\n- Reduce session token lifetime from 30 days to 15 minutes (configurable)\n- Implement server-side token revocation with TokenRevocation table\n- Add POST /auth/logout endpoint with immediate token blocklist\n- Update admin UI logout to revoke tokens server-side\n- Add security validation warnings for excessive token expiry values\n\nSecurity improvements:\n- Token replay attacks prevented via server-side revocation\n- Revocation persists in database (source of truth)\n- Redis-cached revocation for performance\n- Complete audit trail (JTI, revoked_by, revoked_at, reason)\n- Idempotent logout operations (DoS prevention)\n\nTest coverage:\n- 10 unit tests (token lifetime, revocation, logout endpoints)\n- 15 security tests (threat modeling, attack scenarios)\n- 7 integration tests (E2E login → logout → revocation flow)\n\nBreaking changes:\n- Session token expiry reduced from 10080 minutes (7 days) to 15 minutes\n- Automation scripts using session tokens must migrate to API tokens\n\nMigration guide included in CHANGELOG.md\n\nCloses #4324\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-23T07:13:16+00:00"
+    },
+    {
+      "sha": "851cf290892166eea36d243b1add24feda116cad",
+      "message": "fix(security): add missing pragma comments for detect-secrets\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-23T11:02:34+00:00"
+    },
+    {
+      "sha": "916204808dd875c3f50317627c1ae07b6f725827",
+      "message": "Merge branch 'main' into fix/icacf-22-session-token-security",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-23T13:14:02+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 1504,
+  "deletions": 34,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:58.778540",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:58.779566",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4406,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4406.json"
+  }
+}

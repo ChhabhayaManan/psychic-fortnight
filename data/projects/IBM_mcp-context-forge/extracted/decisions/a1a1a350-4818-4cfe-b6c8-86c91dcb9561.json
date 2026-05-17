@@ -1,0 +1,39 @@
+{
+  "id": "a1a1a350-4818-4cfe-b6c8-86c91dcb9561",
+  "title": "feat(auth): add service-level caching for get_user_by_email",
+  "summary": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3061\r\n\r\n---\r\n\r\n## 📝 Summary\r\n_What does this PR do and why?_\r\nImplements two-tier caching (L1 in-memory + L2 Redis) for get_user_by_email() to reduce database load during authentication hot paths. Addresses ORM detachment issues, implements comprehensive cache invalidation, and ensures Pydantic v2 compatibility.\r\n\r\n## Changes Made\r\n\r\n### 1. Core Implementation\r\n**File: `mcpgateway/schemas.py`**\r\n- Added `ClassVar` to typing imports for Pydantic v2 compatibility\r\n- Created `CachedEmailUser` Pydantic model with:\r\n  - `CACHE_VERSION: ClassVar[str] = \"v1\"` for schema drift protection\r\n  - `from_orm(obj)` method for ORM → Pydantic conversion\r\n  - `to_orm()` method for Pydantic → detached ORM reconstruction\r\n  - All EmailUser fields with proper type annotations\r\n  - Automatic datetime serialization via Pydantic\r\n\r\n**File: `mcpgateway/services/email_auth_service.py`**\r\n- Modified `get_user_by_email()` to implement caching:\r\n  - Checks cache first with versioned key: `v1:user_by_email:{email}`\r\n  - Falls back to database on cache miss\r\n  - Stores results using Pydantic serialization\r\n  - Graceful error handling: cache failures don't break authentication\r\n  - 60-second TTL with documented staleness window\r\n\r\n**File: `mcpgateway/cache/auth_cache.py`**\r\n- Added `get_user_by_email(email, cache_version)` method\r\n- Added `cache_user_by_email(email, user_data, cache_version)` method\r\n- Both methods support cache versioning for schema evolution\r\n\r\n### 2. Cache Invalidation\r\n**File: `mcpgateway/services/email_auth_service.py`**\r\n\r\nAdded `_invalidate_user_auth_cache(email)` helper and integrated into 6 mutation methods:\r\n- `update_user()` - line 938\r\n- `activate_user()` - line 983  \r\n- `deactivate_user()` - line 1055\r\n- `unlock_user_account()` - line 1622\r\n- `reset_password_with_token()` - line 1657\r\n- `change_password()` - line 1693\r\n\r\n### 3. Test Updates\r\n**File: `tests/unit/mcpgateway/services/test_email_auth_basic.py`**\r\n- Fixed `test_get_user_by_email_found` - mocks cache at correct path\r\n- Fixed `test_get_user_by_email_cache_hit` - tests cache hit scenario\r\n- Fixed `test_get_user_by_email_cache_miss_then_cache` - tests caching on miss\r\n- Fixed `test_get_user_by_email_normalizes_email` - tests email normalization\r\n- Fixed `test_get_user_by_email_database_error` - expects exception propagation\r\n\r\n**File: `tests/unit/mcpgateway/services/test_email_auth_caching.py`**\r\n- Created comprehensive test suite with 15+ tests covering:\r\n  - Pydantic model serialization (`from_orm`, `to_orm`, `model_dump`)\r\n  - Cache hit/miss scenarios\r\n  - Cache invalidation on all mutation paths\r\n  - Error handling and graceful degradation\r\n\r\n## Technical Details\r\n\r\n### ORM Detachment Solution\r\n- Caches plain dicts via Pydantic `model_dump()`, not ORM objects\r\n- Reconstructs detached `EmailUser` instances using `to_orm()`\r\n- Avoids `DetachedInstanceError` when accessing lazy-loaded relationships\r\n\r\n### Cache Versioning\r\n- Version prefix in cache keys: `v1:user_by_email:email`\r\n- Incrementing `CACHE_VERSION` auto-invalidates stale entries\r\n- Protects against schema drift and incomplete cached data\r\n\r\n### Error Handling\r\n- Cache read errors: log warning, fall back to database\r\n- Cache write errors: log warning, continue normally\r\n- Database errors: propagate for visibility\r\n- Ensures service availability even when cache fails\r\n\r\n### TTL and Staleness\r\n- **TTL**: 60 seconds (configurable via `auth_cache_user_ttl`)\r\n- **Staleness Window**: Up to 60 seconds between cache invalidation and expiry\r\n- **Acceptable**: Critical changes (password resets, deactivation) trigger explicit invalidation\r\n\r\n## Benefits\r\n- ✅ Reduces database load during authentication hot paths\r\n- ✅ Prevents ORM detachment errors\r\n- ✅ Maintains data consistency via cache invalidation\r\n- ✅ Graceful degradation on cache failures\r\n- ✅ Type-safe serialization via Pydantic\r\n- ✅ Schema evolution support via versioning\r\n- ✅ Comprehensive test coverage\r\n\r\n## Breaking Changes\r\nNone - fully backward compatible\r\n\r\n\r\n\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   PASS     |\r\n| Unit tests                | `make test`     |    PASS    |\r\n| Coverage ≥ 80%            | `make coverage` |   99%     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._",
+  "reasoning": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3061\r\n\r\n---\r\n\r\n## 📝 Summary\r\n_What does this PR do and why?_\r\nImplements two-tier caching (L1 in-memory + L2 Redis) for get_user_by_email() to reduce database load during authentication hot paths. Addresses ORM detachment issues, implements comprehensive cache invalidation, and ensures Pydantic v2 compatibility.\r\n\r\n## Changes Made\r\n\r\n### 1. Core Implementation\r\n**File: `mcpgateway/schemas.py`**\r\n- Added `ClassVar` to typing imports for Pydantic v2 compatibility\r\n- Created `CachedEmailUser` Pydantic model with:\r\n  - `CACHE_VERSION: ClassVar[str] = \"v1\"` for schema drift protection\r\n  - `from_orm(obj)` method for ORM → Pydantic conv",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "msureshkumar88"
+  ],
+  "tags": [
+    "caching",
+    "enhancement",
+    "SHOULD",
+    "performance",
+    "database",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "19eb7f20-ae3f-4532-8442-25a2b7f0d111",
+      "source_type": "pr",
+      "source_id": "3083",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/3083",
+      "contributor": "msureshkumar88",
+      "timestamp": "2026-02-20T16:00:07Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3083.json"
+    }
+  ],
+  "timestamp": "2026-02-20T16:00:07Z",
+  "created_at": "2026-05-17T17:23:47.231483",
+  "updated_at": "2026-05-17T17:23:47.231485",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:47.232438",
+    "artifact_type": "decisions",
+    "artifact_id": "a1a1a350-4818-4cfe-b6c8-86c91dcb9561"
+  }
+}

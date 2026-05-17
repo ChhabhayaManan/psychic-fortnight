@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1710,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1710"
+  },
+  "metadata": {
+    "title": "Optimize PerformanceTracker buffer management with deque",
+    "state": "closed",
+    "created_at": "2025-12-22T09:40:06+00:00",
+    "updated_at": "2025-12-23T04:02:16+00:00",
+    "closed_at": "2025-12-23T04:02:15+00:00",
+    "merged_at": "2025-12-23T04:02:15+00:00",
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## :rocket: Performance Improvement PR\r\n### :pushpin: Summary\r\nOptimizes PerformanceTracker buffer management from O(n) to O(1) complexity\r\n- Replaces manual `list.pop(0)` with `deque(maxlen=...)` for automatic eviction\r\n- Eliminates manual buffer size checking in `track_operation` and `record_timing`\r\n- Converts deque to list only when slicing is needed in `check_performance_degradation`\r\n- Adds comprehensive unit tests for buffer eviction behavior\r\n\r\n### :link: Related Issue\r\nCloses: #1610\r\n\r\n### :chart_with_upwards_trend: Root Cause\r\n- Manual buffer management used `list.pop(0)` which is O(n) - shifts all remaining elements\r\n- Buffer size checking and eviction happened on every operation\r\n- Performance degraded as buffers filled to max capacity (1000 samples)\r\n- High concurrency amplified the O(n) cost across many simultaneous requests\r\n\r\n### :wrench: Solution\r\n- Changed `operation_timings` from `Dict[str, List[float]]` to `Dict[str, deque[float]]`\r\n- Use `deque(maxlen=max_samples)` for automatic O(1) eviction of oldest items\r\n- Removed manual size checking: `if len(buffer) >= max_samples: buffer.pop(0)`\r\n- Deque automatically evicts oldest element when appending to full buffer\r\n- Convert to list only where slicing is required: `timings_list = list(timings)`\r\n\r\n### :test_tube: Verification\r\n| Test | Command | Status |\r\n|------|---------|--------|\r\n| Unit tests (12 new tests) | `pytest tests/unit/mcpgateway/services/test_performance_tracker.py` | :white_check_mark: pass |\r\n| Buffer eviction tests | Unit test coverage | :white_check_mark: pass |\r\n| Deque O(1) performance test | Unit test coverage | :white_check_mark: pass |\r\n| All existing tests | `pytest` (49/49) | :white_check_mark: pass |\r\n| Code quality | `flake8`, `pylint` (10/10) | :white_check_mark: pass |\r\n\r\n### :bar_chart: Testing\r\n**Test Environment 1: SQLite (200 users, 5 min sustained load)**\r\n| Metric | OLD (list) | NEW (deque) | Improvement |\r\n|--------|-----------|-------------|-------------|\r\n| **RPS** | 105.9 | 130.4 | **+23% higher** :white_check_mark: |\r\n| **Median** | 130ms | 110ms | **15% faster** :white_check_mark: |\r\n| **95th percentile** | 9,100ms | 5,400ms | **41% better** :white_check_mark: |\r\n| **Failures** | 0% | 0% | Same reliability |\r\n\r\n**Test Environment 2: PostgreSQL/Docker (200 users, 5 min sustained load)**\r\n| Metric | OLD (list) | NEW (deque) | Result |\r\n|--------|-----------|-------------|---------|\r\n| **RPS** | 186.8 (volatile) | 161 (stable) | More consistent :white_check_mark: |\r\n| **Stability** | Volatile swings | Stable | Better predictability :white_check_mark: |\r\n| **Failures** | Spikes observed | 0% | Perfect reliability :white_check_mark: |\r\n\r\n**Key Findings:**\r\n- :white_check_mark: SQLite: Significant improvements across all metrics (+23% RPS, 15% faster responses, 41% better tail latency)\r\n- :white_check_mark: PostgreSQL: Better stability and reliability with consistent RPS and zero failures\r\n- :white_check_mark: Deque optimization delivers measurable benefits in both throughput and response time consistency",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3606442048",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-23T03:55:16+00:00",
+      "body": "Rebased and tested"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "bbbc50a53d9e55b4098cecb1388b3d95ffae9fb1",
+      "message": "optimize PerformanceTracker buffer management with deque\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2025-12-22T08:07:31+00:00"
+    },
+    {
+      "sha": "d033dbe1892a426b34921e0a1ecd378a0f5ab05b",
+      "message": "fix: clean up linting issues in performance tracker tests\n\n- Remove unused pytest import\n- Move time import to top level\n- Rename unused arguments to _obj convention\n- Replace unused loop variables with underscore\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-23T03:46:56+00:00"
+    },
+    {
+      "sha": "24b0af5568d7b06a15a763806834a9542800736d",
+      "message": "Rebase and test\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-23T03:54:36+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 250,
+  "deletions": 18,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:55.192045",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:55.193227",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1710,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1710.json"
+  }
+}

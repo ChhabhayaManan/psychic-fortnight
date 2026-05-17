@@ -1,0 +1,198 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3504,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3504"
+  },
+  "metadata": {
+    "title": "[FEATURE][UI]: Add gateway credential reveal endpoint with admin UI support",
+    "state": "open",
+    "created_at": "2026-03-05T15:57:59+00:00",
+    "updated_at": "2026-04-13T10:16:41+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "gandhipratik203",
+    "labels": [
+      "bug",
+      "enhancement",
+      "security",
+      "ui",
+      "SHOULD",
+      "ready"
+    ],
+    "milestone": "Release 1.4.0",
+    "assignees": [
+      "jonpspri",
+      "crivetimihai",
+      "gandhipratik203"
+    ]
+  },
+  "description": "---                                                                                                      \n🔗 Related Issue\n                                                                                                           \nCloses #3346, closes #2968 — see also #3201 for an alternative approach            \n                                                 \n---\n📝 Summary\n\n- Adds GatewayCredentialRevealResponse schema to mcpgateway/schemas.py\n- Adds get_gateway_with_credentials() service method to gateway_service.py — fetches and decrypts gateway\n credentials without calling .masked()\n- Adds POST /admin/gateways/{gateway_id}/reveal endpoint to admin.py, gated by gateways.read permission\nwith mandatory audit logging on every call\n- Wires up the Show button in the Edit Gateway modal (admin.js) to transparently call the reveal endpoint\n on first click, then toggle show/hide on subsequent clicks\n- Adds 5 unit tests covering all acceptance criteria\n\nChanges are purely additive — masked(), get_gateway(), and the existing GET endpoint are untouched.\n\n| Functionality                             | PR #3201 | This PR |\n|-------------------------------------------|----------|---------|\n| Reveal gateway credentials via API        | ✅       | ✅      |\n| Audit log on every credential reveal      | —        | ✅      |\n| Dedicated reveal endpoint                 | —        | ✅      |\n\n---\n🏷️  Type of Change\n\n- Bug fix\n- Feature / Enhancement\n- Documentation\n- Refactor\n- Chore (deps, CI, tooling)\n- Other (describe below)\n\n---\n## 🧪 Verification\n\n| Check           | Command       | Status             |\n|-----------------|--------------|--------------------|\n| Lint suite      | `make lint`  | ✅                 |\n| Unit tests      | `make test`  | ✅ 13,776 passed   |\n| Coverage ≥ 80%  | `make coverage` |   ✅               |\n\n---\n🔬 Steps to Test\n\nPrerequisites\n- Server running locally (make dev)\n- Logged in to the Admin UI at http://localhost:8000/admin\n\nTest 1 — UI flow (end-to-end)\n1. Navigate to MCP Servers → scroll to Add New MCP Server or Gateway\n2. Fill in: Name = test-reveal, URL = any reachable SSE URL, Authentication Type = Bearer Token, Token =\nsupersecrettoken123\n3. Click Add Gateway\n4. Find test-reveal in the list → click Edit\n5. In the Token field, click Show\n6. Expected: button briefly shows Loading…, then reveals supersecrettoken123\n7. Click Hide → token is masked again\n8. Click Show again → token revealed instantly (no network call needed, cached in data-real-value)\n\n**Optional for reviewers:**\nTest 2 — API (Swagger UI)\n1. Open http://localhost:8000/docs\n2. Authorize with a Bearer JWT token\n3. Call POST /admin/gateways/{gateway_id}/reveal with the ID of test-reveal\n4. Expected: 200 response with authToken: <your-bearer-token>\n\nTest 3 — Unauthenticated request\n1. Call POST /admin/gateways/{gateway_id}/reveal without Authorization header\n2. Expected: 401 Unauthorized\n\nTest 4 — Non-existent gateway\n1. Call POST /admin/gateways/does-not-exist/reveal\n2. Expected: 404 Not Found\n\nTest 5 — Audit trail\n1. After calling the reveal endpoint, check audit trail via GET /admin/audit-trail\n2. Expected: entry with action: READ, resource_type: gateway, resource_id: <gateway_id>\n\n---\n\n## 📸 Observed Output\n\n<details>\n<summary>Edit Gateway modal — before clicking Show</summary>\n\n<br>\n\n<img width=\"1511\" height=\"857\" alt=\"Edit Gateway modal before clicking Show\" src=\"https://github.com/user-attachments/assets/edc6f3b1-d20c-4610-a4d6-4114e73dd3a5\" />\n\n</details>\n\n<details>\n<summary>Edit Gateway modal — after clicking Show</summary>\n\n<br>\n\n<img width=\"1509\" height=\"851\" alt=\"Edit Gateway modal after clicking Show\" src=\"https://github.com/user-attachments/assets/c8e326ec-58ea-400d-bab9-fd2e8c754e6a\" />\n\n</details>\n\n---\n✅ Checklist\n\n- Code formatted (make black isort pre-commit)\n- Tests added/updated for changes\n- Documentation updated (if applicable)\n- No secrets or credentials committed\n\n---\n📓 Notes\n\nThis implementation uses a dedicated POST endpoint rather than modifying the existing GET endpoint (as\nproposed in #3201). Benefits: explicit user intent, mandatory audit logging on every reveal, no risk of\naccidentally exposing credentials in GET responses or logs.",
+  "comments": [
+    {
+      "id": "2896629021",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-06T16:14:50+00:00",
+      "body": "`/reveal` is slightly vague, have you considered `reveal-credentials`?"
+    },
+    {
+      "id": "2896648273",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-06T16:18:55+00:00",
+      "body": "Why the underscore on the function name?"
+    },
+    {
+      "id": "2896658781",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-06T16:21:10+00:00",
+      "body": "Should we add some caching or debouncing to this function, to avoid abusing the backend with multiple clicks?"
+    },
+    {
+      "id": "2904679160",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-09T10:56:07+00:00",
+      "body": "Good call, renamed the endpoint to /reveal-credentials for clarity. Updated in admin.py and the fetch URL in admin.js. "
+    },
+    {
+      "id": "2904681785",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-09T10:56:40+00:00",
+      "body": "Good catch, the leading underscore was borrowed from Python's private-function convention by mistake. JavaScript doesn't use this pattern, so renamed to\n  populateRevealedCredentials"
+    },
+    {
+      "id": "2925654582",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-12T15:53:04+00:00",
+      "body": "Good point, thanks for flagging! Both are actually already in place though:\r\n  \r\nAdded inline comments to make both behaviours visible to future readers.\r\n\r\n- **Caching**\r\n\r\n  After the first successful reveal, `populateRevealedCredentials()` writes the fetched value into `data-real-value` on the input element. The `hasRevealableValue` check at the top of the function becomes truthy from that point on, so the entire fetch block is skipped on every subsequent **Show/Hide** toggle.\r\n\r\n  The backend is therefore called **at most once per page load**.\r\n\r\n- **Debounce**\r\n\r\n  The button is set to `disabled` before the `await fetch()` call and re-enabled only after the response (or on error). Rapid clicks during an in-flight request are therefore **silently ignored**.\r\n\r\n"
+    },
+    {
+      "id": "2925982696",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-12T16:46:28+00:00",
+      "body": "Excelent!"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3904654214",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-06T16:14:50+00:00",
+      "body": ""
+    },
+    {
+      "id": "3904674554",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-06T16:18:55+00:00",
+      "body": ""
+    },
+    {
+      "id": "3914563843",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-09T10:56:08+00:00",
+      "body": ""
+    },
+    {
+      "id": "3914566559",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-09T10:56:41+00:00",
+      "body": ""
+    },
+    {
+      "id": "3904685605",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-12T15:19:52+00:00",
+      "body": ""
+    },
+    {
+      "id": "3937783083",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-12T15:53:05+00:00",
+      "body": ""
+    },
+    {
+      "id": "3938166314",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-12T16:46:29+00:00",
+      "body": ""
+    },
+    {
+      "id": "3944409905",
+      "author": "gcgoncalves",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-13T14:26:02+00:00",
+      "body": "The show button is never revealing the token.\n\nhttps://github.com/user-attachments/assets/c77fc684-8fc4-49eb-8f01-ce2bc5ac343b"
+    },
+    {
+      "id": "3944446309",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-13T14:30:43+00:00",
+      "body": "Disregard my last review, the problem was on my end."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f83fc11083c16070c026f86258533345f6b76dcd",
+      "message": "feat: add POST /admin/gateways/{id}/reveal endpoint for credential reveal\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-05T15:51:38+00:00"
+    },
+    {
+      "sha": "bb16b75e1010894e3e9392533bd70a0b6aded1e9",
+      "message": "feat: wire Show button to call credential reveal endpoint\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-05T22:30:37+00:00"
+    },
+    {
+      "sha": "fb1affcb90ab4414f265ec52ae7bb3e31f608d30",
+      "message": "fix(ui): rename /reveal to /reveal-credentials, fix prettier, add credential reveal tests\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-09T11:06:03+00:00"
+    },
+    {
+      "sha": "19ab7ea718961b316f7ec2e9e43530650c5a4533",
+      "message": "fix(ui): restore unmaskedHeaders definition lost during rebase conflict resolution\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-10T11:20:22+00:00"
+    },
+    {
+      "sha": "ad03fe665411fe15e62ab1ce8da76407301b4591",
+      "message": "fix(ui): re-add Show/Hide buttons to Edit Gateway form after #3508 rebase\n\nPR #3508 removed non-functional Show/Hide toggle buttons from admin.html.\nAfter rebasing on main, re-add the buttons to the Edit Gateway form only,\nnow wired to the working async toggleInputMask() that calls the\nPOST /admin/gateways/{id}/reveal-credentials endpoint.\n\nAlso fix button state reset in editGateway() so reopening the Edit dialog\nalways shows the correct initial \"Show\" label with token masked.\n\nAdd form intentionally excluded — no stored secret exists at creation time.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-10T15:12:14+00:00"
+    },
+    {
+      "sha": "0b83ae57c6b8fa94369b330842446e5459854a58",
+      "message": "docs(ui): clarify caching and debounce behaviour in toggleInputMask\n\nAdd inline comments explaining that data-real-value acts as a per-session\ncache (backend called at most once per reveal) and that button.disabled\nprevents duplicate in-flight requests on rapid clicks.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-12T15:55:34+00:00"
+    },
+    {
+      "sha": "f660a40575d73abe5404d37805e03bae43592b46",
+      "message": "fix(gateway): replace removed _prepare_gateway_for_read with inline dict in get_gateway_with_credentials\n\n_prepare_gateway_for_read was removed in #3570. Inline the equivalent\ndict construction from convert_gateway_to_read, skipping .masked() so\nthat _populate_auth() leaves plaintext values in the _unmasked fields.\nUpdate the test to drop the now-unnecessary monkeypatch of the removed method.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-13T09:15:22+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 392,
+  "deletions": 28,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:42.496145",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:42.497587",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3504,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3504.json"
+  }
+}

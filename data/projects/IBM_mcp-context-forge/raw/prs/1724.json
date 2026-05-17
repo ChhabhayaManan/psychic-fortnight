@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1724,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1724"
+  },
+  "metadata": {
+    "title": "Optimize Startup Slug Refresh with Batch Processing",
+    "state": "closed",
+    "created_at": "2025-12-24T05:22:06+00:00",
+    "updated_at": "2025-12-24T11:02:42+00:00",
+    "closed_at": "2025-12-24T11:02:41+00:00",
+    "merged_at": "2025-12-24T11:02:41+00:00",
+    "author": "Nayana-R-Gowda",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "Closes #1611\r\n\r\nSigned-off-by: NAYANAR <nayana.r5@ibm.com>\r\nSummary\r\n\r\nThe refresh_slugs_on_startup() implementation previously loaded all gateways and tools into memory using .all() and expired relationships during iteration.\r\nFor large installations, this caused:\r\n\r\nStartup time to grow linearly with database size\r\n\r\nHigh peak memory usage during startup\r\n\r\nAn N+1 query pattern when accessing tool.gateway\r\n\r\nRisk of container startup timeouts in orchestrated environments\r\n\r\nThis PR refactors the startup slug refresh logic to use batched pagination with eager loading, ensuring predictable memory usage and eliminating N+1 queries.\r\n\r\nProblem Details\r\n\r\nPrevious behavior:\r\n\r\nsession.query(Gateway).all() and session.query(Tool).all() loaded all rows at once\r\n\r\nsession.expire(tool, [\"gateway\"]) forced gateway re-fetch per tool\r\n\r\nEach tool triggered a separate SELECT for its gateway\r\n\r\nAll updates occurred in a single long-running transaction\r\n\r\nImpact:\r\n\r\nSlow startup for large datasets\r\n\r\nMemory usage proportional to total row count\r\n\r\nExcessive SQL queries\r\n\r\nIncreased risk of failed health checks during container startup\r\n\r\nSolution Implemented\r\nBatched Processing with Eager Loading\r\n\r\nIntroduced _refresh_gateway_slugs_batched() and _refresh_tool_names_batched() helpers\r\n\r\nProcess records in configurable batches using pagination\r\n\r\nAdded joinedload(Tool.gateway) to eliminate N+1 queries\r\n\r\nRemoved session.expire(tool, [\"gateway\"])\r\n\r\nAdded session.expire_all() between batches to release ORM state\r\n\r\nMade batch size configurable via settings.slug_refresh_batch_size (default: 1000)\r\n\r\nThis approach is consistent with existing patterns already used in the codebase\r\n(e.g. tool_service.py uses joinedload(DbTool.gateway)).\r\n\r\nValidation & Testing\r\n\r\nThe change was validated using a reproducible large-dataset test:\r\n\r\nTest Dataset\r\n\r\n1,000 gateways\r\n\r\n50,000 tools (50 tools per gateway)\r\n\r\nValidation Steps\r\n\r\nBaseline startup timing\r\n\r\nPost-change startup timing\r\n\r\nSQL echo enabled to confirm no N+1 queries\r\n\r\nMemory usage verification using /usr/bin/time -v\r\n\r\nIdempotency check (second run performs no updates)\r\n\r\nBatch size tuning via SLUG_REFRESH_BATCH_SIZE\r\n\r\nResults\r\n\r\nStartup time reduced by 50%+ for large datasets\r\n\r\nPeak memory usage bounded by batch size\r\n\r\nNo N+1 queries observed\r\n\r\nSecond run completes faster with no database updates\r\n\r\nSafe for repeated startup execution\r\n\r\nEstimated Impact by Scale\r\nGateways | Tools | Previous Startup | Previous Queries | Optimized Startup\r\n-- | -- | -- | -- | --\r\n100 | 500 | ~2s | ~600 | ~1s\r\n1,000 | 5,000 | ~15s | ~6,000 | ~3s\r\n5,000 | 25,000 | ~60s | ~30,000 | ~10s\r\n10,000 | 50,000 | ~120s+ | ~60,000 | ~20s\r\n\r\nAcceptance Criteria\r\n\r\n✅ Startup time reduced for large databases\r\n\r\n✅ Memory usage bounded by batch size\r\n\r\n✅ No N+1 queries (joinedload used)\r\n\r\n✅ Configurable batch size\r\n\r\n✅ Idempotent execution\r\n\r\n✅ All tests pass (make verify)\r\n\r\nTesting \r\nSTEP 1: Baseline Data Load\r\npython -m mcpgateway.bootstrap_db\r\npython - << 'PY'\r\nfrom mcpgateway.db import Gateway, Tool, SessionLocal\r\nfrom datetime import datetime\r\n\r\nsession = SessionLocal()\r\n\r\n# -------------------\r\n# Create 1,000 gateways\r\n# -------------------\r\ngateways = []\r\nfor i in range(1000):\r\n    g = Gateway(\r\n        name=f\"Gateway {i}\",\r\n        slug=f\"gateway-{i}\",\r\n        url=f\"http://localhost:9000/gateway/{i}\",\r\n        description=\"test gateway\",\r\n        transport=\"SSE\",\r\n        capabilities={},          # REQUIRED\r\n        tags=[],\r\n        enabled=True,\r\n        reachable=True,\r\n        created_at=datetime.utcnow(),\r\n        updated_at=datetime.utcnow(),\r\n    )\r\n    session.add(g)\r\n    gateways.append(g)\r\n\r\nsession.commit()\r\n\r\n# -------------------\r\n# Create 50 tools per gateway (50,000 tools)\r\n# -------------------\r\nEMPTY_SCHEMA = {\r\n    \"type\": \"object\",\r\n    \"properties\": {},\r\n    \"additionalProperties\": True\r\n}\r\n\r\nfor g in gateways:\r\n    for j in range(50):\r\n        t = Tool(\r\n            original_name=f\"tool_{g.id}_{j}\",\r\n            custom_name_slug=None,\r\n            description=\"test tool\",\r\n            gateway_id=g.id,\r\n            input_schema=EMPTY_SCHEMA,     # :white_check_mark: REQUIRED\r\n            output_schema=EMPTY_SCHEMA,    # :white_check_mark: REQUIRED\r\n            created_at=datetime.utcnow(),\r\n            updated_at=datetime.utcnow(),\r\n        )\r\n        session.add(t)\r\n\r\nsession.commit()\r\nsession.close()\r\n\r\nprint(\":white_check_mark: Created 1000 gateways and 50,000 tools successfully\")\r\nPY\r\n\r\nExpected:\r\n\r\n1,000 gateways\r\n\r\n50,000 tools\r\n\r\nSTEP 2: Measure Startup Time\r\ntime python -c \"from mcpgateway.db import refresh_slugs_on_startup; refresh_slugs_on_startup()\"\r\n\r\nSTEP 3: Confirm No N+1 Queries\r\nexport SQLALCHEMY_ECHO=true\r\npython -c \"from mcpgateway.db import refresh_slugs_on_startup; refresh_slugs_on_startup()\"\r\n\r\nSTEP 4: Memory Usage Check(optional)\r\n/usr/bin/time -v python -c \"from mcpgateway.db import refresh_slugs_on_startup; refresh_slugs_on_startup()\"\r\n\r\nSTEP 5: Idempotency Test\r\nRun twice back-to-back:\r\ntime python -c \"from mcpgateway.db import refresh_slugs_on_startup; refresh_slugs_on_startup()\"\r\ntime python -c \"from mcpgateway.db import refresh_slugs_on_startup; refresh_slugs_on_startup()\"\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3610671180",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-24T10:51:58+00:00",
+      "body": "Rebased and tested, ready go merge.\r\n\r\nCloses #1611"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c314d9213b61d41a901ccae2f3db71ce58bf58ab",
+      "message": "Optimize Startup Slug Refresh with Batch Processing\n\nSigned-off-by: NAYANAR <nayana.r5@ibm.com>",
+      "author": "NAYANAR",
+      "date": "2025-12-23T15:46:50+00:00"
+    },
+    {
+      "sha": "8d23d797cbf9802281246672f4101d8e68ca29b0",
+      "message": "fixing  flake8\n\nSigned-off-by: NAYANAR <nayana.r5@ibm.com>",
+      "author": "NAYANAR",
+      "date": "2025-12-24T05:45:55+00:00"
+    },
+    {
+      "sha": "d4a3b05da2134df9338f83561fd84d2e3dd331a0",
+      "message": "Fix indentation in prompts.py test generator\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-24T09:50:32+00:00"
+    },
+    {
+      "sha": "6f78c592ba054246a997b093a071c1c8bc9542b6",
+      "message": "Improve error handling in slug refresh with specific exception types\n\n- Use OperationalError and ProgrammingError for table-not-found scenarios\n- Add SQLAlchemyError handler for database errors\n- Include actual error message in log output for better debugging\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-24T10:38:35+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 118,
+  "deletions": 37,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:01.752613",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:01.754921",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1724,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1724.json"
+  }
+}

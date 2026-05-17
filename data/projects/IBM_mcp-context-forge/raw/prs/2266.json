@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2266,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2266"
+  },
+  "metadata": {
+    "title": "fix: FastMCP compatibility",
+    "state": "closed",
+    "created_at": "2026-01-21T12:14:04+00:00",
+    "updated_at": "2026-01-25T02:04:47+00:00",
+    "closed_at": "2026-01-25T02:04:35+00:00",
+    "merged_at": "2026-01-25T02:04:35+00:00",
+    "author": "joar",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nBefore opening this PR please:\r\n\r\n1. `make lint`            - passes `ruff`, `mypy`, `pylint`\r\n2. `make test`            - all unit + integration tests green\r\n3. `make coverage`        - ≥ 90 %\r\n4. `make docker docker-run-ssl` or `make podman podman-run-ssl`\r\n5. Update relevant documentation.\r\n6. Tested with sqlite and postgres + redis.\r\n7. Manual regression no longer fails. Ensure the UI and /version work correctly.\r\n\r\n---\r\n\r\n## 📌 Summary\r\n_What problem does this PR fix and **why**?_\r\n\r\n## 🔁 Reproduction Steps\r\n_Link the issue and minimal steps to reproduce the bug._\r\n\r\n## 🐞 Root Cause\r\n_What was wrong and where?_\r\n\r\n## 💡 Fix Description\r\n_How did you solve it?  Key design points._\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3703082736",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-25T01:52:51+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "387b1c6e38baa22fd6c6f966d71b6740ed53d070",
+      "message": "fix: FastMCP compatibility",
+      "author": "Joar Wandborg",
+      "date": "2026-01-21T12:11:19+00:00"
+    },
+    {
+      "sha": "ac8502993a4ef79a8b8fd5ca84bb3f10099d15a3",
+      "message": "fix: normalize issuer URL for metadata validation and caching\n\nThe original trailing slash fix introduced a bug where the issuer\nvalidation would fail when the server returned an issuer without\ntrailing slash but the client passed one (or vice versa).\n\nChanges:\n- Normalize both the input issuer and metadata issuer for comparison\n- Use normalized issuer as cache key for consistent cache lookup\n- Add tests for trailing slash normalization scenarios\n- Update test to expect refresh_token in grant_types\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-25T00:53:48+00:00"
+    },
+    {
+      "sha": "488b288e308220d390de14dc3e8e01ee1e0b04b2",
+      "message": "fix: complete issuer normalization and conditional refresh_token\n\nAddress review feedback:\n\n1. Normalize issuer consistently across the entire DCR flow:\n   - Allowlist validation uses normalized comparison\n   - Storage uses normalized issuer\n   - Lookup uses normalized issuer\n\n2. Make refresh_token conditional on AS support:\n   - Check grant_types_supported in AS metadata\n   - Only request refresh_token if AS advertises support\n\n3. Fix grant_types fallback:\n   - Use requested grant_types as fallback when AS response omits them\n   - Previously hardcoded to [\"authorization_code\"] which dropped refresh_token\n\n4. Add comprehensive tests:\n   - Test refresh_token inclusion when AS supports it\n   - Test grant_types fallback behavior\n   - Test allowlist trailing slash normalization\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-25T01:17:03+00:00"
+    },
+    {
+      "sha": "0549e0e137d9bf99557c132be37408cc0e30a57e",
+      "message": "fix: handle null grant_types_supported and add issuer normalization migration\n\nAddress additional review findings:\n\n1. Fix TypeError when grant_types_supported is explicit null:\n   - Use `metadata.get(\"grant_types_supported\") or []` instead of\n     `metadata.get(\"grant_types_supported\", [])`\n   - The latter returns None when key exists with null value\n\n2. Add configurable permissive refresh_token mode:\n   - New setting: dcr_request_refresh_token_when_unsupported\n   - Default: False (strict mode - only request if AS advertises support)\n   - When True: request refresh_token if AS omits grant_types_supported\n\n3. Add Alembic migration to normalize legacy issuer values:\n   - Strips trailing slashes from registered_oauth_clients.issuer\n   - Idempotent and works with SQLite and PostgreSQL\n   - Prevents duplicate registrations from legacy rows\n\n4. Add comprehensive tests:\n   - Test explicit null grant_types_supported handling\n   - Test permissive refresh_token mode\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-25T01:35:34+00:00"
+    },
+    {
+      "sha": "6c7ed735db2127535c23ceeca9761c98a6481cd4",
+      "message": "docs: add DCR_REQUEST_REFRESH_TOKEN_WHEN_UNSUPPORTED to documentation\n\nUpdate documentation for new DCR refresh token configuration option:\n\n- README.md: Add to DCR settings table\n- charts/mcp-stack/values.yaml: Add with comment\n- charts/mcp-stack/README.md: Regenerated via helm-docs\n- docs/docs/manage/dcr.md: Add env var and behavior note\n- docs/docs/config.schema.json: Add schema definition\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-25T01:51:10+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 429,
+  "deletions": 46,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:03.364073",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:03.365619",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2266,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2266.json"
+  }
+}

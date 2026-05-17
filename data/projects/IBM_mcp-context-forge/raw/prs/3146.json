@@ -1,0 +1,89 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3146,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3146"
+  },
+  "metadata": {
+    "title": "feat(db): standardize UUID format to hyphenated representation across all models",
+    "state": "open",
+    "created_at": "2026-02-24T09:23:05+00:00",
+    "updated_at": "2026-03-07T12:39:12+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "COULD"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #2931 due to repository maintenance. Your code and branch are intact. @Lang-Akshay please verify everything looks good.\n\n## **Resolves**\r\n\r\nCloses #1324\r\n\r\n---\r\n\r\n## ⚠️ **Breaking Changes**\r\n This PR changes UUID format from 32-char hex to 36-char hyphenated.\r\n API accepts both formats during transition period.\r\n---\r\n\r\n## **Issue Summary**\r\n\r\nThe codebase used inconsistent UUID string representations:\r\n\r\n- **Hyphenated format** (36 chars): `550e8400-e29b-41d4-a716-446655440000` (6 models)\r\n- **Hex format** (32 chars): `550e8400e29b41d4a716446655440000` (18 models)\r\n\r\nThis inconsistency caused:\r\n\r\n- Data representation confusion\r\n- API clients handling different formats per entity\r\n- Potential foreign key constraint mismatches\r\n- Deviation from RFC 4122 standard UUID representation\r\n\r\n---\r\n\r\n## **Solution**\r\n\r\nStandardized all UUID primary keys to the **hyphenated format** (`str(uuid.uuid4())`) across all 18 affected models, as recommended in issue #1324. This approach:\r\n\r\n- ✅ Ensures consistency across the codebase\r\n- ✅ Maintains RFC 4122 compliance\r\n- ✅ Improves data readability and debuggability\r\n- ✅ Defers performance optimization (native UUID types) until PostgreSQL 18 is production-stable\r\n\r\n---\r\n\r\n## **Changes Made**\r\n\r\n### **1. Model Definitions** (mcpgateway/db.py)\r\n\r\nUpdated 12 models from hex (`uuid.uuid4().hex`) to hyphenated format (`str(uuid.uuid4())`):\r\n\r\n| Model                  | Line | Column Type Change               |\r\n| ---------------------- | ---- | -------------------------------- |\r\n| EmailTeam              | 834  | `String(32)` → `String(36)` |\r\n| EmailTeamMember        | 943  | `String(32)` → `String(36)` |\r\n| EmailTeamMemberHistory | 1009 | `String(32)` → `String(36)` |\r\n| EmailTeamInvitation    | 1078 | `String(32)` → `String(36)` |\r\n| EmailTeamJoinRequest   | 1181 | `String(32)` → `String(36)` |\r\n| Tool                   | 1565 | `String(32)` → `String(36)` |\r\n| Server                 | 2275 | `String(32)` → `String(36)` |\r\n| Gateway                | 2431 | `String(32)` → `String(36)` |\r\n| A2AAgent               | 2555 | `String(32)` → `String(36)` |\r\n| GrpcService            | 2689 | `String(32)` → `String(36)` |\r\n| OAuthToken             | 2780 | `String(32)` → `String(36)` |\r\n| OAuthState             | 2805 | `String(32)` → `String(36)` |\r\n\r\n**Note:** 6 models (Role, UserRole, PendingUserApproval, RegisteredOAuthClient, EmailApiToken, SSOAuthSession) already used hyphenated format and required no changes.\r\n\r\n### **2. Database Migration** (Alembic)\r\n\r\n**File:** `mcpgateway/alembic/versions/*71e35d2065b6_convert_hex_uuids_to_hyphenated.py`\r\n\r\nConverts existing hex UUIDs to hyphenated format:\r\n\r\n```python\r\nUPDATE table_name SET id =\r\n  CONCAT(\r\n    SUBSTR(id, 1, 8), '-',\r\n    SUBSTR(id, 9, 4), '-',\r\n    SUBSTR(id, 13, 4), '-',\r\n    SUBSTR(id, 17, 4), '-',\r\n    SUBSTR(id, 21)\r\n  )\r\nWHERE id NOT LIKE '%-%-%-%-'  # Idempotent: skip if already converted\r\n```\r\n\r\nHandles all 12 affected tables and their foreign key relationships.\r\n\r\n### **3. Validation Updates** (mcpgateway/common/validators.py)\r\n\r\n- Updated UUID pattern matching to expect 36-character hyphenated format\r\n- Ensures validation consistency across API endpoints\r\n\r\n### **4. Schema Updates** (mcpgateway/schemas.py)\r\n\r\n- Updated Pydantic models to reflect 36-character UUID fields\r\n- Ensures API serialization consistency\r\n\r\n### **5. Test Updates** (6 files)\r\n\r\nUpdated all test assertions to expect hyphenated UUIDs:\r\n\r\n- `tests/mcpgateway/services/test_server_service.py`\r\n- `tests/mcpgateway/test_display_name_uuid_features.py`\r\n- `tests/unit/mcpgateway/test_admin.py`\r\n- `tests/unit/mcpgateway/test_admin_module.py`\r\n\r\n---\r\n\r\n## **Migration Details**\r\n\r\n### **Idempotent Pattern**\r\n\r\nThe migration checks if conversion already occurred using `WHERE id NOT LIKE '%-%-%-%-'` to safely handle:\r\n\r\n- Fresh databases (skip conversion, use models directly)\r\n- Partial migrations (re-run safely)\r\n- Multiple database runs\r\n\r\n### **Database Support**\r\n\r\n- ✅ SQLite (uses `SUBSTR` + `CONCAT`)\r\n- ✅ PostgreSQL (uses `substring` + `concatenation`)\r\n\r\n---\r\n\r\n## **Testing**\r\n\r\n✅ All existing tests updated and passing:\r\n\r\n```bash\r\n\r\n# Format\r\nmake autoflake isort black pre-commit\r\n\r\n# Unit Test\r\nmake doctest test lint-web flake8 bandit interrogate pylint verify\r\n\r\nmake coverage\r\n\r\n# Delete existing volume\r\nmake clean    \r\n                    \r\n# Create production docker image\r\nmake docker-prod      \r\n\r\n# Run the gateway - Access it http://localhost:8080          \r\nmake compose-lite-up Or make compose-up\r\n\r\n# Run load test UI - Access it http://localhost:8089\r\nmake load-test-ui\r\n\r\n# [OPTIONAL] Run monitoring - Access it http://localhost:3000\r\nmake monitoring-lite-up Or make monitoring-up\r\n```\r\n\r\nVerification scripts validate:\r\n\r\n- UUID format consistency across all models\r\n- Foreign key relationships preserved\r\n- No data loss during migration\r\n- Round-trip conversion accuracy\r\n\r\n---\r\n\r\n## **Benefits**\r\n\r\n1. **Consistency**: Single UUID representation across entire codebase\r\n2. **Standards Compliance**: RFC 4122 hyphenated format is industry standard\r\n3. **Debuggability**: UUIDs are immediately recognizable in logs and database queries\r\n4. **API Clarity**: Clients no longer handle multiple UUID formats per entity\r\n5. **Future-Proof**: Foundation for eventual migration to native PostgreSQL UUID type\r\n\r\n---\r\n\r\n## **Storage Overhead**\r\n\r\n- **Hyphenated format**: 36 bytes per ID (4 bytes increase from hex)\r\n- Trade-off: Accepted per issue recommendation to defer performance optimization until PostgreSQL 18 stability\r\n\r\n### **Future Optimization Options**\r\n\r\n- Native PostgreSQL UUID type (16 bytes) once stable\r\n- Binary UUID storage with API-level string conversion\r\n- Integer IDs for high-volume tables (if federation allows)\r\n\r\n## **Migration Runbook**\r\n\r\n### **Rollback (if needed)**\r\n\r\n```bash\r\ncd mcpgateway\r\nalembic downgrade -1  # Reverts to previous revision\r\n```\r\n\r\n---\r\n\r\n## **Related Issues**\r\n\r\n- #1324 — UUID format inconsistency tracking issue\r\n- Follows recommendation from issue discussion to use hyphenated format until PostgreSQL 18 is production-stable\r\n\r\n---\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "df728e11825c388a47d0afbde7e7d9873eb14601",
+      "message": "feat: convert UUID generation to hyphenated format for consistency across models\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-13T14:27:11+00:00"
+    },
+    {
+      "sha": "0b495aa08d7016ffaebaaaa6e419f35d2051a481",
+      "message": "feat:normalize UUID format to hyphenated representation across models and tests\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-13T14:46:25+00:00"
+    },
+    {
+      "sha": "5cf8f44147af3e129a00824a003fad86e75af54d",
+      "message": "fixup:formatting\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-13T14:47:11+00:00"
+    },
+    {
+      "sha": "cb29a775b561d7bb0b0ead49e7ad005da7c064c3",
+      "message": "fix: add nosec comments for SQL queries in UUID conversion script  and correct UUID format in test case for validated team ID parameter\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-13T15:41:59+00:00"
+    },
+    {
+      "sha": "a4f6ba9aafebc2afefe71ac5647e85d4d2da178a",
+      "message": "feat: add migration script for merging UUID conversion and JWKS URI heads\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-18T16:17:43+00:00"
+    },
+    {
+      "sha": "1007087448061d6646aa408547bf37315ca93783",
+      "message": "fixup:formatting\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-18T17:03:10+00:00"
+    },
+    {
+      "sha": "bc3d92391c4f260ccf1837c8dc10642cdc1e27bf",
+      "message": "feat: enhance UUID migration to convert primary keys and foreign key references with batch updates for performance\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-19T15:55:15+00:00"
+    },
+    {
+      "sha": "aa2a935d01a64d9b80881d0a02c996bfb065256c",
+      "message": "fixup: enhance SQL conversion function documentation for UUID hyphenation\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-19T16:42:36+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 422,
+  "deletions": 104,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:12:44.836634",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:44.837726",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3146,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3146.json"
+  }
+}

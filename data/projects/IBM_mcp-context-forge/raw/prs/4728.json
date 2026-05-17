@@ -1,0 +1,68 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4728,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4728"
+  },
+  "metadata": {
+    "title": "[BUG FIX] Register team management functions with window.Admin namespace",
+    "state": "closed",
+    "created_at": "2026-05-12T14:29:14+00:00",
+    "updated_at": "2026-05-15T16:14:45+00:00",
+    "closed_at": "2026-05-15T16:14:42+00:00",
+    "merged_at": "2026-05-15T16:14:42+00:00",
+    "author": "vishu-bh",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## Description\n\nFixes #4727 \n\nThis PR resolves the openCreateTeamModal undefined error that prevented administrators from creating teams through the admin UI.\n\n## Root Cause\n\nThe event delegation system (eventDelegation.js) expects functions to be accessible via the window.Admin namespace. Team management functions were defined in global scope but not registered with window.Admin, causing the event delegation system to fail when trying to execute them.\n\n## Changes\n\n- Registered 13 team management functions with window.Admin namespace at the end of the script block in admin.html\n- No modifications to existing function definitions (minimal, non-invasive change)\n- Follows the existing pattern used for other functions like downloadSampleJSON\n\n## Functions Registered\n\n- openCreateTeamModal\n- closeCreateTeamModal\n- requestToJoinTeamSafe\n- leaveTeamSafe\n- editTeamSafe\n- manageTeamMembersSafe\n- loadTeamMembersView\n- loadAddMembersView\n- deleteTeamSafe\n- cancelJoinRequest\n- viewJoinRequestsSafe\n- approveJoinRequest\n- rejectJoinRequest\n- initializeTeamManagement\n\n## Testing\n\n- Create Team button now opens the modal correctly\n- All team management buttons work as expected\n- Event delegation system can find and execute all team functions\n\n## Impact\n\n- User-facing: Yes - fixes critical admin functionality\n- Breaking changes: None\n- Files changed: 1 (mcpgateway/templates/admin.html)\n- Lines changed: +14, -2",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4282362713",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-13T14:01:38+00:00",
+      "body": "### Issues\r\n\r\n  1. Stale branch — will introduce duplicate registrations on merge\r\n\r\n  PR #4673 (fix(security): remove inline event handlers for strict CSP compliance, merged May 10) already registered 7 of the 13 functions this PR adds:\r\n```bash\r\n  window.Admin.manageTeamMembersSafe    # already at line 15038 in origin/main\r\n  window.Admin.deleteTeamSafe           # already at line 15039\r\n  window.Admin.cancelJoinRequest        # already at line 15040\r\n  window.Admin.editTeamSafe             # already at line 15042\r\n  window.Admin.leaveTeamSafe            # already at line 15043\r\n  window.Admin.requestToJoinTeamSafe    # already at line 15044\r\n  window.Admin.viewJoinRequestsSafe     # already at line 15045\r\n```\r\n\r\n  The PR branch was cut before that commit landed. Merging as-is would register these 7 functions twice. The branch needs a rebase onto current main.\r\n\r\n  2. openCreateTeamModal / closeCreateTeamModal are already registered in origin/main\r\n\r\n  At lines 15073–15074 of current main, both functions are registered with typeof guards. So the reported bug is already partially addressed. The PR's core value is actually adding the 5 functions that are still missing:\r\n  - loadTeamMembersView\r\n  - loadAddMembersView\r\n  - approveJoinRequest\r\n  - rejectJoinRequest\r\n  - initializeTeamManagement\r\n\r\n  ---\r\n### Code Quality Issues\r\n\r\n  3. Inconsistent guard pattern — risk of ReferenceError\r\n\r\n  All existing registrations in this block use typeof guards:\r\n```bash\r\n  if (typeof downloadSampleJSON !== 'undefined') window.Admin.downloadSampleJSON = downloadSampleJSON;\r\n```\r\n\r\n  This PR drops the guards entirely:\r\n```bash\r\n  window.Admin.openCreateTeamModal = openCreateTeamModal;  // no guard\r\n```\r\n\r\n  If any of these functions are ever not in scope at execution time (e.g., due to conditional script loading, a `DOMContentLoaded` wrapper, or future refactors), this will throw a ReferenceError rather than silently skipping. At minimum this should be consistent with the established pattern. The PR description claims the typeof guard was causing the bug — but only if the function was somehow not in scope, which should be investigated and explained rather than worked around by dropping the guard entirely.\r\n\r\n  4. Unnecessary registrations for non-event-delegation functions\r\n\r\n  `loadTeamMembersView, loadAddMembersView, approveJoinRequest, rejectJoinRequest, and initializeTeamManagement` are called directly from inline JavaScript (e.g., `setTimeout(initializeTeamManagement, 100)`) — none of them appear as `data-action-click` targets. Registering them in `window.Admin` is harmless but unnecessary noise.\r\n\r\n  5. Suspicious co-author sign-off\r\n\r\n  The commit contains:\r\n  Signed-off-by: Bob Shell <bob@shell.ai>\r\n  This appears to be an AI tool attribution. Per project conventions, AI assistant co-authorship should not appear in commits or PRs.\r\n"
+    },
+    {
+      "id": "4288427782",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-14T08:19:28+00:00",
+      "body": "It looks good!\n\nLGTM 🚀 "
+    },
+    {
+      "id": "4299631206",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-15T16:14:32+00:00",
+      "body": "Approved based on others review"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b2c1e8d75f066382ddafaa2781a1330065552ea8",
+      "message": "fix: register team modal actions with Admin namespace\n\nFixes #4727\n\nKeep create-team modal registrations guarded, avoid duplicate team handler registrations already present on main, and migrate remaining team modal callbacks to delegated data-action handlers.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-12T14:28:40+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 8,
+  "deletions": 5,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:32.340109",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:32.341401",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4728,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4728.json"
+  }
+}

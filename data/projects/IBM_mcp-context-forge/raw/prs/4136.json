@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4136,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4136"
+  },
+  "metadata": {
+    "title": "fix(transport): skip outputSchema validation for isError tool responses",
+    "state": "closed",
+    "created_at": "2026-04-13T01:15:12+00:00",
+    "updated_at": "2026-05-05T08:38:16+00:00",
+    "closed_at": "2026-05-05T08:38:16+00:00",
+    "merged_at": null,
+    "author": "kimsehwan96",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4135 \r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nWhen an upstream MCP tool with outputSchema defined returns an error (isError: true) without structuredContent, the MCP Python SDK's server-side validation replaces the original error message with a generic \"outputSchema defined but no structured output returned\". \r\n\r\nThis hides the actual error cause from the user.\r\n\r\nThis PR bypasses the SDK validation by returning a CallToolResult(isError=True) directly when is_error is True, which triggers the SDK's early-return path and skips outputSchema validation. This uses the same pattern already established in the codebase (lines 1451, 1468).\r\n\r\nThe root cause is in the MCP Python SDK v1.x (mcp/server/lowlevel/server.py), where outputSchema validation runs unconditionally regardless of isError.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    pass    |\r\n| Unit tests                | `make test`     |    pass    |\r\n| Coverage ≥ 80%            | `make coverage` |   pass     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\nImplementation detail\r\n\r\nThe fix is placed after the structuredContent check in streamablehttp_transport.py:call_tool():\r\n\r\n1. if structured → return (unstructured, structured)   # SDK validates against outputSchema\r\n2. if is_error is True → return CallToolResult(isError=True)  # SDK early-return, no validation\r\n3. return unstructured                                  # normal path\r\n\r\nThis ordering is intentional: if an error response does include structuredContent, the existing validation path is preserved. We have not observed any MCP server returning both isError: true and structuredContent simultaneously, and the MCP spec does not define this combination. If it does occur, validating the structured content is arguably the correct behavior — the server explicitly provided it, so schema conformance should be checked.\r\n\r\nis_error is True (strict identity check)\r\n\r\nWe use getattr(result, \"is_error\", None) with is True rather than a truthy check. This prevents false positives when result is a MagicMock in unit tests (where unset attributes return truthy MagicMock objects).\r\n\r\nManual E2E verification\r\n\r\nTo validate this fix end-to-end, we added a lookup_calculation tool to the existing output_schema_test_server that raises ToolError for unknown IDs (producing isError: true with outputSchema defined). Using the docker-compose stack:\r\n\r\n- Before fix: \"Output validation error: outputSchema defined but no structured output returned\" ❌\r\n- After fix: \"Calculation 'nonexistent-id' not found. Only 'calc-001' is available.\" ✅\r\n\r\nThe test server change is not included in this PR — unit tests provide sufficient coverage for the transport-layer logic. The E2E setup can be formalized in a follow-up if needed.\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "548220780fc138089955844af4097842f63f0de5",
+      "message": "fix(transport): skip outputSchema validation for isError tool responses\n\nWhen an upstream MCP tool returns an error (isError: true) without\nstructuredContent, the MCP Python SDK's server-side outputSchema\nvalidation replaces the original error message with a generic\n\"outputSchema defined but no structured output returned\" error.\n\nThis bypasses the SDK validation by returning a CallToolResult directly\nwhen is_error is True, using the same pattern already established in\nthe codebase (lines 1451, 1468).\n\nCloses #4135\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-04-13T01:11:18+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 147,
+  "deletions": 0,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:07:52.172209",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:52.174513",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4136,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4136.json"
+  }
+}

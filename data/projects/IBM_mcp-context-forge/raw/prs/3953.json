@@ -1,0 +1,61 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3953,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3953"
+  },
+  "metadata": {
+    "title": "fix(mcp): convert PromptArgument types in prompts/list MCP handler",
+    "state": "closed",
+    "created_at": "2026-03-31T15:16:52+00:00",
+    "updated_at": "2026-04-04T23:32:33+00:00",
+    "closed_at": "2026-04-04T23:32:32+00:00",
+    "merged_at": "2026-04-04T23:32:32+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "MUST",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3939\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes the `prompts/list` MCP JSON-RPC method returning empty arrays due to a Pydantic v2 type validation error.\r\n\r\n**Root Cause**: Type mismatch between `mcpgateway.schemas.PromptArgument` (from database layer) and `mcp.types.PromptArgument` (expected by MCP SDK). When `prompt_service.list_server_prompts()` returned `PromptRead` objects containing schema `PromptArgument` instances, the MCP handler passed them directly to `mcp.types.Prompt()`, causing Pydantic v2 to reject the cross-module type assignment. The exception was silently caught, returning an empty list.\r\n\r\n**Solution**: Added explicit type conversion in `list_prompts()` to map `mcpgateway.schemas.PromptArgument` fields (`name`, `description`, `required`) to `mcp.types.PromptArgument` instances before constructing `mcp.types.Prompt` objects.\r\n\r\n**Impact**: MCP clients can now successfully retrieve prompts through `/servers/{UUID}/mcp/` and `/mcp/` endpoints. REST Admin API (`GET /prompts`, `GET /servers/{UUID}/prompts`) was unaffected and continues to work correctly.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   ✅ Pass     |\r\n| Unit tests                | `make test`     |    ✅ Pass    |\r\n| Coverage ≥ 80%            | `make coverage` |    ✅ Pass    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n**Changes Made:**\r\n1. **`mcpgateway/transports/streamablehttp_transport.py`** (lines 1807-1833):\r\n   - Added explicit conversion from `mcpgateway.schemas.PromptArgument` to `mcp.types.PromptArgument`\r\n   - Applied to both code paths: with `server_id` and without `server_id`\r\n\r\n2. **`tests/unit/mcpgateway/transports/test_streamablehttp_transport.py`**:\r\n   - Changed import from `mcp.types.PromptArgument` to `mcpgateway.schemas.PromptArgument`\r\n   - Fixed test data: `required=True` instead of `required=None` (Pydantic validation requirement)\r\n   - Added assertion to verify `required` field conversion\r\n\r\n**Why existing tests didn't catch this:**\r\nThe unit test `test_list_prompts_with_server_id` mocked `prompt_service.list_server_prompts()` and injected `mcp.types.PromptArgument` objects directly, bypassing the real service which returns `mcpgateway.schemas.PromptArgument`. The mock hid the type mismatch. The updated test now uses the correct schema types to properly validate the conversion.\r\n\r\n**Error logs before fix:**\r\n```\r\nmcpgateway.transports.streamablehttp_transport - ERROR - Error listing Prompts:3 validation errors for Prompt\r\narguments.0\r\nInput should be a valid dictionary or instance of PromptArgument [type=model_type,\r\ninput_value=PromptArgument(name='quer...rching.', required=True), input_type=PromptArgument]\r\n```\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4058904077",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-04T22:38:19+00:00",
+      "body": "Nice catch identifying the Pydantic v2 cross-module type mismatch — that silent empty-array behavior would have been hard to debug in production.\n\nWorth noting: the core fix was independently addressed on `main` via `_normalize_mcp_prompt_arguments()` and `_to_mcp_prompt()` helpers (which handle additional edge cases like `None` arguments, already-converted types, and `title`/`meta` fields). After rebasing onto `main`, the transport code changes resolved cleanly to the existing helpers.\n\n**What remains after rebase:** one additional test assertion in `test_list_prompts_with_server_id` verifying the `required` field is preserved through the schema-to-MCP type conversion. Small but meaningful coverage improvement.\n\n**Rebase fixups applied:**\n- Restored `from mcp.types import PromptArgument` top-level import (the schema import broke `isinstance` checks on converted output)\n- Corrected assertion to `required is False` to match the mock fixture data\n- Kept import in the Third-Party section where it belongs\n\nAll 433 transport tests pass.\n\nLGTM — minor but clean."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "267ffb02527e7f7d00bae659dbbe78a2487df723",
+      "message": "fix: convert PromptArgument types in prompts/list MCP handler\n\nFixes #3939\n\nThe prompts/list MCP JSON-RPC method was returning empty arrays due to\na Pydantic v2 type validation error. The root cause was a type mismatch\nbetween mcpgateway.schemas.PromptArgument (from the database layer) and\nmcp.types.PromptArgument (expected by the MCP SDK).\n\nChanges:\n- Add explicit type conversion in list_prompts() for both code paths\n  (with and without server_id) to convert schema PromptArgument to\n  MCP PromptArgument by mapping name, description, and required fields\n- Update test to use mcpgateway.schemas.PromptArgument instead of\n  mcp.types.PromptArgument to properly test the conversion\n- Fix test data to use required=True instead of required=None\n\nThe fix ensures MCP clients receive valid prompt lists through\n/servers/{UUID}/mcp/ and /mcp/ endpoints.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-03-31T15:09:27+00:00"
+    },
+    {
+      "sha": "9e2eec3fbdb393b83585b67f9741498b46511472",
+      "message": "chore: update secrets baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T23:03:55+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 4,
+  "deletions": 3,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:57.132986",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:57.133591",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3953,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3953.json"
+  }
+}

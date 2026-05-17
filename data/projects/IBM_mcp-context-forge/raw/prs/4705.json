@@ -1,0 +1,99 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4705,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4705"
+  },
+  "metadata": {
+    "title": "feat(observability): add baggage attribute mapping for span customization",
+    "state": "open",
+    "created_at": "2026-05-11T15:00:42+00:00",
+    "updated_at": "2026-05-15T08:33:05+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "vishu-bh",
+    "labels": [
+      "do-not-merge"
+    ],
+    "milestone": null,
+    "assignees": [
+      "ja8zyjits"
+    ]
+  },
+  "description": "## Problem\n\nIssue #4700 requires selected tenant/user context carried through OpenTelemetry baggage to appear in exported spans without the `baggage.` prefix. Clients can send values such as `tenant.id` and `user.id` as OTEL baggage, but some observability backends expect those dimensions as span attributes named `tenant.id` / `user.id`, not `baggage.tenant.id` / `baggage.user.id`.\n\nThe gateway still needs to stay aligned with OTEL semantics: baggage remains the propagation mechanism, while span attributes are the reporting surface.\n\n## Solution\n\nThis PR replaces the earlier span-processor remapping approach with a baggage emission policy that is applied where baggage is copied onto spans.\n\nThe `SpanAttributeCustomizer` plugin now supports:\n\n```yaml\nconfig:\n  allowed_baggage_span_attributes:\n    - \"tenant.id\"\n    - \"user.id\"\n  emit_baggage_prefixed_attributes: false\n```\n\nWith that configuration:\n\n- OTEL baggage continues to carry `tenant.id` and `user.id`\n- only allowlisted baggage keys are promoted to span attributes\n- exported span attributes are emitted as `tenant.id` / `user.id`\n- `baggage.tenant.id` / `baggage.user.id` are not emitted for those allowlisted keys\n\nIf the new config is not provided, the gateway preserves legacy behavior and emits baggage as `baggage.<key>`.\n\n## Changes\n\n- `mcpgateway/observability.py`\n  - Added `BaggageSpanAttributePolicy`\n  - Added startup extraction for the SpanAttributeCustomizer baggage policy\n  - Applies the policy directly in both request-root span baggage injection and `create_span()`\n  - Removed the old `BaggageAttributeSpanProcessor` remapping path\n\n- `mcpgateway/main.py`\n  - Loads the baggage span attribute policy after plugin config is available and before telemetry is initialized\n\n- `plugins/span_attribute_customizer/config_schema.py`\n  - Added `allowed_baggage_span_attributes`\n  - Added `emit_baggage_prefixed_attributes`\n  - Added validation/normalization for the baggage allowlist\n\n- `plugins/config.yaml`\n  - Added ready-to-use baggage policy config for `tenant.id` and `user.id`\n\n- Docs\n  - Updated OpenTelemetry architecture docs\n  - Updated span attribute reference docs\n  - Updated SpanAttributeCustomizer docs and README\n\n- Tests\n  - Added coverage for policy extraction, malformed config handling, allowlist behavior, default legacy behavior, and both baggage-to-span injection paths\n\n## Testing\n\nValidated locally:\n\n```bash\nmake pre-commit\n```\n\nAlso verified focused observability coverage and diff-cover behavior locally after adding tests for the changed baggage paths.\n\nFixes #4700\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4279798273",
+      "author": "ja8zyjits",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-13T08:33:35+00:00",
+      "body": "Lgtm"
+    },
+    {
+      "id": "4280619850",
+      "author": "ja8zyjits",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-13T10:27:49+00:00",
+      "body": "testing needed."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "04492f3731dee9e5d2b608a97a0b15c501e9b126",
+      "message": "feat(observability): add baggage attribute mapping for span customization\n\nImplements Option A semantics for SpanAttributeCustomizer plugin:\n- Extract attribute_mapping from plugin config at startup\n- Add BaggageAttributeSpanProcessor to duplicate baggage.* attributes\n- Initialize telemetry after plugin manager to access config\n- Add comprehensive test coverage for mapping extraction and processor\n\nThis allows operators to remap baggage-derived span attributes like\nbaggage.tenant.id to custom keys like tenant.id for backend compatibility.\n\nFixes #4700\n\nSigned-off-by: Bob Shell <bob@example.com>\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-11T14:58:33+00:00"
+    },
+    {
+      "sha": "4656370366acfea81f3ee525771938db47956f57",
+      "message": "test: add coverage for baggage attribute mapping edge cases\n\n- Add test for extract_span_attribute_mapping with None factory\n- Add test for BaggageAttributeSpanProcessor with empty mapping\n- Add test for BaggageAttributeSpanProcessor with None span\n- Add test for BaggageAttributeSpanProcessor skipping None values\n- Add test for BaggageAttributeSpanProcessor on_end returning None\n\nThese tests cover lines 416, 468, 478, and 487 in observability.py,\nbringing coverage from 92.3% to above the 93% threshold.\n\nRelates-to: #4700\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-12T10:18:09+00:00"
+    },
+    {
+      "sha": "92d7c36b7a98977fd849c043b61add60e202c1fa",
+      "message": "fix: resolve pylint warnings\n\n- Prefix unused 'span' parameter with underscore in observability.py\n- Remove redundant SessionLocal import in admin.py\n\nFixes pylint unused-argument and reimported warnings.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-12T10:48:58+00:00"
+    },
+    {
+      "sha": "23c5572cda9f7d5ae57f3b87fc4902373d21522b",
+      "message": "feat: add default tenant.id baggage header mapping for testing\n\n- Set OTEL_BAGGAGE_HEADER_MAPPINGS=x-tenant-id:tenant.id in Langfuse compose\n\n- Enables testing of tenant.id propagation to span attributes via baggage\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-12T12:31:33+00:00"
+    },
+    {
+      "sha": "2fa567cd6f343139b4833603a775896c64344333",
+      "message": "feat: reverting test changes\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-12T12:35:04+00:00"
+    },
+    {
+      "sha": "21c9fb2c30bd977a8914ec9bd3d92261313daf60",
+      "message": "docs: add inline comments for telemetry init reordering\n\nExplain why span_attribute_mapping extraction happens before\ntelemetry initialization - it must run after plugin manager init\nto access plugin configuration.\n\nAddresses review comment about missing documentation for\ntelemetry init reordering logic.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-12T14:03:19+00:00"
+    },
+    {
+      "sha": "d942dcc94f54761bf77227cb49f7f947de9e638d",
+      "message": "Add baggage span attribute policy\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-14T14:27:58+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 578,
+  "deletions": 22,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:26.409433",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:26.410086",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4705,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4705.json"
+  }
+}

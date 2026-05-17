@@ -1,0 +1,35 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4694,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4694"
+  },
+  "metadata": {
+    "title": "[BUG]: Admin Users Cannot See Their Own Private Agents in List View",
+    "state": "open",
+    "created_at": "2026-05-11T07:10:27+00:00",
+    "updated_at": "2026-05-11T07:10:27+00:00",
+    "closed_at": null,
+    "author": "rakdutta",
+    "labels": [
+      "bug",
+      "triage",
+      "a2a"
+    ],
+    "milestone": null,
+    "assignees": [
+      "rakdutta"
+    ]
+  },
+  "description": "Discovered during: TC-A2A-005 testing (Private Agent Visibility) of issue #2406 \n\n  Test Result: FAILED - Test 2 (Owner can see their own private agent)\n  Tests Passed: 7/8\n\n  Symptom\n\n  Admin user with is_admin=true and token_teams=null:\n  - ✅ Can create a private agent (201)\n  - ✅ Can access their private agent via direct GET /a2a/{agent_id} (200)\n  - ❌ Cannot see their private agent in list view GET /a2a (empty result)\n\n  Root Cause\n\n  File: mcpgateway/main.py, lines 4411-4413 in list_a2a_agents() endpoint\n\n  if is_admin and token_teams is None:\n      user_email = None  # <-- BUG: This breaks owner matching\n      token_teams = None  # Admin unrestricted\n\n  When admin bypass is triggered, the code sets user_email = None to indicate \"unrestricted\" access. However, this breaks the PR #4341 invariant implemented in mcpgateway/services/base_service.py _apply_access_control() method (lines 109-115):\n\n  if token_teams is None and user_email and is_user_admin(db, user_email):\n      return query.where(\n          or_(\n              model_cls.visibility != \"private\",\n              and_(model_cls.visibility == \"private\", model_cls.owner_email == user_email),\n          )\n      )\n\n  This filter requires user_email to be set to match model_cls.owner_email == user_email and show the admin's OWN private agents. When user_email = None, the code falls through to lines 107-108 which exclude ALL private agents:\n\n  if user_email is None and token_teams is None:\n      return query.where(model_cls.visibility != \"private\")\n\n  Expected Behavior (per PR #4341)\n\n  Admin bypass should show:\n  - ✅ All public agents\n  - ✅ All team agents\n  - ✅ Admin's OWN private agents\n  - ❌ Other users' private agents (security invariant)\n  \n  Actual Behavior\n\n  Admin bypass shows:\n  - ✅ All public agents\n  - ✅ All team agents\n  - ❌ NO private agents (including admin's own)\n  \n  Proposed Fix\n\n  File: mcpgateway/main.py, line 4412\n\n  Remove user_email = None assignment. The token_teams = None is sufficient to trigger admin bypass in _apply_access_control(), and keeping user_email allows the owner matching to work correctly.\n\n  if is_admin and token_teams is None:\n      # user_email stays set for owner matching on private agents (PR #4341)\n      token_teams = None  # Admin unrestricted - sees all public+team agents\n\n  Impact\n\n  - Admin users cannot see their own private agents in list views\n  - Direct GET access still works (uses different code path via _check_agent_access())\n  - Affects all resources using the BaseService visibility filtering pattern (agents, potentially others)\n\n  Test Evidence\n\n  ==========================================\n  Test 2: Owner can see their own private agent\n  ==========================================\n\n  ❌ Test 2 FAILED - Owner cannot see their own private agent\n  Expected ID: ae3e9330611743a1a7231a8ee33ccb89\n  Found ID:\n",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:27.455897",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:27.456961",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4694,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4694.json"
+  }
+}

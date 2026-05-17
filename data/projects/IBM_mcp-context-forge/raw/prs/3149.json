@@ -1,0 +1,236 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3149,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3149"
+  },
+  "metadata": {
+    "title": "feat(mcp): add secure code execution and virtual tool filesystem",
+    "state": "open",
+    "created_at": "2026-02-24T09:23:37+00:00",
+    "updated_at": "2026-03-07T10:41:30+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "experimental",
+      "mcp-protocol",
+      "epic",
+      "COULD"
+    ],
+    "milestone": "Release 1.5.0",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #2976 due to repository maintenance. Your code and branch are intact. @crivetimihai please verify everything looks good.\n\n## Summary\r\n\r\nThis PR fully implements [EPIC][CORE]: Secure Code Execution & Virtual Tool Filesystem (MCP Code Mode) end-to-end, including core runtime, persistence, API surface, RBAC/scoping, Admin UI, configurability across all deployment surfaces, documentation\r\n(including ADR + architecture/usage docs), and test coverage.\r\n\r\nCloses: #2952\r\n\r\n## What This Delivers\r\n\r\n- Adds a first-class virtual server type: type=code_execution\r\n- Adds policy-driven sandbox execution via synthetic meta-tools:\r\n- shell_exec\r\n- fs_browse\r\n- Adds isolated virtual filesystem semantics per session:\r\n- /tools\r\n- /skills\r\n- /scratch\r\n- /results\r\n- Adds policy controls:\r\n- mount_rules\r\n- sandbox_policy\r\n- tokenization\r\n- skills_scope\r\n- skills_require_approval\r\n- Adds persistent run/session/security/skills lifecycle support\r\n- Adds replay + approval/revoke operational actions\r\n- Adds complete feature-flag and config surface support\r\n- Adds full Admin UI support for create/edit/preview/monitoring flows\r\n- Adds complete documentation set for this major feature\r\n\r\n## Core Backend Implementation\r\n\r\n- Added mcpgateway/services/code_execution_service.py as the core orchestration layer\r\n- Added runtime abstraction for Deno/Python execution\r\n- Added configurable limits and controls for time/memory/cpu/disk/network/rate\r\n- Added dangerous-pattern checks for Python/TypeScript\r\n- Added mounted tool invocation bridge with permission enforcement\r\n- Added tokenization support (bidirectional strategy)\r\n- Added virtual filesystem mount/materialization and refresh behavior\r\n- Added skills lifecycle and approval workflows\r\n- Added replay support and structured security event recording\r\n- Added optional Rust acceleration hooks for stub/catalog/search generation\r\n\r\n## Data Model & Migration\r\n\r\n- Extended servers with code mode fields:\r\n- server_type\r\n- stub_language\r\n- mount_rules\r\n- sandbox_policy\r\n- tokenization\r\n- skills_scope\r\n- skills_require_approval\r\n- Added persistent tables:\r\n- code_execution_skills\r\n- skill_approvals\r\n- code_execution_runs\r\n- Added Alembic migration:\r\n- mcpgateway/alembic/versions/x7h8i9j0k1l2_add_code_execution_mode.py\r\n\r\n## API, Permissions, and Scoping\r\n\r\n- Added code mode APIs under server scope:\r\n- GET /servers/{server_id}/code/runs\r\n- GET /servers/{server_id}/code/sessions\r\n- GET /servers/{server_id}/code/security-events\r\n- POST /servers/{server_id}/code/runs/{run_id}/replay\r\n- Added skills APIs:\r\n- GET /servers/{server_id}/skills\r\n- POST /servers/{server_id}/skills\r\n- GET /servers/{server_id}/skills/approvals\r\n- POST /servers/{server_id}/skills/approvals/{approval_id}/approve\r\n- POST /servers/{server_id}/skills/approvals/{approval_id}/reject\r\n- POST /servers/{server_id}/skills/{skill_id}/revoke\r\n- Updated token scoping rules for all new code/skills endpoints\r\n- Updated default role bootstrap to include skills.* permissions where appropriate\r\n- Enforced feature flag guardrails (CODE_EXECUTION_ENABLED) in service + admin flows\r\n\r\n## Admin UI & UX\r\n\r\n- Added create/edit support for Server Type: code_execution\r\n- Added code mode fields in forms:\r\n- Stub Language\r\n- Skills Scope\r\n- Require skill approval\r\n- Mount Rules (JSON)\r\n- Sandbox Policy (JSON)\r\n- Tokenization Policy (JSON)\r\n- Added robust section toggle behavior for create/edit forms (including HTMX swap sync)\r\n- Added Preview Virtual Server payload generation in create flow\r\n- Added editable template insertion for JSON policy fields\r\n- Upgraded JSON fields to CodeMirror-backed editing behavior\r\n- Added code mode visual differentiation in servers list:\r\n- row highlight\r\n- ⚡ marker\r\n- 💻 Code Mode badge\r\n- Added code mode detail panel in server view modal:\r\n- run history\r\n- active sessions\r\n- pending approvals + approve/reject actions\r\n- skills + revoke action\r\n- security events\r\n- replay action\r\n\r\n## Configurability & Feature Flags\r\n\r\nAdded full config support in:\r\n\r\n- mcpgateway/config.py\r\n- .env.example\r\n- docker-compose.yml\r\n- charts/mcp-stack/values.yaml\r\n- charts/mcp-stack/values.schema.json\r\n- docs/docs/config.schema.json\r\n- docs/docs/manage/configuration.md\r\n\r\nCoverage includes:\r\n\r\n- master feature gate\r\n- per-capability toggles (shell_exec, fs_browse, replay, rust acceleration, fallback)\r\n- default sandbox/runtime/limits\r\n- filesystem/tool pattern defaults\r\n- tokenization defaults\r\n- browse limits and persisted output limits\r\n- dangerous pattern lists\r\n\r\nRollout defaults:\r\n\r\n- config.py: code execution disabled by default\r\n- .env.example: code execution disabled by default\r\n- docker-compose.yml: code execution enabled by default for testing/dev convenience\r\n\r\n## Documentation (Major Feature Set)\r\n\r\n- Added ADR:\r\n- docs/docs/architecture/adr/040-secure-code-execution-virtual-tool-filesystem.md\r\n- Added architecture overview page:\r\n- docs/docs/architecture/code-execution-virtual-tool-filesystem.md\r\n- Added usage guide:\r\n- docs/docs/using/code-execution-virtual-server.md\r\n- Updated docs navigation and indexes (.pages + index files) to surface feature docs\r\n- Updated security/features documentation to include code mode controls\r\n- Updated README quick links and overview to prominently advertise MCP Code Mode\r\n\r\n## Testing & Quality\r\n\r\n- Added new unit coverage for core code execution behaviors:\r\n- tests/unit/mcpgateway/services/test_code_execution_service.py\r\n- Added service-level gating tests:\r\n- tests/unit/mcpgateway/services/test_server_service.py\r\n- Added admin form parsing/validation tests for code mode:\r\n- tests/unit/mcpgateway/test_admin.py\r\n- Added JS tests for UI behavior:\r\n- tests/js/admin-forms.test.js\r\n- Hardened Playwright reliability for admin UI race conditions:\r\n- tests/playwright/conftest.py\r\n- tests/playwright/entities/test_servers_extended.py\r\n- tests/playwright/pages/gateways_page.py\r\n- Addressed lint/static-analysis/docstring pipeline issues encountered during integration (flake8, pylint, lint-web, interrogate, bandit)\r\n\r\n## Backward Compatibility\r\n\r\n- Existing standard virtual server behavior remains unchanged\r\n- Code mode fields are rejected/cleared when server type is standard\r\n- Feature remains explicitly gateable via configuration\r\n- Non-enabled deployments are protected by feature gate validation paths\r\n\r\n## Migration Notes\r\n\r\n- Apply DB migration to use persistent code mode entities:\r\n- alembic upgrade head\r\n- Ensure runtime prerequisites are available for selected policy/runtime (Deno and/or Python)\r\n- Enable CODE_EXECUTION_ENABLED=true to activate code mode in non-compose environments",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "1135ac47aaa34d1df0202b6b114b71b15fc7f34e",
+      "message": "feat(core): add code execution platform baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T08:11:38+00:00"
+    },
+    {
+      "sha": "53294b4773d81651103dcb2801e1207f77f3cd50",
+      "message": "feat(ui): complete code execution admin monitoring actions\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T08:39:01+00:00"
+    },
+    {
+      "sha": "cf81c0fe220fc82c54cba7ac55c7e0005f2ce30f",
+      "message": "feat(code-exec): fully complete MCP Code Mode across core, config surfaces, admin UX, and docs\n\nComplete all phases of [EPIC][CORE]: Secure Code Execution & Virtual Tool Filesystem (MCP Code Mode) (#2952).\n\nThis commit finalizes the code execution feature as a production-ready capability:\nsecure runtime execution, virtual tool filesystem exposure, configurable policy\ndefaults and limits, deployment-surface wiring, admin UX completion, and\nvalidation coverage.\n\nCore delivery and phase completion\n- complete the secure code execution and virtual filesystem feature set end-to-end\n- finish remaining implementation gaps from prior baseline/core/ui commits\n- align runtime behavior with policy-driven configuration rather than fixed constants\n- preserve backward-compatible defaults while enabling environment-level override control\n\nConfig and feature-flag surface (mcpgateway/config.py)\n- add full CODE_EXECUTION_* settings family for feature management and tuning\n- add master enable switch and per-capability toggles\n- add shell_exec feature toggle\n- add fs_browse feature toggle\n- add replay feature toggle\n- add Rust acceleration toggle\n- add Python in-process fallback toggle\n- add runtime default selection\n- add execution timeout default\n- add memory default\n- add CPU default\n- add network connections default\n- add per-file write-size default\n- add total session disk default\n- add per-user run-rate default\n- add default tool-call permission\n- add default raw HTTP permission\n- add default filesystem read/write/deny policy arrays\n- add default tool allow/deny policy arrays\n- add default tokenization enabled flag\n- add default tokenization types array\n- add default tokenization strategy\n- add fs_browse default max_entries\n- add fs_browse hard max_entries\n- add max persisted output length setting\n- add configurable dangerous pattern lists for Python and TypeScript safety filters\n\nCode execution service hardening and configurability (mcpgateway/services/code_execution_service.py)\n- replace hardcoded sandbox defaults with settings-driven defaults\n- normalize and enforce configured runtime and policy defaults\n- enforce meta-tool enablement gates in runtime paths\n- disable shell_exec path when feature flag is off\n- disable fs_browse path when feature flag is off\n- disable replay path when feature flag is off\n- clamp fs_browse max_entries to configured hard limit\n- apply configured default max_entries when input is missing/invalid\n- apply configured max persisted output cap to run output/error storage\n- apply configured dangerous regex patterns instead of fixed tuples\n- honor Rust acceleration toggle before Rust helper usage\n- honor Python fallback toggle before in-process fallback path\n- keep secure conservative behavior when parsing invalid or malformed policy inputs\n- preserve compatibility for existing stored sandbox/tokenization server policy objects\n\nTool invocation path integration (mcpgateway/services/tool_service.py)\n- update fs_browse invocation to pass raw max_entries input\n- delegate max_entries parsing and clamping to code execution service logic\n\nServer lifecycle gating (mcpgateway/services/server_service.py, mcpgateway/admin.py)\n- block creation of code_execution servers when CODE_EXECUTION_ENABLED=false\n- block updates that move servers into code_execution when CODE_EXECUTION_ENABLED=false\n- enforce the same gate in admin create/edit form handlers\n- maintain existing error handling semantics and service-layer behavior expectations\n\nAdmin UI/UX completion for large JSON policies (mcpgateway/templates/admin.html, mcpgateway/static/admin.js)\n- resolve UX issue where long hint examples disappeared on focus\n- add click-to-insert editable templates for policy-heavy fields\n- add template insertion support for Skills Scope\n- add template insertion support for Mount Rules (JSON)\n- add template insertion support for Sandbox Policy (JSON)\n- add template insertion support for Tokenization Policy (JSON)\n- implement shared JS helper and template map for create/edit forms\n- keep inserted values user-editable after insertion for long JSON workflows\n\nDeployment and operations surface wiring\n- add and document CODE_EXECUTION_* variables in .env.example\n- wire core CODE_EXECUTION_* variables into docker-compose gateway service\n- expose CODE_EXECUTION_* values in Helm values.yaml\n- add Helm schema entries for CODE_EXECUTION_* keys in values.schema.json\n\nDocumentation and schema updates\n- expand configuration reference with dedicated Code Execution (MCP Code Mode) section\n- document feature flags, defaults, limits, and JSON array policy variables\n- regenerate settings schema documentation outputs\n- update docs/docs/config.schema.json\n- update docs/config.schema.json\n- ensure docs reflect full configurability and operational tuning controls\n\nTesting and validation\n- add unit tests for meta-tool feature gating behavior\n- add unit tests for settings-driven default policy behavior\n- add unit tests for configurable dangerous pattern enforcement\n- add unit tests for fs_browse limit clamping and defaults\n- add unit tests for replay feature-gate behavior\n- add unit tests for admin create/edit rejection when code execution is disabled\n- add unit tests for server registration rejection when code execution is disabled\n- run targeted code execution, admin, and server service suites\n- run lint/syntax checks and schema validation checks for touched artifacts\n- validate JSON/YAML outputs after schema/config edits\n\nOperational result\n- code execution feature is now fully configurable through settings/env/deployment surfaces\n- admins can tune defaults/limits/policy controls without code changes\n- UI supports practical editing of large JSON policy payloads\n- implementation is aligned with full epic scope and ready for downstream integration\n\nCloses #2952\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T10:10:31+00:00"
+    },
+    {
+      "sha": "e03d810b3b0330722025002316f5c7d98e3281d0",
+      "message": "docs(code-execution): add major docs set for MCP Code Mode\n\nAdd full documentation coverage for Secure Code Execution & Virtual Tool Filesystem, including architecture rationale, operator usage, navigation wiring, and top-level product positioning.\n\nIncludes:\n\n- ADR-0040 for design decision, tradeoffs, and rollout rationale\n\n- Architecture overview for code_execution server type, virtual filesystem model, policy layers, runtime/audit endpoints, and security notes\n\n- Usage guide for enablement, server creation payloads, shell_exec/fs_browse invocation, skills lifecycle, and troubleshooting\n\n- Navigation updates via .pages in architecture, ADR, and using sections\n\n- ADR index and architecture index updates for discoverability\n\n- Feature surfacing in docs home, overview/features, using index, security-features, and README quick links/feature list\n\nThis documents and advertises the completed MCP Code Mode feature set across docs/docs and repository entry points.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T10:41:47+00:00"
+    },
+    {
+      "sha": "2103fa7a9d9d3cb81e95944e186b227e713b9a27",
+      "message": "chore(code-execution): disable default rollout and restore flake8 baseline\n\nSet code execution to opt-in by default in runtime and config artifacts while keeping docker-compose default-enabled for local testing workflows.\n\nAlso align linting so 🐍 flake8 mcpgateway... passes cleanly, including targeted docstring-contract handling and explicit suppressions for intentional sandbox patterns in code execution internals.\n\nUpdated files include config/docs schema/config reference and flake8/code_execution_service adjustments.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T11:00:23+00:00"
+    },
+    {
+      "sha": "8f07d2eb4801b081f6e8b499024fca34a0d15f48",
+      "message": "feat(code-execution): harden admin UX, preview, and security gates\n\nStabilize the Admin UI behavior for code execution virtual servers and improve operator clarity in the catalog list.\n\nChanges included:\n\n- Fix create/edit server type toggle synchronization so code_execution sections reliably expand even when tool selectors/HTMX swaps initialize in different orders.\n\n- Add 'Preview Virtual Server' payload rendering in Add Server to show effective request JSON before submit, including validation for mount rules/sandbox/tokenization JSON fields.\n\n- Highlight code_execution servers in the catalog with a visual marker (⚡ + 💻 Code Mode badge) and row styling to distinguish code mode servers.\n\n- Resolve Bandit findings by removing hardcoded /tmp fallbacks (use tempfile-based defaults), documenting restricted exec usage with explicit nosec rationale, replacing pipe literal comparison false-positive path, and tightening exception handling in search-index generation.\n\n- Update and expand tests for admin server code_execution form handling, metrics endpoint determinism, server template rendering markers, and admin.js UI behavior.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T11:45:29+00:00"
+    },
+    {
+      "sha": "a4935cfd64918b5613dbb30bcc73e2da0bcb8de2",
+      "message": "feat(code-exec): codemirror json editing, lint hardening, and full docstring coverage\n\nWire CodeMirror into code-execution server JSON fields in create/edit flows so sandbox/tokenization/mount policies remain editable and persist correctly across template insertion, preview, and submit paths.\n\nAlso harden lint workflows and quality gates by fixing web lint regressions, stabilizing nodejsscan fallback behavior in constrained environments, resolving pylint/flake8 findings, and bringing interrogate coverage back to 100%.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T12:35:54+00:00"
+    },
+    {
+      "sha": "17ce14ccdaecd612339e100892e4503c475183ee",
+      "message": "test(playwright): harden admin UI tests against navigation and shell init races\n\nRoot cause:\n- Intermittent chromium flakes were triggered by page reloads racing with in-flight JS redirects after create-server form submission (ERR_ABORTED / frame detached).\n- Additional flakes came from one-shot waits during admin shell/tab bootstrap and gateways panel HTMX load timing.\n\nChanges:\n- Added `_reload_with_retry()` in servers extended tests to absorb transient ERR_ABORTED/frame-detached reload races.\n- Added `_stabilize_after_server_create()` and replaced repeated post-create wait/reload sequences across view/edit/export/deactivate/delete scenarios.\n- Hardened `GatewaysPage.wait_for_gateways_table_loaded()` with bounded retries, reload recovery, and tab re-open before rechecking table attachment.\n- Hardened `_ensure_admin_logged_in()` with a recovery attempt when `servers-tab` visibility times out, including re-auth transition handling.\n\nValidation:\n- Re-ran the originally failing tests in repeated loops and validated clean passes.\n- Re-ran broader class-level playwright suites (`TestServersExtended` and `TestGatewaysPage`) in loops with no reproduced failures.\n\nThis commit reduces nondeterministic test failures caused by navigation and UI initialization timing races in the admin Playwright suite.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T13:24:35+00:00"
+    },
+    {
+      "sha": "f5588e303009aa8634bd2c40c773f49badda6374",
+      "message": "fix(code-exec): harden security patterns, skill validation, endpoint guards, and tests\n\n- Sync config.py dangerous pattern defaults with module-level constants\n  (13 security patterns were inactive with default config)\n- Validate skill source_code against dangerous patterns at creation time\n  (imported skills run with unrestricted builtins in subprocess runtime)\n- Validate skill language is python or typescript before persisting\n- Add is_code_execution_server guard to approve/reject/revoke endpoints\n- Cap shell pipeline output at 10 MiB to prevent memory exhaustion\n- Remove dead __main() function from subprocess wrapper (silent exception swallowing)\n- Fix migration docstring revision ID mismatch\n- Add comprehensive coverage tests (~200 tests) for code execution service\n- Fix test_timeout_raises hang (sync busy loop blocked event loop)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-18T20:57:24+00:00"
+    },
+    {
+      "sha": "dda67bff3ade0fb79df1a1826bbc71f6272a69eb",
+      "message": "fix(code-exec): close IDOR, policy bypass, and error-handling gaps\n\n- Enforce server_id ownership in replay_run, approve_skill, revoke_skill\n- Block expired skill approvals via is_expired() check\n- Add filesystem policy enforcement to fs_browse, in-process Python,\n  subprocess Python (with root-path and relative-path matching), and\n  Deno runtime (filter --allow-read/--allow-write by policy)\n- Fix CancelledError escape in subprocess wrapper (suppress BaseException)\n- Reorder token-scoping patterns so skills/approvals match before\n  generic /servers catch-all\n- Guard code-exec field updates behind effective server_type check\n- Wrap approve/reject/revoke routes with CodeExecutionError handler\n- Deduplicate dangerous patterns into config.PYTHON_DANGEROUS_PATTERNS\n- Fix asyncio event loop deprecation in runtime noop tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-18T23:57:34+00:00"
+    },
+    {
+      "sha": "3fd39b7e3ad73812db0988e35962b18963a1f5b8",
+      "message": "Fix some flaky tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T00:30:17+00:00"
+    },
+    {
+      "sha": "8d55428eb8d28dcf3a3a1f8bd3e0ecddcc150b94",
+      "message": "Linting fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T00:49:21+00:00"
+    },
+    {
+      "sha": "a646232de5d926250bf6e0ed923f6642f1753e8b",
+      "message": "Linting fixes for ui\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T01:06:42+00:00"
+    },
+    {
+      "sha": "a6475a92edcbcc0044ef6dc714e65449cccfa450",
+      "message": "Linting fixes for ui\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T01:36:08+00:00"
+    },
+    {
+      "sha": "b90d38dfe1b2ccffc5a0191e3408da350e8f98d6",
+      "message": "Update .env.example with better docs\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T01:47:32+00:00"
+    },
+    {
+      "sha": "d22ba76b69307a61be32471f3b00657cec3e4b02",
+      "message": "Update config.py with patterns\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T02:20:17+00:00"
+    },
+    {
+      "sha": "90fc35f58238e051eb00dc164f994dbd07f063c7",
+      "message": "Code review\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T02:39:06+00:00"
+    },
+    {
+      "sha": "66b7791331fd348be4ad5a94a1b6ed569cead662",
+      "message": "Code review\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T02:45:33+00:00"
+    },
+    {
+      "sha": "ae42b978b5ee9310ed4107bda1f46af6d7cd4fc2",
+      "message": "Code review\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T03:09:11+00:00"
+    },
+    {
+      "sha": "a94fc42a86fc83c068001d5c6fad18decc3a2793",
+      "message": "fix(code-exec): migration portability, CI formatting, coverage, and review-2 findings\n\n- Use batch_alter_table for SQLite ALTER COLUMN compatibility\n- Use FALSE instead of 0 for PostgreSQL boolean backfill\n- Refresh inspector before each index-check block for idempotency\n- Fix cargo fmt formatting in plugins_rust/src/lib.rs\n- Scope server update feature gate to explicit type transitions only\n- Always render code_execution option in edit modal (disabled when off)\n- Add 27 new test methods across 14 test classes for coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T03:44:16+00:00"
+    },
+    {
+      "sha": "ccb066e6479a2a8d6b9ddb9eed09708916d22e2d",
+      "message": "test(code-exec): comprehensive coverage for route handlers, service methods, and edge cases\n\nAdd 153 new tests covering main.py code-exec endpoints, tool_service\nmeta-tool dispatch, server_service update paths, admin form parsing,\nbootstrap role reconciliation, schemas validators, and edge cases\nin shell commands, rate limits, disk limits, and VFS setup.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T05:02:06+00:00"
+    },
+    {
+      "sha": "1e8b092dce4cd703452fea0226cf468f6b2f9c19",
+      "message": "fix(rbac): update permission matrix tests for skills.* permissions\n\nAdd skills.create, skills.read, skills.approve, skills.revoke to\nTEAM_ADMIN_PERMISSIONS and skills.create/read to DEVELOPER_PERMISSIONS.\nAdd skills.read to VIEWER and PLATFORM_VIEWER permission constants.\nAlso add tokens.* to TEAM_ADMIN to match bootstrap_db.py definitions.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T05:44:44+00:00"
+    },
+    {
+      "sha": "2f19c9c295f20a5396e002c2a4dcedc4d724fdbe",
+      "message": "fix(test): restore PermissionService.check_permission after monkey-patching\n\nThe test helper _build_test_client() replaced PermissionService.check_permission\nwith _allow_all on the class level, but never restored it. This caused all\nsubsequent RBAC tests in the full suite to see check_permission always\nreturning True, producing 130 false-positive test failures.\n\nSave the original method and restore it in _cleanup_test_client().\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T06:02:04+00:00"
+    },
+    {
+      "sha": "88c8200ea9f92a718086ebc6387edcdde6ae2ee5",
+      "message": "fix(admin-ui): lazy-init CodeMirror editors for code execution section\n\nCodeMirror editors for mount_rules, sandbox_policy, and tokenization\nwere not initialized when the code execution section was hidden at page\nload. The \"Insert editable JSON template\" buttons silently failed because\nthe editors did not exist yet.\n\nAdd ensureCodeExecutionEditors() to lazily create CodeMirror instances\nwhen the section is first revealed. Also enable CODE_EXECUTION_ENABLED\nby default in docker-compose.yml and add Playwright E2E tests covering\nsection toggle, editor init, template buttons, and server creation.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T09:24:42+00:00"
+    },
+    {
+      "sha": "e542771bb8493a117174ce558efb96df31bba06c",
+      "message": "fix(admin-ui): resolve CodeMirror editor lookup for code execution template buttons\n\nThe getCodeMirrorEditorForField() function relied on fieldElement.CodeMirror,\nwhich is not set by our init code. Added _FIELD_ID_TO_EDITOR_VAR mapping to\nfall back to window-level editor globals (e.g. window.serverMountRulesEditor).\nAlso fixed Playwright test assertion to use the Pydantic alias \"type\" instead\nof the Python field name \"server_type\".\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T09:43:50+00:00"
+    },
+    {
+      "sha": "6ea737c961ef30f7e946114dd2a974f82ac10c3d",
+      "message": "fix(code-exec): resolve GlobalContext missing request_id and unhashable tags\n\nTwo bugs prevented code execution tools from working via MCP protocol:\n\n1. _invoke_code_execution_meta_tool created GlobalContext without request_id\n   (required field), causing a Pydantic validation error. Now mirrors the\n   pattern from the regular tool invocation path.\n\n2. _tool_matches_mount_rules called set() on tool.tags which may contain\n   dicts (structured tag objects), causing TypeError. Now normalizes tags\n   to strings before set conversion.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T10:47:33+00:00"
+    },
+    {
+      "sha": "1bd4d5b1653fd493f8cc2cc768356167b3975ec5",
+      "message": "test(code-exec): add unit tests for dict-style tag handling in mount rules\n\nCover the fix where tool.tags contain dicts (e.g. [{\"name\": \"csv\"}])\ninstead of plain strings, which previously caused TypeError in\n_tool_matches_mount_rules.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T10:50:05+00:00"
+    },
+    {
+      "sha": "651a68c3c6be8d919f6a7abdafc0fe279391f810",
+      "message": "fix(admin-ui): edit form defaults code_execution server type to standard\n\nWhen CODE_EXECUTION_ENABLED is false, the template renders the\ncode_execution <option> with a disabled attribute. Browsers silently\nignore setting a <select> value to a disabled option, so the edit form\nalways showed \"standard\" for code_execution servers.\n\nThe fix enables the disabled option before setting the select value\nwhen the server already uses code_execution. Added 4 Playwright\nregression tests covering the edit flow, disabled-option scenario,\nand save round-trip.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T13:20:15+00:00"
+    },
+    {
+      "sha": "f919a03fbe758cac68e8ecd2cb2c040be3adb170",
+      "message": "feat(code-exec): add fs_read/fs_write meta-tools, improve tool schemas, and fix fs_browse root listing\n\n- Add fs_read meta-tool: read file contents without sandbox boot overhead\n- Add fs_write meta-tool: write files to /scratch and /results without sandbox boot\n- Add fs_browse root listing: browsing \"/\" returns synthetic VFS root directories\n- Remove timeout_ms maximum:30000 from shell_exec schema (fixes client-side\n  \"must be <= 30000\" rejection by Claude Code); server-side clamping suffices\n- Remove unused \"stream\" field from shell_exec schema\n- Add descriptions to all tool schema fields for better LLM guidance\n- Add config flags: fs_read_enabled, fs_write_enabled, fs_read_max_size_bytes\n- Enforce read permissions, file size limits, write root restrictions, and\n  aggregate disk quotas in the new tools\n- 17 new unit tests covering fs_read, fs_write, and root listing (477 total)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T18:22:58+00:00"
+    },
+    {
+      "sha": "c52f12fab4891835da8d06c51ed53efe62b0b767",
+      "message": "feat(code-exec): deterministic session paths and Redis registry for multi-worker persistence\n\nReplace UUID-based session IDs with deterministic SHA-256 derivation from\n(server_id, user_email, language) so any worker resolves the same filesystem\npath. Add a Redis session registry (content_hash, last_used_at) as a\ncross-worker coordination layer with graceful fallback when Redis is\nunavailable. Use fcntl file-based locking for concurrent session init.\n\nAdd shared Docker volume (code_exec_data) so all gateway containers share\nthe /tmp/mcpgateway_code_execution/ directory.\n\nCreate ADR-0042 documenting the 3-tier session lookup architecture:\nprocess-local dict -> Redis metadata -> filesystem probe.\n\nIncludes tests for deterministic IDs, cross-worker session reuse, Redis\nmetadata roundtrip, and graceful Redis fallback.\n\nRefs: ADR-0042, ADR-0038\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T19:46:24+00:00"
+    },
+    {
+      "sha": "8f00629e707064a19f4d00295eac89103c50ac47",
+      "message": "fix(code-exec): add init container to fix shared volume ownership\n\nDocker named volumes are created as root:root, but the gateway runs as\nuid 1001 (app). Add a busybox init container that chowns the shared\ncode_exec_data volume before gateway startup, ensuring the app user\ncan create session directories.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T19:59:44+00:00"
+    },
+    {
+      "sha": "aec034d98c14e8755825a0dfc471983af1440f22",
+      "message": "fix(code-exec): replace bare except-pass with debug logging for bandit B110\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-19T20:14:48+00:00"
+    }
+  ],
+  "files_changed": 53,
+  "additions": 21566,
+  "deletions": 2915,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:45.769911",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:45.771626",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3149,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3149.json"
+  }
+}

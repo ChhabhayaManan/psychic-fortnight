@@ -1,0 +1,155 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4139,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4139"
+  },
+  "metadata": {
+    "title": "fix(api): support multipart/form-data and form-urlencoded for REST tool invocations",
+    "state": "closed",
+    "created_at": "2026-04-13T10:54:32+00:00",
+    "updated_at": "2026-04-27T13:20:26+00:00",
+    "closed_at": "2026-04-27T13:20:23+00:00",
+    "merged_at": "2026-04-27T13:20:23+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "ica",
+      "SHOULD",
+      "api",
+      "release-fix",
+      "merge-queue"
+    ],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## 📌 Summary\nREST tools always sent request bodies as `application/json` regardless of what the upstream API required. Any API expecting `multipart/form-data` or `application/x-www-form-urlencoded` would return 400 Bad Request with no way to configure the encoding.\n\n## 🔁 Reproduction Steps\nCloses #4058\n\n1. Register a REST tool pointing to an API that requires `multipart/form-data` (e.g. uses `-F` form fields)\n2. Set `Content-Type: multipart/form-data` in the tool's headers\n3. Invoke the tool — previously returned 400 Bad Request\n\n## 🐞 Root Cause\n`tool_service.py` hardcoded `json=payload` for all non-GET REST requests, causing httpx to always serialize the body as JSON and override any user-configured `Content-Type` header with `application/json`.\n\n## 💡 Fix Description\nAfter all header modifications (auth merge, passthrough, plugin hooks, header mapping), inspect the final `Content-Type` header and dispatch to the appropriate httpx body encoding:\n\n- `application/x-www-form-urlencoded` → `data=` (scalars stringified, nested values JSON-encoded)\n- `multipart/form-data` → `files=` with `Content-Type` stripped so httpx sets the correct `boundary=` parameter\n- Anything else (including unset or `application/json`) → `json=` — unchanged default, no behaviour change for existing tools\n\nNo DB/schema/migration changes — behaviour is driven entirely by the `Content-Type` header already stored on the tool.\n\n## 🧪 Verification\n\n| Check                             | Command                                                                                  | Status |\n|-----------------------------------|------------------------------------------------------------------------------------------|--------|\n| Lint suite                        | `make lint`                                                                              | ✅     |\n| Unit tests                        | `uv run pytest tests/unit/mcpgateway/services/test_tool_service.py -v`                  | ✅ 337/337 |\n| New encoding tests                | `uv run pytest tests/unit/mcpgateway/services/test_tool_service.py -k \"rest_post\" -v`   | ✅ 4/4  |\n| Manual regression no longer fails | Register a REST tool with `Content-Type: application/x-www-form-urlencoded`, invoke it — response `form` field contains parameters instead of 400 | ✅ |\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4121018824",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-16T12:57:35+00:00",
+      "body": "@madhav165 - the PR looks good, just a few issues\n\n#### Summary\n\n  Fixes issue #4058 by detecting the final `Content-Type` header after all auth/plugin/mapping transformations and dispatching to the appropriate httpx encoding (`data=, files=, or json=`). The core fix is correct, backward-compatible, and the happy-path test coverage is solid.\n\n####  Findings\n\n- `mcpgateway/services/tool_service.py:4283` — Design: nested function definition\n  `_to_str` is defined inside the method body, creating a new function object on every code-path execution. Extract it as a `@staticmethod _form_value_to_str(v: Any) -> str on ToolService`.\n\n- `mcpgateway/services/tool_service.py:4295–4309` — Correctness: undocumented query param behavioral asymmetry\n  The JSON/default path merges URL query params into the request body (`payload.update(query_params)`). The form-urlencoded and multipart paths forward them as `params=_qp` (query string). This is the more semantically correct behavior for form encoding, but it is a silent behavioral difference for any tool that switches content types. Add an inline comment explaining the intentional asymmetry.\n\n- `mcpgateway/services/tool_service.py:4274` — Consistency: opaque variable name\n  `_qp` is not self-explanatory. Rename to _url_query_params or inline the ternary directly at its two call sites.\n\n- Test coverage: GET + form-related `Content-Type`\n  No test guards against a GET request where `Content-Type: application/x-www-form-urlencoded` is set. The GET branch correctly wins in the dispatch, but there is no regression guard for this.\n\n- Test coverage: `tool_query_mapping` + form-urlencoded\n  No test verifies that when `tool_query_mapping` is set, `_qp` is `None` and the mapped payload is sent in the form body rather than forwarded as query string params.\n"
+    },
+    {
+      "id": "4127682110",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-17T09:42:01+00:00",
+      "body": "The core fix is well-structured and the test coverage is solid. A few security-relevant items worth addressing before merge, ranging from a meaningful behavioral issue to lower-priority correctness gaps.\n\n---\n\n## Blocking\n\n**`Content-Type` is not in the sensitive header blocklist, enabling encoding dispatch manipulation via `header_mapping`**\n\nThe new dispatch logic routes requests to `data=`, `files=`, or `json=` based on `_ct_base`, which is read from the **final, post-mapping** `headers` dict. Because `Content-Type` is not blocked by `_is_sensitive_tool_header_name()` (see `_SENSITIVE_TOOL_HEADER_PATTERNS` in `tool_service.py`), an admin can configure a tool with `header_mapping: { \"encoding\": \"Content-Type\" }`. A caller with only tool-invoke rights could then pass `{ \"encoding\": \"application/x-www-form-urlencoded\" }` and silently switch the upstream request from JSON to form-encoded — or vice versa.\n\nThis may not be an issue in practice (it requires an admin to create a Content-Type mapping, which is an unusual configuration), but it creates a surprising attack surface: the encoding path becomes caller-controllable, which is almost certainly unintentional. Worth a targeted decision here:\n\n**Option A (minimal):** Add `content-type` to `_SENSITIVE_TOOL_HEADER_PATTERNS` so `header_mapping` cannot target it.\n\n**Option B (defense-in-depth):** Determine `_ct_base` from the tool's *statically configured* headers before mapping is applied, not after. This is a stronger guarantee but a larger change.\n\nA deny-path test covering this scenario would be valuable regardless.\n\n---\n\n## Should Fix\n\n**Boolean serialization in `_form_value_to_str` produces `\"True\"`/`\"False\"`, not `\"true\"`/`\"false\"`**\n\n```python\nreturn str(v)  # str(True) == \"True\"\n```\n\nFor form APIs that inspect boolean flag fields (e.g., `admin=true`, `enabled=true`), this will silently fail with the capitalized variant. `orjson.dumps` already handles booleans correctly:\n\n```python\nif isinstance(v, (dict, list, bool)):\n    return orjson.dumps(v).decode()  # produces \"true\" / \"false\"\n```\n\nThere is currently no test asserting `_form_value_to_str(True)` behaviour.\n\n---\n\n**`_url_query_params` initialization doesn't account for `has_header_mapping`**\n\n```python\n_url_query_params = query_params if not tool_query_mapping else None\n```\n\nWhen `has_header_mapping=True` and `has_query_mapping=False`, the mapping block (lines 4685–4707) already strips and processes URL query params into `query_params`. The form branch then receives that processed dict as `params=` via `_url_query_params`, but the URL-stripping block below is skipped (guarded by `not has_header_mapping`). The result is that processed URL params could be forwarded as query string parameters on form-encoded requests — a subtle double-send. The initialization should mirror the extraction guard:\n\n```python\n_url_query_params = query_params if not tool_query_mapping and not tool_header_mapping else None\n```\n\nThis case is also untested.\n\n---\n\n## Suggestions\n\nPlease feel free to fix the following in this PR or in a newly created one.\n\n**`multipart/form-data`: all fields are sent as file attachments**\n\nUsing `files=` for every field sends `Content-Disposition: form-data; filename=\"\"` on each part. For APIs that expect standard form fields alongside actual file uploads, this will break. The standard httpx pattern is `data=` for plain fields and `files=` only for file parts. For a v1 fix this is acceptable, but worth a comment and a known-limitations note so future contributors don't have to rediscover it.\n\n**`parse_qs(..., v[0])` silently drops duplicate query parameters**\n\nBoth the existing code (lines 4688, 4720) and the new form path use `v[0]` to take only the first value of repeated keys. This is consistent, but for signed URLs (AWS presigned, Azure SAS) that sometimes include repeated params for multi-value filters, silent truncation could corrupt the signature. A logged warning here similar to the GET conflict warning (lines 4722–4728) would help debugging.\n\n**No size guard on `orjson.dumps(v)` for nested values**\n\nA caller could pass a deeply nested dict or very large list as a form field value, causing `orjson.dumps` to allocate significant memory before the request is sent. Existing payload size limits upstream may already cover this, but it is worth verifying — and if not, a max-depth or max-size check before serialization would be prudent.\n"
+    },
+    {
+      "id": "4128831466",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-17T12:42:05+00:00",
+      "body": "## Summary\n\nAdds `application/x-www-form-urlencoded` and `multipart/form-data` encoding support to REST tools, moving beyond hardcoded JSON. The implementation is correct, backward-compatible, and security-aware.\n\n---\n\n## Resolved Items\n\n| Item | Status |\n|------|--------|\n| Boolean serialization (`true`/`false`) | ✅ Fixed — `bool` added to `isinstance` check in `_form_value_to_str`, now uses `orjson.dumps()` |\n| Content-Type in sensitive header blocklist | ✅ Fixed — `content-type` added to `_SENSITIVE_TOOL_HEADER_PATTERNS` (Option A) |\n| multipart `files={'field': (None, value)}` | ✅ Correct — httpx emits no `filename=` with `None`; proper form field behaviour |\n| `parse_qs` `v[0]` dropping duplicates | ✅ Pre-existing pattern, out of scope |\n\n---\n\n## `_url_query_params` / `has_header_mapping` — Author Is Right\n\nAfter tracing the logic, the author's explanation is accurate:\n\n```\nScenario: has_header_mapping=True, has_query_mapping=False\n1. Lines 4685–4688: URL stripped → query_params populated\n2. Line 4711: _url_query_params = query_params  ✓  (tool_query_mapping is falsy)\n3. Line 4718 extraction block: skipped (has_header_mapping=True)  ✓\n4. Lines 4756/4763 form branches: params=_url_query_params  ✓\n```\n\nAdding `and not tool_header_mapping` to line 4711 **would be a regression** — it would set `_url_query_params = None` and silently drop URL params from form/multipart requests when only header mapping is configured. Header mapping is orthogonal to URL query param forwarding.\n\n---\n\n## Suggestions (Non-blocking)\n\n1. **Add a comment at line 4711** to document the invariant and prevent future regression:\n   ```python\n   # NB: guard on tool_query_mapping, not has_header_mapping. When only\n   # header_mapping is present, URL params were already extracted into\n   # query_params above and must still be forwarded on the query string.\n   ```\n\n2. **Add one test** for `header_mapping`-only (no `query_mapping`) to lock in the subtle behaviour:\n   ```python\n   # URL has ?key=value, tool has header_mapping only\n   # Assert final request has params={'key': 'value'} on query string\n   ```\n\n---\n\n## Security\n\n- **Content-Type blocking:** Effective — prevents encoding dispatch manipulation via `header_mapping`\n- **`_form_value_to_str()`:** No injection vectors — all types serialized as strings, not interpreted\n- **Signed URL preservation:** Correct — form paths forward URL params via `params=`, not merged into body\n\n---\n\n## Test Coverage\n\n- ✅ Form-urlencoded POST with nested values\n- ✅ Multipart form-data with various types\n- ✅ Query parameter forwarding for both encodings\n- ✅ Interaction with `query_mapping`\n- ✅ Interaction with `header_mapping`\n- ✅ Edge case: GET request with form Content-Type (correctly stays GET)"
+    },
+    {
+      "id": "4180118801",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-27T10:32:06+00:00",
+      "body": "All blocking issues resolved, implementation correct and secure\n\nLGTM 🚀 "
+    },
+    {
+      "id": "4180968424",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-27T12:42:56+00:00",
+      "body": "Approved based on previous approvals."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d8549c141690a7f3cac7bf7b1f122bfbdaec3143",
+      "message": "fix(api): support multipart/form-data and form-urlencoded for REST tool invocations\n\nREST tools always sent request bodies as application/json regardless of\nthe upstream API's requirements. Detect the final Content-Type header\n(after auth, plugin, and header-mapping modifications) and dispatch to\nthe appropriate httpx body encoding:\n\n- application/x-www-form-urlencoded → data= (scalars stringified, nested JSON-encoded)\n- multipart/form-data → files= with Content-Type stripped so httpx sets the boundary\n- anything else → json= (existing default, no behaviour change)\n\nCloses #4058\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-13T10:43:17+00:00"
+    },
+    {
+      "sha": "42bd13a30710828ce88ff4d89aace623ac2530d1",
+      "message": "chore: restore validators.py to main\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-13T10:44:54+00:00"
+    },
+    {
+      "sha": "f145918c5d23cec4f9abd0dc95c524281e75c459",
+      "message": "fix(api): preserve URL query params for form-encoded and multipart REST requests\n\nThe form-urlencoded and multipart/form-data branches did not forward\nURL-embedded query parameters, silently dropping them. Pass query_params\nvia httpx params= so they remain on the query string instead of being\nlost.\n\nAlso move an inline json import to the module top in the test file.\n\nCloses #4058\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-13T11:10:18+00:00"
+    },
+    {
+      "sha": "4bb8522939c23a17312ad4238741cdf018f12393",
+      "message": "test: add coverage for URL query param forwarding in form-encoded and multipart REST requests\n\nVerify that URL-embedded query parameters (e.g. ?token=abc) are passed\nvia httpx params= for both application/x-www-form-urlencoded and\nmultipart/form-data branches, keeping them on the query string rather\nthan merging into the request body.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-13T11:16:00+00:00"
+    },
+    {
+      "sha": "05d16de21e9898d17fdd73bd0548c357bb9bed9a",
+      "message": "update secrets baseline\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-17T05:48:28+00:00"
+    },
+    {
+      "sha": "a44a102fc714fdd5fd9eb5d3980cc23ee69e2974",
+      "message": "fix(api): extract URL query params for form-encoded and multipart POST without mappings\n\nWhen no query_mapping or header_mapping is configured, form-urlencoded and\nmultipart POST requests were not extracting query parameters from the tool\nURL.  The params stayed as an empty dict and the query string remained\nembedded in the URL, causing params= to be empty.\n\nStrip the query string from the URL and populate params= so query\nparameters are forwarded on the query string, matching the existing GET\nbehaviour.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-17T07:42:12+00:00"
+    },
+    {
+      "sha": "a3ab1b3aa3f94343a26fc171583b3d0e735274e3",
+      "message": "refactor(api): address PR #4139 review feedback\n\n- Extract nested _to_str as @staticmethod _form_value_to_str on ToolService\n  to avoid re-creating a function object on every invocation.\n- Rename opaque _qp variable to _url_query_params for clarity.\n- Add inline comments documenting the intentional query-param behavioral\n  asymmetry between form-encoded (params=) and JSON (payload merge) paths.\n- Guard the new form/multipart URL query-param extraction with method != GET\n  so GET requests with a form Content-Type still follow the GET branch.\n- Add regression tests: GET with form Content-Type header, and\n  form-urlencoded POST with query_mapping set.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-17T07:47:55+00:00"
+    },
+    {
+      "sha": "9e43ced49197e4acbe61f5c9788b687ed76f056b",
+      "message": "update .secretse.baseline\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-17T07:50:06+00:00"
+    },
+    {
+      "sha": "d0a966354bff88b9c95e14a71b5fd147fa9c1455",
+      "message": "fix(api): serialize booleans as lowercase and block Content-Type header mapping\n\n- Add bool to orjson serialization path in _form_value_to_str so\n  True/False produce \"true\"/\"false\" instead of \"True\"/\"False\"\n- Add content-type to _SENSITIVE_TOOL_HEADER_PATTERNS to prevent\n  caller-controllable encoding dispatch via header_mapping (#4139)\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-17T11:25:19+00:00"
+    },
+    {
+      "sha": "df2248e84bc03332f9d0c5c260155f23514187d9",
+      "message": "update .secrets.baseline\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-17T11:31:17+00:00"
+    },
+    {
+      "sha": "0673ceeacff706d50349c56057f2e503489d4456",
+      "message": "update .secretse.baseline\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-17T13:24:55+00:00"
+    },
+    {
+      "sha": "4cae893c771ef9a8181c6e6d34c7e4b4ef6a7a68",
+      "message": "Update secrets\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-04-27T12:40:27+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 310,
+  "deletions": 14,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:54.981226",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:54.982555",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4139,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4139.json"
+  }
+}

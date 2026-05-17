@@ -1,0 +1,136 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2359,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2359"
+  },
+  "metadata": {
+    "title": "fix(perf): resolve high-load performance degradation and CPU spin loops",
+    "state": "closed",
+    "created_at": "2026-01-24T12:55:36+00:00",
+    "updated_at": "2026-01-24T14:48:37+00:00",
+    "closed_at": "2026-01-24T14:48:35+00:00",
+    "merged_at": "2026-01-24T14:48:35+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": "Release 1.0.0-BETA-2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\nResolves critical performance issues under high load (4000+ concurrent users) including database lock contention, cascading FOR UPDATE locks, and SSE connection spin loops.\n\n## Changes\n\n### Database Performance Fixes\n- **Bulk UPDATE for gateway heartbeats** - Replace sequential FOR UPDATE loops with single bulk UPDATE statement, reducing lock contention by ~95%\n- **nowait locks for state changes** - Add `nowait=True` to `get_for_update()` calls in tool, server, prompt, and resource services for fail-fast lock handling\n- **409 Conflict responses** - Return HTTP 409 when lock conflicts occur instead of blocking\n\n### SSE Transport Spin Loop Prevention\n- **Robust rapid yield detection** - Track consecutive rapid yields (<100ms apart) to detect spin loops\n- **client_close_handler_callable** - Use sse_starlette callback to detect disconnects that granian may not propagate\n- **Remove harmful deque clearing** - Fix bug where clearing yield_timestamps after keepalives prevented spin detection\n\n### Lock Conflict Error Handling\n- Add `ToolLockConflictError`, `ServerLockConflictError`, `PromptLockConflictError`, `ResourceLockConflictError`\n- Explicit exception handlers to prevent generic Exception from swallowing lock errors\n- HTTP 409 responses for lock conflicts in all state change endpoints\n\n### Configuration & Documentation\n- Add SSE rapid yield detection settings (`sse_rapid_yield_window_ms`, `sse_rapid_yield_max`)\n- Document granian worker lifecycle options (`GRANIAN_WORKERS_LIFETIME`, `GRANIAN_WORKERS_MAX_RSS`) as workaround for #2357\n- Update dependencies (gunicorn, sqlalchemy, langgraph, hypothesis, etc.)\n\n## Test Results\n- All unit tests passing\n- Load tested with 4000 concurrent users\n- Database lock contention eliminated\n- No more cascading lock timeouts\n\n## Known Limitation\nPost-load CPU spike (#2357) - After load stops, granian may spin at ~800% CPU due to SSE connections not being properly closed. This is a granian issue (#286), documented with workaround options.\n\n## Closes\n- Closes #2355\n\n## Related Issues\n- #2357 - Granian CPU spike after load (documented, workaround added)\n- #2358 - Granian feature requests for better worker lifecycle management",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "3971f0178bbc55208d3698dd3998267cbb9c0b21",
+      "message": "fix(perf): resolve lock contention and CPU spin loop under high load (#2355)\n\nPhase 1: Replace cascading FOR UPDATE loops with bulk UPDATE statements\nin gateway_service.set_gateway_state() to eliminate lock contention when\nactivating/deactivating gateways with many tools/servers/prompts/resources.\n\nPhase 2: Add nowait=True to get_for_update() calls in set_server_state()\nand set_tool_state() to fail fast on locked rows instead of blocking.\nAdd ServerLockConflictError and ToolLockConflictError exceptions with\n409 Conflict handlers in main.py and admin.py routers.\n\nPhase 3: Fix CPU spin loop in SSE transport by properly detecting client\ndisconnection. Add request.is_disconnected() check, consecutive error\ncounting, GeneratorExit handling, and ensure _client_gone is set in all\nexit paths.\n\nResults:\n- RPS improved from 173-600 to ~2000 under load\n- Failure rate reduced from 14-22% to 0.03-0.04%\n- Blocked queries reduced from 33-48 to 0\n- CPU after load test: ~1% (was 800%+ spin loop)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T00:07:37+00:00"
+    },
+    {
+      "sha": "9296947939381e7a9b61125cf8ee5b2d6194a4b2",
+      "message": "fix(perf): add database lock timeout configuration (#2355)\n\nAdd configurable timeout settings for database operations:\n- db_lock_timeout_ms: Maximum wait for row locks (default 5000ms)\n- db_statement_timeout_ms: Maximum statement execution (default 30000ms)\n\nThese settings can be used with get_for_update() to prevent indefinite\nblocking under high concurrency scenarios.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T00:18:35+00:00"
+    },
+    {
+      "sha": "97e2d1a3039f4df727636cbf57ff9920a708990f",
+      "message": "test: update tests for bulk UPDATE and SSE transport changes (#2355)\n\nUpdate gateway_service tests to use side_effect for multiple db.execute\ncalls (SELECT + bulk UPDATEs) instead of single return_value.\n\nUpdate row_level_locking test to expect nowait=True parameter in\nget_for_update calls for set_tool_state.\n\nUpdate SSE transport tests to mock request.is_disconnected() and adjust\nerror handling test to expect consecutive errors causing generator stop\ninstead of error event emission.\n\nAdd missing exception documentation for ServerLockConflictError and\nToolLockConflictError in service docstrings (flake8 DAR401).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T00:35:58+00:00"
+    },
+    {
+      "sha": "e167ac4038fccd702a865c7d24ee9b80205dc4ac",
+      "message": "fix(sse): add send_timeout to EventSourceResponse to prevent spin loops (#2355)\n\nWhen Granian ASGI server fails to send to a disconnected client, it logs\n\"ASGI transport error: SendError\" but doesn't raise an exception to our\ncode. This causes rapid iteration of the generator without proper\ntimeout handling.\n\nAdd send_timeout=5.0 to EventSourceResponse to ensure sends time out if\nthey fail, triggering sse_starlette's built-in error handling.\n\nAlso enable sse_starlette's built-in ping mechanism when keepalive is\nenabled, which provides additional disconnect detection.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T00:45:30+00:00"
+    },
+    {
+      "sha": "08e2cae205a83e014bdbcd46843ea88d9c671a1d",
+      "message": "fix(sse): add rapid yield detection to prevent CPU spin loops (#2355)\n\nWhen clients disconnect abruptly, Granian may fail sends without\nraising Python exceptions. This adds rapid yield detection: if\n50+ yields occur within 1 second, we assume client is disconnected\nand stop the generator.\n\nNew configurable settings:\n- SSE_SEND_TIMEOUT: ASGI send timeout (default 30s)\n- SSE_RAPID_YIELD_WINDOW_MS: detection window (default 1000ms)\n- SSE_RAPID_YIELD_MAX: max yields before disconnect (default 50)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T00:56:17+00:00"
+    },
+    {
+      "sha": "3b88c6e1c44f92998877699315d7ae8233193645",
+      "message": "fix(sse): log rapid yield detection at ERROR level for visibility\n\nChanged from WARNING to ERROR so the detection message is visible\neven when LOG_LEVEL=ERROR. This is appropriate since rapid yield\ndetection indicates a problem condition (client disconnect not\nreported by ASGI).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T01:24:16+00:00"
+    },
+    {
+      "sha": "7a62c47fc084772d0cd3bd5ac228f9aeba60d4c3",
+      "message": "fix: address review findings from ChatGPT analysis\n\nFinding 1: Fix lock conflict error propagation\n- Add explicit except handlers for ToolLockConflictError and\n  ServerLockConflictError before the generic Exception handler\n- This allows 409 responses to propagate correctly instead of\n  being wrapped as generic 400 errors\n\nFinding 3: Improve SSE rapid yield detection\n- Only track message yields, not keepalives\n- Reset the timestamp deque when timeout occurs (we actually waited)\n- This prevents false positives on high-throughput legitimate streams\n\nFinding 4: Remove unused db timeout settings\n- Remove db_lock_timeout_ms and db_statement_timeout_ms from config\n- These settings were defined but never wired into DB operations\n- Avoids false sense of protection\n\nFinding 2 (notifications) is intentional: gateway-level notifications\nare sent, and bulk UPDATE is used for performance under high load.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T01:35:12+00:00"
+    },
+    {
+      "sha": "6cb6f8b8435c329a8818137355acdff1ce58bad6",
+      "message": "fix(perf): add nowait locks to prompt and resource state changes\n\nExtends the lock contention fix to prompt_service and resource_service:\n- Add PromptLockConflictError and ResourceLockConflictError classes\n- Use nowait=True in get_for_update to fail fast if row is locked\n- Add 409 Conflict handlers in main.py for both services\n- Re-raise specific errors before generic Exception handler\n\nThis ensures consistent lock handling across all state change endpoints.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T11:46:08+00:00"
+    },
+    {
+      "sha": "6854ad9b1f95d7e72a4f9e19102ca75641dd5617",
+      "message": "fix(sse): improve rapid yield detection to catch all spin scenarios\n\n- Track time since last yield as additional signal (<10ms is suspicious)\n- Check rapid yield after BOTH message and keepalive yields\n- Reset timestamps only after successful keepalive wait\n- Include time interval in error log for debugging\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T12:00:24+00:00"
+    },
+    {
+      "sha": "13f6699e4f77db59f2347e35d7c81c0dca62eb13",
+      "message": "fix(sse): add robust spin loop detection and update dependencies (#2355)\n\nSSE transport improvements:\n- Add consecutive rapid yield counter for simpler spin loop detection\n  (triggers after 10 yields < 100ms apart)\n- Remove deque clearing after keepalives that prevented detection\n- Add client_close_handler_callable to detect disconnects that ASGI\n  servers like granian may not propagate via request.is_disconnected()\n\nTest updates:\n- Update row-level locking tests to expect nowait=True for prompt\n  and resource state changes\n\nDependency updates:\n- Containerfile.lite: Update UBI base images to latest\n- gunicorn 23.0.0 -> 24.1.1\n- sqlalchemy 2.0.45 -> 2.0.46\n- langgraph 1.0.6 -> 1.0.7\n- hypothesis 6.150.2 -> 6.150.3\n- schemathesis 4.9.2 -> 4.9.4\n- copier 9.11.1 -> 9.11.3\n- pytest-html 4.1.1 -> 4.2.0\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T12:31:39+00:00"
+    },
+    {
+      "sha": "86faac3bc8bd80521677b0e30241772f410afdfa",
+      "message": "docs: add granian worker lifecycle options for SSE connection leak workaround\n\nDocument GRANIAN_WORKERS_LIFETIME and GRANIAN_WORKERS_MAX_RSS options\nas commented-out configuration in docker-compose.yml and run-granian.sh.\n\nThese options provide a workaround for granian issue #286 where SSE\nconnections are not properly closed after client disconnect, causing\nCPU spin loops after load tests complete.\n\nRefs: #2357, #2358\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T12:55:11+00:00"
+    },
+    {
+      "sha": "dbe26a0bc07d3c2bda2f03d9fbaf34841eea97c7",
+      "message": "docker-compose updates for GUNICORN\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T13:35:26+00:00"
+    },
+    {
+      "sha": "d15772ac586453739bae0ea0eaadeef6a91f5ac2",
+      "message": "docker-compose updates for GUNICORN\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T13:41:51+00:00"
+    },
+    {
+      "sha": "38d72fd7513371df9493744f333bd32bc69b71d6",
+      "message": "docker-compose updates for GUNICORN\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T13:46:30+00:00"
+    },
+    {
+      "sha": "1fd93bac9e31f2d585f08aa30f8c323bd71f1548",
+      "message": "Update pyproject.toml\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T13:56:19+00:00"
+    },
+    {
+      "sha": "26837c70c150746bab680bfa050f280afb5489c2",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T14:21:32+00:00"
+    }
+  ],
+  "files_changed": 42,
+  "additions": 552,
+  "deletions": 413,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:19.248229",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:19.249337",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2359,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2359.json"
+  }
+}

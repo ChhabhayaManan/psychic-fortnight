@@ -1,0 +1,180 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3696,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3696"
+  },
+  "metadata": {
+    "title": "fix(api): consolidate loopback RPC URLs and TLS verification into shared helper (#3543)",
+    "state": "closed",
+    "created_at": "2026-03-16T14:41:45+00:00",
+    "updated_at": "2026-03-23T18:08:12+00:00",
+    "closed_at": "2026-03-23T18:08:10+00:00",
+    "merged_at": "2026-03-23T18:08:10+00:00",
+    "author": "madhu-mohan-jaishankar",
+    "labels": [
+      "bug",
+      "SHOULD",
+      "api",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3543\r\n\r\n---\r\n\r\n## 📝 Summary\r\nThis PR removes hardcoded loopback HTTP URLs and TLS verification flags and centralizes the decision based on runtime mode (SSL env) into a tiny helper.\r\n\r\nConcretely:\r\n\r\nAdds mcpgateway/utils/internal_http.py with:\r\ninternal_loopback_base_url() — returns \"[http://127.0.0.1:{port}](http://127.0.0.1:%7Bport%7D/)\" or \"[https://127.0.0.1:{port}](https://127.0.0.1:%7Bport%7D/)\" depending on SSL env.\r\ninternal_loopback_verify() — returns a boolean to use for HTTP client TLS verification (disabled for local HTTPS).\r\nReplaces literal loopback URLs:\r\n\"[http://127.0.0.1:{settings.port}/rpc](http://127.0.0.1:%7Bsettings.port%7D/rpc)\"\r\n\"[http://localhost:{settings.port}{settings.app_root_path}/rpc](http://localhost:%7Bsettings.port%7D%7Bsettings.app_root_path%7D/rpc)\" with f\"{internal_loopback_base_url()}/...\" where used.\r\nReplaces default httpx/ResilientHttpClient verification use with internal_loopback_verify() so local HTTPS with self-signed certs won't fail.\r\nUpdates one assertion in tests to assert against internal_loopback_base_url().\r\nAdds unit tests for the new internal_http helpers.\r\nFiles changed:\r\n\r\nAdded: mcpgateway/utils/internal_http.py\r\nModified: mcpgateway/cache/session_registry.py\r\nModified: mcpgateway/main.py\r\nModified: mcpgateway/services/mcp_session_pool.py\r\nModified: mcpgateway/transports/streamablehttp_transport.py\r\nTest changes: tests/unit/mcpgateway/cache/test_session_registry_coverage.py (assertion updated)\r\nAdded tests: tests/unit/mcpgateway/utils/test_internal_http.py\r\nThis is an internal refactor to remove hardcoded loopback scheme and verification; it does not change external APIs or RPC semantics.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [x] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [ ] No secrets or credentials committed\r\n\r\n",
+  "comments": [
+    {
+      "id": "2965897095",
+      "author": "ja8zyjits",
+      "created_at": "2026-03-20T13:52:06+00:00",
+      "body": "Please add appropriate license docstring at the top of the file. You can copy from other files."
+    },
+    {
+      "id": "2965910322",
+      "author": "ja8zyjits",
+      "created_at": "2026-03-20T13:54:45+00:00",
+      "body": "Why is this a separate Global variable? any specific reason for that?"
+    },
+    {
+      "id": "2971445282",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-03-22T12:05:46+00:00",
+      "body": "\"_SSL_TRUE_VALUES is not a global variable - it is a private module-level constant (note the _ prefix). It is defined at module scope intentionally so it is created once at import time rather than recreated on every function call."
+    },
+    {
+      "id": "2971458966",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-03-22T12:20:18+00:00",
+      "body": "good catch. added now."
+    },
+    {
+      "id": "2974868717",
+      "author": "ja8zyjits",
+      "created_at": "2026-03-23T12:56:30+00:00",
+      "body": "HI @madhu-mohan-jaishankar , \n- I dont see any value in having that defined outside. Specially when there is no reuse of the values anywhere else. In this case, it is just a variable with a default value with limited scope.\n- Also we are not fetching it from any external configuration or environment.\n- Might as well define it in the only function calling it `internal_loopback_base_url`"
+    },
+    {
+      "id": "2975061437",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-03-23T13:32:34+00:00",
+      "body": "Just to clarify - _SSL_TRUE_VALUES is not a hardcoded URL string or a simple default value. It's a module-level constant set used for membership testing (ssl_env in _SSL_TRUE_VALUES).\r\n\r\nKeeping it at module level is intentional for a few reasons:\r\nPEP 8 convention - constants belong at module level, not inside functions.\r\nBuilt once - the set is constructed once at import time, not recreated on every function call.\r\nExtensible - if we ever need to accept \"1\" or \"yes\" as valid SSL truthy values, we just update the set in one place.\r\nThe _ prefix already signals it's private to this module.\r\n\r\nI believe the current placement is idiomatic Python."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3981677176",
+      "author": "ja8zyjits",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-20T13:59:19+00:00",
+      "body": "Looks good, just need few updates."
+    },
+    {
+      "id": "3988079677",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-22T12:05:46+00:00",
+      "body": ""
+    },
+    {
+      "id": "3988090368",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-22T12:20:18+00:00",
+      "body": ""
+    },
+    {
+      "id": "3991543458",
+      "author": "ja8zyjits",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-23T12:56:30+00:00",
+      "body": ""
+    },
+    {
+      "id": "3991755516",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-23T13:32:34+00:00",
+      "body": ""
+    },
+    {
+      "id": "3991886708",
+      "author": "cafalchio",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-23T13:51:08+00:00",
+      "body": "Looks good, clean and tested. "
+    },
+    {
+      "id": "3991890309",
+      "author": "cafalchio",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T13:51:35+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "3992020749",
+      "author": "ja8zyjits",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T14:07:02+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "3993547549",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-23T17:50:06+00:00",
+      "body": "Approved after rebasing, code review, and fixes. The refactoring is correct — all loopback RPC call sites are consistently updated, the SSL check now matches the shell launcher semantics exactly, verify=False is properly scoped to loopback-only, and differential test coverage is 100%."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "9d654a2f025c144606c06899dfe6a390824e9763",
+      "message": "#3543 added helper to consolidate loopback RPC callls\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-16T14:30:43+00:00"
+    },
+    {
+      "sha": "ade7d15c0d29427c17675339cf4060cc43291d04",
+      "message": "#3543 adding license header\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-22T12:17:29+00:00"
+    },
+    {
+      "sha": "fedef8dfd43ced96f8b5bb1a2da35789d3ed60b7",
+      "message": "fix: fixing lint issues\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-23T11:37:38+00:00"
+    },
+    {
+      "sha": "22c5750ff599da8572395b2d1e309a94baff88f2",
+      "message": "fix: refactor internal_http helper and improve test coverage\n\n- Extract _is_ssl_enabled() to avoid redundant URL construction in\n  internal_loopback_verify()\n- Replace _SSL_TRUE_VALUES set with direct string comparison matching\n  gunicorn.config.py convention\n- Add license header to test file\n- Expand test coverage from 2 to 16 cases: SSL unset, empty string,\n  whitespace, case variations, non-truthy values (\"1\", \"yes\")\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T17:01:47+00:00"
+    },
+    {
+      "sha": "cda28405d370b9874781c4c3bb9e40e3896c793f",
+      "message": "fix: drop .strip() from SSL env check to match launcher semantics\n\ngunicorn.config.py uses `.lower() == \"true\"` without stripping, and\nthe shell launchers use exact `[[ \"${SSL}\" == \"true\" ]]`. The previous\n`.strip().lower()` would treat `SSL=\" true \"` as truthy while the\nserver actually starts plain HTTP, breaking loopback self-calls.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T17:27:08+00:00"
+    },
+    {
+      "sha": "9860c1403ddd9cb28b807acfd8b30bef2654fe62",
+      "message": "fix: use exact case-sensitive SSL check matching shell launchers\n\nrun-gunicorn.sh and run-granian.sh use exact [[ \"${SSL}\" == \"true\" ]]\n(case-sensitive). Dropping .lower() so _is_ssl_enabled() only matches\nthe exact value that actually enables TLS on the listener, preventing\nHTTPS loopback calls against a plain HTTP server when SSL=TRUE/True.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T17:48:12+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 172,
+  "deletions": 16,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:38.962474",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:38.964564",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3696,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3696.json"
+  }
+}

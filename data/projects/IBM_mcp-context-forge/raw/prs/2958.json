@@ -1,0 +1,61 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2958,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2958"
+  },
+  "metadata": {
+    "title": " fix: Handle Empty String in iFrame Embedding Config options",
+    "state": "closed",
+    "created_at": "2026-02-15T21:09:13+00:00",
+    "updated_at": "2026-02-18T08:06:21+00:00",
+    "closed_at": "2026-02-18T08:06:19+00:00",
+    "merged_at": "2026-02-18T08:06:19+00:00",
+    "author": "prakhar-singh1928",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #2492\r\n\r\n---\r\n\r\n## 📝 Summary\r\nThis PR fixes X_FRAME_OPTIONS related middleware behavior not properly handling empty string values.\r\n\r\nKey changes:\r\n- Fixed middleware bug where empty string `\"\"` was falling through to the default case and being treated like DENY (adding `frame-ancestors 'none'`), when it should allow all embedding (no frame-ancestors directive)\r\n- Updated test cases in `test_security_middleware_comprehensive.py` to use `None` instead of `\"\"` when testing disabled iframe restrictions, matching the config validator's behavior that converts empty strings to `None`\r\n- Added test_x_frame_options_empty_string_returns_none \r\n \r\n\r\nThe root cause was:\r\n1. The middleware was incorrectly treating empty string `\"\"` as an unknown value, defaulting to DENY behavior(adding frame-ancestors 'none') (blocking embedding)\r\n\r\nAll X_FRAME_OPTIONS now exhibit expected behaviour\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n\r\nCheck | Command | Status\r\n-- | -- | --\r\nLint suite | make lint | ✅ Passed (Pylint score: 10/10)\r\nUnit tests | make test | ✅ Passed (all X_FRAME_OPTIONS tests)\r\nCoverage ≥ 80% | make coverage | ✅ Passed (100% for modified files, 99%+ overal\r\n\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\nTargeted local verification executed:\r\n- `pytest tests/unit/mcpgateway/test_config.py -v` ✅\r\n- ` pytest tests/security/test_security_middleware_comprehensive.py` ✅",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3815005191",
+      "author": "ja8zyjits",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-17T16:32:09+00:00",
+      "body": ""
+    },
+    {
+      "id": "3817273472",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-18T01:58:52+00:00",
+      "body": "## Approved\n\nRebased onto `main`, squashed 9 commits into 1, and applied additional hardening based on review.\n\n### Changes applied during review\n\n1. **Docs fix (P2)**: Updated `.env.example` — empty string docs incorrectly claimed `\"\"` yields `frame-ancestors * file: http: https:`. It now correctly documents that `\"\"` / `null` / `none` all remove iframe restrictions (no headers sent).\n\n2. **Middleware hardening (P3)**: Added defense-in-depth normalization in the middleware itself — if `x_frame_options` is ever set to `\"\"` or whitespace programmatically (bypassing the config validator), the middleware now treats it as `None` instead of falling through to `frame-ancestors 'none'`.\n\n3. **Stale comments (P4)**: Fixed misleading comments in middleware (line 258) and test file (line 665) that still referenced the old empty-string semantics.\n\n4. **Test coverage**: Added 2 new middleware-level unit tests (`test_x_frame_options_raw_empty_string`, `test_x_frame_options_raw_whitespace_string`) to exercise the hardened bypass path. Middleware coverage remains at 100%.\n\n### Manual verification\n\nTested end-to-end with Playwright across all four config scenarios:\n\n| Config | X-Frame-Options | CSP frame-ancestors | iframe Result |\n|--------|----------------|-------------------|---------------|\n| Default (DENY) | `DENY` | `'none'` | Blocked |\n| `X_FRAME_OPTIONS=\"\"` | absent | absent | Loads successfully |\n| `X_FRAME_OPTIONS=SAMEORIGIN` | `SAMEORIGIN` | `'self'` | Blocked (cross-origin) |\n| `X_FRAME_OPTIONS=\"   \"` | absent | absent | Loads successfully |\n\n### Test results\n\n- 223 related tests pass (config + security + middleware)\n- Full unit suite: 11,932 passed\n- Full security suite: 238 passed\n- Differential coverage: `security_headers.py` 100%, `config.py` 99%"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e93f7c8229892b88105584b6252fc1266c4f49ab",
+      "message": "fix: normalize empty string X_FRAME_OPTIONS to None for iframe embedding\n\nThe config validator now converts empty/whitespace-only X_FRAME_OPTIONS\nvalues to None, matching the middleware's expectation that None means\n\"allow all embedding\". Previously, an empty string fell through to the\ndefault DENY behavior in the middleware, blocking embedding unexpectedly.\n\nCloses #2492\n\nSigned-off-by: prakhar-singh1928 <prakhar.singh1928@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "prakhar-singh1928",
+      "date": "2026-02-18T01:31:46+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 78,
+  "deletions": 25,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:43.477481",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:43.479136",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2958,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2958.json"
+  }
+}

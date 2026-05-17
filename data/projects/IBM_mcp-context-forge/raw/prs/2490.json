@@ -1,0 +1,104 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2490,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2490"
+  },
+  "metadata": {
+    "title": "chore-2193: add Rocky Linux setup script",
+    "state": "closed",
+    "created_at": "2026-01-25T15:19:34+00:00",
+    "updated_at": "2026-01-25T18:10:27+00:00",
+    "closed_at": "2026-01-25T18:10:26+00:00",
+    "merged_at": "2026-01-25T18:10:26+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\n- Add setup script for Rocky Linux and RHEL-compatible distributions\r\n- Adapts the Ubuntu setup script (`scripts/ubuntu-contextforge-setup-script.sh`) for RHEL-based systems\r\n- Uses dnf package manager and Docker CE RHEL repository\r\n\r\n## Changes\r\n\r\n- Use `dnf` package manager instead of `apt`\r\n- Docker CE installation via RHEL repository (`https://download.docker.com/linux/rhel/docker-ce.repo`)\r\n- OS detection for Rocky Linux, RHEL, CentOS, and AlmaLinux\r\n- Support for x86_64 and aarch64 architectures\r\n- Remove podman during Docker installation (common on RHEL-based systems)\r\n\r\nCloses #2193",
+  "comments": [
+    {
+      "id": "2725621922",
+      "author": "Copilot",
+      "created_at": "2026-01-25T15:23:33+00:00",
+      "body": "The help text suggests installing to `/opt/contextforge`, but the script is explicitly intended to run as a non-root user and will fail to `git clone` into `/opt` on most systems. Consider changing the example to a user-writable path or noting that the directory must be pre-created and owned by the running user.\n```suggestion\n    echo \"  $0 ~/contextforge           # Install to ~/contextforge and start\"\n```"
+    },
+    {
+      "id": "2725621925",
+      "author": "Copilot",
+      "created_at": "2026-01-25T15:23:34+00:00",
+      "body": "`get_docker_arch()` is defined but never used, which adds dead code and may confuse readers about architecture handling. Either remove this function or wire it into Docker repo/package selection so the architecture check is actually enforced.\n```suggestion\n\n```"
+    },
+    {
+      "id": "2725621928",
+      "author": "Copilot",
+      "created_at": "2026-01-25T15:23:34+00:00",
+      "body": "The Docker install step unconditionally removes `podman` (and `runc`) via `dnf remove`. On many RHEL-compatible hosts, podman is used by other tooling and removing it can uninstall dependent packages or break existing workflows. Consider making podman removal opt-in (prompt/flag), or restrict removals to packages that actually conflict with Docker CE (e.g., `podman-docker`) and avoid removing `runc` unless required."
+    },
+    {
+      "id": "2725621931",
+      "author": "Copilot",
+      "created_at": "2026-01-25T15:23:34+00:00",
+      "body": "The command `curl -LsSf https://astral.sh/uv/install.sh | sh` downloads and executes a remote installer script without any integrity or authenticity verification, so a compromise of `astral.sh` or its TLS path would lead to arbitrary code execution under the current user. An attacker who can influence DNS, the network path, or that host could serve a malicious script and gain full control of the environment where this setup script is run. Use a distribution-verified package/source or at minimum verify a pinned checksum/signature of the installer before executing it, rather than piping `curl` output directly into `sh`."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3703969288",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-25T15:23:34+00:00",
+      "body": "## Pull request overview\n\nAdds a Rocky Linux / RHEL-compatible setup script to install prerequisites, install Docker CE via the RHEL repo, and bootstrap ContextForge similarly to the existing Ubuntu setup script.\n\n**Changes:**\n- Introduces `scripts/rocky-contextforge-setup-script.sh` with OS detection for Rocky/RHEL/CentOS/AlmaLinux and `dnf`-based package installs\n- Installs Docker CE via `https://download.docker.com/linux/rhel/docker-ce.repo`, enables the Docker service, and configures the user for docker group usage\n- Clones the ContextForge repo, creates `.env` from `.env.example`, and optionally starts/verifies services\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3704146375",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-25T18:10:14+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "1f6e550af25c32efe1276ad3f34b43dfb6d81ad5",
+      "message": "chore-2193: add Rocky Linux setup script\n\nAdd setup script for Rocky Linux and RHEL-compatible distributions.\nAdapts the Ubuntu setup script with the following changes:\n\n- Use dnf package manager instead of apt\n- Docker CE installation via RHEL repository\n- OS detection for Rocky, RHEL, CentOS, and AlmaLinux\n- Support for x86_64 and aarch64 architectures\n\nCloses #2193\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-25T15:07:40+00:00"
+    },
+    {
+      "sha": "74f062a12ad007ea4eb43ccebc5d640ada863053",
+      "message": "chore-2193: add Docker login check before compose-up\n\nCheck if Docker is logged in before running docker-compose to avoid\nimage pull failures. If not logged in, prompt user with options:\n- Interactive login (username/password prompts)\n- Username with password from stdin (for automation)\n- Skip login (continue without authentication)\n\nSupports custom registry URLs for non-Docker Hub registries.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-25T16:19:12+00:00"
+    },
+    {
+      "sha": "a4425f46c8e35ddc6471941f61a3872bac43c952",
+      "message": "fix: add non-interactive mode and git repo check to setup scripts\n\nApply to both Rocky and Ubuntu setup scripts:\n- Add -y/--yes flag for fully non-interactive operation\n- Check for .git directory before running git pull\n- Fail fast with clear error if directory exists but isn't a git repo\n- Auto-confirm prompts in non-interactive mode\n- Exit with error on unsupported OS in non-interactive mode\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-25T17:32:56+00:00"
+    },
+    {
+      "sha": "c07538e8e22bfd59d89f4d0413e17deb8da6ecb4",
+      "message": "Linting\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-25T18:07:55+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 557,
+  "deletions": 19,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:23.409787",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:23.411445",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2490,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2490.json"
+  }
+}

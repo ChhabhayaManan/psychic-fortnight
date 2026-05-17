@@ -1,0 +1,77 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3932,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3932"
+  },
+  "metadata": {
+    "title": "fix(security): enforce token_teams narrowing across all Layer 2 RBAC paths",
+    "state": "closed",
+    "created_at": "2026-03-30T15:00:46+00:00",
+    "updated_at": "2026-03-30T19:51:38+00:00",
+    "closed_at": "2026-03-30T19:51:35+00:00",
+    "merged_at": "2026-03-30T19:51:35+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "security",
+      "rbac",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3924\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes pre-existing security gaps where `token_teams` (Layer 1 scoping) was either not forwarded or ignored in several RBAC code paths, allowing narrowed or public-only tokens to satisfy permission checks using roles from teams outside their scope.\r\n\r\n**Key Fixes:**\r\n- **Gap 2**: Fixed admin bypass suppression for `token_teams=[]` by changing from separate `if` to `elif` in `check_permission()` (lines 126-136)\r\n- **Gap 6**: Fixed critical bug where `base_condition` was unconditionally appended even for `token_teams=[]`, now properly excludes ALL team roles for public-only tokens (lines 528-550)\r\n\r\n**Already Implemented (Verified):**\r\n- Gap 1: Explicit team_id validation (lines 502-508)\r\n- Gap 3: `check_admin_permission` accepts `token_teams` (lines 389-410, rbac.py 784-793)\r\n- Gap 4: Token minting forwards `token_teams` (tokens.py line 96)\r\n- Gap 5: Admin UI menu forwards `token_teams` (admin.py line 510)\r\n\r\n**Design Decision:** Implemented strict isolation where `token_teams=[]` means public-only access at both Layer 1 (visibility) and Layer 2 (RBAC), providing defense-in-depth security.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   Passed ✅     |\r\n| Unit tests                | `make test`     |    Passed ✅    |\r\n| Coverage ≥ 80%            | `make coverage` |    Passed ✅    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Test Coverage Added\r\nAdded 9 comprehensive regression tests in `test_permission_service_token_narrowing.py`:\r\n\r\n1. **Explicit team_id validation (2 tests)**:\r\n   - `test_explicit_team_id_rejects_out_of_scope_team` - Verifies rejection when team_id not in token_teams\r\n   - `test_explicit_team_id_allows_in_scope_team` - Verifies access when team_id is in token_teams\r\n\r\n2. **Admin bypass behavior (3 tests)**:\r\n   - `test_admin_bypass_suppressed_for_public_only_non_admin_perm` - Verifies bypass suppression for token_teams=[]\r\n   - `test_admin_bypass_works_for_narrowed_token` - Verifies bypass works for narrowed tokens\r\n   - `test_admin_bypass_works_for_unnarrowed_token` - Verifies bypass works for un-narrowed tokens\r\n\r\n3. **Admin permission checks (2 tests)**:\r\n   - `test_check_admin_permission_respects_token_teams` - Verifies token_teams=[] filters out team roles\r\n   - `test_check_admin_permission_allows_with_proper_scope` - Verifies proper scoping allows access\r\n\r\n4. **Team role filtering (2 tests)**:\r\n   - `test_public_only_token_excludes_all_team_roles` - Verifies token_teams=[] excludes ALL team roles\r\n   - `test_narrowed_token_includes_specified_teams` - Verifies narrowed tokens filter to specified teams\r\n\r\n### Security Impact\r\nThese fixes prevent privilege escalation scenarios where:\r\n- A session narrowed to team-A could pass Layer 2 checks for team-B operations\r\n- A public-only token (token_teams=[]) could benefit from team-scoped roles or admin bypass\r\n- Token minting could derive permissions from out-of-scope teams\r\n\r\n### Files Modified\r\n- `mcpgateway/services/permission_service.py` - Core RBAC logic fixes\r\n- `mcpgateway/admin.py` - Admin UI menu token scope forwarding (verified)\r\n- `mcpgateway/middleware/rbac.py` - RBAC middleware token scope forwarding (verified)\r\n- `mcpgateway/routers/tokens.py` - Token minting token scope forwarding (verified)\r\n- `tests/unit/mcpgateway/services/test_permission_service_token_narrowing.py` - Comprehensive test coverage\r\n- `.secrets.baseline` - Updated baseline for secret scanning\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4032748410",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-30T19:13:16+00:00",
+      "body": "Approved after thorough review. All Layer 2 RBAC paths now correctly enforce token_teams narrowing. Three fixup commits address gaps found during review and code review cross-check. 884 tests passing."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "768e35e0b96dc02ca75600333211cf425737ac9f",
+      "message": "fix(security): enforce token_teams narrowing across all Layer 2 RBAC paths\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-03-30T14:51:35+00:00"
+    },
+    {
+      "sha": "9dc90e9a2322ca2e6d1bce388590803f9edefb97",
+      "message": "fix(security): close remaining token_teams gaps in RBAC paths\n\n- PermissionChecker.has_admin_permission: forward token_teams to\n  check_admin_permission (middleware/rbac.py)\n- has_admin_permission on PermissionService: add token_teams param,\n  suppress admin bypass for public-only tokens (permission_service.py)\n- AdminAuthMiddleware: forward token_teams to has_admin_permission\n  (main.py)\n- get_my_permissions endpoint: forward token_teams to\n  get_user_permissions (routers/rbac.py)\n- _get_user_roles: reject explicit team_id when token_teams=[]\n  (public-only tokens must not access team-specific roles)\n- Fix stale test asserting token_teams=[] retains team perms\n  (contradicts Option A strict isolation)\n- Fix stale test asserting team_id ignores token_teams (team_id is\n  now validated against token_teams)\n- Add regression tests for all new paths\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T15:53:26+00:00"
+    },
+    {
+      "sha": "bed00a4e4c6c443563e0630357ba87c5c6b5d19d",
+      "message": "fix(tests): update has_admin_permission assertions for token_teams param\n\nUpdate test assertions in test_permission_service.py and\ntest_main_extended.py to include the new token_teams parameter\nadded to has_admin_permission().\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T17:18:23+00:00"
+    },
+    {
+      "sha": "a7e248d175ef803674e55cb6ad2c5d977bf362f9",
+      "message": "fix(security): close remaining token_teams gaps from codex review\n\nAddress all 4 findings from the Codex code review:\n\nFinding 1 (HIGH) — _get_caller_permissions admin bypass:\n- Only treat admin as unrestricted when token_teams is None.\n  Narrowed/public-only admin sessions now derive permissions through\n  the token-aware path (routers/tokens.py).\n- create_token auto-inheritance now applies to narrowed admins too.\n\nFinding 2 (HIGH) — scope_id IS NULL team roles on public-only:\n- _get_user_roles with team_id=None, include_all_teams=False now\n  excludes scope='team', scope_id=NULL roles when token_teams=[]\n  (permission_service.py).\n\nFinding 3 (HIGH) — list_all_tokens/admin_revoke_token admin guard:\n- Both endpoints now require un-narrowed admin (token_teams is None).\n  Narrowed and public-only admin sessions are rejected with 403\n  (routers/tokens.py).\n\nFinding 4 (LOW) — cache key collision None vs []:\n- Cache keys now use __public__ sentinel for token_teams=[] and\n  include token_teams in team_id cache keys (permission_service.py).\n\nAdd 12 regression tests covering all fixed paths.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T19:04:45+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 709,
+  "deletions": 91,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:48.127577",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:48.130238",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3932,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3932.json"
+  }
+}

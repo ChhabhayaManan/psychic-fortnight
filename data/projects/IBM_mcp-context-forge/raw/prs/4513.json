@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4513,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4513"
+  },
+  "metadata": {
+    "title": "fix(security): align A2A service with post-#4341 admin-bypass private-deny rule",
+    "state": "closed",
+    "created_at": "2026-04-29T08:37:28+00:00",
+    "updated_at": "2026-05-10T09:26:14+00:00",
+    "closed_at": "2026-05-10T09:26:13+00:00",
+    "merged_at": "2026-05-10T09:26:13+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "security",
+      "a2a",
+      "rbac",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4437\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR aligns A2A service authorization with the post-#4341 admin-bypass private-deny security invariant. Two service-layer methods were identified as encoding pre-#4341 semantics where admin bypass granted unrestricted access to private resources.\r\n\r\n**What changed:**\r\n- `A2AAgentService._visible_agent_ids`: Now filters out private agents during admin bypass, returning only public + team agent IDs instead of `None` (unrestricted)\r\n- `a2a_server_service._check_server_access`: Verified already correct (no changes needed)\r\n\r\n**Why this matters:**\r\nWhile no current router exposes these code paths with admin-bypass parameters, leaving them unfixed creates a latent security footgun for future callers. This defensive alignment prevents potential bypass vulnerabilities if these helpers are invoked directly.\r\n\r\n**Security impact:**\r\n- Prevents `list_tasks` from exposing tasks on private agents via admin bypass\r\n- Maintains consistency with PR #4341's invariant: admin bypass must not grant visibility to another user's private resources\r\n- Zero observable behavior change for current callers (no live endpoints hit these paths with admin-bypass)\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass    |\r\n| Unit tests                | `make test`     | ✅ Pass   |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass    |\r\n\r\n**Test results:**\r\n- New test file: `tests/unit/mcpgateway/services/test_a2a_authorization_access.py` (14 tests)\r\n- Updated test: `tests/unit/mcpgateway/services/test_a2a_service.py::TestVisibleAgentIds`\r\n- All tests pass\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Implementation Details\r\n\r\n**1. `_visible_agent_ids` fix (mcpgateway/services/a2a_service.py:370-399)**\r\n\r\nBefore:\r\n```python\r\nif user_email is None and token_teams is None:\r\n    return None  # Unrestricted access to ALL agents\r\n```\r\n\r\nAfter:\r\n```python\r\nif user_email is None and token_teams is None:\r\n    # Admin bypass: return public + team agents only (exclude private)\r\n    query = db.query(DbA2AAgent.id).filter(\r\n        DbA2AAgent.enabled.is_(True),\r\n        DbA2AAgent.visibility.in_([\"public\", \"team\"])\r\n    )\r\n    return [row[0] for row in query.all()]\r\n```\r\n\r\n**2. `_check_server_access` verification (mcpgateway/services/a2a_server_service.py:36-68)**\r\n\r\nAlready correct - lines 49-51 implement the post-#4341 pattern:\r\n```python\r\nif token_teams is None and user_email is None:\r\n    return server.visibility != \"private\"  # Denies private servers\r\n```\r\n\r\n### Test Coverage\r\n\r\nCreated comprehensive regression tests covering:\r\n- Admin bypass with private/team/public servers (11 tests)\r\n- Admin bypass with private/team/public agents (3 tests)\r\n- All visibility scenarios and token scoping combinations\r\n\r\n### References\r\n- PR #4341: fix(security): prevent admin bypass from accessing private resources\r\n- Issue #4323: [ICACF-21] [Security][Pen Testing] Restrict outbound requests\r\n- AGENTS.md: \"Authentication & RBAC Overview\" and \"Security Invariants\"\r\n- docs/docs/architecture/multitenancy.md: canonical visibility semantics",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "e5c8a5ccc5fc18c67fe18f4a83898f154d39ee02",
+      "message": "fix(security): align A2A service with post-#4341 admin-bypass private-deny rule\n\nCloses #4437\n\nChanges:\n- Modified A2AAgentService._visible_agent_ids to filter out private agents\n  during admin bypass (user_email=None, token_teams=None)\n- Previously returned None (unrestricted access), now returns filtered list\n  of public + team agent IDs only\n- Prevents list_tasks from exposing tasks on private agents via admin bypass\n- Verified a2a_server_service._check_server_access already correct (no changes)\n\nTesting:\n- Added 14 new tests in test_a2a_authorization_access.py covering both\n  _check_server_access and _visible_agent_ids with all visibility scenarios\n- Updated test_a2a_service.py::test_admin_bypass_returns_none to expect\n  filtered list instead of None\n- All tests pass\n\nSecurity Impact:\n- Aligns with PR #4341 invariant: admin bypass must not grant visibility\n  to another user's private resources\n- No live endpoint currently hits these paths with admin-bypass, so this\n  is a defensive alignment preventing future bypass vulnerabilities\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-29T08:32:14+00:00"
+    },
+    {
+      "sha": "5614fc8b1980b5cee2a435f993b1798bac311318",
+      "message": "fix(security): harden A2A visibility controls and fix orphaned-task leak\n\nPost-PR review hardening for #4437:\n\n- _visible_agent_ids now returns List[str] (was Optional[List[str]]); admin\n  bypass (user_email=None, token_teams=None) returns public+team agents only,\n  never private\n- Added is_user_admin guard for token_teams=None + user_email set path in\n  both _visible_agent_ids and _check_agent_access\n- Removed dead 'is not None' guards in list_tasks and\n  list_push_configs_for_dispatch; added empty-list short-circuit\n- Fixed orphaned-task fail-open: get_task and cancel_task now deny access\n  when the owning agent has been deleted\n- Updated stale docstrings across get_agent, invoke_agent, and callers to\n  reflect the post-#4341 restricted admin-bypass semantics\n- Added tests for orphaned-task denial and SQL predicate assertions\n\nCloses #4437\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-10T08:25:41+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 399,
+  "deletions": 61,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T17:17:07.231068",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:07.232154",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4513,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4513.json"
+  }
+}

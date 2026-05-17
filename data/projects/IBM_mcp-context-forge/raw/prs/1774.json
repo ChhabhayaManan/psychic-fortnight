@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1774,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1774"
+  },
+  "metadata": {
+    "title": "Fix SQLAlchemy Object Expiration Causing 422 Validation Errors",
+    "state": "closed",
+    "created_at": "2025-12-29T00:36:49+00:00",
+    "updated_at": "2025-12-29T00:50:49+00:00",
+    "closed_at": "2025-12-29T00:50:47+00:00",
+    "merged_at": "2025-12-29T00:50:47+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# Fix SQLAlchemy Object Expiration Causing 422 Validation Errors\r\n\r\n## Summary\r\n\r\nThis PR fixes HTTP 422 validation errors occurring on entity fetch endpoints (`/servers/{id}`, `/gateways/{id}`, etc.) caused by SQLAlchemy object expiration after mid-transaction commits.\r\n\r\n## Problem\r\n\r\nAfter the recent addition of `db.commit()` calls to release transactions and avoid \"idle in transaction\" issues with PgBouncer, the following error pattern emerged:\r\n\r\n```\r\nGET /servers/[id] -> 422 Unprocessable Entity\r\n{\"message\":\"Validation failed: Invalid enabled\",\"details\":[{\"field\":\"id\",\"message\":\"Invalid id\"},...]}\r\n```\r\n\r\n**Root cause**: SQLAlchemy's default behavior (`expire_on_commit=True`) expires all ORM object attributes after a commit. When service methods called `_get_team_name()` (which commits to release the transaction), the parent entity's attributes became inaccessible, causing Pydantic validation to fail when converting to response schemas.\r\n\r\n**Flow that caused the bug**:\r\n1. `get_server()` loads server from DB\r\n2. `_get_team_name(db, server.team_id)` is called, which does `db.commit()`\r\n3. SQLAlchemy expires all attributes on `server` object\r\n4. `_convert_server_to_read(server)` tries to access `server.__dict__` → attributes are expired\r\n5. Pydantic validation fails with 422\r\n\r\n## Solution\r\n\r\n### 1. Core Fix: `mcpgateway/db.py`\r\n\r\nAdded `expire_on_commit=False` to the SessionLocal configuration:\r\n\r\n```python\r\nSessionLocal = sessionmaker(\r\n    class_=ResilientSession,\r\n    autocommit=False,\r\n    autoflush=False,\r\n    expire_on_commit=False,  # NEW: Prevents object expiration after commit\r\n    bind=engine\r\n)\r\n```\r\n\r\nThis allows ORM objects to remain accessible after commits while still supporting explicit `db.refresh()` and `db.expire()` calls where needed.\r\n\r\n### 2. Load Test Fix: `tests/loadtest/locustfile.py`\r\n\r\nFixed unsafe ID fallback patterns that could use entity names instead of UUIDs:\r\n\r\n```python\r\n# Before (unsafe - falls back to name if id is missing):\r\nSERVER_IDS.extend([str(s.get(\"id\") or s.get(\"name\")) for s in items[:50]])\r\n\r\n# After (safe - only uses valid IDs):\r\nSERVER_IDS.extend([str(s.get(\"id\")) for s in items[:50] if s.get(\"id\")])\r\n```\r\n\r\nApplied to both `SERVER_IDS` and `GATEWAY_IDS` to match the safe pattern already used for tools, resources, and prompts.\r\n\r\n### 3. Test Updates\r\n\r\nUpdated 5 unit tests to account for additional commit calls from `_get_team_name()`:\r\n\r\n| Test File | Test Method | Change |\r\n|-----------|-------------|--------|\r\n| `test_server_service.py` | `test_toggle_server_status` | `assert_called_once()` → `call_count == 2` |\r\n| `test_resource_service.py` | `test_toggle_resource_status_activate` | `assert_called_once()` → `call_count == 2` |\r\n| `test_resource_service.py` | `test_toggle_resource_status_deactivate` | `assert_called_once()` → `call_count == 2` |\r\n| `test_resource_service.py` | `test_toggle_resource_status_no_change` | `assert_not_called()` → `call_count == 1` |\r\n| `test_prompt_service.py` | `test_update_prompt_success` | `assert_called_once()` → `call_count == 2` |\r\n\r\n### 4. Code Quality Fixes\r\n\r\n**Bandit (B110)**: Added `# nosec B110` to 3 intentional try/except/pass patterns in low-level connection handling:\r\n- Line 444: Flush before commit (commit will fail anyway if flush fails)\r\n- Line 557: Close connection after rollback fails (nothing more we can do)\r\n- Line 573: Rollback on reset (connection may be invalid)\r\n\r\n**Pylint (W0613)**: Prefixed 4 unused SQLAlchemy event listener callback arguments with underscores:\r\n- `end_transaction_cleanup(_session, _transaction)`\r\n- `reset_connection_on_checkin(dbapi_connection, _connection_record)`\r\n- `reset_connection_on_reset(dbapi_connection, _connection_record)`\r\n\r\n## Verification\r\n\r\n### `expire_on_commit=False` is Safe\r\n\r\nAnalysis confirmed this setting doesn't break existing code:\r\n\r\n1. **Write operations**: All follow `db.add() → db.commit() → db.refresh()` pattern - explicit refresh still works\r\n2. **Read operations**: Can now safely access attributes after mid-transaction commits\r\n3. **Explicit expiration**: `db.expire()`, `db.expire_all()`, and `db.refresh()` still work as expected\r\n4. **Existing patterns**: Code already uses explicit refresh for writes; no code relies on auto-expire behavior\r\n\r\n## Files Changed\r\n\r\n- `mcpgateway/db.py` - Core fix + bandit/pylint fixes\r\n- `tests/loadtest/locustfile.py` - Safe ID handling\r\n- `tests/unit/mcpgateway/services/test_server_service.py` - Test update\r\n- `tests/unit/mcpgateway/services/test_resource_service.py` - Test updates\r\n- `tests/unit/mcpgateway/services/test_prompt_service.py` - Test update\r\n\r\n## Testing\r\n\r\n- All previously failing tests now pass\r\n- `make bandit` passes (0 issues)\r\n- `make pylint` passes (10.00/10)\r\n- Load test 422 errors resolved\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "70bd25adceadb9430ef3a63d67cb3574a3c3c2f4",
+      "message": "Fix SQLAlchemy Object Expiration Causing 422 Validation Errors\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-29T00:35:35+00:00"
+    }
+  ],
+  "files_changed": 21,
+  "additions": 348,
+  "deletions": 15,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:15.802373",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:15.803593",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1774,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1774.json"
+  }
+}

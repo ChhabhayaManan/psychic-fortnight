@@ -1,0 +1,76 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3806,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3806"
+  },
+  "metadata": {
+    "title": "Fixed model selection dropdown appearance and interaction ",
+    "state": "closed",
+    "created_at": "2026-03-23T16:34:40+00:00",
+    "updated_at": "2026-03-24T00:36:30+00:00",
+    "closed_at": "2026-03-24T00:36:28+00:00",
+    "merged_at": "2026-03-24T00:36:28+00:00",
+    "author": "a-effort",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #3800\r\n\r\n---\r\n\r\n## 📝 Summary\r\n Replaces the native HTML `datalist` on the Model ID field in the Add/Edit LLM Model modal with a custom styled combobox. The datalist had two problems: it rendered as a browser-native tooltip bubble inconsistent with the rest of the admin UI, and after selecting a model it filtered suggestions down to a single matching entry, preventing the user from switching to a different model without manually clearing the field. The replacement uses a Tailwind-styled `ul` dropdown with vanilla JS event delegation, matching the existing patterns in the admin panel. Selecting a model populates the input; clicking the field again reopens the full list. Free-text entry for unlisted model IDs is preserved. Also fixes `overflow-hidden` on the model modal card which was clipping the dropdown and making items unclickable.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\nBug fix\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |  ✅  |\r\n| Unit tests                | `make test`     |  ✅  |\r\n| Coverage ≥ 80%            | `make coverage` |  ✅   |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\nhttps://github.com/user-attachments/assets/5a7595cf-bae2-459e-bf37-df87cdb1cb9f\r\n\r\n---\r\n\r\n🤖 AI assisted\r\n🧑🏻‍💻 human reviewed / edited \r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3995579888",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-24T00:34:05+00:00",
+      "body": "LGTM after fixes. All codex review findings addressed, 35 unit tests added, 982/982 green."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2f0da7f7ef11897a398f6a76048ff515a51bff7b",
+      "message": "fix(ui): replace datalist with custom combobox for LLM model selection\n\nReplace the browser-native <datalist> (inconsistent across browsers)\nwith a custom dropdown combobox for the LLM model-id picker. Adds\ntype-ahead filtering, click-to-select, and proper dark-mode styling.\n\nCloses #3800\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Anna Effort",
+      "date": "2026-03-23T23:41:51+00:00"
+    },
+    {
+      "sha": "ecdaacba5855bb588b37b45b5feccb87a512b4b6",
+      "message": "fix(ui): harden LLM model combobox against XSS and stale state\n\nUse safe DOM APIs (createElement, textContent, dataset) instead of\ninnerHTML with string interpolation for model-id rendering.\nReset combobox state in editLLMModel to prevent stale dropdown\npersisting from a previous modal session.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T23:45:22+00:00"
+    },
+    {
+      "sha": "3037ebdcc246d65516b2747c919f418ff11db0d6",
+      "message": "test(ui): add unit tests for LLM model combobox\n\nCover _renderLLMModelDropdown, open/close/filter/select, delegated\nclick and mousedown handlers, fetchModelsForModelModal integration,\nand XSS safety of model-id rendering.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T23:49:14+00:00"
+    },
+    {
+      "sha": "54d49ec248a87d3b7ecb5aef411a4d32dd6f7935",
+      "message": "fix(ui): add ARIA, keyboard nav, race guard, and empty-state fix to combobox\n\nAddress Codex review findings:\n- Add ARIA combobox semantics (role=combobox/listbox/option,\n  aria-expanded, aria-controls, aria-activedescendant).\n- Add keyboard navigation: ArrowDown/ArrowUp to highlight,\n  Enter to select, Escape to close (stops propagation so the\n  modal stays open).\n- Guard fetchModelsForModelModal against out-of-order responses\n  by re-checking the current provider value after await.\n- Suppress empty-state dropdown (\"No models found\") before any\n  fetch has occurred (_llmModelsFetched flag).\n- Guard scrollIntoView for JSDOM compatibility.\n- Update tests: 34 tests covering all new behavior.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-24T00:21:42+00:00"
+    },
+    {
+      "sha": "b5e34a362f45212baf62f51d6593d5d4e8b211b4",
+      "message": "fix(ui): close same-provider race in model fetch with sequence counter\n\nReplace provider-value-only stale guard with a monotonic _llmFetchSeq\ncounter. Each fetchModelsForModelModal call bumps the counter and\ncaptures the current value; responses whose seq no longer matches\n(because a newer fetch was started — same or different provider) are\nsilently discarded. The provider-value check is kept as belt-and-\nsuspenders for provider changes without a new fetch.\n\nAdd test for concurrent same-provider requests resolving out of order.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-24T00:29:17+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 719,
+  "deletions": 21,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:11.462738",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:11.464180",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3806,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3806.json"
+  }
+}

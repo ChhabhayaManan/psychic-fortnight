@@ -1,0 +1,59 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4588,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4588"
+  },
+  "metadata": {
+    "title": "[FEATURE]: Implement MCP gateway runtime with Pingora library",
+    "state": "open",
+    "created_at": "2026-05-05T07:07:30+00:00",
+    "updated_at": "2026-05-13T22:52:28+00:00",
+    "closed_at": null,
+    "author": "dima-zakharov",
+    "labels": [
+      "enhancement",
+      "triage"
+    ],
+    "milestone": null,
+    "assignees": [
+      "dima-zakharov"
+    ]
+  },
+  "description": "<!--\n💡 Tip: When suggesting a feature, provide a high-level epic and concrete user stories.\nInclude markdown examples, Mermaid diagrams, and MCP standards where appropriate.\n\nFeel free to include feature requests to develop new components, MCP servers, tools, integrations, etc.\n-->\n\n### 🧭 Rust implementation of mcp gateway core\n\nPlease select the most appropriate category:\n\n- [ ] Enhancement to existing functionality\n- [x] New feature or capability\n- [ ] New MCP-compliant server\n- [x] New component or integration\n- [ ] Developer tooling or test improvement\n- [ ] Packaging, automation and deployment (ex: pypi, docker, quay.io, kubernetes, terraform)\n- [ ] Other (please describe below)\n\n### 🧭 The current solution for mcp gateway uses combination of web server and http client to create gateway between client and upstream mcp server. This proposal is about usage of Claudflare Pingora library https://github.com/cloudflare/pingora , which includes both web servers and http connectors to upstream server and offer pre-process and post-process filters - the same idea as current plugin system.\n\nPingora abstracts away transport semantics, letting us focus entirely on application semantics.\n\n\n**Title:** Implement mcp gateway with Pingora library\n**Goal:** Simplification of development process with well defined and documented approach.\n**Why now:** The ongoing plan offers solution similar to python version (web server and http client library) this process assumes lower level abstraction than Pingora library. This means more work than usage of the library arleady working as a proxy. \nThe current implementation of http client connections to upstream servers needs enhancement. The ticket was created in the past about excessive default ssl context creation. The recent changes with implemented session affinity also showed that maintenance of custom created http connections to upstream servers need attention.\n\nSee also: https://github.com/IBM/mcp-context-forge/issues/4352 especially in comment: https://github.com/IBM/mcp-context-forge/issues/4352#issuecomment-4295125274\n```\nTotal Requests:            3,501\n```\nAnd these 3501 requests produced 8116 default ssl context creation:\n```\ncat log | grep PID | grep SSL  | wc -l\n8116\n```\nThe problem with upstream http connections may be addressed with Pingora library the connections to upstream servers is maintained by library. The bug found in the sample above is addressed by the library.\n\n```\nPingora is the only open-source proxy framework where the upstream connection pool is not an afterthought — it’s the core of the architecture.\n\nEveryone else treats upstream pooling as a library feature.\nPingora treats it as a first‑class subsystem.\n```\n\n\n---\n\n### 🧑🏻‍💻 User Story 1\n\n**As a:** Mcp client\n**I want:** Work with mcp servers via gateway to icrease security\n**So that:** Client connects to gateway based on Pingrora\n\n#### ✅ Acceptance Criteria\n```gherkin\nScenario: Streaming http variant\n  Connection comes via pre and post filters without essenital changes in logic\n  When request is coming incoming filter works\n  Request is sent to upstream server and response via outcoming filter goes back to client\n\nScenario: Deprecated SSE MCP variant translated to Streaming HTTP variant\n  Connection comes to one endpoint and in response another endpoint is sent back to client\n  In Pingora inc post-process body is rewritten to redirect request to the same encpoint\n  Client uses with Streaming HTTP even for deprecated SSE Mcp server.\n```\n\nBoth scenarios were tested and prototyped in : https://github.com/sco3/pin-gateway\nThe sequence diagram on Readme.md shows another variant of implemenation of Deprecated SSE MCP protocol with memory session state - no body rewrite the redirection happens in pre-process filter. \nThis approach has some benefits and drawbacks but was considered as less preferable and body rewrite approach is the current solution.l\n\n\n---\n\n### 📐 Design Sketch (optional)\n\nInclude a diagram, sketch, or flow (use [Mermaid](https://mermaid.js.org/) if desired):\n\n```mermaid\ngraph TD\n    %% Define Nodes\n    Start((Client Request))\n    \n    subgraph Phase_1 [Phase 1: Setup]\n        Init(fn new_ctx - Initialize Request Context)\n    end\n\n    subgraph Phase_2 [Phase_2: Pre-Processing REQUEST]\n        EarlyFilter(fn early_request_filter - Rate Limiting)\n        ReqFilter(fn request_filter - Modify Headers)\n        Upstream(fn upstream_peer - Routing Decision)\n    end\n\n    subgraph Phase_3 [Phase 3: Upstream Connection]\n        Connect(Connect to Origin)\n        Origin[(Origin Server)]\n        Receive(Receive Response)\n    end\n\n    subgraph Phase_4 [Phase 4: Post-Processing RESPONSE]\n        ResFilter(fn response_filter - Modify Headers)\n        BodyFilter(fn response_body_filter - Modify Body)\n    end\n\n    subgraph Phase_5 [Phase 5: Finalization]\n        EndRes((Response to Client))\n        Summary(fn request_summary - Logging/Metrics)\n    end\n\n    %% Flow logic\n    Start --> Init\n    Init --> EarlyFilter\n    EarlyFilter --> ReqFilter\n    ReqFilter --> Upstream\n    \n    Upstream --> Connect\n    Connect <--> Origin\n    Connect --> Receive\n    \n    Receive --> ResFilter\n    ResFilter --> BodyFilter\n    \n    BodyFilter --> EndRes\n    BodyFilter -.-> Summary\n```\n\n---\n\n### 🔗 MCP Standards Check\n\n- [ ] Change adheres to current [MCP specifications](https://developer.ibm.com/tutorials/awb-handle-remote-tool-calling-model-context-protocol/)\n- [ ] No breaking changes to existing MCP-compliant integrations\n- [ ] If deviations exist, please describe them below:\n\n---\n\n### 🔄 Alternatives Considered\n\nAxum + Reqwest\nProxy.py\n\n---\n\n### 📓 Additional Context\n\nInclude related issues, links to discussions, issues, etc.\n",
+  "comments": [
+    {
+      "id": "4395439111",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-07T08:25:37+00:00",
+      "body": "125 users, fast-time-server, get_system_time https://github.com/sco3/pin-gateway.\n\nFigures for simple pingora based code:\n```\n ./sdk-benchmark -s  http://localhost:3000/vs/time/http -t get_system_time -u 125 -r 1000\n...\nSummary:\n   Init:      3963.72 req/s,  31.47ms avg latency\n   Tool/list: 23251.48 req/s,  5.34ms avg latency\n   Tool call: 27025.47 req/s,  4.60ms avg latency\n\n```\nDirect benchmark for fast-time-server \n```\n./sdk-benchmark -s http://localhost:8111/http -t get_system_time -u 125 -r 1000\n...\nSummary:\n   Init:      10962.81 req/s,  11.29ms avg latency\n   Tool/list: 64598.98 req/s,  1.89ms avg latency\n   Tool call: 73639.22 req/s,  1.65ms avg latency\n\n```"
+    },
+    {
+      "id": "4416368133",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-10T21:15:31+00:00",
+      "body": "The pingora server offers more detailed diagram for data flow.\n\nhttps://github.com/cloudflare/pingora/blob/main/docs/user_guide/internals.md\n```mermaid\n graph TD;\n    start(\"new request\")-->early_request_filter;\n    early_request_filter-->request_filter;\n    request_filter-->upstream_peer;\n\n    upstream_peer-->Connect{{IO: connect to upstream}};\n\n    Connect--connection success-->connected_to_upstream;\n    Connect--connection failure-->fail_to_connect;\n\n    connected_to_upstream-->upstream_request_filter;\n    upstream_request_filter --> request_body_filter;\n    request_body_filter --> SendReq{{IO: send request to upstream}};\n    SendReq-->RecvResp{{IO: read response from upstream}};\n    RecvResp-.feature: adjust_upstream_modules.->adjust_upstream_modules;\n    adjust_upstream_modules-->upstream_response_filter-->response_filter-->upstream_response_body_filter-->response_body_filter-->logging-->endreq(\"request done\");\n\n    fail_to_connect --can retry-->upstream_peer;\n    fail_to_connect --can't retry-->fail_to_proxy--send error response-->logging;\n\n    RecvResp--failure-->IOFailure;\n    SendReq--failure-->IOFailure;\n    error_while_proxy--can retry-->upstream_peer;\n    error_while_proxy--can't retry-->fail_to_proxy;\n\n    request_filter --send response-->logging\n\n\n    Error>any response filter error]-->error_while_proxy\n    IOFailure>IO error]-->error_while_proxy\n```\nIn order to create custom solution one has to implement trait."
+    },
+    {
+      "id": "4416376941",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-10T21:19:51+00:00",
+      "body": "The peer configuration specific TLS for upstream, client certificate, etc:\nhttps://github.com/cloudflare/pingora/blob/main/docs/user_guide/peer.md\n\n"
+    },
+    {
+      "id": "4445727127",
+      "author": "sco3",
+      "created_at": "2026-05-13T22:36:11+00:00",
+      "body": "Body inspection: https://dev.to/warren_jitsing_dd1c1d6fc6/pingora-guide-how-to-make-a-programmable-api-gateway-1oim#lesson-12-body-inspection\n\nThe sample with the link above works with streaming data, in order to work with whole body one can use the context structure.\n\nIn order to collect  body from streaming pingora api one needs to keep chunks in `buffer`\n```\nuse bytes::BytesMut;\n\npub struct BodyCtx {\n    pub buffer: BytesMut,\n    pub is_sse: bool,\n}\n\n```\nWhen chunk appears in http stream this trait function is called:\n```\n    type CTX = BodyCtx;\n    async fn request_body_filter(\n        &self,\n        _session: &mut Session,\n        body: &mut Option<Bytes>,\n        end_of_stream: bool,\n        ctx: &mut Self::CTX,\n    ) -> Result<()> {\n        if let Some(chunk) = body.take() {\n            ctx.buffer.extend_from_slice(&chunk);\n        }\n\n        if end_of_stream {\n            BodyInspector::check_body(&ctx.buffer)?;\n            *body = Some(ctx.buffer.split().freeze());\n        }\n\n        Ok(())\n    }\n```\nThe `end_of_stream == true` means we collected all data and can process with `check_body` - parse, validate, update etc.\nThe response body works the same way, also this way we can validate, inspect, update sse chunks.\n\nSources: https://github.com/sco3/pin-body/tree/main\n"
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:39.711472",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:39.711977",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4588,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4588.json"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1950,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1950"
+  },
+  "metadata": {
+    "title": "configurable auto refresh for automatic tools/prompts/resources sync during health checks",
+    "state": "closed",
+    "created_at": "2026-01-07T11:13:55+00:00",
+    "updated_at": "2026-01-09T01:37:50+00:00",
+    "closed_at": "2026-01-09T01:37:48+00:00",
+    "merged_at": "2026-01-09T01:37:48+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "wxo"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# ✨ Feature / Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\nCloses #1910, #172\r\n\r\n---\r\n\r\n## 🚀 Summary (1-2 sentences)\r\nAdded configurable `AUTO_REFRESH_SERVERS` feature that automatically syncs gateway tools, resources, and prompts with the database during health checks. When enabled, the system detects changes from MCP servers and performs add/update/delete operations only when necessary.\r\n\r\nThe tools, prompts, and resources are compared against those stored in the database, and any required add, update, or delete operations are performed.\r\n\r\n---\r\n\r\n## 🔧 Usage\r\nEnable via environment variable:\r\n\r\n```bash\r\nAUTO_REFRESH_SERVERS=true\r\n```\r\n\r\n1. HEALTH_CHECK_INTERVAL=30  # Optional: shorter interval for testing\r\n2. Add an mcp server with 3 tools in the gateway.\r\n3. Update the mcp server by reducing the number of tools or adding some tools.\r\n4. Wait for the health check and notice that the new tools are automatically refreshed in the DB.\r\n5. Same applies for prompts and resources as well.\r\n\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n- [ ] CHANGELOG updated (if user-facing)\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n```mermaid\r\nflowchart TD\r\n    A[Health Check Loop] -->|Every HEALTH_CHECK_INTERVAL| B{Gateway Healthy?}\r\n    B -->|No| C[Handle Failure]\r\n    B -->|Yes| D{AUTO_REFRESH_SERVERS?}\r\n    D -->|No| E[Update last_seen]\r\n    D -->|Yes| F[Fetch tools from MCP Server]\r\n    F --> G{Any Changes?}\r\n    G -->|No| E\r\n    G -->|Yes| H[Sync DB: Add/Update/Delete]\r\n    H --> I[Invalidate Caches]\r\n    I --> E\r\n```\r\n\r\n\r\n- The feature reuses existing _update_or_create_tools/resources/prompts helper methods\r\n- Uses fresh_db_session() to avoid holding DB connections during HTTP calls to MCP servers\r\n- SQLAlchemy's db.dirty tracking detects in-place updates to determine if commit is needed\r\n- Tool lookup cache is invalidated per-gateway for efficiency",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3642024482",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-09T01:37:42+00:00",
+      "body": "Approved - created [FEATURE REQUEST]: Full tool list/spec refresh (polling + API + list_changed) #1984 for remaining features"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "5b0ba9bcd621b4d8e8ab7d10062723d2e3ce76c4",
+      "message": "feat: Add AUTO_REFRESH_SERVERS for automatic tools/prompts/resources sync\n\nAdd configurable feature to automatically sync gateway tools, resources,\nand prompts with the database during health checks. When enabled:\n\n- Fetches latest tools/resources/prompts from MCP servers\n- Compares against database state\n- Performs add/update/delete operations only when changes detected\n- Tracks updates per-type (tools/resources/prompts) for precise cache invalidation\n- Only deletes MCP-discovered items (health_check, oauth, federation, update, MCP)\n- Preserves user-created entries (api, ui, None/legacy) during cleanup\n- Allows empty server responses to clear stale items (except for auth_code OAuth)\n- Passes pre-authenticated headers from health check to avoid duplicate OAuth token fetch\n- Invalidates relevant caches per-gateway for efficiency\n- Uses fresh_db_session() to avoid holding DB connections during HTTP calls\n\nConfiguration:\n- AUTO_REFRESH_SERVERS=false (disabled by default)\n- Reduces load on MCP servers when disabled\n\nCloses #1910, #172\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-09T00:43:03+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 799,
+  "deletions": 163,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:52.718517",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:52.719515",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1950,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1950.json"
+  }
+}

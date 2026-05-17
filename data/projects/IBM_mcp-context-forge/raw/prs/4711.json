@@ -1,0 +1,68 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4711,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4711"
+  },
+  "metadata": {
+    "title": "fix: implement OTEL_EXPORTER_OTLP_INSECURE configuration setting",
+    "state": "open",
+    "created_at": "2026-05-12T03:48:16+00:00",
+    "updated_at": "2026-05-13T23:52:08+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "kimjune01",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nFixes #4644 by properly implementing the `OTEL_EXPORTER_OTLP_INSECURE` configuration setting for OpenTelemetry HTTP and gRPC exporters.\n\n### Root Cause\n\nThe `insecure` parameter was never passed to OTLP exporter constructors, despite being defined in `config.py` and documented. This caused SSL certificate verification errors when users attempted to export traces/metrics to servers with self-signed certificates by setting `OTEL_EXPORTER_OTLP_INSECURE=true`.\n\nAdditionally, HTTP exporters don't accept an `insecure` parameter—they determine TLS usage from the endpoint URL scheme (`http://` vs `https://`).\n\n### Changes\n\n**HTTP Exporter Fix**\n- Rewrite endpoint URL scheme from `https://` to `http://` when `insecure=true` is set\n- HTTP exporters now respect the `OTEL_EXPORTER_OTLP_INSECURE` setting without requiring a direct `insecure` parameter\n\n**gRPC Exporter**\n- Pass `insecure` parameter to gRPC exporter constructors when configured\n\n**Test Coverage**\n- Added comprehensive tests for HTTP/gRPC span and metric exporters with insecure flag combinations\n- Added environment variable cleanup to prevent test pollution\n\n### Bug Fixes\n\nDuring QA, Gemini found two critical bugs:\n1. **HTTP exporter TLS logic**: Original implementation incorrectly tried to pass `insecure` parameter to HTTP exporters, which don't accept it. Fixed by rewriting URL schemes instead.\n2. **Test pollution**: Missing `OTEL_AVAILABLE` patch in new tests. Added cleanup to prevent cross-test contamination.\n\n## Testing\n\n```bash\nuv run pytest tests/unit/mcpgateway/test_observability.py\n# 76 passed, 1 skipped\n```\n\nVerified:\n- HTTP exporters correctly use `http://` when `insecure=true`\n- gRPC exporters receive `insecure=true` parameter\n- Existing tests remain green",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "bffce28b1b8524dcb470c577d0b22325ff6a26da",
+      "message": "fix: implement OTEL_EXPORTER_OTLP_INSECURE configuration setting\n\nThe OTEL_EXPORTER_OTLP_INSECURE setting was defined in config.py and documented but not used by the OTLP exporter initialization code. This caused SSL verification errors for users trying to export telemetry to servers with self-signed certificates (e.g., Langfuse on OpenShift).\n\nChanges:\n- Pass cfg.otel_exporter_otlp_insecure to both GRPC and HTTP OTLP exporters\n- Remove outdated comment about exporter compatibility\n- Add unit tests to verify insecure parameter is correctly passed\n\nFixes #4644",
+      "author": "June Kim",
+      "date": "2026-05-09T15:41:33+00:00"
+    },
+    {
+      "sha": "747d036d31b38fd7b76fcb994b64e42660d9f696",
+      "message": "test: add missing OTEL_AVAILABLE patch to insecure parameter tests",
+      "author": "June Kim",
+      "date": "2026-05-12T00:51:36+00:00"
+    },
+    {
+      "sha": "2636ac41c36ac81e29e9b4d5edac348f6f1a2d7a",
+      "message": "fix: HTTP exporter uses URL scheme for TLS, not insecure parameter\n\n- HTTP exporter doesn't accept insecure kwarg, uses http:// vs https://\n- Rewrite endpoint scheme based on OTEL_EXPORTER_OTLP_INSECURE setting\n- Update tests to verify URL scheme instead of parameter\n- Add OTEL_EXPORTER_OTLP_INSECURE and PROTOCOL to teardown cleanup",
+      "author": "June Kim",
+      "date": "2026-05-12T00:55:29+00:00"
+    },
+    {
+      "sha": "7cf906f313cf65b2c4f939e819582e224cbe9ad4",
+      "message": "test: remove duplicate OTEL_AVAILABLE patch decorator",
+      "author": "June Kim",
+      "date": "2026-05-13T23:29:35+00:00"
+    },
+    {
+      "sha": "e7007c37c74654e0e43c4637e84a76cae0973834",
+      "message": "fix(observability): never mutate OTLP/HTTP URL scheme based on insecure flag\n\nThe HTTP exporter branch previously rewrote the URL scheme based on\nOTEL_EXPORTER_OTLP_INSECURE in both directions:\n\n  * insecure=false upgraded http:// -> https:// (broke standard local\n    collector setups like http://localhost:4318)\n  * insecure=true downgraded https:// -> http://; because the config\n    default is True, any user who only set\n    OTEL_EXPORTER_OTLP_ENDPOINT=https://... had TLS silently stripped,\n    sending traces and auth headers (e.g., Langfuse basic auth) in\n    plaintext\n\nPer the OTEL spec (OTLP/HTTP), the URL scheme is the source of truth for\ntransport TLS. The `insecure` flag is meaningful only for OTLP/gRPC,\nwhere it is still passed through unchanged. Drop scheme mutation on the\nHTTP path entirely.\n\nAlso tighten the :4317 -> :4318 port rewrite: only append `/v1/traces`\nwhen the endpoint does not already target a `/v1/` resource, and strip\ntrailing slashes before appending. This fixes path double-appending for\nendpoints like `http://proxy:4317/v1/traces`.\n\nTests updated:\n\n  * test_init_telemetry_otlp_http_insecure_true_preserves_https\n    (renamed and inverted from ..._true; now asserts https:// is kept\n    verbatim even when insecure=true)\n  * test_init_telemetry_otlp_http_insecure_false_preserves_http\n    (renamed and inverted from ..._false; previously codified the\n    broken http -> https upgrade)\n  * test_init_telemetry_otlp_http_insecure_unset_preserves_https\n    (new; covers the actual risk case where the default insecure=True\n    would have triggered the downgrade)",
+      "author": "June Kim",
+      "date": "2026-05-13T23:51:02+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 154,
+  "deletions": 6,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:04:28.549879",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:28.550876",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4711,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4711.json"
+  }
+}

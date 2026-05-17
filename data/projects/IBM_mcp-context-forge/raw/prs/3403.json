@@ -1,0 +1,75 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3403,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3403"
+  },
+  "metadata": {
+    "title": "test: add and document CONC-02 gateway read-during-write manual runner",
+    "state": "closed",
+    "created_at": "2026-03-02T18:20:09+00:00",
+    "updated_at": "2026-03-10T10:00:48+00:00",
+    "closed_at": "2026-03-10T09:59:26+00:00",
+    "merged_at": "2026-03-10T09:59:26+00:00",
+    "author": "gandhipratik203",
+    "labels": [
+      "testing",
+      "performance",
+      "COULD"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #3392\r\n\r\n---\r\n\r\n# Summary\r\n\r\nThis PR adds CONC-02 manual concurrency test coverage for gateway read-during-write consistency on `GET/PUT /gateways/{id}`.\r\n\r\nThe CONC-02 acceptance intent is:\r\n\r\n- create one baseline gateway\r\n- run concurrent writer(s) updating the same gateway\r\n- run concurrent reader(s) reading the same gateway\r\n- verify:\r\n  - no write/read 5xx responses\r\n  - no malformed/partial read payloads\r\n  - final read returns `200` with valid payload\r\n\r\nLatest stable run on **March 2, 2026** passed the CONC-02 checks with controlled settings.\r\n\r\n---\r\n\r\n# Steps To Run This Test\r\n**Note:**\r\n- This is intentionally a manual test flow for now, to keep reproduction straightforward and explicit.\r\n- If we need to run this more frequently, we can later extend `tests/manual/concurrency/run_conc_02_gateways.sh` to automate more setup steps.\r\n- Linux reviewers can use equivalent Docker runtime/container startup commands if not using Colima.\r\n\r\n## 1) Start Postgres + Redis in Docker (Colima runtime)\r\n\r\n```bash\r\n# Start runtime first if needed\r\ncolima start\r\ndocker context use colima\r\n\r\n# Recreate clean containers\r\ndocker rm -f conc-postgres conc-redis 2>/dev/null || true\r\n\r\ndocker run -d --name conc-postgres -p 5432:5432 \\\r\n  -e POSTGRES_USER=postgres \\\r\n  -e POSTGRES_PASSWORD=postgres \\\r\n  -e POSTGRES_DB=concurrent_test \\\r\n  postgres:16\r\n\r\ndocker run -d --name conc-redis -p 6379:6379 redis:7\r\n\r\ndocker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}' | rg 'conc-postgres|conc-redis'\r\n```\r\n\r\n## 2) Terminal A: start gateway (Postgres + Redis + local SSRF overrides)\r\n\r\n```bash\r\ncd /Users/pratik/Desktop/work/new_mcf/mcp-context-forge\r\npkill -f \"mcpgateway.main|uvicorn\" || true\r\n\r\nDATABASE_URL='postgresql+psycopg://postgres:postgres@127.0.0.1:5432/concurrent_test' \\\r\nREDIS_URL='redis://127.0.0.1:6379/0' \\\r\nCACHE_TYPE='redis' \\\r\nJWT_SECRET_KEY='my-test-key' \\\r\nSSRF_ALLOW_LOCALHOST=true \\\r\nSSRF_ALLOW_PRIVATE_NETWORKS=true \\\r\nmake dev\r\n```\r\n\r\n## 3) Terminal B: start translator\r\n\r\n```bash\r\ncd /Users/pratik/Desktop/work/new_mcf/mcp-context-forge\r\npython -m mcpgateway.translate --stdio \"uvx mcp-server-git\" --port 9000\r\n```\r\n\r\n## 4) Terminal C: generate token and run CONC-02\r\n\r\n```bash\r\ncd /Users/pratik/Desktop/work/new_mcf/mcp-context-forge\r\nexport CONC_TOKEN=\"$(python3 -m mcpgateway.utils.create_jwt_token --username admin@example.com --exp 120 --secret my-test-key)\"\r\nmake conc-02-gateways\r\n```\r\n\r\n## 5) Optional token/service sanity checks\r\n\r\n```bash\r\ncurl -i \"http://127.0.0.1:8000/health\"\r\ncurl -i -H \"Authorization: Bearer $CONC_TOKEN\" \"http://127.0.0.1:8000/servers?limit=1\"\r\n```\r\n\r\nExpected: `HTTP/1.1 200 OK` for both.\r\n\r\n## 6) Controlled stable run used for latest evidence\r\n\r\n```bash\r\nCONC_RW_TIMEOUT_SEC=90 CONC_RW_DURATION_SEC=10 CONC_RW_READERS=1 CONC_RW_WRITERS=1 make conc-02-gateways\r\n```\r\n\r\n---\r\n\r\n# Results Observed vs Expected\r\n\r\n## Expected (CONC-02)\r\n\r\n- `write_5xx == 0`\r\n- `read_5xx == 0`\r\n- `malformed_read_payloads == 0`\r\n- `final_read_status == 200`\r\n- `final_payload_valid == True`\r\n\r\n## Observed (latest stable run)\r\n\r\n- Write path: `200=169`\r\n- Read path: `200=339`\r\n- Assertions:\r\n  - `write_5xx == 0 -> 0`\r\n  - `read_5xx == 0 -> 0`\r\n  - `malformed_read_payloads == 0 -> 0`\r\n  - `final_read_status == 200 -> 200`\r\n  - `final_payload_valid == True -> True (ok)`\r\n\r\n## Outcome\r\n\r\nCONC-02 acceptance is **met** for `/gateways/{id}` read-during-write behavior in this environment/configuration.\r\n\r\n---\r\n\r\n# Scope\r\n\r\n- In scope: manual CONC-02 runner, Make target wiring, reproducible runbook/results artifact.\r\n- Out of scope: CONC-01 create-race behavior and its fix path.\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [x] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [x] Other (Testing)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |  ✅ Passed (Pylint score: 10/10)      |\r\n| Unit tests                | `make test`     | ✅ Passed (updated unit tests with the changes)        |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Passed (100% for modified files, 99%+ overal        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n\r\n## 📓 Notes (optional)\r\n\r\n- This is intentionally a manual test flow for now, to keep reproduction straightforward and explicit.\r\n- If we need to run this more frequently, we can later extend `tests/manual/concurrency/run_conc_02_gateways.sh` to automate more setup steps.\r\n- Linux reviewers can use equivalent Docker runtime/container startup commands if not using Colima.\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3920971186",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T09:27:35+00:00",
+      "body": "## Review Summary\n\nRebased onto `main` (clean, no conflicts) and reviewed.\n\n### What was reviewed\n- Manual CONC-02 concurrency test: creates a gateway, runs concurrent PUT writers and GET readers, asserts no 5xx errors, no malformed payloads, and a valid final read.\n- Shell wrapper, results runbook, and Makefile target.\n\n### Findings & fixes applied\n\n**Bug fixed — URL validation too restrictive:**\n`_is_valid_read_payload` only accepted `http://` URLs, but gateways support `https://` (and `ws://`/`wss://`) per `SecurityValidator.validate_url()`. Updated to accept both `http://` and `https://`. This would have caused false test failures if someone ran the test against an HTTPS gateway endpoint.\n\n**Unit tests added:**\nCreated `tests/unit/test_conc_02_helpers.py` with 27 tests covering the pure helper functions (`_env_int`, `_build_config`, `_is_valid_read_payload`) — all edge cases including missing/invalid env vars, URL scheme validation, payload structure checks.\n\n**Formatting:**\nApplied `black` and `isort` to the modified file.\n\n### No issues found with\n- **Security**: proper Bearer token auth, no hardcoded secrets\n- **Performance**: reasonable 10ms async sleep pacing, proper httpx.AsyncClient usage\n- **Design**: correctly leverages asyncio.gather for parallel workers with Counter aggregation; aligns with gateway service's `FOR UPDATE` row locking on PostgreSQL\n- **Consistency**: follows existing manual test patterns (shell runners, Makefile targets, `--ignore=tests/manual` in coverage runs)\n\n### Test results\n- 27 new unit tests: all pass\n- Full test suite (13,980 tests): no regressions"
+    },
+    {
+      "id": "3920971953",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-10T09:27:42+00:00",
+      "body": "## Review Summary\n\nRebased onto main (clean, no conflicts) and reviewed.\n\n### What was reviewed\n- Manual CONC-02 concurrency test: creates a gateway, runs concurrent PUT writers and GET readers, asserts no 5xx errors, no malformed payloads, and a valid final read.\n- Shell wrapper, results runbook, and Makefile target.\n\n### Findings and fixes applied\n\n**Bug fixed - URL validation too restrictive:**\n_is_valid_read_payload only accepted http:// URLs, but gateways support https:// (and ws:///wss://) per SecurityValidator.validate_url(). Updated to accept both http:// and https://. This would have caused false test failures if someone ran the test against an HTTPS gateway endpoint.\n\n**Unit tests added:**\nCreated tests/unit/test_conc_02_helpers.py with 27 tests covering the pure helper functions (_env_int, _build_config, _is_valid_read_payload) - all edge cases including missing/invalid env vars, URL scheme validation, payload structure checks.\n\n**Formatting:**\nApplied black and isort to the modified file.\n\n### No issues found with\n- **Security**: proper Bearer token auth, no hardcoded secrets\n- **Performance**: reasonable 10ms async sleep pacing, proper httpx.AsyncClient usage\n- **Design**: correctly leverages asyncio.gather for parallel workers with Counter aggregation; aligns with gateway service FOR UPDATE row locking on PostgreSQL\n- **Consistency**: follows existing manual test patterns (shell runners, Makefile targets, --ignore=tests/manual in coverage runs)\n\n### Test results\n- 27 new unit tests: all pass\n- Full test suite (13,980 tests): no regressions"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "86144c12790afe8d5f8509c141d31444a2b37190",
+      "message": "test: add and document CONC-02 gateway read-during-write manual runner\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-02T18:10:14+00:00"
+    },
+    {
+      "sha": "65ce103165a130466e8061d6575f88d02f51c8eb",
+      "message": "fix(test): accept https:// URLs in CONC-02 payload validation and add unit tests\n\nThe _is_valid_read_payload helper only accepted http:// URLs, which would\ncause false test failures for HTTPS gateway endpoints. Also adds 27 unit\ntests covering _env_int, _build_config, and _is_valid_read_payload helpers.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T09:26:02+00:00"
+    },
+    {
+      "sha": "a5cd85d7246a9ed71dc690c2bcef303c13432b10",
+      "message": "docs: document CONC-02 concurrency tests in manual README and testing docs\n\nAdd concurrency test section to tests/manual/README.md with full quick\nstart, environment variable reference, and naming conventions. Add\nconcurrency testing section to docs/docs/testing/index.md with the\ntesting pyramid table and quick start instructions.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T09:43:16+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 717,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:07.668214",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:07.670217",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3403,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3403.json"
+  }
+}

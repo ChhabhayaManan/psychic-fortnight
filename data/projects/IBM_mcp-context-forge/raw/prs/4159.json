@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4159,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4159"
+  },
+  "metadata": {
+    "title": "fix(auth): handle Azure AD v1 tokens in OAuth claim validation",
+    "state": "open",
+    "created_at": "2026-04-13T16:12:04+00:00",
+    "updated_at": "2026-04-27T09:37:02+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "ecthelion77",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\n\n## 🔗 Issue\n\nCloses #4158\n\n## 📌 Summary\n\nThe token claim validation introduced in #3941 produces false-positive blocking errors for Azure AD tokens, preventing valid OAuth gateways from fetching tools. Three issues are fixed:\n\n1. **Audience**: Azure AD v1 tokens use `client_id` (GUID) as audience when scopes use `{client_id}/.default`. The validator now accepts `client_id` and `api://{client_id}` as valid audiences alongside the configured `resource`.\n\n2. **Issuer**: Azure AD v1 tokens use `iss=https://sts.windows.net/{tenant}/` while v2 uses `https://login.microsoftonline.com/{tenant}/v2.0`. Same tenant, different URL. The validator now detects Entra v1/v2 duality and accepts both when the tenant ID matches.\n\n3. **Scopes**: OIDC meta-scopes (`openid`, `offline_access`, `profile`, `email`) and Azure AD `/.default` scopes are request-time directives that never appear in the access token `scp` claim. The validator now skips them from the missing-scope check.\n\n## 🔁 Reproduction Steps\n\n1. Configure a gateway with Azure AD OAuth (`authorization_code` grant)\n2. Set scopes to `[\"{client_id}/.default\", \"openid\", \"offline_access\"]`\n3. Complete OAuth flow → \"Fetch Tools\" → blocked with audience/issuer/scope errors\n\n## 🐞 Root Cause\n\n`_validate_audience()` did not consider `client_id` as a valid audience.\n`_validate_issuer()` did not handle Azure AD v1/v2 issuer URL duality.\n`_validate_scopes()` treated OIDC meta-scopes and `/.default` as required token claims.\n\n## 💡 Fix Description\n\n- `_validate_audience()`: build a set of acceptable audiences including `client_id` and `api://{client_id}`\n- `_validate_issuer()`: extract tenant from v1 (`sts.windows.net/{tenant}`) and v2 (`login.microsoftonline.com/{tenant}/v2.0`) URLs, accept both if tenant matches\n- `_validate_scopes()`: skip `openid`, `offline_access`, `profile`, `email`, and any scope ending with `/.default`\n\n## 🧪 Verification\n\n| Check | Command | Status |\n|---|---|---|\n| Lint suite | `make lint` | ✅ |\n| Unit tests | `make test` | ✅ |\n| Coverage ≥ 80 % | `make coverage` | ✅ |\n| Manual regression | Azure AD gateway fetch tools works | ✅ |\n\n## 📐 MCP Compliance\n- [x] No breaking change to MCP clients\n- [x] No change to MCP protocol handling\n\n## ✅ Checklist\n- [x] DCO sign-off present\n- [x] Single file changed (`token_validation_service.py`)\n- [x] Backward compatible — only relaxes false-positive blocking, does not weaken legitimate validation",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "443d4e7b2a6432d05284017bf95c6d1c4fe931ae",
+      "message": "fix(oauth): accept api://{resource_id}/{perm} scopes for audience validation\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-14T14:56:05+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 168,
+  "deletions": 8,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:57.548125",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:57.548546",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4159,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4159.json"
+  }
+}

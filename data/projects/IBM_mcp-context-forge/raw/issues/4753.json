@@ -1,0 +1,42 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4753,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4753"
+  },
+  "metadata": {
+    "title": "[BUG]: Password Requirements UI Not Displaying All Validation Rules",
+    "state": "open",
+    "created_at": "2026-05-14T05:12:31+00:00",
+    "updated_at": "2026-05-14T14:31:09+00:00",
+    "closed_at": null,
+    "author": "rakdutta",
+    "labels": [
+      "bug",
+      "triage",
+      "priority"
+    ],
+    "milestone": null,
+    "assignees": [
+      "rakdutta"
+    ]
+  },
+  "description": "\nThe admin UI password requirement display is **incomplete and misleading**. The UI shows only \"At least 8 characters long\" but the backend enforces additional complexity requirements (uppercase, lowercase, special characters, minimum 12 characters). When users enter passwords that match the displayed requirement but fail the hidden backend validation, they get a cryptic error: \"New password does not meet requirements.\"\n\n## Affected Flows\n1. **Password Change Required Page** (`/admin/change-password-required`)\n2. **Create/Edit User Page** (`/admin/users` - Create New User and Edit User forms)\n\n## Root Cause Analysis\n\n### Backend Validation (Password Policy Service)\nThe backend enforces these requirements (`mcpgateway/services/password_policy_service.py`):\n- **Minimum length**: 12 characters (for users) or 22 characters (for privileged accounts)\n- **Complexity**: Must have **3 of 4 character types**:\n  - Lowercase letters (a-z)\n  - Uppercase letters (A-Z)\n  - Numbers (0-9)\n  - Special characters (!@#$%^&*(),.?\":{}|<>\\-_=+\\[\\]\\\\;'`~)\n- Additional checks: common password detection, username-based validation, sequential character detection\n\n### Frontend Display Issue\nThe admin UI only conditionally displays requirements in `mcpgateway/admin.py` lines 7854-7896:\n- It checks individual `password_require_*` settings flags (uppercase, lowercase, numbers, special)\n- It displays `settings.password_min_length` (defaults to 8 characters)\n- **Problem**: The actual validation uses `password_min_length_user` (default 12) and enforces a **3-of-4 complexity rule**, but the UI doesn't reflect this\n\n### Default Settings Mismatch\n\n| Setting | Default | Used For | Displayed in UI? |\n|---------|---------|----------|------------------|\n| `password_min_length` | 8 | Legacy fallback | ✅ YES (incorrect) |\n| `password_min_length_user` | 12 | Actual user validation | ❌ NO |\n| `password_require_uppercase` | `true` | Complexity check | ✅ YES (if true) |\n| `password_require_lowercase` | `true` | Complexity check | ✅ YES (if true) |\n| `password_require_numbers` | `false` | Complexity check | ✅ YES (if false) |\n| `password_require_special` | `true` | Complexity check | ✅ YES (if true) |\n\n## Reproduction Steps\n\n### Step 1: Password Change Required Page\n1. Fresh login as admin@example.com (no prior password set)\n2. Redirected to password change page showing: \"At least 8 characters long\"\n3. Enter password: `abcd1234` (8 characters, meets displayed requirement)\n4. Submit form\n5. **Expected**: Password accepted (matches shown requirement)\n6. **Actual**: Error \"New password does not meet requirements\" (backend checks require uppercase + lowercase + numbers/special)\n\n### Step 2: Create User Page  \n1. Navigate to Admin UI > User Management > Create New User\n2. Enter:\n   - Email: `user@example.com`\n   - Full Name: `Test User`\n   - Password: `password1` (9 characters, no special chars - fails backend validation)\n3. **Expected**: Clear message about what's missing\n4. **Actual**: Red error \"Failed to create user. Please check your input.\" + shows only \"At least 8 characters long\" ✅\n\n## Impact\n- **User Confusion**: Users don't know why their password fails despite appearing to meet requirements\n- **Usability**: Admin UI becomes frustrating when password creation repeatedly fails  \n- **Security Communication**: Lack of clear requirements makes password policy feel arbitrary\n\n## Required Fix\n\nUpdate the admin UI to display the **actual** password requirements:\n\n### For Password Change Page\n- Minimum: **12 characters** (not 8)\n- Must contain **3 of the following 4 types**:\n  - Uppercase letters (A-Z)\n  - Lowercase letters (a-z)\n  - Numbers (0-9)\n  - Special characters (!@#$%^&*(),.?\":{}|<>\\-_=+\\[\\]\\\\;'`~)\n- Cannot contain sequential characters (e.g., \"123\", \"abc\")\n- Cannot contain your username\n- Cannot be a common password\n\n### For Create/Edit User Pages\nSame requirements as above\n\n## Code Locations to Update\n- **Admin HTML generation**: `mcpgateway/admin.py:7854-7896` (password requirement display)\n- **Frontend validation**: `mcpgateway/admin_ui/` (password strength/validation JavaScript)\n- **Backend**: No changes needed - validation logic is correct\n\n## Solution Options\n\n### Option A: Fix UI to Match Current Backend (Recommended for Quick Fix)\n1. Display `password_min_length_user` (12) instead of `password_min_length` (8)\n2. Add UI text indicating \"Must contain 3 of 4 character types\" \n3. Show all applicable complexity requirements regardless of individual `password_require_*` flags\n\n### Option B: Make Backend Configurable (Better Long-Term)\n1. Add frontend-friendly `password_policy_display` config\n2. Simplify the default complexity rule in display\n3. Keep backend validation strict\n\n### Option C: Sync Display with Backend Policy Service\n1. Query the actual validation rules from `PasswordPolicyService.validate_user_password()`\n2. Render dynamic requirement list in UI\n3. Ensures display always matches backend\n\n## Testing\n- [ ] Password change page displays correct minimum length (12, not 8)\n- [ ] Password change page displays \"3 of 4 character types required\"\n- [ ] Create user page shows same requirements\n- [ ] Edit user page shows same requirements\n- [ ] Test with various invalid passwords to confirm error messages now match displayed requirements\n- [ ] Test with `PASSWORD_POLICY_ENABLED=false` - requirements disappear\n- [ ] Test with custom `password_min_length_user` - displays custom value\n\n## Environment Context\n- Affected after recent git pull (commit 16f8d1a00 or newer)\n- Current password policy service is robust and correct\n- Issue is purely UI/UX mismatch\n",
+  "comments": [
+    {
+      "id": "4451617768",
+      "author": "snorlaX-sleeps",
+      "created_at": "2026-05-14T14:31:09+00:00",
+      "body": "As a note in the helm chart we only ask for \"minimum 8 characters\" (whats displayed) and have disabled all the other settings for staging. However this is not reflected and we are asked for these hidden requirements despite disabling them"
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:34.418816",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:34.419829",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4753,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4753.json"
+  }
+}

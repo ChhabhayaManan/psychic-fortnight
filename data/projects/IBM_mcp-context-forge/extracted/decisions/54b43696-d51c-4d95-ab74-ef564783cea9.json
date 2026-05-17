@@ -1,0 +1,37 @@
+{
+  "id": "54b43696-d51c-4d95-ab74-ef564783cea9",
+  "title": "feat(security): expand inbound passthrough denylist to block protocol-level headers",
+  "summary": "## 🔗 Related Issue\r\nCloses #4450\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nExpands the inbound passthrough header denylist from a single entry (`content-type`) to 10 protocol-level headers that pose security risks when client-controlled. This prevents vhost selection attacks, cache poisoning, request smuggling, and encoding-dispatch bypasses.\r\n\r\n**What changed:**\r\n- Added `_INBOUND_PASSTHROUGH_DENYLIST` constant with 10 security-critical headers\r\n- Enforced denylist in both `get_passthrough_headers()` and `compute_passthrough_headers_cached()`\r\n- Added 13 comprehensive security tests covering individual and combined denial scenarios\r\n- Updated existing tests to use safe alternative headers (`X-Custom-Type` instead of `Content-Type`)\r\n\r\n**Headers now blocked from inbound passthrough:**\r\n- `content-type` — encoding-dispatch protection (PR #4139)\r\n- `host` — vhost selection / cache-poisoning protection\r\n- `transfer-encoding` — request-smuggling protection\r\n- `content-length` — httpx-managed; defence-in-depth\r\n- `connection`, `keep-alive`, `proxy-connection`, `te`, `trailer`, `upgrade` — hop-by-hop headers\r\n\r\n**Note:** `authorization` is intentionally NOT in the denylist as it has existing gateway-auth-aware handling via `X-Upstream-Authorization` rename logic.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass    |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass   |\r\n\r\n**Test coverage:**\r\n- 13 new security tests in `TestInboundPassthroughDenylist` class\r\n- Tests verify each header is denied via both `default_passthrough_headers` and per-gateway `passthrough_headers`\r\n- Tests verify case-insensitive matching and WARNING-level logging\r\n- Tests verify `authorization` is NOT blocked (existing special handling preserved)\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Security rationale per header:**\r\n\r\n| Header | Risk if client-supplied | Severity |\r\n|--------|------------------------|----------|\r\n| `host` | Wrong upstream vhost selection on multi-tenant origins; cache-poisoning class | Medium |\r\n| `transfer-encoding` | Request-smuggling primitive against fragile upstream parsers | Medium |\r\n| `content-type` | Encoding-dispatch bypass (already fixed in PR #4139) | Medium |\r\n| `content-length` | httpx auto-recalculates; defence-in-depth | Low |\r\n| `connection`, `keep-alive`, `proxy-connection`, `te`, `trailer`, `upgrade` | Hop-by-hop — httpx manages; defence-in-depth | Low |\r\n\r\n**Design decisions:**\r\n- Mirrored the protocol-level subset of existing `_LOOPBACK_SKIP_HEADERS` constant (same file, line 552)\r\n- Excluded gateway-internal routing headers (`mcp-session-id`, `x-forwarded-internally`) as they only matter in loopback contexts\r\n- Excluded `authorization` to preserve existing gateway-auth-aware handling\r\n- Logs at WARNING level when blocking headers for visibility and troubleshooting\r\n\r\n**Files modified:**\r\n- `mcpgateway/utils/passthrough_headers.py` — added denylist constant and enforcement logic\r\n- `tests/unit/mcpgateway/utils/test_passthrough_headers_security.py` — added 13 new security tests\r\n- `tests/unit/mcpgateway/utils/test_passthrough_headers.py` — fixed 8 tests expecting `Content-Type` passthrough\r\n- `tests/unit/mcpgateway/utils/test_passthrough_headers_fixed.py` — fixed 4 tests expecting `Content-Type` passthrough\r\n- `.secrets.baseline` — updated baseline for new test content",
+  "reasoning": "## 🔗 Related Issue\r\nCloses #4450\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nExpands the inbound passthrough header denylist from a single entry (`content-type`) to 10 protocol-level headers that pose security risks when client-controlled. This prevents vhost selection attacks, cache poisoning, request smuggling, and encoding-dispatch bypasses.\r\n\r\n**What changed:**\r\n- Added `_INBOUND_PASSTHROUGH_DENYLIST` constant with 10 security-critical headers\r\n- Enforced denylist in both `get_passthrough_headers()` and `compute_passthrough_headers_cached()`\r\n- Added 13 comprehensive security tests covering individual and combined denial scenarios\r\n- Updated existing tests to use safe alternative headers (`X-Custom-Type` instead of `Content-Type`)\r\n\r\n**Headers now blocked from inbound passthrough:**\r\n- `content-type` — encoding-dispatch protection (PR #4139)\r\n- `host` — vhost selection / cache-poisoning protection\r\n- `transfer-encoding` — request-smuggling protection\r\n- `content-length` — httpx-managed; defence-in-d",
+  "confidence": 0.7000000000000001,
+  "related_services": [],
+  "contributors": [
+    "bogdanmariusc10"
+  ],
+  "tags": [
+    "security",
+    "enhancement",
+    "caching",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "a826bc60-e6b8-496e-a515-5ff36924e303",
+      "source_type": "pr",
+      "source_id": "4726",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/4726",
+      "contributor": "bogdanmariusc10",
+      "timestamp": "2026-05-12T13:27:22Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4726.json"
+    }
+  ],
+  "timestamp": "2026-05-12T13:27:22Z",
+  "created_at": "2026-05-17T17:22:58.927342",
+  "updated_at": "2026-05-17T17:22:58.927344",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:58.928061",
+    "artifact_type": "decisions",
+    "artifact_id": "54b43696-d51c-4d95-ab74-ef564783cea9"
+  }
+}

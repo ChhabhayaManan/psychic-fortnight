@@ -1,0 +1,35 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4700,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4700"
+  },
+  "metadata": {
+    "title": "[BUG]: SpanAttributeCustomizer plugin cannot rename baggage-derived span attributes",
+    "state": "open",
+    "created_at": "2026-05-11T11:11:23+00:00",
+    "updated_at": "2026-05-14T15:06:01+00:00",
+    "closed_at": null,
+    "author": "vishu-bh",
+    "labels": [
+      "bug",
+      "observability",
+      "plugins"
+    ],
+    "milestone": null,
+    "assignees": [
+      "vishu-bh"
+    ]
+  },
+  "description": "## Bug Description\n\nThe SpanAttributeCustomizer plugin attribute mapping feature does not work for baggage-derived span attributes.\n\n## Current Behavior\n\nWhen an external plugin or client sets values through OpenTelemetry baggage, the gateway receives those values and can export them on spans as baggage-derived attributes such as:\n\n- `baggage.tenant.id`\n- `baggage.user.id`\n\nHowever, clients need selected baggage keys to appear in exported spans without the `baggage.` prefix, for example:\n\n- `tenant.id`\n- `user.id`\n\n## Root Cause\n\nBaggage is propagation context, while span attributes are the reporting surface. The previous SpanAttributeCustomizer `attribute_mapping` approach operated in plugin/span attribute contexts and was not the right layer to control how OTEL baggage is promoted onto spans.\n\nA SpanProcessor-based remapping approach is also not ideal because it tries to fix attribute names after span creation instead of deciding the emitted span attribute names at the point where baggage is copied onto spans.\n\n## Proposed Solution\n\nKeep OTEL baggage as the standards-compliant propagation mechanism, and add an explicit baggage span attribute emission policy controlled by the SpanAttributeCustomizer plugin.\n\nConfiguration:\n\n```yaml\nplugins:\n  - name: \"SpanAttributeCustomizer\"\n    kind: \"plugins.span_attribute_customizer.span_attribute_customizer.SpanAttributeCustomizerPlugin\"\n    hooks: [\"tool_pre_invoke\", \"resource_pre_fetch\", \"resource_post_fetch\"]\n    mode: \"enforce\"\n    config:\n      allowed_baggage_span_attributes:\n        - \"tenant.id\"\n        - \"user.id\"\n      emit_baggage_prefixed_attributes: false\n```\n\nExpected behavior with this configuration:\n\n- `tenant.id` and `user.id` continue to be carried through OTEL baggage.\n- Only allowlisted baggage keys are promoted to span attributes.\n- Exported spans contain `tenant.id` and `user.id`.\n- Exported spans do not contain `baggage.tenant.id` or `baggage.user.id` for those allowlisted keys.\n- If the new config is not provided, the gateway preserves legacy behavior and emits baggage as `baggage.<key>`.\n\nImplementation should apply the policy directly where baggage is copied onto spans:\n\n- request-root span baggage injection\n- `create_span()` baggage injection\n\nThis avoids post-creation remapping and keeps the gateway aligned with OpenTelemetry semantics.\n\n## Impact\n\nThis addresses compliance/privacy and multi-tenant observability use cases where backends require stable tenant/user span attributes without the `baggage.` prefix.\n\n## Related PR\n\nImplemented in PR #4705.\n",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:27.528604",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:27.529106",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4700,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4700.json"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "6c355d39-9945-44c5-b56b-b9c5d41561d4",
+  "title": "refactor(plugins): decouple plugin framework data models",
+  "summary": "## Summary\r\n\r\nEliminates reverse dependencies from the plugin framework (`mcpgateway/plugins/framework/`) back into the outer gateway package (`mcpgateway.common`, `mcpgateway.utils`), and introduces hook payload policies for controlled modification of plugin payloads. \r\n\r\nAfter this change, the plugin framework has **zero imports** from `mcpgateway.common` or `mcpgateway.utils`, making it viable as a standalone, extractable package.\r\n\r\nThis PR depends on #2829 (`refactor/plugins_settings`).\r\n\r\nCloses: #2859\r\n\r\n## Changes\r\n\r\n### Protocol definitions for boundary types\r\n- New `protocols.py` with `@runtime_checkable` `MessageLike` and `PromptResultLike` protocols\r\n- Replaces concrete imports of `Message` and `PromptResult` from `mcpgateway.common.models`\r\n- The framework never instantiates these types — protocols express the structural contract without creating a dependency\r\n\r\n### Immutable payloads\r\n- Promoted `PluginPayload` from a bare `TypeAlias = BaseModel` to a proper frozen base class (`ConfigDict(frozen=True, arbitrary_types_allowed=True)`)\r\n- Enforces copy-on-write semantics — plugins use `model_copy(update={...})` instead of in-place mutation\r\n- Eliminates the need for defensive deep copies in the executor\r\n\r\n### Internal framework types\r\n- Defined `TransportType` enum internally in `models.py` (was imported from `mcpgateway.common.models`)\r\n- Created self-contained `SecurityValidator` in `validators.py` with only the two methods used by the framework (`validate_url`, path validation)\r\n- Copied `ORJSONResponse` into `utils.py` (was imported from `mcpgateway.utils.orjson_response`)\r\n\r\n### Hook payload policies\r\n- New `hooks/policies.py` with `HookPayloadPolicy`, `DefaultHookPolicy`, and `apply_policy()` — the framework provides the mechanism\r\n- New `mcpgateway/plugins/policy.py` — the gateway defines the concrete policies per hook type (tool, prompt, resource, agent)\r\n- Policies are injected into `PluginManager` via dependency injection, keeping the framework decoupled from gateway-specific decisions\r\n- `default_hook_policy` setting (`PLUGINS_DEFAULT_HOOK_POLICY` env var) controls behavior for hooks without explicit policies: `allow` (default, backwards compatible) or `deny` (strict mode)\r\n\r\n### Policy enforcement in executor\r\n- `PluginExecutor` applies per-plugin policy filtering after each plugin returns\r\n- Only fields listed in `writable_fields` are accepted; all other modifications are silently reverted to the original values\r\n- Hooks without a defined policy fall back to `default_hook_policy`\r\n\r\n### JSON deserialization for `Any`-typed fields\r\n- Added `StructuredData` model and `coerce_nested()` utility for recursive dict-to-object conversion\r\n- Applied as a Pydantic field validator on `PromptPosthookPayload.result` so that external server flows (gRPC, MCP stdio, Unix socket, streamable HTTP) correctly reconstruct nested objects with attribute access\r\n\r\n### Plugin updates for frozen payloads\r\n- Updated vault, search-replace, PII filter, and Cedar plugins to use `model_copy(update={...})` instead of direct attribute assignment\r\n- Updated test fixture `HeadersPlugin` to use the same pattern\r\n\r\n## Files changed\r\n\r\n| Action | File | Description |\r\n|--------|------|-------------|\r\n| New | `framework/protocols.py` | `MessageLike`, `PromptResultLike` protocol classes |\r\n| New | `framework/validators.py` | Self-contained `SecurityValidator` subset |\r\n| New | `framework/hooks/policies.py` | `HookPayloadPolicy`, `DefaultHookPolicy`, `apply_policy` |\r\n| New | `plugins/policy.py` | Gateway-side `HOOK_PAYLOAD_POLICIES` dictionary |\r\n| New | `tests/.../test_policies.py` | 20 tests: policies, protocols, frozen payloads, import isolation |\r\n| Modified | `framework/models.py` | Internal `TransportType` enum, frozen `PluginPayload` base class |\r\n| Modified | `framework/hooks/agents.py` | Use `Any` + protocol docs instead of `Message` import |\r\n| Modified | `framework/hooks/prompts.py` | Use `Any` + field validator instead of `PromptResult` import |\r\n| Modified | `framework/hooks/registry.py` | Minor import cleanup |\r\n| Modified | `framework/manager.py` | Accept `hook_policies` via DI, enforce in executor loop |\r\n| Modified | `framework/settings.py` | Add `default_hook_policy` field |\r\n| Modified | `framework/utils.py` | Add `StructuredData`, `coerce_nested`, `ORJSONResponse` |\r\n| Modified | `framework/__init__.py` | Inject `HOOK_PAYLOAD_POLICIES` when creating manager |\r\n| Modified | `framework/external/mcp/client.py` | Import `TransportType` from framework |\r\n| Modified | `framework/external/mcp/server/runtime.py` | Import `ORJSONResponse` from framework |\r\n| Modified | `plugins/vault/vault_plugin.py` | Use `model_copy` for frozen payload compatibility |\r\n| Modified | `plugins/regex_filter/search_replace.py` | Use `model_copy` for frozen payload compatibility |\r\n| Modified | `plugins/pii_filter/pii_filter.py` | Use `model_copy` for frozen payload compatibility |\r\n| Modified | `plugins/external/cedar/.../plugin.py` | Use `model_copy` for frozen payload compatibility |\r\n| Modified | `tests/.../headers.py` | Use `model_copy` for frozen payload compatibility |\r\n\r\n## Note to maintainer\r\n\r\nPlease merge #2829 first.",
+  "reasoning": "## Summary\r\n\r\nEliminates reverse dependencies from the plugin framework (`mcpgateway/plugins/framework/`) back into the outer gateway package (`mcpgateway.common`, `mcpgateway.utils`), and introduces hook payload policies for controlled modification of plugin payloads. \r\n\r\nAfter this change, the plugin framework has **zero imports** from `mcpgateway.common` or `mcpgateway.utils`, making it viable as a standalone, extractable package.\r\n\r\nThis PR depends on #2829 (`refactor/plugins_settings`).\r\n\r\nCloses: #2859\r\n\r\n## Changes\r\n\r\n### Protocol definitions for boundary types\r\n- New `protocols.py` with `@runtime_checkable` `MessageLike` and `PromptResultLike` protocols\r\n- Replaces concrete imports of `Message` and `PromptResult` from `mcpgateway.common.models`\r\n- The framework never instantiates these types — protocols express the structural contract without creating a dependency\r\n\r\n### Immutable payloads\r\n- Promoted `PluginPayload` from a bare `TypeAlias = BaseModel` to a proper frozen base c",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "araujof",
+    "crivetimihai",
+    "jonpspri"
+  ],
+  "tags": [
+    "enhancement",
+    "SHOULD",
+    "plugins",
+    "grpc",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "a61da676-1a03-4dd3-9823-1fe472e7426a",
+      "source_type": "pr",
+      "source_id": "2895",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/2895",
+      "contributor": "araujof",
+      "timestamp": "2026-02-13T02:18:57Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2895.json"
+    }
+  ],
+  "timestamp": "2026-02-13T02:18:57Z",
+  "created_at": "2026-05-17T17:23:56.343049",
+  "updated_at": "2026-05-17T17:23:56.343051",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:56.343487",
+    "artifact_type": "decisions",
+    "artifact_id": "6c355d39-9945-44c5-b56b-b9c5d41561d4"
+  }
+}

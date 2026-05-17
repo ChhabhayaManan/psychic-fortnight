@@ -1,0 +1,35 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4670,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4670"
+  },
+  "metadata": {
+    "title": "[BUG]: Root cause investigation - user dict passed instead of email string to get_rpc_filter_context()",
+    "state": "open",
+    "created_at": "2026-05-08T13:02:03+00:00",
+    "updated_at": "2026-05-11T06:39:13+00:00",
+    "closed_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "bug",
+      "a2a",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": [
+      "bogdanmariusc10"
+    ]
+  },
+  "description": "### 🐞 Bug Summary\nPR #4637 (closes #4624) implemented a defensive fix that catches non-string `user_email` values in `get_rpc_filter_context()` and converts them to `None`. However, the **root cause** - what code path causes an entire user dict to be passed where a string email is expected — remains unidentified.\n\n**Current State:**\n- Symptom is handled: non-string emails are caught and logged\n- Affected users are silently downgraded to public-only access\n- Warning logs fire on every affected request in production\n- The underlying bug may affect other fields beyond email\n\n**Related Issues:**\n- Original issue: #4624 (A2A agent listing returns 500)\n- Defensive fix PR: #4637\n\n### 🧩 Affected Component\n- [x] `mcpgateway` - API\n\n### 🔁 Steps to Reproduce\n1. Create and register an A2A agent in IBM Context Forge\n2. Authenticate as admin user (`admin@admin.com`)\n3. Call `GET /a2a` from Swagger docs or API client\n4. Observe warning log: `get_rpc_filter_context: user_email extraction returned non-string type dict, setting to None`\n5. Request succeeds (after defensive fix) but user has public-only access instead of admin access\n\n**Investigation needed:** Potential code paths to investigate:\n1. JWT token processing - Does token payload contain nested user dict?\n2. Session middleware - Is `request.state.user` being set to dict instead of email?\n3. Internal auth context - Does `internal_auth_context.get(\"email\")` return dict in some cases?\n4. User object extraction - Is `get_user_email()` helper being bypassed somewhere?\n\n### 🤔 Expected Behavior\nRoot cause should be identified and fixed so that:\n1. `get_rpc_filter_context()` always receives a string email or `None` from upstream callers\n2. No warning logs fire for normal authenticated requests\n3. Users maintain their proper access level (admin/team-scoped) instead of being downgraded to public-only\n4. The defensive type check remains as defense-in-depth but is never triggered in normal operation\n\n### 📓 Logs / Error Output\n**From original issue #4624:**\n```\n2026-05-06 08:57:14,784 - mcpgateway.services.team_management_service - ERROR - Failed to get teams for user {'email': 'admin@admin.com', 'full_name': 'Platform Administrator', 'is_admin': True, ...}: (sqlite3.ProgrammingError) Error binding parameter 1: type 'dict' is not supported\n\nparameters: ({'email': 'admin@admin.com', 'full_name': 'Platform Administrator', 'is_admin': True, ...},)\n```\n\n### 🧠 Environment Info\n| Key | Value |\n|-----|-------|\n| Version or commit | `1.0.0-GA` |\n| Runtime | `Python 3.12, Uvicorn` |\n| Platform / OS | `macOS` |\n| Container | `none` |\n\n### 🧩 Additional Context\n**Investigation priorities:**\n1. **High priority:** Identify which endpoint(s) trigger the warning log (request path now logged)\n2. **Medium priority:** Trace user object flow through `list_a2a_agents()` and similar endpoints\n3. **Low priority:** Audit other fields for similar issues\n\n**Security consideration:** The defensive fix correctly downgrades to public-only access (fail-safe), but this may mask legitimate admin/team access in production.\n\n**Test coverage:** PR #4637 added comprehensive test coverage for the symptom. Root cause fix should ensure these tests continue to pass but warning logs should not fire in normal operation.",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:51.985928",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:51.986392",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4670,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4670.json"
+  }
+}

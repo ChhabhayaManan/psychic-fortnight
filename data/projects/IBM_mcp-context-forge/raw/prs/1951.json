@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1951,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1951"
+  },
+  "metadata": {
+    "title": "Check L1 before L2 in AuthCache to reduce Redis calls",
+    "state": "closed",
+    "created_at": "2026-01-07T12:18:39+00:00",
+    "updated_at": "2026-01-07T17:04:41+00:00",
+    "closed_at": "2026-01-07T17:04:39+00:00",
+    "merged_at": "2026-01-07T17:04:39+00:00",
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## :rocket: Performance Improvement PR\r\n\r\n### :pushpin: Summary\r\nOptimizes AuthCache by checking in-memory L1 cache before Redis L2 cache\r\n- Implements L1-first lookup pattern to eliminate unnecessary network I/O on cache hits\r\n- Adds write-through from L2 to L1 to populate local cache on Redis hits\r\n- Removes Redis round-trip latency for hot authentication data\r\n- Adds comprehensive unit tests for L1/L2 behavior and write-through logic\r\n\r\n### :link: Related Issue\r\nCloses: #1881\r\n\r\n### :chart_with_upwards_trend: Root Cause\r\n- AuthCache checked Redis (L2) first on every cache lookup, even when data existed in local memory (L1)\r\n- Every cache operation incurred network latency (~1-2ms per Redis call)\r\n- At high request rates, this accumulated significant overhead\r\n- Example: at 2000 RPS with 100% cache hit rate → ~2-4 seconds of network time per second of requests\r\n- No write-through mechanism to populate L1 from L2 hits, causing repeated Redis calls for same data\r\n\r\n### :wrench: Solution\r\n- Implemented L1-first cache checking in 4 critical methods:\r\n  - `get_auth_context()` (Lines 270-301)\r\n  - `get_user_role()` (Lines 532-566)\r\n  - `get_user_teams()` (Lines 695-725)\r\n  - `is_token_revoked()` (Lines 1022-1054)\r\n- Check L1 in-memory cache first (no network I/O, ~0.004ms)\r\n- On L1 miss, check Redis L2 cache (~1-2ms with network)\r\n- On L2 hit, populate L1 for future requests (write-through pattern)\r\n- Proper TTL handling using `min()` for combined cache contexts\r\n- Updated metrics tracking for both L1 and L2 hits/misses\r\n\r\n### :test_tube: Verification\r\n| Test | Command | Status |\r\n|------|---------|--------|\r\n| Unit tests (15 new tests) | `pytest tests/unit/mcpgateway/cache/test_auth_cache_l1_l2.py -v` | :white_check_mark: 15/15 pass |\r\n| All cache tests | `pytest tests/unit/mcpgateway/cache/ -v` | :white_check_mark: 102/105 pass, 3 skipped |\r\n| Code quality | `make verify` | :white_check_mark: pass |\r\n\r\n### :bar_chart: Testing\r\n\r\n**Micro-Benchmark Results:**\r\n\r\n| Scenario | Mean Latency | Improvement |\r\n|----------|--------------|-------------|\r\n| **L1 Cache Hit (NEW)** | 0.004 ms | 12× faster :white_check_mark: |\r\n| **Redis-Only (OLD)** | 0.043 ms | baseline |\r\n| **Realistic Workload (97% hit rate)** | 0.011 ms | 4× faster :white_check_mark: |\r\n\r\n**Impact:**\r\n- :white_check_mark: L1 hits are **12× faster** than Redis-only pattern (mocked Redis)\r\n- :white_check_mark: At 97% hit rate: saves ~2-4 seconds per second of request load at 2000 RPS\r\n- :white_check_mark: Write-through ensures subsequent requests for same key hit L1\r\n- :white_check_mark: Metrics properly track L1 vs L2 hits for observability\r\n\r\n### :arrow_forward: Next Steps\r\n- Apply same L1-first pattern to `registry_cache.py` and `admin_stats_cache.py`\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3635863047",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-07T17:04:31+00:00",
+      "body": "Rebased, updated code and tested"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8dc4e1444c1b112d60481813afbdd51ecb475e82",
+      "message": "perf: check L1 cache before L2 Redis in AuthCache\n\nOptimizes AuthCache by checking in-memory L1 cache before Redis L2 cache:\n- Implements L1-first lookup pattern in get_auth_context, get_user_role,\n  get_user_teams, is_token_revoked, and get_team_membership_valid\n- Adds write-through from L2 to L1 to populate local cache on Redis hits\n- Removes Redis round-trip latency for hot authentication data\n- Adds comprehensive unit tests for L1/L2 behavior and write-through logic\n- Updates docstrings to accurately reflect L1-first architecture\n\nCloses: #1881\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-07T16:16:43+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 559,
+  "deletions": 50,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:53.788405",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:53.790541",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1951,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1951.json"
+  }
+}

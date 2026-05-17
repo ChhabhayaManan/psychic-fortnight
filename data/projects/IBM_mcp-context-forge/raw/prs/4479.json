@@ -1,0 +1,128 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4479,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4479"
+  },
+  "metadata": {
+    "title": "Fix/alembic migration safety",
+    "state": "closed",
+    "created_at": "2026-04-27T19:07:29+00:00",
+    "updated_at": "2026-05-01T10:58:09+00:00",
+    "closed_at": "2026-05-01T10:58:07+00:00",
+    "merged_at": "2026-05-01T10:58:07+00:00",
+    "author": "madhu-mohan-jaishankar",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4429 #4138\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes unsafe Alembic downgrade behaviour and closes the migration testing gaps identified in both issues.\r\n\r\n**From #4429 — Alembic downgrade is unsafe and environment-dependent:**\r\n\r\n- **Root cause 2 fixed — runtime settings dependency in `ba202ac1665f`:** Introduces a `migration_metadata` table (new migration `f9a8b7c6d5e4`) that snapshots the four `DEFAULT_*_ROLE` env-var values at `upgrade()` time. `downgrade()` now reads from this snapshot instead of live `settings`, so the role-remap reversal is deterministic regardless of what env vars are set at rollback time. Falls back to live settings with a prominent warning on pre-existing databases that have no snapshot.\r\n\r\n- **Root cause 4 fixed — irreversible Phase 2 backfill in `ba202ac1665f`:** Phase 2 backfill rows are now tagged with `migration_source = 'migration:ba202ac1665f'` in `user_roles`. `downgrade()` deletes only those rows, leaving all other grants untouched. Previously the docstring acknowledged the rows could not be cleaned up at all.\r\n\r\n- **Root causes 1, 3, 5 not addressed — by design:** Migrations `b77ca9d2de7e` (UUID refactor, destructive base downgrade) and `a706a3320c56` (Argon2id, silent crypto skip on downgrade) shipped in 0.9.0. The practical rollback scenario this issue targets is 1.0.0 → 0.9.0, which never traverses those older migrations.\r\n\r\n- **CI roundtrip validation added:** `scripts/ci/run_upgrade_validation.sh` now runs `run_sqlite_roundtrip` and `run_postgres_roundtrip` (upgrade base→head then downgrade head→base) in addition to the existing fresh-install checks. All 6 checks pass. The alembic-upgrade-validation workflow picks these up automatically on every PR touching migration files.\r\n\r\n**From #4138 — Migration testing gaps:**\r\n\r\n- **Gap 1 — Rollback tests under pytest:** `make migration-test-all` already runs `test_sequential_reverse_migrations` (parametrized via `reverse_version_pair` in `conftest.py`). Added `make migration-test-rollback` as a dedicated target that runs `-k 'reverse or rollback'` on both SQLite and PostgreSQL test files, then runs the full upgrade/downgrade roundtrip harness.\r\n\r\n- **Gap 2 — Cross-DB schema validation:** Added `tests/migration/test_cross_db_schema_consistency.py` — 5 tests that boot the target image with both SQLite and PostgreSQL, introspect schemas via SQLAlchemy Inspector, normalise engine-specific type names, and assert tables/columns/types/PKs/FKs match. All 5 pass (67 tables each engine). Also added `make migration-test-cross-db` target.\r\n\r\n- **Gap 3 — CI coverage decision documented:** Added a comment block to `.github/workflows/alembic-upgrade-validation.yml` explaining why the full suite (rollback, perf, cross-DB) does not run on every PR (runtime cost, risk profile, cold Docker pull cost) and pointing to the three `make` targets for manual/pre-release runs.\r\n\r\n- **AGENTS.md guideline:** Added \"Hermetic Downgrade: Config Snapshot Pattern\" section documenting the rule and providing a copy-paste template for any future migration whose `downgrade()` reads from `settings`.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [x] Feature / Enhancement\r\n- [x] Documentation\r\n- [ ] Refactor\r\n- [x] Chore (deps, CI, tooling)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|---|---|---|\r\n| Lint suite | `make lint` | Not run (no logic changes outside migrations/tests) |\r\n| Unit tests | `make test` | Not run (migration tests require Docker) |\r\n| CI roundtrip (SQLite fresh + upgrade + roundtrip) | `bash scripts/ci/run_upgrade_validation.sh` | ✅ 6/6 pass |\r\n| Cross-DB consistency | `UPGRADE_TARGET_IMAGE=... pytest tests/migration/test_cross_db_schema_consistency.py` | ✅ 5/5 pass |\r\n| Alembic single head | `cd mcpgateway && alembic heads` | ✅ `bb43712cae28` |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (AGENTS.md, workflow comment)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n- The `migration_metadata` table is inserted at `a31c6ffc2239 → f9a8b7c6d5e4 → ba202ac1665f` in the chain. Databases upgraded before this PR have no snapshot rows for `ba202ac1665f` — downgrade on those will fall back to live settings with a warning (same behaviour as before, now surfaced explicitly rather than silently).\r\n- `make migration-test-cross-db` and `make migration-test-rollback` require Docker and the target image to be built locally (`docker build -f Containerfile.lite -t mcpgateway/mcpgateway:upgrade-ci-test .`). Override the image with `UPGRADE_TARGET_IMAGE=mcpgateway/mcpgateway:upgrade-ci-test make migration-test-cross-db`.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4195508532",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-29T09:08:48+00:00",
+      "body": "Great work on this PR — the core design (hermetic downgrade via `migration_metadata`, tagging Phase 2 backfill rows, roundtrip CI validation) is exactly the right approach to the issues raised in #4429 and #4138. The cross-DB consistency test is a nice addition. A few things need fixing before this can merge.\n\n---\n\n## Blocking issues\n\n### H1 — `migration-setup` target became a silent no-op (Makefile)\n\nThe `migration-setup:` recipe body was converted into `migration-test-rollback:`, but `migration-test-all: migration-setup` still lists it as a prerequisite. GNU Make silently treats a `.PHONY` target with no recipe as a no-op, so `make migration-test-all` now runs without creating `$(MIGRATION_REPORTS_DIR)` or `$(MIGRATION_TEST_DIR)/logs`, and without pulling container images.\n\nThere's a second wrinkle: the image-pull block ended up at the **bottom** of `migration-test-cross-db` — after the test runs. Images are being pulled after the test that needs them, which means a cold runner will fail.\n\n**Fix:** Restore a `migration-setup` recipe that creates the required directories and pulls images, and remove the misplaced image-pull stanza from `migration-test-cross-db`.\n\n---\n\n### H2 — `_delete_config_snapshot` not in a `finally` block\n\nIn `ba202ac1665f.downgrade()`, `_delete_config_snapshot(bind, revision)` is the last statement. If an exception is raised during Phase 1 role remap (`_migrate_role()` calls, lines ~382–408) the snapshot rows are never cleaned up. A subsequent downgrade retry would find the stale snapshot and use it as if the prior attempt had succeeded.\n\n```python\n# Suggested fix\ntry:\n    # ... Phase 1 role remap reversal ...\nfinally:\n    _delete_config_snapshot(bind, revision)\n```\n\nThe snapshot is only meaningful within a single downgrade execution, so cleanup should be unconditional.\n\n---\n\n### H3 — `f9a8b7c6d5e4.downgrade()` drops `migration_metadata` even when rows remain\n\nThe downgrade for the metadata table migration logs a warning when rows are present, then drops the table anyway. The scenario where this matters: an operator downgrades only part of the chain (stops at `f9a8b7c6d5e4` without first downgrading `ba202ac1665f`). The config snapshot for `ba202ac1665f` is silently destroyed, making any future attempt to downgrade `ba202ac1665f` fall back to live settings — exactly the non-hermetic behaviour this PR is trying to fix.\n\nWorth considering: should the downgrade raise instead of proceeding when rows remain?\n\n```python\nif count:\n    raise RuntimeError(\n        f\"Cannot drop migration_metadata — {count} snapshot row(s) remain. \"\n        \"Downgrade dependent migrations first.\"\n    )\n```\n\n---\n\n## Suggestions (non-blocking, but worth addressing)\n\n**M1 — `grep -F ''` is a no-op in `assert_version_present` (run_upgrade_validation.sh:290)**\n`grep -F ''` matches every line — it's an accidental no-op. The function happens to be correct today because the real check is the subsequent `grep -qxF`, but the dead pipe stage is confusing. Removing it would also make the intent clearer.\n\n**M2 — Hardcoded test passwords**\n`upgrade-test-password` and `schema-test-pw` appear in three functions and the pytest fixture. Using `openssl rand -hex 16` per run is a small change that removes a permanently searchable secret string from the source file and keeps secrets-scanning signal meaningful.\n\n**M3 — Warning-level messages via `print()` rather than `logging.warning()`**\nThe \"No config snapshot found\" fall-back warning and the \"migration_metadata table not found; skipping snapshot\" message are operator-critical. In environments where stdout is redirected (systemd, log forwarder, structured logging), bare `print()` output is silently dropped. Routing these through `logging.warning()` or at minimum `sys.stderr` would make them reliably visible.\n\n**M4 — `migration_metadata` has no ORM model in `db.py`**\nWithout an ORM model, `alembic revision --autogenerate` will always propose to drop the table. A minimal model (or an explicit autogenerate exclusion in `env.py`) would prevent accidental future migrations from destroying the snapshot infrastructure.\n\n**M5 — N+1 INSERT in Phase 2 backfill**\nThe loop over `members_without_roles` issues one INSERT per member. On large deployments this will be slow. Using `executemany()` or a bulk INSERT would be more robust.\n\n---\n\n## Testing gaps worth tracking\n\n- No unit tests for `_snapshot_config` / `_read_config_snapshot` / `_delete_config_snapshot` and their fallback paths (table absent, no matching revision).\n- No test asserting that rows with other `migration_source` values (NULL, `'sso'`, `'manual'`) are **not** deleted during downgrade — this is the key correctness claim of the PR and it has no regression test.\n- `make migration-test-rollback` invokes the full 6-check roundtrip harness, which makes it take as long as `upgrade-validate`. The target name implies it only runs rollback/downgrade paths; the scope mismatch will confuse contributors.\n\n---\n\n## Minor\n\n- `_META_KEYS` (ba202ac1665f, line 56–57) is defined but never referenced — the keys are passed as dict literals instead. Either wire it up or remove it.\n- `import re` inside the inner loop of `_INTROSPECT_SCRIPT` (test_cross_db_schema_consistency.py:50) and `import urllib.request` inside `_wait_health()` (line 168) should be at the top of their respective scopes.\n\n---\n\nHappy to discuss any of these. The H1–H3 fixes are straightforward and the rest could be addressed in a follow-up if preferred."
+    },
+    {
+      "id": "4198266437",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-29T15:12:47+00:00",
+      "body": "All three blocking items are resolved — approving.\n\n**H1 fixed** — `migration-setup` recipe is restored with the `mkdir -p` and image-pull stanzas; the misplaced image-pull block is no longer at the bottom of `migration-test-cross-db`.\n\n**H2 fixed** — `_delete_config_snapshot` is now inside a `try/finally` block in `ba202ac1665f.downgrade()`, so snapshot cleanup is unconditional even if Phase 1 role-remap raises.\n\n**H3 fixed** — `f9a8b7c6d5e4.downgrade()` now raises `RuntimeError` when snapshot rows remain instead of silently dropping the table; operators must downgrade dependent migrations first.\n\nTwo non-blocking suggestions were also addressed voluntarily:\n- **M3** — critical fall-back warnings now route through `logger.warning()` rather than bare `print()`.\n- **M4** — `MigrationMetadata` ORM model added to `db.py`, preventing `alembic revision --autogenerate` from proposing to drop the table in future.\n\nItems still open (all non-blocking, fine to track as follow-up):\n- **M1** — `grep -F ''` no-op in `assert_version_present` (run_upgrade_validation.sh:290)\n- **M2** — hardcoded test passwords (`upgrade-test-password`, `schema-test-pw`) in the CI script and test fixture\n- **M5** — N+1 INSERT in Phase 2 backfill loop\n- Minor: `_META_KEYS` tuple defined but never referenced in `ba202ac1665f`\n- Minor: `import re` inside the inner loop and `import urllib.request` inside `_wait_health()` should move to module scope\n- Testing: no unit tests for `_snapshot_config`/`_read_config_snapshot`/`_delete_config_snapshot` fallback paths; no regression test asserting non-tagged rows survive downgrade\n\nNone of the above affect correctness of the migration logic. The core design is sound."
+    },
+    {
+      "id": "4210901190",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-01T10:58:00+00:00",
+      "body": "Approving based on others approval."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2f273fe4a52dd30d05fc937f39b53f57d90b5b63",
+      "message": "fix(alembic): safe downgrade + roundtrip CI validation\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-27T15:20:53+00:00"
+    },
+    {
+      "sha": "6b5a8fcfb34d048cfa44091ddb0b25dd60b1a6f0",
+      "message": "fix(alembic): add migration_metadata table for hermetic downgrade config snapshots\n\nIntroduces a new migration (f9a8b7c6d5e4) that creates a\nmigration_metadata(revision, key, value, created_at) table. Data\nmigrations that read settings.* at upgrade time now write a config\nsnapshot into this table so that downgrade() can use the original\nvalues regardless of the current environment.\n\nba202ac1665f (migrate_user_roles_to_configurable_defaults) is wired\nto this table:\n- upgrade(): snapshots default_admin_role, default_user_role,\n  default_team_owner_role, default_team_member_role immediately after\n  reading them from settings.\n- downgrade(): reads the snapshot first; falls back to live settings\n  only if the table/rows are absent, logging a warning.\n\nscripts/ci/run_upgrade_validation.sh: replace post-downgrade strict\nequality assert with assert_version_present. The migration graph has a\nparallel branch (aa1b2c3d4e5f) that diverges below the base-image\nhead; Alembic correctly leaves that branch tip in alembic_version after\ndowngrade. assert_version_present verifies the expected version is\npresent and logs the extra heads rather than failing.\n\nAll 6 CI checks pass (SQLite fresh, SQLite upgrade, PostgreSQL fresh,\nPostgreSQL upgrade, SQLite roundtrip, PostgreSQL roundtrip).\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-27T18:08:09+00:00"
+    },
+    {
+      "sha": "297e23d0bc2a4340af2c17202e241929e68eac19",
+      "message": "chore(make): add migration-test-rollback target\n\nAdds a dedicated `make migration-test-rollback` Makefile target that\nruns pytest -k 'reverse or rollback' on both SQLite and PostgreSQL test\nfiles, followed by the full upgrade/downgrade roundtrip harness\n(scripts/ci/run_upgrade_validation.sh).\n\nAlso updates the upgrade-validate help comment to reflect that it now\nvalidates fresh, upgrade, AND roundtrip (downgrade) paths, since\nrun_sqlite_roundtrip/run_postgres_roundtrip were added in the previous\ncommit.\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-27T18:14:03+00:00"
+    },
+    {
+      "sha": "65a37c5168a9ac70d9795ec30445f27926344b32",
+      "message": "test(migration): add cross-DB schema consistency test\n\nAdds tests/migration/test_cross_db_schema_consistency.py, a new pytest\nmodule that boots the target image twice — once with SQLite, once with\nPostgreSQL — applies Alembic migrations to head in each case, then\nintrospects both schemas via SQLAlchemy's Inspector API (exec'd inside\nthe running container) and asserts:\n\n  test_same_tables_exist      - identical table set (66 tables)\n  test_column_names_match     - same column names per table\n  test_column_types_match     - equivalent types after canonicalisation\n  test_primary_keys_match     - same primary key columns\n  test_foreign_keys_match     - same FK relationships\n\nEngine-specific type differences (VARCHAR vs TEXT, TIMESTAMPTZ vs\nDATETIME, JSONB vs JSON, BYTEA vs BLOB, etc.) are normalised through a\n_TYPE_CANON mapping so the test asserts semantic equivalence, not\nstring identity.  Unknown type mappings produce a clear failure message\ndirecting the author to extend _TYPE_CANON.\n\nAlso adds make migration-test-cross-db, a dedicated Makefile target.\n\nVerified locally: 5/5 tests pass in 22 s against\nmcpgateway/mcpgateway:upgrade-ci-test (67 tables on each engine).\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-27T18:23:57+00:00"
+    },
+    {
+      "sha": "04dd70d08deba01925ef86f676d09e17ec4d4c02",
+      "message": "docs: document migration CI coverage decision and config snapshot pattern\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-27T18:52:15+00:00"
+    },
+    {
+      "sha": "450b51c68eb52ad615d90a0ffeb49c8ac0923033",
+      "message": "fix(make): fix tab indentation in migration-test-rollback and migration-test-cross-db targets\n\nMakefile recipe lines were indented with 8 spaces instead of tabs,\ncausing 'missing separator' parse errors that triggered the Rust CI\nworkflow (which monitors Makefile changes).\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-27T19:20:47+00:00"
+    },
+    {
+      "sha": "c32c19ee44e7ba90ecd452738ebd3be068ff8b3a",
+      "message": "fix(lint): fix ruff errors in new migration files and cross-DB test\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-27T19:41:20+00:00"
+    },
+    {
+      "sha": "ff091f64db737f0fffc941c5ff72beffdbffda0e",
+      "message": "fix(lint): fix ruff F841 and detect-secrets false positives\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-27T20:18:47+00:00"
+    },
+    {
+      "sha": "a15e78b860aa9e44cf9413df6c3e7eed1da0e3b0",
+      "message": "fix: address PR review feedback - migration safety hardening\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-29T14:24:48+00:00"
+    },
+    {
+      "sha": "9498c14af3bc35078225185f7009eb8f08eb8f73",
+      "message": "fix(lint): remove extra blank lines in db.py (E303)\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-29T14:59:03+00:00"
+    },
+    {
+      "sha": "29b15c0aa9a44abda21c780aef610ae30f8636f9",
+      "message": "Update secrets baseline\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-05-01T10:40:15+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 1101,
+  "deletions": 111,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:21.217978",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:21.219034",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4479,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4479.json"
+  }
+}

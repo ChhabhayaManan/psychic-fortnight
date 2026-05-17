@@ -1,0 +1,96 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3268,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3268"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Preserve team_id in delete/toggle redirect URLs",
+    "state": "closed",
+    "created_at": "2026-02-26T04:21:07+00:00",
+    "updated_at": "2026-02-26T13:28:45+00:00",
+    "closed_at": "2026-02-26T08:55:24+00:00",
+    "merged_at": "2026-02-26T08:55:23+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "ui",
+      "ica",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nFixes #3267\r\n\r\n## Summary\r\n\r\n- Fixes delete and toggle operations dropping `team_id` from redirect URLs, which caused users to lose their team-scoped view\r\n- Adds `_build_admin_redirect()` helper in `admin.py` to centralize redirect URL construction with `error`, `include_inactive`, and `team_id` parameters\r\n- Moves `team_id` form injection from `handleDeleteSubmit()` into `handleToggleSubmit()` so both toggle and delete paths include team context\r\n\r\n## Details\r\n\r\n### Backend (`mcpgateway/admin.py`)\r\n\r\n- New `_build_admin_redirect()` helper replaces ~150 lines of duplicated redirect logic across 14 endpoints\r\n- Extracts `team_id` from form data and includes it in the redirect URL\r\n- Validates `team_id` through `_normalize_team_id()` (UUID check) before including it\r\n- Uses `urllib.parse.urlencode(quote_via=urllib.parse.quote)` to maintain `%20` encoding consistent with existing patterns\r\n\r\n**Endpoints updated:**\r\n- `admin_set_server_state`, `admin_delete_server` (catalog tab)\r\n- `admin_set_gateway_state`, `admin_delete_gateway` (gateways tab)\r\n- `admin_delete_tool`, `admin_set_tool_state` (tools tab)\r\n- `admin_delete_resource`, `admin_set_resource_state` (resources tab)\r\n- `admin_delete_prompt`, `admin_set_prompt_state` (prompts tab)\r\n- `admin_add_root`, `admin_update_root`, `admin_delete_root` (roots tab)\r\n- `admin_set_a2a_agent_state`, `admin_delete_a2a_agent` (a2a-agents tab)\r\n\r\n### Frontend (`mcpgateway/static/admin.js`)\r\n\r\n- Moved `team_id` injection from `handleDeleteSubmit()` into `handleToggleSubmit()` with a guard (`!form.querySelector(...)`) to prevent duplicates\r\n- Both toggle and delete paths now include `team_id` in form data\r\n\r\n## Test plan\r\n\r\n- [x] All 873 existing admin tests pass\r\n- [x] All redirect-specific tests pass\r\n- [x] Verify on admin UI: toggle a tool on a team-scoped page, confirm redirect preserves `?team_id=`\r\n- [x] Verify on admin UI: delete a tool on a team-scoped page, confirm redirect preserves `?team_id=`\r\n- [x] Verify on admin UI: operations without team scope still redirect correctly (no empty `team_id=` param)\r\n- [x] Verify error redirects also preserve team scope\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3858953326",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-26T07:25:02+00:00",
+      "body": "LGTM. Rebased, reviewed, and tested. Helper centralizes redirect logic correctly, team_id validated via UUID check, no security issues. Added review commit with dead code fix, import ordering, and comprehensive test coverage (100% differential). All 891 tests pass."
+    },
+    {
+      "id": "3859426016",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-26T08:52:24+00:00",
+      "body": "Reviewed codex findings, confirmed and fixed both issues. A2A form parsing hardened, inactive-filter mismatch resolved, Playwright tests corrected. LGTM."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8780c17a9216f9a4e9f13fa3575c9abb2a93c5fe",
+      "message": "[FIX][UI]: Preserve team_id in delete/toggle redirect URLs\n\nDelete and toggle operations dropped the team_id query parameter from\nredirect URLs, causing the browser to land on the unscoped admin page\ninstead of the team-scoped view. Edit worked because it built the\nredirect client-side.\n\n- Add _build_admin_redirect() helper to construct redirect URLs with\n  error, include_inactive, and team_id query parameters\n- Update all delete/toggle/state endpoints to use the helper\n- Move team_id form injection from handleDeleteSubmit into\n  handleToggleSubmit so both code paths include it\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-26T04:14:03+00:00"
+    },
+    {
+      "sha": "9cb04e961d4bc1a1d6cfcd66e740de4453dd0847",
+      "message": "improve coverage\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-26T04:50:27+00:00"
+    },
+    {
+      "sha": "ae2c91ae4dc31baf8e94be2fd3217ddece29cf06",
+      "message": "review: remove dead code, fix imports, add team_id redirect tests\n\n- Remove unreachable `or \"\"` fallback in _build_admin_redirect\n  (_normalize_team_id never returns None when team_id is truthy)\n- Fix import ordering in test_admin.py (isort)\n- Add comprehensive unit tests for _build_admin_redirect helper\n  covering all parameter combinations and edge cases\n- Add integration tests verifying team_id flows through endpoints:\n  admin_delete_server, admin_set_tool_state, admin_delete_root,\n  admin_delete_a2a_agent, admin_set_a2a_agent_state\n- Verify invalid team_id is silently dropped from redirect URLs\n- Achieve 100% differential test coverage for all new code\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T07:14:00+00:00"
+    },
+    {
+      "sha": "7c22832b8e813f6478173b7ec0b87be35fcad357",
+      "message": "Update tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T08:18:44+00:00"
+    },
+    {
+      "sha": "7f9c898e9307d5d2608da11cb44c9fec136bafb2",
+      "message": "fix(ui): preserve a2a scoped redirect params\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T08:36:14+00:00"
+    },
+    {
+      "sha": "252155c0cb5285482f88452270fbaa9dfdab6fcb",
+      "message": "fix(test): correct API payload nesting and JS test URL injection\n\nNest tool/server payloads under \"tool\"/\"server\" keys to match FastAPI\nbody parameter binding. Use pushState for JS test to avoid login\nredirect stripping query params.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T08:51:55+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 606,
+  "deletions": 207,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:33.325580",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:33.327112",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3268,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3268.json"
+  }
+}

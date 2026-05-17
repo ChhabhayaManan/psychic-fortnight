@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1649,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1649"
+  },
+  "metadata": {
+    "title": "🚀 Performance Improvement: Parallelize Session Cleanup with asyncio.gather()",
+    "state": "closed",
+    "created_at": "2025-12-18T11:06:00+00:00",
+    "updated_at": "2026-02-15T12:27:35+00:00",
+    "closed_at": "2026-02-15T10:55:32+00:00",
+    "merged_at": null,
+    "author": "nmveeresh",
+    "labels": [
+      "blocked"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "**Summary**\r\n\r\nThis PR optimizes session cleanup in SessionRegistry by parallelizing database refresh operations using asyncio.gather() instead of executing them sequentially. The change eliminates O(n) cleanup behavior and significantly reduces cleanup latency under high session counts.\r\n\r\n**❌ Problem**\r\n\r\nThe existing session cleanup logic executed asyncio.to_thread() calls sequentially inside a loop:\r\n\r\n- Cleanup time scaled linearly with number of sessions\r\n- Thread pool usage was inefficient\r\n- Long cleanup cycles delayed other async operations\r\n- _refresh_session was defined inside the loop, creating unnecessary function objects\r\nWith 100 sessions and ~50ms DB latency per session:\r\n\r\n```\r\nSequential cleanup ≈ 5 seconds\r\n```\r\n\r\n**✅ Solution**\r\n- Introduced parallel database refresh using asyncio.gather()\r\n- Moved _refresh_session_db() outside the loop (defined once)\r\n- Preserved correct session removal semantics\r\n- Ensured thread pool usage is batched and efficient\r\n\r\n```\r\ntasks = [\r\n    asyncio.to_thread(self._refresh_session_db, session_id)\r\n    for session_id in connected_sessions\r\n]\r\nresults = await asyncio.gather(*tasks, return_exceptions=True)\r\n```\r\n\r\n**📈 Performance Results**\r\n| Sessions | Sequential Time | Parallel Time | Speedup |\r\n|----------|-----------------|---------------|---------|\r\n| 10       | 0.50 s          | ~0.05 s       | 10×     |\r\n| 50       | 2.50 s          | ~0.05 s       | 50×     |\r\n| 100      | 5.00 s          | 0.438 s       | 11.4×   |\r\n\r\n\r\n**Test output:**\r\n\r\nActual parallel cleanup time: 0.438 seconds\r\nSpeedup: 11.4x faster than sequential\r\n✅ PASS: Parallel cleanup is significantly faster\r\n\r\n**🧪 Testing**\r\n\r\nRun\r\n\r\n```\r\npython tests/performance/test_parallel_cleanup.py\r\n```\r\n\r\n- Added a performance test simulating 100 active sessions\r\n- Each session simulates a 50ms database operation\r\n- Validates:\r\n   - Parallel execution behavior\r\n   - Cleanup correctness\r\n   - Significant performance improvement\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "9e765c40ae98604cf3008956d7462ca49921075d",
+      "message": "added paralle session cleanup\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-12-18T10:43:07+00:00"
+    },
+    {
+      "sha": "dfab0473c6f36f6408660e31e31351c589e7abe2",
+      "message": "added paralle session cleanup documentation\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-12-18T11:05:28+00:00"
+    },
+    {
+      "sha": "788f45b0c1e132ca1808c8f789a430b86fc3d38b",
+      "message": "fixed flake\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-12-18T11:32:40+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 270,
+  "deletions": 77,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:21:49.191185",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:21:49.192426",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1649,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1649.json"
+  }
+}

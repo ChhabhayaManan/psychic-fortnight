@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2925,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2925"
+  },
+  "metadata": {
+    "title": "fix: add members to team and delete team without reloading page",
+    "state": "closed",
+    "created_at": "2026-02-13T15:07:58+00:00",
+    "updated_at": "2026-02-16T11:19:22+00:00",
+    "closed_at": "2026-02-14T03:44:59+00:00",
+    "merged_at": "2026-02-14T03:44:59+00:00",
+    "author": "marekdano",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n---\r\n\r\n## 📌 Summary\r\nThe PR covers two issues\r\n\r\n1. Team deletion and member management actions were not updating the UI reliably, especially when accessed through nginx (port 8080). Using the app on port 4444 has no issue. Playwright tests for team deletion were failing intermittently in headless mode.\r\n\r\n2. After deleting a team via the \"Delete Team\" button, the team list briefly (or persistently) shows stale data — the deleted team still appears in the list even though it was successfully removed on the server.\r\n\r\nCloses #2811 #2864 \r\n\r\n\r\n## 🔁 Reproduction Steps\r\n1. Go to http://localhost:8080/admin/#teams\r\n2. Click Manage Members button\r\n3. Add / remove members\r\n4. Click Save Changes\r\n5. Click Manage Member to see the updates\r\n\r\n## 🐞 Root Cause\r\n1. Nginx Caching: 5-second cache on `/admin` endpoints prevented real-time UI updates\r\n2. HTMX Swap Target Issue: deleteTeamSafe() was swapping success message into teams list, preventing proper refresh\r\n3. Search Filter Preservation: JavaScript preserved search query during HTMX refresh, causing stale DOM state\r\n4. Timing Issues: Insufficient timeouts in headless mode for HTMX refresh cycles\r\n\r\n## 💡 Fix Description\r\n\r\nBackend: `mcpgateway/admin.py`\r\nAdded `Cache-Control: no-cache, no-store, must-revalidate` headers to 6 critical endpoints to bypass nginx caching and ensure real-time UI updates:\r\n\r\n- /admin/teams/partial - Teams list (line 3931)\r\n- /admin/teams/{team_id}/members - Member management view (line 4277)\r\n- /admin/teams/{team_id} DELETE - Team deletion (line 4662)\r\n- /admin/teams/{team_id}/add-member POST - Add members (line 4871)\r\n- /admin/teams/{team_id}/members/partial - Members pagination (line 5831)\r\n- /admin/teams/{team_id}/non-members/partial - Non-members pagination (line 5923)\r\n\r\nWhy this matters: Without these headers, nginx serves cached responses for up to 5 seconds, causing users to see stale team lists after deletions or member changes. The cache-control headers force nginx to always fetch fresh data from the backend.\r\n\r\nFrontend: `mcpgateway/templates/admin.html`\r\nFixed `deleteTeamSafe()`, `leaveTeamSafe()`, and `cancelJoinRequest()` functions:\r\n \r\n- Changed HTMX swap target from #unified-teams-list to body with swap: 'none'\r\n- Removed redundant .then() refresh calls\r\n- Let backend HX-Trigger handle refresh with proper delay for DB commit\r\n\r\nWhy this matters: The old code was replacing the entire team's list with a success message, then trying to refresh over that message. The new approach lets the backend's `HX-Trigger` event handle the refresh properly after the database transaction commits.\r\n\r\nTests: `tests/playwright/pages/team_page.py`\r\n   \r\n`delete_team()` method:\r\n - Removed failing expect_response() wrapper that was timing out\r\n - Increased timeout from 1500ms → 5000ms for reliable HTMX completion in headless mode\r\n\r\n`wait_for_team_hidden()` method:\r\n - Clear search filter before checking visibility (prevents stale DOM from filtered results)\r\n - Wait for networkidle after clearing search (5s timeout)\r\n - Fallback to 1500ms fixed timeout if networkidle times out\r\n - Removed page reload workaround (no longer needed with cache-control headers)\r\n\r\n\r\nTests: `tests/playwright/test_organization.py`\r\nFix the playwright tests when the teams are deleted. Added `@pytest.mark.flaky(reruns=2, reruns_delay=1)` to handle remaining timing edge cases in headless mode:\r\n    \r\n- test_create_and_delete_team\r\n- test_delete_team_button_in_card\r\n\r\nDeveloper Experience: `Makefile`\r\n\r\nAdded **FILE** variable support for running specific Playwright tests instead of the entire suite:\r\n    \r\n\r\n    # Run specific test\r\n    make test-ui FILE=tests/playwright/test_organization.py::TestTeams::test_create_and_delete_team\r\n   \r\n    # Run specific test file\r\n    make test-ui FILE=tests/playwright/test_organization.py\r\n   \r\n    # Run all tests (default)\r\n    make test-ui\r\n  \r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |     ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅   |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "ee45f01b7db27ee9086bf66c9b1441f791ec1d4a",
+      "message": "fix: add members to team and delete team without reloading page\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-13T14:55:27+00:00"
+    },
+    {
+      "sha": "eba61dbd82bc637d74c31949b7428207535431bc",
+      "message": "fix: use swap none for leave/cancel to avoid stale UI flash\n\n- leaveTeamSafe and cancelJoinRequest now use swap:'none' like\n  deleteTeamSafe, preventing the team list from being briefly replaced\n  by partial response HTML before HX-Trigger refresh fires\n- Move pytest import to Third-Party section per isort convention\n- Add reason parameter to flaky markers for consistency\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T03:30:39+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 79,
+  "deletions": 31,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:23.190809",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:23.191676",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2925,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2925.json"
+  }
+}

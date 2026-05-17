@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2949,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2949"
+  },
+  "metadata": {
+    "title": "feat(keycloak): add keycloak to docker-compose and enable sso by default for development testing",
+    "state": "closed",
+    "created_at": "2026-02-14T16:46:34+00:00",
+    "updated_at": "2026-02-15T00:22:13+00:00",
+    "closed_at": "2026-02-15T00:22:11+00:00",
+    "merged_at": "2026-02-15T00:22:11+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\nThis epic adds a complete local Keycloak development path for SSO testing in compose, and hardens the SSO callback path so local auth-code login is reliable by default when the SSO profile is enabled.\n\nCloses #2875\n\n## What Changed\n### 1) Compose + Keycloak dev profile\n- Added `docker-compose.sso.yml` as an overlay for local SSO testing.\n- Enabled Keycloak-specific gateway env defaults for the SSO profile (realm/client/base URLs, role mapping defaults, etc.).\n- Added local Keycloak realm seed data in `infra/keycloak/realm-export.json`.\n- Updated compose docs and make targets for `compose-sso` / `sso-test-login` workflows.\n\n### 2) Keycloak discovery/bootstrap wiring\n- Extended Keycloak discovery/bootstrap behavior for dev split-host setup:\n  - browser-facing URL (e.g. `localhost:8180`) for auth redirect\n  - internal URL (e.g. `keycloak:8080`) for backchannel calls\n- Updated config/docs so this path is explicit and repeatable.\n\n### 3) SSO callback reliability fixes\n- Hardened Keycloak userinfo handling in `SSOService`:\n  - if Keycloak userinfo fails in dev host/port split scenarios, fallback to `id_token` claims.\n- Removed fragile post-commit ORM attribute reads in `authenticate_or_create_user` by snapshotting resolved values before commit/await boundaries.\n- Added explicit rollback in role-sync assignment exception paths to avoid leaving the SQLAlchemy session in a broken transaction state.\n\n### 4) Test coverage and smoke checks\n- Added/updated unit tests for:\n  - Keycloak `id_token` fallback behavior\n  - session-safe callback auth flow (no post-commit lazy-load dependence)\n  - bootstrap/discovery behavior for Keycloak URLs\n  - role-sync failure rollback handling\n- Added `scripts/test-sso-flow.sh` and wired `make sso-test-login` to validate:\n  - provider exposure\n  - auth URL correctness\n  - seeded user role claims\n  - full browser callback redirect to `/admin` with auth cookie set\n\n### 5) Documentation\n- Added developer-facing Keycloak local login guidance, including:\n  - default URLs\n  - default credentials\n  - pre-seeded users\n  - quick troubleshooting for `error=sso_failed`\n- Updated SSO/compose docs to reflect the local dev flow.\n\n## Changed Files (High-Level)\n- Compose/config: `docker-compose.yml`, `docker-compose.sso.yml`, `.env.example`, `mcpgateway/config.py`, `mcpgateway/utils/keycloak_discovery.py`, `mcpgateway/utils/sso_bootstrap.py`\n- SSO service: `mcpgateway/services/sso_service.py`\n- Tests: `tests/unit/mcpgateway/services/test_sso_service.py`, `tests/unit/mcpgateway/utils/test_keycloak_discovery.py`, `tests/unit/mcpgateway/utils/test_sso_bootstrap.py`\n- Smoke automation: `scripts/test-sso-flow.sh`\n- Docs: `docs/docs/deployment/compose.md`, `docs/docs/development/developer-workstation.md`, `docs/docs/development/index.md`, `docs/docs/manage/sso.md`, `docs/docs/manage/sso-keycloak-tutorial.md`\n- Generated diagrams updated: `docs/docs/design/images/classes.svg`, `docs/docs/design/images/code2flow.svg`, `docs/docs/design/images/packages.svg`\n\n## Validation Performed\n- `pytest tests/unit/mcpgateway/services/test_sso_service.py -q`\n- `pytest tests/unit/mcpgateway/routers/test_sso_router.py -q`\n- `pytest tests/unit/mcpgateway/utils/test_keycloak_discovery.py tests/unit/mcpgateway/utils/test_sso_bootstrap.py -q`\n- `make sso-test-login` (includes browser callback check)\n- `docker compose -f docker-compose.yml -f docker-compose.sso.yml --profile sso up -d --build`\n\n## Notes / Follow-up\n- This PR is intentionally opened as a draft to unblock review while additional follow-up fixes are still expected.\n- The diagram SVG changes are regenerated outputs from the updated docs image workflow.\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "e2ead20d0a23e823cfa513217b6606f82eebcc3b",
+      "message": "feat(keycloak): add Keycloak SSO to docker-compose for development testing\n\n- Add Keycloak service to docker-compose.yml (pinned to v26.1) with\n  pre-configured realm export for local SSO development\n- Add docker-compose.sso.yml overlay for SSO-specific configuration\n- Add \"sso\" to testing and inspector service profiles so --profile sso\n  brings up the full dev stack (Keycloak + testing + inspector)\n- Implement SSO bootstrap utility for automatic Keycloak realm/client setup\n- Add Keycloak discovery helper with well-known endpoint support\n- Enhance SSO service with id_token claims fallback for split-host\n  configurations (restricted to 401 + split-host detection only)\n- Improve admin.py SSO logout with proper id_token_hint RP-initiated flow\n- Skip expired id_token_hint in logout URL to avoid Keycloak rejection\n- Add cookie size validation for id_token storage (>3.8KB warning)\n- Use dynamic max_age for SSO cookies matching token_expiry setting\n- Improve error handling and logging throughout SSO flows\n- Add sso-keycloak-tutorial and developer workstation documentation\n- Add test-sso-flow.sh script for manual SSO flow verification\n- Add Makefile targets for Keycloak lifecycle management\n\nCloses #2949\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T23:47:51+00:00"
+    },
+    {
+      "sha": "5a171c62b54b0e1128ff5bab1ebaa6ead0509969",
+      "message": "test(keycloak): add and update tests for Keycloak SSO integration\n\n- Add SSO service tests for Keycloak userinfo fallback, callback error\n  handling, personal team resolution, and user authentication flows\n- Add Keycloak discovery and SSO bootstrap unit tests\n- Update SSO router tests to use handle_oauth_callback_with_tokens\n- Update admin module tests for Keycloak-aware logout behavior with\n  separate coverage for keycloak-enabled and keycloak-disabled paths\n- Add expired id_token_hint omission test\n- Add id_token cookie size and max_age validation tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T23:47:58+00:00"
+    }
+  ],
+  "files_changed": 27,
+  "additions": 62436,
+  "deletions": 54691,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:39.905819",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:39.908268",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2949,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2949.json"
+  }
+}

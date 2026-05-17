@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4620,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4620"
+  },
+  "metadata": {
+    "title": "fix(admin-ui): namespace onsubmit handlers in LLM provider/model forms",
+    "state": "open",
+    "created_at": "2026-05-06T09:35:31+00:00",
+    "updated_at": "2026-05-06T09:35:32+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "meltforce",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nCloses #4619.\n\nThe \"Add LLM Provider\" and \"Add LLM Model\" modals at `/admin/#llm-settings` silently fail when clicking the Save button: the modal closes, no entity is created, no error toast, no log line.\n\nRoot cause: the two forms' inline `onsubmit` attributes reference bare globals (`saveLLMProvider` / `saveLLMModel`), but `admin.js` registers those handlers only on the `Admin` namespace (`Admin.saveLLMProvider`, `Admin.saveLLMModel`) — they are never exposed on `window`. The bare references therefore raise `ReferenceError`, and with no `return false`/`preventDefault` the browser falls back to a default form submit (no `action`/`method` set), which silently re-renders the page and dismisses the modal — no POST is ever sent.\n\nThe selects right next to the broken forms already use the correct namespaced form: `onchange=\"Admin.onLLMProviderTypeChange()\"` (line 2095) and `onchange=\"Admin.onModelProviderChange()\"` (line 2193). Only the two `onsubmit` calls were missed.\n\nA scan of all other inline handlers in `admin.html` confirms these are the only two cases — every other `onclick`/`onchange`/`onsubmit` references a real `window` global. The fix is therefore safe to apply minimally.\n\n## Changes\n\n`mcpgateway/templates/admin.html`:\n\n```diff\n-              <form id=\"llm-provider-form\" onsubmit=\"saveLLMProvider(event)\">\n+              <form id=\"llm-provider-form\" onsubmit=\"Admin.saveLLMProvider(event)\">\n...\n-              <form id=\"llm-model-form\" onsubmit=\"saveLLMModel(event)\">\n+              <form id=\"llm-model-form\" onsubmit=\"Admin.saveLLMModel(event)\">\n```\n\n## Verification\n\nVerified locally against `ghcr.io/ibm/mcp-context-forge:1.0.0` by bind-mounting the patched template:\n\n- **Add Provider** flow now fires `POST /llm/providers → 201 Created`; provider appears in the list.\n- **Add Model** flow now fires `POST /llm/models → 201 Created`; model appears in the list.\n\nDevTools state confirms the namespacing is the only thing that changed:\n```\ntypeof window.saveLLMProvider          // \"undefined\" (still)\ntypeof window.Admin.saveLLMProvider    // \"function\"\ntypeof window.saveLLMModel             // \"undefined\" (still)\ntypeof window.Admin.saveLLMModel       // \"function\"\n```\n\n## Test plan\n- [ ] Pull this branch, run the gateway, sign in as the platform admin, navigate to `/admin/#llm-settings`.\n- [ ] Click **Add Provider** → fill name/type/key → **Save Provider** → confirm 201 + provider appears in list.\n- [ ] Switch to **Models** tab → click **Add Model** → pick provider, fill model id + display name → **Save Model** → confirm 201 + model appears in list.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "46b94d47669c251a49d1777fc9a1764013b57184",
+      "message": "fix(admin-ui): namespace onsubmit handlers in LLM provider/model forms\n\nThe \"Add LLM Provider\" and \"Add LLM Model\" modals at /admin/#llm-settings\nsilently fail on submit. Root cause: the forms' inline onsubmit references\nbare globals `saveLLMProvider` / `saveLLMModel`, but the bundled admin JS\nexposes those functions only on the Admin namespace\n(`Admin.saveLLMProvider`, `Admin.saveLLMModel`). The bare references\nraise ReferenceError, the handlers return nothing, the browser falls\nback to a default GET-form submit, and the modals disappear without\nfiring POST /llm/providers or POST /llm/models.\n\nFix: namespace both calls (`Admin.saveLLMProvider(event)` /\n`Admin.saveLLMModel(event)`), matching the provider-type and\nmodel-provider selects right next to these forms which already use\n`onchange=\"Admin.on{LLMProviderType,ModelProvider}Change()\"`.\n\nCloses #4619.\n\nSigned-off-by: Linus <25252086+meltforce@users.noreply.github.com>",
+      "author": "Linus",
+      "date": "2026-05-06T09:34:46+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 2,
+  "deletions": 2,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:58.243779",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:58.245503",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4620,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4620.json"
+  }
+}

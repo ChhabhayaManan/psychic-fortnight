@@ -1,0 +1,29 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4605,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4605"
+  },
+  "metadata": {
+    "title": "plugin loader: SandboxedEnvironment(autoescape=True) silently corrupts non-HTML config values",
+    "state": "open",
+    "created_at": "2026-05-05T16:26:43+00:00",
+    "updated_at": "2026-05-05T16:26:43+00:00",
+    "closed_at": null,
+    "author": "gandhipratik203",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n`mcpgateway/plugins/framework/loader/config.py:80` builds the Jinja env for rendering `plugins/config.yaml` with `autoescape=True`:\n\n```python\njinja_env = SandboxedEnvironment(loader=jinja2.BaseLoader(), autoescape=True)\nrendered_template = jinja_env.from_string(template).render(env=os.environ)\n```\n\n`autoescape=True` HTML-encodes `&`, `<`, `>`, `\"` in the rendered output. That's correct for HTML templates and wrong for YAML — any Jinja-rendered value (e.g. `{{ env.REDIS_URL }}` or any other env var passed through this path) containing those characters is silently corrupted before `yaml.safe_load` consumes it.\n\n## Concrete failure cases\n\n- `REDIS_URL=redis://user:p&w@host:6379/0` (password containing `&`) renders as `redis://user:p&amp;w@host:6379/0` → broken URL.\n- Any env-sourced TLS cert content, API key, or token containing `<`, `>`, `\"`, or `&` → silently corrupted.\n- The corruption is silent: YAML parses successfully, plugin init fails downstream with a confusing error that doesn't point back at the encoding step.\n\nAffects every Jinja-templated value in `plugins/config.yaml`, not just `redis_url`. Surfaced during review of #4582.\n\n## Proposed fix\n\n```python\njinja_env = SandboxedEnvironment(loader=jinja2.BaseLoader(), autoescape=False)\n```\n\n`autoescape=False` is the right default for non-HTML output; YAML's own escaping handles structural characters at the `yaml.safe_load` layer.\n\n## Acceptance criteria\n\n- [ ] `SandboxedEnvironment` constructed with `autoescape=False`\n- [ ] Regression test that asserts a env var containing `&`, `<`, `>`, `\"` round-trips through Jinja substitution unchanged",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:41.054610",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:41.055329",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4605,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4605.json"
+  }
+}

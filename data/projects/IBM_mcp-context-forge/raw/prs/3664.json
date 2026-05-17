@@ -1,0 +1,103 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3664,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3664"
+  },
+  "metadata": {
+    "title": "feat: Bell-LaPadula MAC Security Clearance Plugin - Phase 1 & 2 (#1245)",
+    "state": "open",
+    "created_at": "2026-03-13T13:08:09+00:00",
+    "updated_at": "2026-04-09T21:06:28+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "nelikatia",
+    "labels": [
+      "enhancement",
+      "security",
+      "plugins",
+      "COULD"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nPart of #1245\r\n\r\n---\r\n\r\n## 📝 Summary\r\nImplements Phase 1 and Phase 2 of the Bell-LaPadula Mandatory Access Control (MAC) security clearance plugin for MCP Gateway.\r\n\r\n### Phase 1 — Core Plugin Implementation\r\n- `plugins/security_clearance/security_clearance.py`: ClearanceEngine \r\n  with No Read Up, No Write Down, Lateral Bands enforcement\r\n- `plugins/security_clearance/plugin-manifest.yaml`: plugin manifest\r\n- `plugins/config.yaml`: plugin registration\r\n- `SecurityClearanceConfig` Pydantic model with full validation\r\n\r\n### Phase 2 — Database Integration\r\n- `plugins/security_clearance/models.py`: 9 SQLAlchemy ORM models (sc_ prefix)\r\n- Alembic migrations: d8a534ca0f9c + 3c272d7a6cee\r\n- Bootstrap default clearance levels 0-5 (PUBLIC → COMPARTMENTALIZED)\r\n- `plugins/security_clearance/repository.py`: ClearanceRepository \r\n  with DB-first lookup and transparent YAML fallback\r\n\r\n### Tests\r\n- `tests/unit/plugins/test_security_clearance.py`: 50 unit tests, 91% coverage\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Feature / Enhancement\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n| Check | Command | Status |\r\n|-------|---------|--------|\r\n| Lint suite | `make lint` | ✅ ruff + yamllint clean |\r\n| Unit tests | `pytest tests/unit/plugins/test_security_clearance.py` | ✅ 50 passed |\r\n| Coverage ≥ 80% | `pytest --cov=plugins/security_clearance` | ✅ 91% |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Tests added/updated for changes\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n- Phase 3-10 will follow in subsequent PRs\r\n- All Phase 1 behavior fully preserved when db=None (YAML-only mode)\r\n- 15 pre-existing test failures unrelated to this PR\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "e777e7ec8f09699c58d676b7f586e7871933caaf",
+      "message": "feat: implement SecurityClearancePlugin phase 1 - Bell-LaPadula MAC foundation\n\nCore Bell-LaPadula Mandatory Access Control plugin implementation.\n\nAdded:\n- SecurityClearanceConfig: Pydantic model with full schema (levels, clearances, bands, downgrade rules)\n- ClearanceEngine: core access control logic (no-read-up, no-write-down, lateral communication)\n- SecurityClearancePlugin: plugin class with hooks (tool_pre_invoke, tool_post_invoke, resource_pre_fetch, resource_post_fetch, prompt_pre_fetch)\n- plugin-manifest.yaml: hook declarations and default config\n\nFeatures:\n- Hierarchical security levels\n- No Read Up enforcement: blocks users from accessing tools above their clearance\n- No Write Down enforcement: blocks high-classification outputs to low contexts\n- Lateral communication: entities in the same band communicate freely\n- Field-level redaction with configurable downgrade policy\n- Structured audit logging for all access decisions\n\nRelated: #1245\nSigned-off-by: Katia Neli <nelik@tcd.ie>",
+      "author": "Katia Neli",
+      "date": "2026-03-13T00:53:59+00:00"
+    },
+    {
+      "sha": "0dd28f6eceef83c7438f06edb21ec96fa0cb7a7c",
+      "message": "feat: register SecurityClearancePlugin in plugins/config.yaml\n\nAdded SecurityClearancePlugin entry with full configuration:\n- Bell-LaPadula MAC enforcement (no-read-up, no-write-down, lateral bands)\n- Priority 5\n- Mode disabled by default (enable with 'enforce')\n- Downgrade rules with field-level redaction support\n\nRelated: #1245\nSigned-off-by: Katia Neli <nelik@tcd.ie>",
+      "author": "Katia Neli",
+      "date": "2026-03-13T01:16:45+00:00"
+    },
+    {
+      "sha": "5a5da3da06b7c4cb815c654768973ad1ffcab62d",
+      "message": "feat: phase 1 - align plugin with issue spec\n\n- Added model_validator to SecurityClearanceConfig to validate levels >= 0\n- Added server_name fallback in resolve_tool_level\n- Added log_level_violations, audit_log_retention_days, dynamic_rules to SecurityClearanceConfig\n- Updated plugins/config.yaml with explicit levels and new audit fields\n- Updated plugin-manifest.yaml default_configs\n\nRelated: #1245\nSigned-off-by: Katia Neli <nelik@tcd.ie>",
+      "author": "Katia Neli",
+      "date": "2026-03-13T01:53:07+00:00"
+    },
+    {
+      "sha": "d44681ceff8ca0b0bcb915a910a67db4c175a0ea",
+      "message": "feat: add ORM models for Bell-LaPadula MAC tables (Phase 2)\n\nAdds 7 ORM models (sc prefix) for the Bell-LaPadula\nMAC security clearance database layer:\n- SCLevel: named clearance level definitions\n- SCUserClearance: per-user clearance assignments with expiry support\n- SCTeamClearance: per-team clearance assignments\n- SCToolClassification: minimum clearance per tool/server\n- SCServerClassification: minimum clearance per MCP server\n- SCClearanceAuditLog: immutable access decision audit trail\n- SCDynamicRule: runtime override rules with priority and expiry\n\nAll models inherit from mcpgateway.db.Base, use SQLAlchemy 2.0\nMapped/mapped_column style, and include tenant_id for multi-tenancy.\n\nSigned-off-by: Katia Neli <nelik@tcd.ie>",
+      "author": "Katia Neli",
+      "date": "2026-03-13T06:17:23+00:00"
+    },
+    {
+      "sha": "7813c62655170f02889950b3ea969a9fd6b24b42",
+      "message": "feat: add Alembic migration for security clearance tables (Phase 2)\n\nPart of #1245 - Bell-LaPadula MAC implementation.\n\nCreates 7 sc_ prefixed tables via Alembic migration d8a534ca0f9c:\n- sc_levels, sc_user_clearances, sc_team_clearances\n- sc_tool_classifications, sc_server_classifications\n- sc_clearance_audit_log, sc_dynamic_rules\n\nSigned-off-by: Katia Neli <nelik@tcd.ie>",
+      "author": "Katia Neli",
+      "date": "2026-03-13T06:42:52+00:00"
+    },
+    {
+      "sha": "b170022b2eb1e175562d667dccde52a3bbba0515",
+      "message": "feat: add ClearanceRepository with DB and YAML fallback (Phase 2)\n\nPart of #1245 - Bell-LaPadula MAC implementation.\n\nAdds ClearanceRepository with silent DB fallback for all lookups:\n- get_user_clearance: user clearance with expiry check\n- get_team_clearance: team clearance lookup\n- get_tool_classification: tool/server classification lookup\n- get_server_classification: server-level classification lookup\n- write_audit_log: immutable audit trail with rollback on failure\n\nAll methods return None on DB failure, allowing the plugin to\nfall back to YAML config values transparently.\n\nSigned-off-by: Katia Neli <nelik@tcd.ie>",
+      "author": "Katia Neli",
+      "date": "2026-03-13T07:02:00+00:00"
+    },
+    {
+      "sha": "4199975921c3d9716f11826324df390d1373d7c1",
+      "message": "feat: integrate ClearanceRepository into SecurityClearancePlugin hooks (Phase 2)\n\nPart of #1245 - Bell-LaPadula MAC implementation.\n\nIntegrates Phase 2 DB layer into the plugin with transparent YAML fallback:\n- ClearanceEngine accepts optional SQLAlchemy Session (db parameter)\n- resolve_user_clearance: DB first, then YAML config, then default\n- resolve_tool_level: DB first, then YAML config, then default\n- SecurityClearancePlugin.set_db(): runtime DB session injection\n- Silent fallback to YAML if DB is unavailable or tables missing\n\nSigned-off-by: Katia Neli <nelik@tcd.ie>",
+      "author": "Katia Neli",
+      "date": "2026-03-13T07:20:16+00:00"
+    },
+    {
+      "sha": "6dc9a1f6ab73b46eeeb1126b4b5883e88ec53602",
+      "message": "feat: missing tables, bootstrap and audit trail (Phase 2)\n\nPart of #1245 - Bell-LaPadula MAC implementation.\n\nAdds missing ORM models and migration 3c272d7a6cee:\n- SCResourceClassification: minimum clearance per resource URI\n- SCA2AAgentClearance: clearance level for A2A agents with expiry\n\nBootstraps 6 default clearance levels in sc_levels:\n  0-PUBLIC, 1-INTERNAL, 2-CONFIDENTIAL, 3-SECRET,\n  4-TOP_SECRET, 5-COMPARTMENTALIZED\n\nAdds get_audit_trail() to ClearanceRepository:\n- Filter by user_id, tenant_id, decision\n- Returns ordered by timestamp desc, configurable limit\n\nSigned-off-by: Katia Neli <nelik@tcd.ie>",
+      "author": "Katia Neli",
+      "date": "2026-03-13T07:40:01+00:00"
+    },
+    {
+      "sha": "c57a8f27b171accb095b5830e9747c1441f6d970",
+      "message": "test: add unit tests for Bell-LaPadula MAC plugin Phase 1 and Phase 2\n\nPart of #1245 - Bell-LaPadula MAC implementation.\n\n50 unit tests with 91% coverage:\n- No Read Up enforcement (4 tests)\n- No Write Down enforcement (3 tests)\n- Lateral band communication (3 tests)\n- User clearance resolution (4 tests)\n- Tool classification resolution (4 tests)\n- Field redaction strategies (3 tests)\n- ClearanceRepository DB access layer (11 tests)\n- DB-first with YAML fallback integration (3 tests)\n- Plugin hooks (15 tests)\n\nSigned-off-by: Katia Neli <nelik@tcd.ie>",
+      "author": "Katia Neli",
+      "date": "2026-03-13T08:26:27+00:00"
+    },
+    {
+      "sha": "39c133873b833da93b55a0b569fd49a6fd2faf61",
+      "message": "fix: resolve ruff and yamllint issues in migrations and plugin manifest\n\nPart of #1245 - Bell-LaPadula MAC implementation.\n\n- Add missing docstrings to upgrade() and downgrade() in both migrations\n- Fix trailing spaces and missing newline in plugin-manifest.yaml\n\nSigned-off-by: Katia Neli <nelik@tcd.ie>",
+      "author": "Katia Neli",
+      "date": "2026-03-13T11:21:30+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 1805,
+  "deletions": 0,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:23.167026",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:23.168348",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3664,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3664.json"
+  }
+}

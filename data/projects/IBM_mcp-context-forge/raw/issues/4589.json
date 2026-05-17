@@ -1,0 +1,36 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4589,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4589"
+  },
+  "metadata": {
+    "title": "[BUG][A2A]: Gateway drops task_id when proxying to A2A backend agents, breaking multi-turn conversations",
+    "state": "closed",
+    "created_at": "2026-05-05T07:48:47+00:00",
+    "updated_at": "2026-05-05T07:54:26+00:00",
+    "closed_at": "2026-05-05T07:54:26+00:00",
+    "author": "nikdvy",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Problem\n\nWhen ContextForge proxies requests to A2A backend agents, it uses hardcoded values:\n- JSONRPC `id` field: always `1`\n- `messageId`: `f\"admin-test-{int(time.time())}\"` (new value each call)\n\nThis means backend agents **cannot correlate messages into a conversation session**. Even if the client sends `task_id` in parameters, it gets dropped by the gateway.\n\n## Impact\n\nStateful A2A agents (e.g. using LangGraph with Redis checkpointer) rely on `task_id` as `thread_id` to maintain conversation history. Without task_id forwarding, every request through ContextForge creates a new isolated conversation — multi-turn dialogs are impossible.\n\n## Expected Behavior\n\nIf the client includes `task_id` or `taskId` in the request parameters, the gateway should forward it to the backend agent in:\n1. The JSONRPC `id` field\n2. The `message.task_id` field (for agents that use it as thread identifier)\n\nWhen `task_id` is not provided, current behavior should be preserved (backward compatible).\n\n## Affected Code\n\n- `mcpgateway/services/a2a_service.py` — `invoke_agent()` line ~1398\n- `mcpgateway/services/tool_service.py` — MCP→A2A bridge lines ~3869, ~4947\n\n## Reproduction\n\n1. Register an A2A agent that uses conversation history (e.g. LangGraph + Redis checkpointer with `thread_id`)\n2. Send two messages with the same `task_id` through the gateway\n3. Observe that the backend agent receives different IDs each time → no conversation continuity\n\n## Proposed Fix\n\nExtract `task_id`/`taskId` from inbound parameters and include it in the outbound JSONRPC payload. Falls back to existing behavior when not provided.",
+  "comments": [
+    {
+      "id": "4377453600",
+      "author": "nikdvy",
+      "created_at": "2026-05-05T07:54:25+00:00",
+      "body": "Closing: investigated the latest main and this has been resolved in the recent refactor. `mcpgateway/services/a2a_protocol.py:build_a2a_jsonrpc_request()` now:\n- Extracts `id` from client parameters (line 312: `request_id = payload.pop(\"id\", 1)`)\n- Forwards client-provided `messageId` (line 329)\n- Falls back to UUID-based messageId when not provided (line 294)\n\nBackend A2A agents can now receive stable identifiers for multi-turn conversations when the client includes `id` or `messageId` in the request parameters."
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:39.745765",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:39.746325",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4589,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4589.json"
+  }
+}

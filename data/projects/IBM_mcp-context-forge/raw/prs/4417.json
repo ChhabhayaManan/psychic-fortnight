@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4417,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4417"
+  },
+  "metadata": {
+    "title": "feat: fix OAuth redirect_uri hint for proxied/iframe deployments",
+    "state": "closed",
+    "created_at": "2026-04-23T15:50:08+00:00",
+    "updated_at": "2026-05-10T06:06:17+00:00",
+    "closed_at": "2026-05-10T06:06:15+00:00",
+    "merged_at": "2026-05-10T06:06:14+00:00",
+    "author": "madhav165",
+    "labels": [
+      "ui",
+      "ica",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# ✨ Feature / Enhancement PR\n\n## 🔗 Epic / Issue\nCloses #4354\n\n---\n\n## 🚀 Summary (1-2 sentences)\n\nAdd `ForwardedHostMiddleware` that rewrites the ASGI `host` header from `X-Forwarded-Host`, so that `request.base_url` reflects the proxy's public address when the gateway is behind a reverse proxy. This fixes the OAuth `redirect_uri` hint in the admin UI showing the gateway's internal address instead of the proxy URL.\n\n---\n\n## 🧪 Checks\n\n- [x] `make lint` passes\n- [x] `make test` passes\n- [ ] CHANGELOG updated (if user-facing)\n\n---\n\n## 📓 Notes\n\n### Problem\n\nThe admin UI shows an OAuth redirect_uri hint (`💡 Use: {base_url}oauth/callback`) on gateway and A2A agent add/edit forms. When the gateway is behind a reverse proxy, this hint shows the internal gateway address because Uvicorn's `ProxyHeadersMiddleware` handles `X-Forwarded-Proto` (scheme) and `X-Forwarded-For` (client IP) but not `X-Forwarded-Host` (host). This is a known upstream gap: [encode/uvicorn#965](https://github.com/encode/uvicorn/issues/965), with an unmerged PR [#2811](https://github.com/Kludex/uvicorn/pull/2811).\n\n### Solution\n\nA small ASGI middleware (`ForwardedHostMiddleware`) registered alongside `ProxyHeadersMiddleware` that:\n- Reads `X-Forwarded-Host`, takes the first comma-separated value\n- Parses optional port (including IPv6 bracket notation)\n- Rewrites the `host` header in `scope[\"headers\"]` and the `scope[\"server\"]` tuple\n- No template changes needed — all 4 hint locations are fixed automatically\n\n### Security review\n\n- **OAuth audience binding** (`_build_server_resource_url`): uses `settings.app_domain`, immune to host rewriting\n- **SSO redirect validation**: uses `settings.app_domain` + allowlist, immune\n- **CSRF origin check**: already reads `X-Forwarded-Host` directly (pre-existing), no regression\n- **`trusted_hosts=\"*\"`**: pre-existing decision on `ProxyHeadersMiddleware`, not introduced by this change\n\n### Files changed\n\n| File | Change |\n|------|--------|\n| `mcpgateway/middleware/forwarded_host.py` | New middleware |\n| `mcpgateway/main.py` | Import + register middleware |\n| `tests/unit/mcpgateway/middleware/test_forwarded_host_middleware.py` | 15 unit tests |\n| `tests/playwright/test_forwarded_host_redirect_hint.py` | 2 Playwright E2E tests |\n\nCan be removed when Uvicorn merges upstream `X-Forwarded-Host` support.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "211de6f409d127adee85d1ce90d8667f42d5f5d9",
+      "message": "feat: add ForwardedHostMiddleware for proxy-aware OAuth redirect_uri hint\n\nUvicorn's ProxyHeadersMiddleware handles X-Forwarded-Proto (scheme) and\nX-Forwarded-For (client IP) but not X-Forwarded-Host. When the gateway\nis behind a reverse proxy, request.base_url still shows the internal\nhost, causing the OAuth redirect_uri hint in the admin UI to display\nthe wrong callback URL.\n\nAdd ForwardedHostMiddleware that rewrites the ASGI host header and\nscope[\"server\"] from X-Forwarded-Host, making request.base_url\nreflect the proxy's public address. This fixes the redirect_uri hint\nin all four add/edit gateway and A2A agent forms without template changes.\n\nThe middleware mirrors the approach in Uvicorn PR #2811 (encode/uvicorn#965)\nand can be removed when upstream merges that support.\n\nCloses #4354\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-23T14:17:21+00:00"
+    },
+    {
+      "sha": "ee562b6b0a0faa930b71bdcfd5b1481bd0812f50",
+      "message": "refactor: share trusted_hosts between proxy middlewares and document limitations\n\nExtract _proxy_trusted_hosts variable so ProxyHeadersMiddleware and\nForwardedHostMiddleware always use the same trust setting. Document\nthat ForwardedHostMiddleware only acts for wildcard trust (no per-IP\nchecking) and that default port values follow RFC 2616.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-23T14:28:08+00:00"
+    },
+    {
+      "sha": "063225be796b7dfa0ecbbbee9dd53b65794fe1d8",
+      "message": "refactor: remove misleading trusted_hosts from ForwardedHostMiddleware\n\nThe middleware had a trusted_hosts parameter that was a no-op for\nnon-wildcard values, making it look like it did per-IP trust checking\nwhen it did not. Remove the parameter entirely -- trust decisions\nbelong to the caller (main.py gates registration). Also clean up\ndocstrings to document port parsing behavior accurately.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-23T14:33:51+00:00"
+    },
+    {
+      "sha": "6d0a385b1638e66b0b49e0be236065db361db7a9",
+      "message": "fix: correct ForwardedHostMiddleware ASGI execution order and typing\n\n- Swap registration order so ForwardedHostMiddleware is inner to\n  ProxyHeadersMiddleware, ensuring scope[\"scheme\"] is already corrected\n  when deriving the default port for scope[\"server\"].\n- Replace uvicorn._types imports with stdlib typing equivalents to avoid\n  coupling to a private module.\n- Inline the trusted_hosts literal instead of a stray module-level constant.\n- Update docstring to match the corrected registration order.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-23T16:04:35+00:00"
+    },
+    {
+      "sha": "72405031f4e7386f6c96df816a061ad4feabc557",
+      "message": "refactor: harden ForwardedHostMiddleware parsing and expand test coverage\n\nHarden _parse_forwarded_host() against malformed input:\n- Reject empty hosts, paths, and whitespace in forwarded host values\n- Reject ports outside 1-65535 and non-digit port strings (e.g. +443)\n- Reject malformed bracketed IPv6 (missing closing bracket, trailing junk)\n- Strip brackets from IPv6 for scope['server'] while preserving them in\n  the Host header\n- Handle unbracketed IPv6 literals without mis-parsing as port\n- Use first (leftmost) X-Forwarded-Host header instead of last-value-wins\n\nRegister ForwardedHostMiddleware in __init__.__all__.\nFix misleading comment in main.py about conditional registration.\n\nAdd 9 new unit tests covering edge cases: unbracketed IPv6, invalid port,\nout-of-range port, path in host, duplicate headers, malformed bracketed\nIPv6, empty brackets, empty host with port, and plus-sign port.\n\nAddresses council review findings from PR #4417.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T21:58:17+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 682,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:05.236729",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:05.237592",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4417,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4417.json"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4602,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4602"
+  },
+  "metadata": {
+    "title": "fix(chore): consolidate OIDC discovery + JWKS caching between sso_service and verify_credentials",
+    "state": "open",
+    "created_at": "2026-05-05T12:37:08+00:00",
+    "updated_at": "2026-05-06T07:48:14+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "chore",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4133\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nConsolidates duplicate OIDC discovery and JWKS caching logic that existed in two separate modules into a single shared implementation.\r\n\r\n**Before:** Identical OIDC discovery and JWKS client caching code existed in:\r\n- [`mcpgateway/utils/verify_credentials.py`](mcpgateway/utils/verify_credentials.py:1355) (OAuth access token verification for MCP endpoints)\r\n- [`mcpgateway/services/sso_service.py`](mcpgateway/services/sso_service.py:95) (SSO id_token verification during interactive login)\r\n\r\n**After:** Single shared module [`mcpgateway/utils/oidc_discovery.py`](mcpgateway/utils/oidc_discovery.py:1) provides:\r\n- `discover_oidc_metadata()` with configurable success/negative TTL caching\r\n- `get_jwks_client()` for shared JWKS client caching\r\n- RFC 8414 + OIDC Discovery 1.0 support with trailing-slash normalization\r\n\r\nBoth callers now delegate to the shared module, eliminating ~143 lines of duplicate code.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [x] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n**Test breakdown:**\r\n- 16 new tests in [`tests/unit/mcpgateway/utils/test_oidc_discovery.py`](tests/unit/mcpgateway/utils/test_oidc_discovery.py:1)\r\n- 29 existing OAuth tests in [`tests/unit/mcpgateway/test_auth.py`](tests/unit/mcpgateway/test_auth.py:1) (updated mock references)\r\n- 7 existing SSO tests in [`tests/unit/mcpgateway/services/test_sso_service.py`](tests/unit/mcpgateway/services/test_sso_service.py:1) (updated cache references)\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Design decisions:**\r\n\r\n1. **Module location:** Placed in `mcpgateway/utils/` as it's a utility function used by multiple services, not business logic specific to one domain.\r\n\r\n2. **Backward compatibility:** Added re-exports in [`verify_credentials.py`](mcpgateway/utils/verify_credentials.py:1355-1364) to maintain compatibility with existing test imports without requiring widespread test changes.\r\n\r\n3. **Cache structure:** Uses 3-tuple `(timestamp, metadata, ttl)` to support different TTLs for successful vs failed discovery attempts (300s success, 60s transient failure, 3600s permanent failure).\r\n\r\n4. **RFC compliance:** Implements both RFC 8414 (OAuth Authorization Server Metadata) and OIDC Discovery 1.0 endpoints with proper trailing-slash normalization per spec requirements.\r\n\r\n5. **No behavior changes:** Both auth paths (OAuth access tokens and SSO id_tokens) maintain identical behavior; only the implementation is consolidated.\r\n\r\n**Files changed:**\r\n- Created: [`mcpgateway/utils/oidc_discovery.py`](mcpgateway/utils/oidc_discovery.py:1) (223 lines)\r\n- Created: [`tests/unit/mcpgateway/utils/test_oidc_discovery.py`](tests/unit/mcpgateway/utils/test_oidc_discovery.py:1) (289 lines)\r\n- Modified: [`mcpgateway/utils/verify_credentials.py`](mcpgateway/utils/verify_credentials.py:1) (-143 lines, +11 lines)\r\n- Modified: [`mcpgateway/services/sso_service.py`](mcpgateway/services/sso_service.py:1) (-49 lines, +8 lines)\r\n- Modified: [`tests/unit/mcpgateway/test_auth.py`](tests/unit/mcpgateway/test_auth.py:4195) (1 line mock update)\r\n- Modified: [`tests/unit/mcpgateway/services/test_sso_service.py`](tests/unit/mcpgateway/services/test_sso_service.py:2445) (3 tests updated)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "095ada4883f9409cee6856e47fb9f1faf2039c3f",
+      "message": "chore: consolidate OIDC discovery + JWKS caching between sso_service and verify_credentials\n\nCloses #4133\n\n- Extract shared module mcpgateway/utils/oidc_discovery.py with:\n  - discover_oidc_metadata() with configurable success/negative TTL\n  - get_jwks_client() for shared JWKS client caching\n  - RFC 8414 + OIDC Discovery 1.0 support with trailing-slash normalization\n- Update mcpgateway/utils/verify_credentials.py to delegate to shared module\n- Update mcpgateway/services/sso_service.py to delegate to shared module\n- Add comprehensive unit tests (16 new tests in test_oidc_discovery.py)\n- Update existing tests to use shared cache references\n- All 52 tests passing (16 new + 29 OAuth + 7 SSO)\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-05T12:35:03+00:00"
+    },
+    {
+      "sha": "02113e2381bfd37b21b314f20181a1a00e6078cc",
+      "message": "Merge branch 'main' into 4133-chore-consolidate-oidc-discovery-jwks-caching-between-sso_service-and-verify_credentials",
+      "author": "Bogdan-Marius Cătănuș",
+      "date": "2026-05-05T12:42:28+00:00"
+    },
+    {
+      "sha": "2c6f75e19aef0d30579886d07d8a1516c8948395",
+      "message": "Merge branch 'main' into 4133-chore-consolidate-oidc-discovery-jwks-caching-between-sso_service-and-verify_credentials",
+      "author": "Bogdan-Marius Cătănuș",
+      "date": "2026-05-05T13:19:47+00:00"
+    },
+    {
+      "sha": "d191dfcaef6d634f49bdcd3cc9ad503eb0a57699",
+      "message": "fix .secrets.baseline\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-06T07:47:47+00:00"
+    },
+    {
+      "sha": "a99810537da4a7c2bafce091d561febaea741e13",
+      "message": "Merge branch 'main' into 4133-chore-consolidate-oidc-discovery-jwks-caching-between-sso_service-and-verify_credentials",
+      "author": "Bogdan-Marius Cătănuș",
+      "date": "2026-05-06T07:48:13+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 574,
+  "deletions": 193,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:53.241270",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:53.242019",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4602,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4602.json"
+  }
+}

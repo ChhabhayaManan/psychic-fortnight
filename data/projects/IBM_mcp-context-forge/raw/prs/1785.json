@@ -1,0 +1,114 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1785,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1785"
+  },
+  "metadata": {
+    "title": "🚀 Performance Improvement: Parallelize Session Cleanup with asyncio.gather()",
+    "state": "closed",
+    "created_at": "2025-12-30T03:22:59+00:00",
+    "updated_at": "2025-12-30T15:55:32+00:00",
+    "closed_at": "2025-12-30T15:55:30+00:00",
+    "merged_at": "2025-12-30T15:55:30+00:00",
+    "author": "TS0713",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "**Summary**\r\n\r\nThis PR optimizes session cleanup in SessionRegistry by parallelizing database refresh operations using asyncio.gather() instead of executing them sequentially. The change eliminates O(n) cleanup behavior and significantly reduces cleanup latency under high session counts.\r\n\r\nCloses #1616\r\n\r\n**❌ Problem**\r\n\r\nThe existing session cleanup logic executed asyncio.to_thread() calls sequentially inside a loop:\r\n\r\n- Cleanup time scaled linearly with number of sessions\r\n- Thread pool usage was inefficient\r\n- Long cleanup cycles delayed other async operations\r\n- _refresh_session was defined inside the loop, creating unnecessary function objects\r\nWith 100 sessions and ~50ms DB latency per session:\r\n\r\n```\r\nSequential cleanup ≈ 5 seconds\r\n```\r\n\r\n**✅ Solution**\r\n- Introduced parallel database refresh using asyncio.gather()\r\n- Moved _refresh_session_db() outside the loop (defined once)\r\n- Preserved correct session removal semantics\r\n- Ensured thread pool usage is batched and efficient\r\n\r\n```\r\ntasks = [\r\n    asyncio.to_thread(self._refresh_session_db, session_id)\r\n    for session_id in connected_sessions\r\n]\r\nresults = await asyncio.gather(*tasks, return_exceptions=True)\r\n```\r\n\r\n**📈 Performance Results**\r\n| Sessions | Sequential Time | Parallel Time | Speedup |\r\n|----------|-----------------|---------------|---------|\r\n| 10       | 0.50 s          | ~0.05 s       | 10×     |\r\n| 50       | 2.50 s          | ~0.05 s       | 50×     |\r\n| 100      | 5.00 s          | 0.438 s       | 11.4×   |\r\n\r\n\r\n**Test output:**\r\n\r\nActual parallel cleanup time: 0.438 seconds\r\nSpeedup: 11.4x faster than sequential\r\n✅ PASS: Parallel cleanup is significantly faster\r\n\r\n**🧪 Testing**\r\n\r\nRun\r\n\r\n```\r\npython tests/performance/test_parallel_cleanup.py\r\n```\r\n\r\n- Added a performance test simulating 100 active sessions\r\n- Each session simulates a 50ms database operation\r\n- Validates:\r\n   - Parallel execution behavior\r\n   - Cleanup correctness\r\n   - Significant performance improvement\r\n\r\n---\r\n\r\n### 🔧 Additional updates\r\n\r\n- Rebased the branch on latest `main`\r\n- Fixed doctest failures uncovered during rebase\r\n- Minor test cleanup; no changes to core parallel cleanup logic or performance behavior",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3618471091",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-30T14:50:14+00:00",
+      "body": "Rebased and tested"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0a12fa6f1d2bf12dbac460a7acc1b44a28025a69",
+      "message": "added paralle session cleanup\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-12-18T10:43:07+00:00"
+    },
+    {
+      "sha": "f8c012c218d1ca8d2e2f882d2f332ab59a2ee09d",
+      "message": "added paralle session cleanup documentation\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-12-18T11:05:28+00:00"
+    },
+    {
+      "sha": "61398efb6a638a76b3c946130c5c0a4484c9638c",
+      "message": "fixed flake\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-12-18T11:32:40+00:00"
+    },
+    {
+      "sha": "39eee9a71fc4223f2367860a13b9ef7d4852f8e7",
+      "message": "changes made by basic tests\n\nSigned-off-by: Satya <tsp.0713@gmail.com>",
+      "author": "Satya",
+      "date": "2025-12-29T07:57:26+00:00"
+    },
+    {
+      "sha": "1a79135647a7f438180a5d0fe6e754e9e7204859",
+      "message": "doctest fix - destroy kubernetes\n\nSigned-off-by: Satya <tsp.0713@gmail.com>",
+      "author": "Satya",
+      "date": "2025-12-30T03:01:29+00:00"
+    },
+    {
+      "sha": "16025182c4c9f547294ed27f692eed48814586e2",
+      "message": "fix: Preserve sessions on transient errors and fix doctest guard\n\n- Don't remove sessions on transient connection check or DB refresh errors\n- Restore kubectl availability guard in destroy_kubernetes doctest\n- Maintains original behavior: only remove sessions that are confirmed disconnected\n  or no longer exist in the database\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-30T14:43:35+00:00"
+    },
+    {
+      "sha": "95ebdb9db17e4be4d1fdbd65c8d9ddf026111846",
+      "message": "perf: Add bounded concurrency to parallel session cleanup\n\n- Add semaphore (max_concurrent=20) to limit concurrent DB operations\n- Prevents thread pool and DB connection pool exhaustion at scale\n- Update documentation to reflect bounded concurrency design\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-30T14:47:03+00:00"
+    },
+    {
+      "sha": "d09df06a6e11cd46dd8146d937521ee6825db9fd",
+      "message": "Rebase\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-30T14:49:53+00:00"
+    },
+    {
+      "sha": "0fdede7b8bb5441fc6b4262bd6a4e192919d0935",
+      "message": "fix: Add missing docstrings and correct test expectations\n\n- Add docstring to bounded_refresh inner function\n- Add docstring to _load_revoked_jtis inner function\n- Fix misleading test output: show correct expected parallel time\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-30T14:55:24+00:00"
+    },
+    {
+      "sha": "8a5aa367bb5ed99d51ceb1c8a806f2a318c9c5ff",
+      "message": "docs: Move parallel session cleanup to proper mkdocs location\n\n- Move docs/parallel-session-cleanup.md to docs/docs/manage/\n- Add ADR-031 for parallel session cleanup architectural decision\n- Add reference in scale.md under Session Management\n- Update .pages files for navigation (ADRs 023-031)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-30T15:24:50+00:00"
+    },
+    {
+      "sha": "4d7d453526ee9d01b8945fcfa0ecca1be66fb509",
+      "message": "fix: Complete docstrings for inner functions (flake8 DAR)\n\nAdd Args and Returns sections to inner function docstrings:\n- _load_revoked_jtis in auth_cache.py\n- bounded_refresh in session_registry.py\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-30T15:37:06+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 500,
+  "deletions": 74,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:21.100584",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:21.102130",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1785,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1785.json"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3293,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3293"
+  },
+  "metadata": {
+    "title": "[FEATURE]: Gate public visibility by ALLOW_PUBLIC_VISIBILITY flag in team scope",
+    "state": "closed",
+    "created_at": "2026-02-26T13:17:50+00:00",
+    "updated_at": "2026-02-26T15:55:53+00:00",
+    "closed_at": "2026-02-26T15:55:50+00:00",
+    "merged_at": "2026-02-26T15:55:50+00:00",
+    "author": "madhav165",
+    "labels": [
+      "ica"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# ✨ Feature / Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\nCloses #3286\r\n\r\n---\r\n\r\n## 🚀 Summary (1-2 sentences)\r\n\r\nAdds an `ALLOW_PUBLIC_VISIBILITY` platform flag (default `true`) that, when set to `false`, prevents entities from being saved with `public` visibility when the request is team-scoped (URL or form contains `team_id`). The restriction is enforced consistently in the backend API, the admin UI HTML, and the JavaScript edit modals.\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Behaviour\r\n\r\n| Scope | `ALLOW_PUBLIC_VISIBILITY=true` | `ALLOW_PUBLIC_VISIBILITY=false` |\r\n|---|---|---|\r\n| Global (no `team_id`) | public selectable | public selectable |\r\n| Team-scoped (`team_id` present) | public selectable | public **disabled / rejected** |\r\n\r\nThe rule applies uniformly to servers, tools, resources, prompts, gateways, A2A agents, and gRPC services.\r\n\r\n### Changes\r\n\r\n**`mcpgateway/config.py`**\r\n- New `allow_public_visibility: bool` field (default `True`).\r\n\r\n**`mcpgateway/admin.py`**\r\n- New helper `_check_public_visibility_allowed(visibility, team_id)` — raises HTTP 422 only when `allow_public_visibility=False` **and** `team_id` is present.\r\n- All 14 add/edit handler call sites updated; A2A add guard moved before schema construction so it is not swallowed by broad exception handlers.\r\n- `except HTTPException: raise` added in four handlers that previously swallowed it.\r\n\r\n**`mcpgateway/templates/admin.html`**\r\n- Removed static Jinja `{% if allow_public_visibility %}…{% endif %}` `disabled` rendering on all public radio inputs; radios are always rendered enabled.\r\n- `window.ALLOW_PUBLIC_VISIBILITY` injected once via `{{ allow_public_visibility | tojson }}`.\r\n\r\n**`mcpgateway/static/admin.js`**\r\n- `updateDefaultVisibility()` now reads `window.ALLOW_PUBLIC_VISIBILITY` and the URL `team_id` param to toggle `disabled`, `opacity-40`, `cursor-not-allowed`, and `line-through` on public radio wrappers dynamically.\r\n- All six edit-modal coerce blocks updated: public visibility is only coerced to `team` when `ALLOW_PUBLIC_VISIBILITY === false` **and** `teamId` is present in the URL.\r\n\r\n**`charts/mcp-stack/values.yaml`**\r\n- Added `ALLOW_PUBLIC_VISIBILITY: \"true\"` entry.\r\n\r\n**Tests**\r\n- `TestPublicVisibilityGuard` (Python): block tests pass `team_id`; new `*_allows_public_when_flag_false_no_team_id` tests confirm global scope is never blocked.\r\n- `tests/js/admin-forms.test.js`: rewrote `ALLOW_PUBLIC_VISIBILITY flag` describe block to call `updateDefaultVisibility()` with `history.replaceState` URL simulation.\r\n- `tests/js/admin-edit-server-selection.test.js`: fixed `mockServerFetch` to include `clone` method; updated coercion tests to reflect global-scope behaviour.\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3861395527",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T14:35:21+00:00",
+      "body": "## Review Summary\n\nRebased onto `main`, resolved 1 merge conflict, squashed 17 commits into 2 clean ones, and fixed several issues.\n\n### Bug Fixed: HTTPException Swallowed in 8 Handlers\n\nThe original PR added `except HTTPException: raise` to only 4 handlers but missed **8 others**. Without this, the visibility guard's `HTTPException(422)` gets caught by the broad `except Exception` and returned as a **500 error** instead of the intended 422.\n\nFixed in: `admin_add_server`, `admin_add_tool`, `admin_edit_tool`, `admin_add_gateway`, `admin_add_resource`, `admin_edit_resource`, `admin_add_prompt`, `admin_edit_prompt`.\n\n### Cleanup Applied\n\n- Reverted unrelated cosmetic changes in `config.py` (~8 string concatenation reformats)\n- Reverted unrelated HTML reformatting in `admin_get_user_edit`\n- Reverted unrelated docstring additions to 3 existing handlers\n- Removed debug `console.log` statements from JS test\n- Fixed misleading `.env.example` comment (\"Block public visibility\" → \"Allow entities to have public visibility\")\n- Added missing `test_create_grpc_service_allows_public_when_flag_false_no_team_id` test\n- Updated `config.py` description to mention team scope restriction\n\n### Design Gap to Discuss\n\nIssue #3286 says _\"no user can create or update any entity with `visibility=public`\"_ (global block), but the PR implements a **narrower team-scoped block** — the guard requires `team_id` to be present:\n```python\nif not settings.allow_public_visibility and visibility == \"public\" and team_id:\n```\n\nThis means global admin scope (no `team_id`) always allows public visibility even with the flag set to `false`. The PR title and description explicitly document this behavior, but it diverges from the issue. **@madhav165** — is this intentional? If so, the issue description should be updated to reflect the team-scoped design.\n\n### Minor Gaps (Non-blocking)\n\n1. **gRPC update guard is dead code**: `GrpcServiceUpdate` schema lacks `team_id`, so `getattr(service, \"team_id\", None)` always returns `None` and the guard never fires for gRPC updates.\n\n2. **Test coverage**: All 22 Python tests and 74 JS tests pass. Coverage is good across all entity types for both block and pass-through scenarios."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "02318610bb771bdc86bac970f5ead5724de37efb",
+      "message": "feat: gate public visibility by ALLOW_PUBLIC_VISIBILITY flag in team scope\n\nAdd ALLOW_PUBLIC_VISIBILITY platform flag (default true) that prevents\nentities from being saved with public visibility when the request is\nteam-scoped (team_id present). Enforced in backend admin handlers, the\nadmin UI (JS dynamic radio gating), and edit modals (legacy-public\ncoercion). Applies to servers, tools, resources, prompts, gateways,\nA2A agents, and gRPC services.\n\nCloses #3286\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-26T14:31:10+00:00"
+    },
+    {
+      "sha": "cc664dcea131317e6a6b250f670f8c342b7367a2",
+      "message": "fix: add missing except HTTPException re-raise in 8 admin handlers, clean up\n\n- Add `except HTTPException: raise` before broad `except Exception` in\n  admin_add_server, admin_add_tool, admin_edit_tool, admin_add_gateway,\n  admin_add_resource, admin_edit_resource, admin_add_prompt, and\n  admin_edit_prompt. Without this, the visibility guard's 422 would be\n  swallowed and returned as a 500.\n- Revert unrelated cosmetic changes (config.py string concatenation\n  reformats, admin_get_user_edit HTML reformatting, docstring additions).\n- Fix .env.example comment to accurately describe the flag behavior.\n- Remove debug console.log statements from JS test.\n- Add missing test_create_grpc_service_allows_public_when_flag_false_no_team_id.\n- Update config.py description to mention team scope restriction.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T14:31:28+00:00"
+    },
+    {
+      "sha": "e628de3968beab502b186d97c5d490d725a435ba",
+      "message": "fix: add missing Raises section to 11 admin handler docstrings\n\nFixes DAR401 flake8 errors for handlers that now re-raise HTTPException\nfrom the public visibility guard.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T14:48:06+00:00"
+    },
+    {
+      "sha": "f91b79a49861d4b30219511f1ff94ca26247291a",
+      "message": "fix: add missing docstring params/returns for flake8 DAR compliance\n\nFix DAR101/DAR201 in plugins framework settings validators,\nplugin manager executor setter, and OAuth router helper.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T14:53:43+00:00"
+    },
+    {
+      "sha": "673272bc4d8dbbbacd102e2d111b4b561cc9f3ea",
+      "message": "style: fix prettier formatting in admin.js\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T14:56:07+00:00"
+    },
+    {
+      "sha": "50b6c732c1981bc02be2787bb716ace6d017e1be",
+      "message": "fix: move visibility guard before try blocks for 100% diff coverage\n\nMove _check_public_visibility_allowed() calls before the enclosing try\nblocks in 8 handlers where the guard was inside a try block but the\nexcept HTTPException clause was in a different try block (dead code).\nRemove the now-unnecessary except HTTPException: raise clauses.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T15:22:25+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 734,
+  "deletions": 33,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:41.327311",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:41.328306",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3293,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3293.json"
+  }
+}

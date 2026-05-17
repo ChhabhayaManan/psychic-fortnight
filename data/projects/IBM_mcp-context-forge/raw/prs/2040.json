@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2040,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2040"
+  },
+  "metadata": {
+    "title": "PR: Configurable MCP Health Check Chain",
+    "state": "closed",
+    "created_at": "2026-01-12T05:45:55+00:00",
+    "updated_at": "2026-01-12T05:51:42+00:00",
+    "closed_at": "2026-01-12T05:51:41+00:00",
+    "merged_at": "2026-01-12T05:51:41+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "performance"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "**Closes:** #2033\r\n**Related:** #1549 (partial mitigation)\r\n\r\n## Summary\r\n\r\nReplaces the heavy `list_tools()` health check with a configurable health check chain. This reduces health check overhead from 30-100ms to 5-10ms and payload size from 10KB-100KB+ to ~50 bytes.\r\n\r\n## Changes\r\n\r\n### Code\r\n- `mcpgateway/config.py` - Added `mcp_session_pool_health_check_methods` and `mcp_session_pool_health_check_timeout` settings\r\n- `mcpgateway/services/mcp_session_pool.py` - Implemented `_run_health_check_chain()` method with fallback support\r\n- `mcpgateway/main.py` - Passes new settings to pool initialization\r\n\r\n### Configuration\r\n- `.env.example` - Added new settings with documentation\r\n- `docker-compose.yml` - Added environment variables\r\n- `docker-compose-debug.yml` - Added environment variables\r\n- `charts/mcp-stack/values.yaml` - Added Helm values\r\n\r\n### Documentation\r\n- `docs/docs/architecture/adr/032-mcp-session-pool.md` - Updated health check section\r\n- `docs/docs/manage/tuning.md` - Added new settings to configuration table\r\n\r\n### Tests\r\n- `tests/unit/mcpgateway/services/test_mcp_session_pool.py` - Updated to test new health check chain\r\n\r\n## New Settings\r\n\r\n| Setting | Default | Description |\r\n|---------|---------|-------------|\r\n| `MCP_SESSION_POOL_HEALTH_CHECK_METHODS` | `[\"ping\", \"skip\"]` | Ordered list of health check methods |\r\n| `MCP_SESSION_POOL_HEALTH_CHECK_TIMEOUT` | `5.0` | Timeout per health check attempt (seconds) |\r\n\r\n### Available Methods\r\n- `ping` - MCP protocol ping (fastest, ~5ms)\r\n- `list_tools` - List tools RPC (30-100ms)\r\n- `list_prompts` - List prompts RPC (30-100ms)\r\n- `list_resources` - List resources RPC (30-100ms)\r\n- `skip` - Skip health check entirely\r\n\r\n### Example Configurations\r\n```bash\r\n# Modern servers (recommended) - try ping, skip if unsupported\r\nMCP_SESSION_POOL_HEALTH_CHECK_METHODS=[\"ping\", \"skip\"]\r\n\r\n# Legacy server support\r\nMCP_SESSION_POOL_HEALTH_CHECK_METHODS=[\"ping\", \"list_tools\", \"skip\"]\r\n\r\n# Maximum performance (no health check)\r\nMCP_SESSION_POOL_HEALTH_CHECK_METHODS=[\"skip\"]\r\n```\r\n\r\n## Impact on #1549 (Spring MCP Server OOM)\r\n\r\nThis change **partially mitigates** issue #1549 by:\r\n\r\n1. **Reducing payload size** - `ping` returns ~50 bytes vs `list_tools` returning 10KB-100KB+ per tool schema. Less data transferred = less memory allocation on both gateway and server.\r\n\r\n2. **Reducing health check frequency impact** - With `skip` option, deployments experiencing memory pressure can disable health checks entirely while investigating root cause.\r\n\r\n3. **Faster health checks** - 5-10ms vs 30-100ms means connections are held for shorter periods.\r\n\r\n**Why it won't fully close #1549:**\r\n- Root cause is likely connection management in 0.9.0 (session pool wasn't available then)\r\n- Spring MCP server may have its own connection handling issues\r\n- SSE connection lifecycle management is separate from health checks\r\n- Upgrading to latest version with session pool enabled is the recommended solution\r\n\r\n## Performance Impact\r\n\r\n| Metric | Before | After |\r\n|--------|--------|-------|\r\n| Health check payload | 10KB-100KB+ | ~50 bytes |\r\n| Health check latency | 30-100ms | 5-10ms |\r\n| Expected RPS improvement | - | +10-15% |\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "55b35e03c91d3921aea7d2a8421c6f99cfa599be",
+      "message": "Healthcheck optimization\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-12T05:42:12+00:00"
+    },
+    {
+      "sha": "4c419b3cda7d9485a1e3fc59e49c2c552dd8f79b",
+      "message": "Healthcheck optimization\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-12T05:44:24+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 162,
+  "deletions": 25,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:18.401637",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:18.403877",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2040,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2040.json"
+  }
+}

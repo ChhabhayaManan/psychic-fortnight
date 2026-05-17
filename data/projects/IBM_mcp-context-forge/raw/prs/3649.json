@@ -1,0 +1,164 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3649,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3649"
+  },
+  "metadata": {
+    "title": "fix[Metrics]:Fix Metrics Returning 0 After Cleanup + Extend include_metrics Support",
+    "state": "closed",
+    "created_at": "2026-03-12T11:21:37+00:00",
+    "updated_at": "2026-03-19T16:31:06+00:00",
+    "closed_at": "2026-03-19T16:31:03+00:00",
+    "merged_at": "2026-03-19T16:31:03+00:00",
+    "author": "rakdutta",
+    "labels": [
+      "bug",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\r\n\r\nFixes #3598 where metrics API returned 0 after raw metrics cleanup. The API only queried the raw metrics table, ignoring hourly aggregates. Also extends `include_metrics=true` support to Resources, Prompts, and Servers (Tools already had this).\r\n\r\n## Problem\r\n\r\nWhen calling `/servers/{server_id}/tools?include_metrics=true`, `total_executions` returned 0 after raw metrics were cleaned up. Historical data existed in `tool_metrics_hourly` but wasn't being queried.\r\n\r\n## Solution\r\n\r\n### 1. Centralized Helper Function\r\nCreated `_compute_metrics_summary()` in `mcpgateway/db.py` (~230 lines) that:\r\n- Queries both raw and hourly metrics tables\r\n- Uses time-based partitioning (current hour = raw only, completed hours = hourly only)\r\n- Prevents double-counting\r\n- Handles timezone normalization\r\n\r\n### 2. Updated 4 Models\r\nApplied fix to Tool, Resource, Prompt, and Server models:\r\n- Added `metrics_hourly` relationship\r\n- Updated `metrics_summary` property to use helper function\r\n\r\n### 3. Extended API Support\r\nAdded `include_metrics=true` parameter to:\r\n- `GET /servers/{server_id}/resources?include_metrics=true`\r\n- `GET /servers/{server_id}/prompts?include_metrics=true`\r\n- `GET /servers?include_metrics=true`\r\n\r\n## Files Changed\r\n\r\n- `mcpgateway/db.py`: Helper function + 4 model updates (+554/-298)\r\n- `mcpgateway/main.py`: Added `include_metrics` to 3 endpoints (+13)\r\n- `mcpgateway/services/{resource,prompt,server}_service.py`: Pass-through support (+12/-3)\r\n- `tests/unit/mcpgateway/test_metrics_aggregation_fix.py`: **NEW** comprehensive tests (+258)\r\n- `tests/unit/mcpgateway/test_db.py`: Updated tests (+144)\r\n\r\n**Total**: 8 files, 925 insertions(+), 298 deletions(-)\r\n\r\n## Benefits\r\n\r\n- **Bug Fixed**: Metrics correctly aggregated from both tables\r\n- **Code Reduced**: 400+ duplicated lines → 230 centralized\r\n- **Consistent API**: All 4 services support `include_metrics=true`\r\n- **Maintainable**: Single function to update instead of 4 places\r\n- **Future-proof**: Adding metrics to new models now takes 5 lines vs 100+\r\n\r\n## Testing\r\n\r\n```bash\r\n# All endpoints now support include_metrics=true\r\ncurl \"http://localhost:4444/servers/{id}/tools?include_metrics=true\" -H \"Authorization: Bearer $TOKEN\"\r\ncurl \"http://localhost:4444/servers/{id}/resources?include_metrics=true\" -H \"Authorization: Bearer $TOKEN\"\r\ncurl \"http://localhost:4444/servers/{id}/prompts?include_metrics=true\" -H \"Authorization: Bearer $TOKEN\"\r\ncurl \"http://localhost:4444/servers?include_metrics=true\" -H \"Authorization: Bearer $TOKEN\"\r\n```\r\n\r\nExpected metrics response:\r\n```json\r\n{\r\n  \"total_executions\": 150,\r\n  \"successful_executions\": 145,\r\n  \"failed_executions\": 5,\r\n  \"failure_rate\": 0.033,\r\n  \"avg_response_time\": 0.45,\r\n  \"last_execution_time\": \"2026-03-12T12:30:00Z\"\r\n}\r\n```\r\n\r\n### Verification Scenarios\r\n\r\nAll scenarios now correctly aggregate metrics from both tables:\r\n\r\n#### Scenario 1: No Raw Cleanup (`METRICS_DELETE_RAW_AFTER_ROLLUP=false`)\r\n- ✅ Counts: Raw metrics from current hour ONLY\r\n- ✅ Counts: All hourly aggregates\r\n- ✅ No double-counting despite raw table having old data (time-based partitioning)\r\n\r\n#### Scenario 2: Delayed Cleanup (`METRICS_DELETE_RAW_AFTER_ROLLUP=true`, delay=1hr)\r\n- ✅ Counts: Raw metrics from current hour ONLY\r\n- ✅ Counts: All hourly aggregates\r\n- ✅ No double-counting during cleanup delay window (time-based partitioning)\r\n\r\n#### Scenario 3: Immediate Cleanup (`METRICS_DELETE_RAW_AFTER_ROLLUP=true`, delay=0)\r\n- ✅ Counts: Raw metrics from current hour (if any)\r\n- ✅ Counts: All hourly aggregates\r\n- ✅ **Fixes #3598**: Historical data correctly retrieved from hourly tables\r\n\r\n## Configuration\r\n\r\nRelevant environment variables (no changes required):\r\n- `METRICS_DELETE_RAW_AFTER_ROLLUP=true` - Enable raw metrics cleanup\r\n- `METRICS_DELETE_RAW_AFTER_ROLLUP_HOURS=1` - Hours to wait after rollup before cleanup\r\n- `METRICS_ROLLUP_INTERVAL_HOURS=1` - Hourly rollup interval\r\n\r\n\r\n## Test Coverage\r\n\r\n- Added 258 lines of new tests covering current hour, completed hours, mixed scenarios, and edge cases\r\n- Updated existing tests (+144 lines)\r\n- All tests passing ✅\r\n\r\n---\r\n\r\nCloses #3598\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3965430306",
+      "author": "MohanLaksh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-18T06:37:02+00:00",
+      "body": "# Code Review: PR #3649 - Fix Metrics Returning 0 After Cleanup + Extend include_metrics Support\n\n**Date:** 2026-03-18  \n**PR Link:** https://github.com/IBM/mcp-context-forge/pull/3649  \n**Issue:** Fixes #3598  \n\n---\n\n## Executive Summary\n\n✅ **APPROVED - Ready to Merge**\n\nThis PR successfully fixes a critical bug where metrics APIs returned 0 after raw metrics cleanup, and extends `include_metrics=true` support to Resources, Prompts, and Servers. The implementation is well-designed, thoroughly tested, and includes performance optimizations.\n\n**Key Stats:**\n- **Files Changed:** 16 files (+1,698/-376 lines)\n- **Test Coverage:** 400+ new test lines\n- **Performance Impact:** 94-97% query reduction for list operations\n- **Code Quality:** Eliminates 400+ lines of duplication with centralized helper\n\n---\n\n## What This PR Does\n\n### Problem Solved\nWhen calling `/servers/{server_id}/tools?include_metrics=true`, the API returned `total_executions: 0` after raw metrics were cleaned up. The system only queried raw metrics tables, ignoring hourly aggregates containing historical data.\n\n### Solution Implemented\n\n1. **Centralized Helper Function** (`_compute_metrics_summary()` ~230 lines in `mcpgateway/db.py`)\n   - Queries both raw AND hourly metrics tables\n   - Time-based partitioning: current hour = raw only, completed hours = hourly only\n   - Prevents double-counting through smart time boundaries\n   - Handles timezone-aware/naive datetime comparisons\n   - Supports both in-memory (loaded relationships) and SQL query paths\n\n2. **Updated 4 ORM Models** (Tool, Resource, Prompt, Server)\n   - Added `metrics_hourly` relationship to each model\n   - Updated `metrics_summary` property to use centralized helper\n   - Reduced 400+ duplicated lines to 230 centralized lines\n\n3. **Extended API Support**\n   - Added `include_metrics=true` parameter to:\n     - `GET /servers/{server_id}/resources?include_metrics=true`\n     - `GET /servers/{server_id}/prompts?include_metrics=true`\n     - `GET /servers?include_metrics=true`\n   - Tools already had this feature; now all 4 services are consistent\n\n4. **Performance Optimizations**\n   - Added `selectinload()` for both `metrics` and `metrics_hourly` relationships\n   - Created composite indexes: `(entity_id, timestamp)` for time-partitioned queries\n   - Reduces 51-101 queries down to 3 queries for list operations\n\n5. **Database Migration**\n   - Alembic migration `20a0e0538ac5` adds composite indexes\n   - Idempotent with proper table/index existence checks\n   - Backward compatible (indexes are additive only)\n\n---\n\n## Code Quality Assessment\n\n### ✅ Strengths\n\n1. **Excellent Architecture**\n   - Time-partitioning strategy elegantly prevents double-counting\n   - Clear separation between current hour (raw) and completed hours (hourly)\n   - Handles edge cases (timezone normalization, missing data)\n\n2. **DRY Principle Applied**\n   - Centralized logic eliminates massive code duplication\n   - Single source of truth for metrics aggregation\n   - Easy to maintain and extend to new entity types\n\n3. **Comprehensive Testing**\n   - 258 lines of new tests in `test_metrics_aggregation_fix.py`\n   - 161 lines in `test_metrics_api_coverage.py`\n   - 144 lines of updated tests in `test_db.py`\n   - 221 lines across service tests\n   - Covers: raw-only, hourly-only, mixed scenarios, edge cases\n\n4. **Performance Optimized**\n   - N+1 query prevention via eager loading\n   - Database indexes for PostgreSQL optimization\n   - Expected: 94-97% query reduction, <50ms response times\n\n5. **Well Documented**\n   - Clear docstrings with ASCII diagrams\n   - Inline comments explaining time-partitioning logic\n   - Comprehensive PR description\n\n6. **Follows Standards**\n   - Type hints throughout\n   - Proper error handling\n   - Consistent with project coding standards\n\n### ✅ Security Review\n\n- ✅ No new authentication/authorization paths\n- ✅ No exposure of sensitive data\n- ✅ Follows existing RBAC patterns\n- ✅ Token scoping properly maintained\n- ✅ No SQL injection risks (uses ORM)\n\n### ✅ Migration Review\n\n- **Revision ID:** 20a0e0538ac5\n- **Parent:** 64acf94cb7f2 ✅ (correct, single head maintained)\n- **Idempotent:** ✅ Checks for table/index existence before creating\n- **Backward Compatible:** ✅ Indexes are additive only\n- **Rollback Safe:** ✅ Proper `downgrade()` implementation\n\n---\n\n## Test Coverage Analysis\n\n### New Test Files\n\n**`test_metrics_aggregation_fix.py` (258 lines)**\n- ✅ Only raw metrics scenario\n- ✅ Only hourly metrics scenario (main fix validation)\n- ✅ Mixed raw + hourly without double-counting\n- ✅ Edge cases and timezone handling\n\n**`test_metrics_api_coverage.py` (161 lines)**\n- ✅ Resources with `include_metrics=true`\n- ✅ Prompts with `include_metrics=true`\n- ✅ Servers with `include_metrics=true`\n\n### Updated Tests\n- ✅ `test_db.py` (+97 lines): Model-level metrics tests\n- ✅ Service tests (+221 lines): All 4 services updated\n\n---\n\n## Performance Impact\n\n### Query Count (50 entities with include_metrics=true)\n\n| Service | Before | After | Improvement |\n|---------|--------|-------|-------------|\n| **Tools** | 51 queries | 3 queries | **94% reduction** |\n| **Resources** | 101 queries | 3 queries | **97% reduction** |\n| **Prompts** | 101 queries | 3 queries | **97% reduction** |\n| **Servers** | 101 queries | 3 queries | **97% reduction** |\n\n### Response Times\n- **Before:** 2-5 seconds (with N+1 queries)\n- **After:** <50ms (with eager loading + indexes)\n- **Improvement:** 99%+ faster\n\n---\n\n## Important Clarification: Regarding Shared Tools Across Virtual Servers\n\n\n### Answer: Metrics Are Tool-Level, Not Per-Server. (Same for prompt/resource/servers)\n\n**Current Behavior (By Design):** Example: Tool Use Metrics\n\nWhen the same tool is shared across multiple virtual servers, **metrics are aggregated at the TOOL level, not per-server**.\n\n#### How It Works:\n\n1. **Metrics Storage:**\n   - `ToolMetric` table has: `tool_id` (FK to tools table)\n   - **No `server_id` column** in the metrics table\n   - Metrics are recorded per tool execution, regardless of which server invoked it\n\n2. **Many-to-Many Relationship:**\n   ```\n   Tool <---> server_tool_association <---> Server\n   ```\n   - One tool can belong to multiple servers\n   - One server can have multiple tools\n\n3. **Metrics Aggregation:**\n   - When you call `/servers/{server_id}/tools?include_metrics=true`\n   - You get ALL metrics for each tool, not just metrics from that specific server\n   - The `metrics_summary` property queries: `WHERE tool_id = ?` (no server filter)\n\n#### Example Scenario:\n\n```\nTool \"git_commit\" (ID: abc123)\n├── Associated with Server A\n├── Associated with Server B\n└── Total executions: 100\n    ├── 60 from Server A (not tracked separately)\n    └── 40 from Server B (not tracked separately)\n\nGET /servers/A/tools?include_metrics=true\nReturns: tool \"git_commit\" with total_executions = 100\n\nGET /servers/B/tools?include_metrics=true\nReturns: tool \"git_commit\" with total_executions = 100\n```\n\n#### Is This a Problem?\n\n**This is the EXISTING behavior** - not introduced by this PR. The PR maintains this design.\n\n**Pros:**\n- ✅ Simpler schema (no server_id in metrics tables)\n- ✅ Tool-level metrics useful for understanding overall tool performance\n- ✅ Consistent with the tool-centric data model\n\n**Cons:**\n- ⚠️ Cannot distinguish which server generated which metrics\n- ⚠️ Cannot answer \"How many times was this tool called via Server A?\"\n- ⚠️ Metrics appear duplicated when same tool is in multiple servers\n\n**Recommendation:** This is acceptable for the current PR. If per-server metrics are needed, file a separate enhancement issue to add `server_id` to metrics tables.\n\n---\n\n## Files Changed Summary\n\n| File | Purpose | Lines Changed |\n|------|---------|---------------|\n| `mcpgateway/db.py` | Helper function + 4 model updates | +554/-298 |\n| `mcpgateway/main.py` | Added `include_metrics` to 3 endpoints | +13/-2 |\n| `mcpgateway/services/resource_service.py` | Pass-through support | +23/-20 |\n| `mcpgateway/services/prompt_service.py` | Pass-through support | +19/-19 |\n| `mcpgateway/services/server_service.py` | Pass-through support | +20/-40 |\n| `mcpgateway/services/tool_service.py` | Minor update | +1/-0 |\n| `mcpgateway/alembic/versions/20a0e0538ac5_*.py` | Composite indexes migration | +113/-0 |\n| `tests/unit/mcpgateway/test_metrics_aggregation_fix.py` | **NEW** comprehensive tests | +258/-0 |\n| `tests/unit/mcpgateway/services/test_metrics_api_coverage.py` | **NEW** API coverage tests | +161/-0 |\n| `tests/unit/mcpgateway/test_db.py` | Updated tests | +97/-47 |\n| Service test files (4 files) | Updated service tests | +221/-1 |\n\n**Total:** 16 files, 1,698 insertions(+), 376 deletions(-)\n\n---\n\n## Verification Checklist\n\n- ✅ Alembic migration has correct parent (64acf94cb7f2)\n- ✅ Single migration head maintained\n- ✅ No security vulnerabilities introduced\n- ✅ Performance optimizations implemented (eager loading + indexes)\n- ✅ Comprehensive test coverage (>400 new test lines)\n- ✅ Code follows project standards (type hints, docstrings, formatting)\n- ✅ Backward compatible (additive changes only)\n- ✅ Fixes the reported issue (#3598)\n- ✅ Extends functionality consistently across all entity types\n- ✅ Maintains existing behavior for shared tools (tool-level metrics)\n\n---\n\n## Minor Suggestions (Non-Blocking)\n\n1. **Documentation:** Consider adding a brief architecture doc explaining the time-partitioning strategy for future maintainers\n\n2. **Monitoring:** Add metrics/logging for the helper function to track:\n   - How often raw vs hourly tables are queried\n   - Query performance distribution\n\n3. **Future Enhancement:** Consider caching `metrics_summary` results with short TTL (5-10 min) for frequently accessed entities\n\n4. **Future Enhancement:** If per-server metrics are needed, file a separate issue to add `server_id` to metrics tables\n\n---\n\n## Final Recommendation\n\n### ✅ **APPROVE AND MERGE**\n\nThis is a high-quality PR that:\n- ✅ Fixes a critical production bug (#3598)\n- ✅ Improves code maintainability significantly (400+ lines → 230 centralized)\n- ✅ Adds comprehensive test coverage (>400 new test lines)\n- ✅ Includes performance optimizations (94-97% query reduction)\n- ✅ Follows all project standards and best practices\n- ✅ Maintains existing architectural decisions (tool-level metrics)\n- ✅ Is production-ready with no blocking issues\n\n**The implementation is solid, well-tested, and ready for production deployment.**\n\n---"
+    },
+    {
+      "id": "3976148210",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-19T15:54:25+00:00",
+      "body": "Reviewed and approved. Changes look correct and well-tested.\n\n**What was done during review:**\n\n1. **Rebased** cleanly onto main (15 commits, no conflicts).\n\n2. **Fixed alembic dual-head**: Migration `20a0e0538ac5` now correctly chains off `abf8ac3b6008` (the viewer permissions migration merged to main). Added standard `# pylint: disable=no-member`.\n\n3. **Fixed under-counting when rollup hasn't run** (Codex finding #1): The original PR dropped raw metrics from completed hours unconditionally, assuming hourly aggregates always exist. Now:\n   - **In-memory path**: Uses a covered-hours set — raw metrics are only skipped if their hour has a corresponding hourly aggregate.\n   - **SQL path**: Uses `max_hour_start` boundary — hourly aggregates cover up to `max_hour_start + 1h`, raw metrics cover everything after.\n\n4. **Fixed `last_execution_time` inconsistency** (Codex finding #2): Changed from `hour_start + 1h` to `hour_start` for hourly-sourced timestamps, consistent with `aggregate_metrics_combined()` in `metrics_query_service.py`.\n\n5. **Fixed caplog test**: Added logger name to `caplog.at_level()` in `test_streamablehttp_transport.py`.\n\n**Verification**: Full test suite passes (14855 passed, 488 skipped). `mcpgateway/db.py` has 100% coverage."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d79e0d2c2900174cf99c9ed16a54f46435216634",
+      "message": "metric count fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-12T07:06:57+00:00"
+    },
+    {
+      "sha": "463881546671d14937d557cba93a2c46e44f427e",
+      "message": "help,fix for others services\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-12T08:29:55+00:00"
+    },
+    {
+      "sha": "b94e1ed75d466591962bbaaa3c687c9caac4b21a",
+      "message": "metrics\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-12T09:02:25+00:00"
+    },
+    {
+      "sha": "b7572925b09456cfa7d8f553df57e71a02933484",
+      "message": "test fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-12T11:15:31+00:00"
+    },
+    {
+      "sha": "99a165b5ebb04f5692f538e74625209b91d07fbd",
+      "message": "test case\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-12T11:19:39+00:00"
+    },
+    {
+      "sha": "cd49020f60d2a1a029a5c372974720850570c27f",
+      "message": "performance fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-13T11:52:46+00:00"
+    },
+    {
+      "sha": "193694ee8da17b3961716e8be72448d684e68ff4",
+      "message": "remove docstroing\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-13T11:58:39+00:00"
+    },
+    {
+      "sha": "3680f9491c62b2950d5bf213f9078a9e6061b214",
+      "message": "test cases\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-13T12:34:29+00:00"
+    },
+    {
+      "sha": "03b9c1704568d9c6a84ab90f11b7b788bb62d6e7",
+      "message": "alembic\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-16T14:11:05+00:00"
+    },
+    {
+      "sha": "c1519ae79ea31fdd233159f9a1ac16a1410aeb05",
+      "message": "md remove\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-16T14:12:38+00:00"
+    },
+    {
+      "sha": "90dd24d514b27b6e088e65967bc29963a8d10195",
+      "message": "docstring\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-16T14:26:40+00:00"
+    },
+    {
+      "sha": "0686a387bfeaf0ab6c2f31448fe69e0981a70400",
+      "message": "metric roll\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-17T08:30:17+00:00"
+    },
+    {
+      "sha": "0226a07ee5b04237c7edffb028711e030a89f2ff",
+      "message": "doc test\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-17T08:48:37+00:00"
+    },
+    {
+      "sha": "e6f7dbb2f71765dc5fe40707cd62b62514d1dcbf",
+      "message": "alembic\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-17T09:34:44+00:00"
+    },
+    {
+      "sha": "77ae69b3078e7ffdbad45adf163149bb0c4a938e",
+      "message": "test coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-18T05:24:58+00:00"
+    },
+    {
+      "sha": "1c065a861d47b6c041be67a591db31d735adbe4e",
+      "message": "fix(alembic): resolve dual-head by rebasing migration onto abf8ac3b6008\n\nUpdate down_revision from 64acf94cb7f2 to abf8ac3b6008 to chain after\nthe viewer permissions migration that was merged to main. Also add\nstandard pylint disable for alembic op proxy.\n\nCloses #3598\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T15:13:54+00:00"
+    },
+    {
+      "sha": "9fc4af28ef81a98e5171a782a2a65f54e53ed297",
+      "message": "fix(metrics): resolve under-counting and last_execution_time inconsistency\n\nAddress two issues found during code review:\n\n1. In-memory path now uses covered-hours set instead of hard current_hour_start\n   cutoff, so raw metrics from completed hours without hourly aggregates are\n   correctly counted (handles rollup lag, disabled rollup, failed rollup).\n\n2. SQL path uses max_hour_start boundary: hourly data covers up to\n   max_hour_start + 1h, raw data covers everything after.\n\n3. last_execution_time now uses hour_start (not hour_start + 1h) for hourly\n   data, consistent with aggregate_metrics_combined() in metrics_query_service.\n\n4. Fix caplog logger capture in test_streamablehttp_transport.py.\n\nCloses #3598\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T15:54:03+00:00"
+    },
+    {
+      "sha": "06281536cc8b5fe1609cf3b6d73294d99aadfee0",
+      "message": "fix(metrics): remove unused variables flagged by flake8/pylint\n\nRemove now and current_hour_start from _compute_metrics_summary top\nlevel — no longer needed after switching to covered-hours approach\nfor in-memory path and max_hour_start boundary for SQL path.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T16:29:56+00:00"
+    }
+  ],
+  "files_changed": 17,
+  "additions": 1686,
+  "deletions": 369,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:16.864041",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:16.865739",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3649,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3649.json"
+  }
+}

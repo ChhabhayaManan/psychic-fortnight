@@ -1,0 +1,47 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4485,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4485"
+  },
+  "metadata": {
+    "title": "fix: serialize delete_tool with row lock and propagate ToolNotFoundError",
+    "state": "open",
+    "created_at": "2026-04-28T05:31:28+00:00",
+    "updated_at": "2026-04-28T05:31:30+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "jonpspri",
+    "labels": [
+      "bug",
+      "python"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Add `get_for_update(db, DbTool, tool_id, nowait=True)` to `delete_tool()`, mirroring the existing pattern in `set_tool_state()`. This serializes concurrent associate/delete operations on the same tool — callers see a 409 `ToolLockConflictError` instead of an opaque 500 from a downstream FK violation when an INSERT into `server_tool_association` races with the association cleanup from #4263.\n- Fix a pre-existing exception-propagation bug: `delete_tool()`'s catch-all `except Exception` was wrapping `ToolNotFoundError` into `ToolError`, preventing `main.py` from returning 404 (always fell through to the 400 catch-all). Add explicit re-raises for `ToolNotFoundError` and `ToolLockConflictError`.\n- Wire `ToolLockConflictError` through the two `delete_tool` callers: `admin.py` (redirect with friendly message, matching `admin_set_tool_state`) and `main.py` (`HTTPException(409)`, matching `set_tool_state`).\n\n## Context\n\nSplit out from #4263 during review — these are behavioral changes beyond the scope of the contributor's FK-constraint fix and belong in their own PR with their own review cycle.\n\nDiscovered during the #4263 review:\n- `delete_tool()` was the only tool-mutation method that didn't use `get_for_update()` (compare `set_tool_state` at L3388, register/upsert paths at L6016/6026/6037/6106)\n- The `ToolNotFoundError` → `ToolError` wrapping bug was pre-existing but only noticeable once the exception-handler block was being edited\n\n## Changes\n\n| File | Change |\n|---|---|\n| `mcpgateway/services/tool_service.py` | `db.get()` → `get_for_update(nowait=True)` in `delete_tool()`; add `except ToolLockConflictError` and `except ToolNotFoundError` re-raises; update doctest to use `patch(\"...get_for_update\")` |\n| `mcpgateway/admin.py` | `admin_delete_tool` catches `ToolLockConflictError` with a friendly retry message (mirrors `admin_set_tool_state`) |\n| `mcpgateway/main.py` | `delete_tool` route maps `ToolLockConflictError` → `HTTPException(409)` (mirrors `set_tool_state`) |\n| `tests/unit/.../test_tool_service.py` | `test_delete_tool_not_found` tightened to assert `ToolNotFoundError` (was `ToolError`); new `test_delete_tool_lock_conflict` |\n\n## Testing\n\n- 32 delete-related unit tests pass (including the new `test_delete_tool_lock_conflict`)\n- `delete_tool` doctest passes\n- Existing PG-only integration test `test_concurrent_tool_delete_operations` will exercise the new `nowait=True` path under real row locking\n\nCloses #4261 (residual concurrency UX gap from the original bug report path)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "60ed0b1bf17513e8af04a8f33733ed47947aab0d",
+      "message": "fix: serialize delete_tool with row lock and propagate ToolNotFoundError\n\nUse get_for_update(nowait=True) when fetching the tool to delete, mirroring\nthe existing pattern in set_tool_state. This serializes concurrent\nassociate/delete operations on the same tool, surfacing contention as a 409\nToolLockConflictError instead of an opaque 500 from a downstream FK violation\nwhen an INSERT into server_tool_association races with the association\ncleanup added in the previous commit.\n\nAlso fix a pre-existing exception-propagation bug surfaced while in the area:\ndelete_tool's catch-all 'except Exception' was wrapping ToolNotFoundError into\nToolError, which prevented the FastAPI route in main.py from returning 404\n(it always fell through to the 400 catch-all). Add explicit re-raises for\nToolNotFoundError and ToolLockConflictError so admin.py and main.py can map\nthem to 4xx correctly.\n\nWire ToolLockConflictError through the two delete_tool callers:\n  - admin.py admin_delete_tool: redirect with a friendly error message,\n    matching the existing pattern in admin_set_tool_state.\n  - main.py delete_tool: HTTPException(409), matching the existing pattern\n    in set_tool_state.\n\nAdd a unit test for the lock-conflict path and tighten the existing\ntest_delete_tool_not_found to assert ToolNotFoundError directly rather than\nrelying on the (now-incorrect) ToolError parent-class match.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T19:22:52+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 99,
+  "deletions": 59,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:23.259857",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:23.262146",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4485,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4485.json"
+  }
+}

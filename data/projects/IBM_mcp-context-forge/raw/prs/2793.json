@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2793,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2793"
+  },
+  "metadata": {
+    "title": "fix: new user with admin privileges cannot log into admin UI",
+    "state": "closed",
+    "created_at": "2026-02-09T17:24:07+00:00",
+    "updated_at": "2026-02-10T01:52:28+00:00",
+    "closed_at": "2026-02-10T01:52:27+00:00",
+    "merged_at": "2026-02-10T01:52:27+00:00",
+    "author": "marekdano",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2741 \r\n\r\n## 📌 Summary\r\nNew users created with the \"Administrator privileges\" as `is_admin=True` are not given the required user_role mapping to grant full privileges. And hence cannot access the admin dashboard in the UI. \r\n\r\nCreating a user with is_admin=true via the Admin API returned HTTP 201 with the admin flag set, but the user_roles table remained empty. Subsequent access to /admin/ returned 403 \"Insufficient permissions. Required: admin.dashboard.\" message\r\n\r\n## 🔁 Reproduction Steps\r\n1. Create a new user with administrator privileges or give a user an admin privilege\r\n2. Attempt to access the admin dashboard in the UI\r\n3. Observe the \"Insufficient permissions\" error\r\n\r\n## 🐞 Root Cause\r\nThere are two independent authorization layers that are out of sync:\r\n\r\nis_admin flag on the EmailUser model — a simple boolean, set during create_user()\r\nuser_roles table — RBAC role assignments checked by PermissionService.get_user_permissions()\r\nThe entire Admin UI uses allow_admin_bypass=False on all @require_permission() decorators (100+ endpoints). This means the is_admin boolean shortcut is intentionally bypassed for the UI — only actual user_roles entries are checked.\r\n\r\nHowever, EmailAuthService.create_user() (email_auth_service.py:301-389) only sets the is_admin flag and never creates a corresponding user_roles entry. The platform_admin role assignment only happens during bootstrap (bootstrap_db.py:334-348).\r\n\r\nThis affects all non-bootstrap user creation paths:\r\n\r\nAdmin API: POST /auth/email/admin/users (email_auth.py:588)\r\nAdmin UI: POST /admin/users (admin.py:5978)\r\nSSO auto-creation only gets roles if SSO group mapping is configured\r\n\r\n## 💡 Fix Description\r\nFixed the synchronization between `is_admin` boolean flag and `platform_admin` role assignments in the RBAC system. Previously, when a user's is_admin flag changed, the corresponding role assignment in the `user_roles` table was not updated, causing inconsistencies.\r\n\r\nChanges Made\r\n\r\n1. `mcpgateway/services/email_auth_service.py`\r\n\r\n    In `create_user()` method (lines ~400-430):\r\n    - Added automatic platform_admin role assignment when is_admin=True\r\n    - Uses RoleService to check for existing assignments and create new ones if needed\r\n    - Gracefully handles errors (logs warnings but doesn't fail user creation)\r\n    - Logs success/failure of role assignment\r\n\r\n    In `update_user()` method (lines ~1095-1130):\r\n    - Added role synchronization when is_admin flag changes\r\n    - Promotion (is_admin=True): Assigns platform_admin role if not already assigned or inactive\r\n    - Demotion (is_admin=False): Revokes platform_admin role\r\n    - Gracefully handles errors (logs warnings but doesn't fail user update)\r\n\r\nBoth methods use `RoleService.assign_role_to_user()` and `RoleService.revoke_role_from_user()` to maintain consistency.\r\n    \r\n2. New Test File: `tests/unit/mcpgateway/services/test_email_auth_service_admin_role_sync.py`\r\n\r\n    Created comprehensive test coverage for admin role synchronization:\r\n\r\n    Tests for `create_user()`:\r\n    - test_create_user_admin_role_not_found - Handles missing platform_admin role\r\n    - test_create_user_admin_role_assignment_exception - Handles role assignment failures\r\n    - test_create_user_admin_role_already_assigned - Skips assignment if already exists\r\n    - test_create_user_admin_role_successful_assignment - Successfully assigns role\r\n\r\n   Tests for `update_user()`:\r\n    - test_update_user_admin_role_not_found - Handles missing platform_admin role\r\n    - test_update_user_revoke_admin_role - Successfully revokes role on demotion\r\n    - test_update_user_assign_admin_role_inactive_assignment - Reactivates inactive assignments\r\n    - test_update_user_admin_role_sync_exception - Handles role sync failures\r\n\r\nAdded comprehensive test coverage to cover all lines added to the functions.\r\n\r\nhttps://github.com/user-attachments/assets/a4dc86aa-7241-4be6-9743-2294beb7c2b0\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 87                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "b837d2a19c02de8c546f2be07fbb7376177a853b",
+      "message": "fix: user with admin privilege can logged into admin UI\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-09T16:51:54+00:00"
+    },
+    {
+      "sha": "6f48461abf551a2d452cfc99a3abb05abb78701a",
+      "message": "fix: lint and formatting fixes for admin role sync tests\n\nFix isort import ordering (add section comments), black formatting,\nand flake8 N806 naming convention (MockRoleService → mock_role_service_cls).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-10T01:44:43+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 329,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:21.767558",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:21.773259",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2793,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2793.json"
+  }
+}

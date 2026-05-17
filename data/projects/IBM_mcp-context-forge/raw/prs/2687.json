@@ -1,0 +1,162 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2687,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2687"
+  },
+  "metadata": {
+    "title": "fix: reduce idle transactions in admin/aggregation",
+    "state": "closed",
+    "created_at": "2026-02-04T01:19:35+00:00",
+    "updated_at": "2026-02-05T20:34:52+00:00",
+    "closed_at": "2026-02-05T20:34:52+00:00",
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "revisit"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\nThis PR fixes the performance regression under load by tightening DB session lifecycle and reconciling missing indexes on freshly bootstrapped databases.\n\n## Key changes\n- Bootstrap/migrations: ensure empty DBs get migration-only indexes by stamping the previous head and running `alembic upgrade head`; add a reconciliation migration that creates any missing indexes (skips `idx_a2a_agents_tags` because Postgres can’t B-tree JSON).\n- Session lifecycle: release transactions before async I/O across resource/tool/server/prompt/team/gateway services; commit after heavy log/tag query fetches before Python-side aggregation; avoid shadowing the injected DB session in admin observability endpoints (with a safe fallback for direct test calls).\n- Config/docs/deploy: document and wire `PERMISSION_AUDIT_ENABLED` (default `false`) in config, `.env.example`, helm values/schema, docker-compose, and the configuration docs.\n- Tests: update migration/observability/unit tests to reflect the bootstrap + session behavior changes.\n\n## Why\nFresh DBs created via `create_all()` were missing migration-defined indexes, and several hot paths held transactions open during async work or Python loops. Both issues led to idle-in-transaction connections and throughput drops under load.\n\n## Testing\n- make doctest\n- make test\n- make flake8\n- make pylint\n\nCloses #2660\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "177e23e690af14ae70601ab40f910187f260a4be",
+      "message": "fix: close db sessions in routes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-03T11:06:47+00:00"
+    },
+    {
+      "sha": "a85538a02314c6b84cc399ecf0433b8228929bc5",
+      "message": "chore: interim db bootstrap and test updates\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-03T20:56:15+00:00"
+    },
+    {
+      "sha": "ce5cb8aa6f038202765935aaf44a185fb6a044ea",
+      "message": "fix(perf): release DB transactions before async I/O in service layer\n\n- Remove db.refresh() after commit in all CRUD services to prevent\n  implicit transactions held open during cache invalidation and\n  notification async I/O\n- Convert ORM objects to read models before commit so no lazy loads\n  occur after transaction release\n- Change audit_trail db=db to db=None to avoid session references\n  during structured logging\n- Use fresh_db_session() in RBAC permission decorators instead of\n  reusing the request session\n- Cache team member count before commit in team creation\n- Add _member_count_cached support to EmailTeam.get_member_count()\n\nCloses #2660\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-04T00:01:36+00:00"
+    },
+    {
+      "sha": "dae07a91f5eece296d1141dac0f2c736e61fca48",
+      "message": "fix: avoid idle transactions in admin/aggregation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-04T01:19:21+00:00"
+    },
+    {
+      "sha": "eaa7c55d7f530a1c0b2f349f917b407010a5b5cc",
+      "message": "fix: resolve pylint errors in permission and team management services\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-04T02:11:04+00:00"
+    },
+    {
+      "sha": "d73c54d342b770739c357a7dacff8dbe511e4cc1",
+      "message": "fix(perf): revert double-session and double-commit patterns in routes\n\nRemove explicit db.commit()/db.close() calls from route handlers and\nadmin endpoints — get_db() dependency already handles session cleanup.\nRevert RBAC middleware from always using fresh_db_session() back to\npreferring the existing request session with fresh fallback. These\npatterns doubled DB sessions per request and caused RPS to drop from\n~2000 to ~1200.\n\nPreserves service layer flush/commit pattern and db=None audit trail.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-04T07:27:46+00:00"
+    },
+    {
+      "sha": "17816d073fc23bcd6bb5fdd1df2bce540bc155c8",
+      "message": "Update auth cache - fix\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-04T08:09:34+00:00"
+    },
+    {
+      "sha": "095a5a7b156d0a4ea3bc89b37049542df79fa332",
+      "message": "fix(perf): QueuePool, index ordering, bootstrap indexes, streaming DB leak\n\n- Switch docker-compose from NullPool to QueuePool with pre_ping to\n  eliminate per-request TCP + SCRAM-SHA-256 connection overhead that was\n  holding the GIL and halving throughput\n- Increase PgBouncer CPU limits (2→4 cores) to handle higher TPS\n- Fix _index_exists_on_columns to compare column lists in order rather\n  than as sets, since B-tree index column order matters for query planning\n- Add _ensure_performance_indexes to bootstrap_db so migration-only\n  indexes are created regardless of migration path\n- Pass shared DB session in token_scoping middleware to avoid extra\n  session creation on public-only token paths\n- Release DB connection before long-lived streaming in llm_proxy_service\n  to prevent session leaks during SSE responses\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T00:30:45+00:00"
+    },
+    {
+      "sha": "9324a2c055d7e31351a1ceb8418d7e60132d8e1b",
+      "message": "fix(perf): reduce PgBouncer overhead - RESET ALL, disable pre_ping\n\n- Change server_reset_query from DISCARD ALL to RESET ALL, eliminating\n  ~3000 heavy reset statements/sec. DISCARD ALL resets prepared\n  statements, temp tables, and search paths unnecessarily since\n  SQLAlchemy manages client-side state. RESET ALL only resets GUCs.\n- Disable pool_pre_ping (DB_POOL_PRE_PING=false) since each SELECT 1\n  counts as a separate PgBouncer transaction in transaction mode,\n  adding ~1 extra transaction per HTTP request. With pool_recycle=120,\n  stale connections are handled by age-based recycling instead.\n- Increase CLIENT_IDLE_TIMEOUT from 60s to 300s to prevent PgBouncer\n  from killing QueuePool connections that sit idle between requests.\n- Increase DB_POOL_RECYCLE from 60s to 120s (must be < CLIENT_IDLE_TIMEOUT).\n\nMeasured impact (4000 concurrent users):\n- PgBouncer CPU: 97% -> 52% (no longer the bottleneck)\n- PgBouncer TPS: 3317 -> 2175 (-34%)\n- Transactions per HTTP request: 4.1 -> 2.3\n- avg_query_time: 4.3ms -> 2.3ms (-46%)\n- Error rate: 0.34% -> 0.23%\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T01:08:18+00:00"
+    },
+    {
+      "sha": "b484ce758677757836bc6815886a259713c79412",
+      "message": "fix: consolidate PR to single alembic migration\n\nRevert modification to existing n8h9i0j1k2l3 migration since the\nreconcile migration (c2d3e4f5g6h7) already uses correct ordered\ncolumn comparison and catches any missed indexes.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T09:24:58+00:00"
+    },
+    {
+      "sha": "a09748b2a32de4fb733f211f424058a6e9360b64",
+      "message": "fix: restore DISCARD ALL for PgBouncer, add client disconnect middleware\n\n- Revert SERVER_RESET_QUERY from RESET ALL back to DISCARD ALL;\n  RESET ALL does not release session-level advisory locks, causing\n  bootstrap deadlocks when multiple gateway replicas start concurrently.\n- Increase IDLE_TRANSACTION_TIMEOUT to 60s and re-enable DB_POOL_PRE_PING.\n- Add ClientDisconnectMiddleware that cancels in-flight request handlers\n  when the client (nginx) closes the connection, preventing CLOSE_WAIT\n  accumulation and memory leaks under sustained load.\n- Add utf-8 coding headers to unified_pdp plugin files.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T10:27:59+00:00"
+    },
+    {
+      "sha": "9c155a21284bfb79c4bb4016a751c4f9831104dd",
+      "message": "fix: use partial index on PostgreSQL in _ensure_performance_indexes\n\nMatch the reconciliation migration's PostgreSQL-specific logic: skip\nthe full composite index (team_id, is_active) and create a partial\nindex (team_id WHERE is_active = true) instead.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T10:58:50+00:00"
+    },
+    {
+      "sha": "23a2eb56c53302ccf542b3b0f9455564240a0927",
+      "message": "fix: flake8 naming convention and docstring coverage\n\nLowercase local variables in _ensure_performance_indexes (N806) and\nadd missing docstrings for client disconnect middleware (DAR101/DAR401).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T11:06:37+00:00"
+    },
+    {
+      "sha": "da531a1f3a9df345e5d637c5828798ef023f7d0e",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T11:21:57+00:00"
+    },
+    {
+      "sha": "8fa3830f9a226438853a825719d03a359e04b7ea",
+      "message": "Update docker-compose (step 1) of perf tuning\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T14:16:00+00:00"
+    },
+    {
+      "sha": "5c1a2639a0775fc5acc1eb7e3e53cef86640efb9",
+      "message": "fix: tune PgBouncer idle_transaction_timeout and remove redundant db commit/close\n\n- Increase IDLE_TRANSACTION_TIMEOUT from 60s to 120s (safety net for\n  sessions idle within a transaction, not a traffic cop)\n- Remove redundant db.commit()/db.close() in read_resource route handler\n  (invoke_resource already commits+closes for gateway path, get_db()\n  handles cleanup for all paths via its finally block)\n\nCloses #2660\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T14:48:09+00:00"
+    },
+    {
+      "sha": "0493ba8f15958cd6a7952d75e0028668f1174ae3",
+      "message": "fix: eliminate redundant DB queries in read_resource and invoke_resource\n\nSteps 3-4 of load test RCA: reduce per-request query count from 6 to 2\nfor resource-by-ID requests.\n\nStep 3: After Q2 (db.get), check enabled in Python and guard Q3/Q4 with\nresource_db is None so they only run for URI-only lookups.\n\nStep 4: Add joinedload(DbResource.gateway) to Q2, pass pre-fetched\nresource_obj and gateway_obj to invoke_resource() to skip Q5/Q6.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T15:43:16+00:00"
+    },
+    {
+      "sha": "b14f2772730c3318a32cbe02c0f8d06bd055a8fa",
+      "message": "fix: resolve load test regressions and parallel test segfaults (RCA steps 5-9)\n\n- Fix isinstance(user, dict) bug: ORM EmailUser objects always evaluated\n  as non-admin, causing 73.6% failure rate on /resources/[id] under load\n- Add shutdown_instrumentation() to stop background span writer before\n  engine disposal, preventing race condition segfaults in parallel tests\n- Skip middleware DB check for resource endpoints (defer to service layer)\n  to eliminate redundant sessions on the hot path\n- Use contains_eager + roles cache in permission_service to avoid N+1\n  queries and duplicate DB round-trips during audit logging\n- Use asyncio.gather for concurrent cache invalidation in team creation\n- Refactor healthcheck to use engine.connect() instead of SessionLocal\n- Use ExitStack for 19 context managers to avoid CPython 3.12 compiler segfault\n- Tune PostgreSQL timeouts: statement_timeout=60s, idle_in_transaction=180s\n- Revert QUERY_WAIT_TIMEOUT to 60s baseline\n- Fix test_tool_service cache poisoning by mocking registry cache\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T18:35:53+00:00"
+    },
+    {
+      "sha": "ad626c107f6a5c5d5bb2fa6d18f9de2454c9b78d",
+      "message": "Update docker-compose (step 1) of perf tuning\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T18:46:20+00:00"
+    },
+    {
+      "sha": "02ca3b71b6ed1347ac3f76404eeb6e0bd9242438",
+      "message": "fix: add missing docstring to ClientDisconnectMiddleware.__init__\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T19:31:33+00:00"
+    }
+  ],
+  "files_changed": 56,
+  "additions": 1210,
+  "deletions": 417,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:06.662639",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:06.664522",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2687,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2687.json"
+  }
+}

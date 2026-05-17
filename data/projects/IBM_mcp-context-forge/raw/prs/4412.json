@@ -1,0 +1,80 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4412,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4412"
+  },
+  "metadata": {
+    "title": "feat(security): implement comprehensive password policy to address pentesting findings",
+    "state": "closed",
+    "created_at": "2026-04-23T10:50:42+00:00",
+    "updated_at": "2026-05-09T23:09:38+00:00",
+    "closed_at": "2026-05-09T23:09:37+00:00",
+    "merged_at": "2026-05-09T23:09:36+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "enhancement",
+      "security",
+      "ica",
+      "SHOULD",
+      "pentesting"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4316\r\n**Jira Issue:** https://jsw.ibm.com/browse/ICACF-17\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR implements a comprehensive password policy system to address security vulnerabilities identified in the penetration testing report. The system enforces industry-standard password requirements, prevents password reuse through history tracking, and blocks common weak password patterns.\r\n\r\n**What this PR does:**\r\n- Implements `PasswordPolicyService` with configurable validation rules\r\n- Enforces minimum password length: 12 characters for users, 22 for privileged accounts\r\n- Requires 3 of 4 complexity types (uppercase, lowercase, digits, special characters)\r\n- Blocks sequential characters (e.g., \"123\", \"abc\") and username-based passwords\r\n- Tracks password history to prevent reuse of last 5 passwords\r\n- Adds database migration for `password_history` table with automatic cleanup\r\n- Maintains backward compatibility with legacy validation fallback\r\n\r\n**Why this is needed:**\r\nThe pentesting report identified weak password policies as a critical security vulnerability. Passwords like \"Password01@\" and \"Admin@123\" were accepted, making the system vulnerable to dictionary attacks and credential stuffing. This implementation addresses all identified weaknesses while maintaining backward compatibility.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass|\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Security Improvements\r\n\r\n**1. Password Strength Requirements**\r\n- Minimum 12 characters for regular users (was 8)\r\n- Minimum 22 characters for privileged accounts (new requirement)\r\n- Must contain 3 of 4 character types: uppercase, lowercase, digits, special characters\r\n- Blocks sequential patterns: \"123\", \"abc\", \"qwerty\", etc.\r\n- Prevents username-based passwords\r\n\r\n**2. Password History Tracking**\r\n- New `password_history` table stores hashed passwords\r\n- Prevents reuse of last 5 passwords plus current password\r\n- Automatic cleanup of old history entries (keeps only last 5)\r\n- Uses same Argon2 hashing as main password storage\r\n\r\n**3. Configuration Options**\r\nAll settings are configurable via environment variables:\r\n```bash\r\nPASSWORD_POLICY_ENABLED=true              # Enable/disable policy\r\nPASSWORD_MIN_LENGTH=12                    # Min length for users\r\nPASSWORD_MIN_LENGTH_PRIVILEGED=22         # Min length for privileged\r\nPASSWORD_PREVENT_REUSE=true               # Enable history check\r\nPASSWORD_HISTORY_COUNT=5                  # Number of passwords to track\r\n```\r\n\r\n### Implementation Details\r\n\r\n**New Files:**\r\n- `mcpgateway/services/password_policy_service.py` - Core validation logic\r\n- `mcpgateway/alembic/versions/351b43e1d273_add_password_history_table.py` - Database migration\r\n- `tests/unit/mcpgateway/test_password_policy.py` - Comprehensive test suite\r\n- `docs/security/password-policy-pentesting-response.md` - Security documentation\r\n\r\n**Modified Files:**\r\n- `mcpgateway/db.py` - Added PasswordHistory model\r\n- `mcpgateway/config.py` - Added password policy settings\r\n- `mcpgateway/services/email_auth_service.py` - Integrated password policy validation\r\n- `tests/unit/mcpgateway/services/test_email_auth_*.py` - Updated tests for new requirements\r\n- `.secrets.baseline` - Updated for new validation patterns\r\n\r\n### Test Coverage\r\n\r\n**New Tests Added:**\r\n- 6 legacy fallback tests for ImportError scenarios\r\n- Comprehensive password policy service tests\r\n- Password history tracking tests\r\n- Edge case validation tests\r\n\r\n### Design Decisions\r\n\r\n1. **Separate Service Pattern**: Created dedicated `PasswordPolicyService` for single responsibility and testability\r\n2. **Graceful Degradation**: Legacy fallback ensures system continues working if new service fails\r\n3. **Configurable Rules**: All requirements can be adjusted via environment variables\r\n4. **Database-Backed History**: Persistent storage prevents circumvention through password reset\r\n5. **Idempotent Migration**: Migration checks for existing tables/columns before modifying\r\n\r\n### Security Compliance\r\n\r\nThis implementation addresses all pentesting findings:\r\n- ✅ Enforces strong password policy (12+ characters, complexity requirements)\r\n- ✅ Prevents password reuse (history tracking)\r\n- ✅ Blocks common weak patterns (sequential chars, username-based)\r\n- ✅ Uses strong hashing (Argon2 with appropriate work factors)\r\n- ✅ Maintains audit trail (password history with timestamps)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "c82abce6fc999189d2b3f8c9d2a5f7900a4b3622",
+      "message": "feat: implement comprehensive password policy to address pentesting findings\n\n- Add PasswordPolicyService with configurable validation rules\n- Enforce 12+ character minimum for users, 22+ for privileged accounts\n- Require 3 of 4 complexity types (uppercase, lowercase, digits, special)\n- Block sequential characters (123, abc) and username-based passwords\n- Implement password history tracking (prevent reuse of last 5 passwords)\n- Add database migration for password_history table\n- Include legacy validation fallback for backward compatibility\n- Add comprehensive test coverage (91% for email_auth_service.py)\n- Document security improvements in pentesting response\n\nAddresses security vulnerabilities identified in penetration testing report:\n- Weak password policy allowing easily guessable passwords\n- Insufficient password complexity requirements\n- No password history enforcement\n\nAll tests pass: 220 unit tests, 14 doctests\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-23T10:45:15+00:00"
+    },
+    {
+      "sha": "305cd52393e7a6d1bb4b298dfdfbe882271046b7",
+      "message": "fix linter issues\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-23T11:19:43+00:00"
+    },
+    {
+      "sha": "1969ef8909f0a4f510591caed26cc32551e54b5a",
+      "message": "fix remaining linter issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-23T11:34:28+00:00"
+    },
+    {
+      "sha": "cccaf3d221738e7143d1a4a5ba612b01c8f9f4a7",
+      "message": "fix: address council PR review findings for password policy implementation\n\nSecurity fixes:\n- Enforce password policy consistently across all password-change paths\n  (reset_password_with_token, update_user, change_password)\n- Add username validation, privileged-length checks, and password history\n  to reset_password_with_token and update_user paths\n- Fix admin.py validate_password_strength to delegate to PasswordPolicyService\n  instead of using outdated legacy validation\n- Change password history checks to fail-closed (any unexpected error rejects\n  the password change instead of falling back)\n- Remove self.db.commit() from save_password_to_history to preserve caller\n  transaction atomicity\n\nOther fixes:\n- Fix alembic migration down_revision to point to current head (w7x8y9z0a1b2)\n- Add reverse sequential character detection (321, cba)\n- Make PasswordPolicyService accept optional password_service for testability\n- Remove dead/unreachable legacy validation code from admin.py\n- Fix import ordering and remove unused imports in test files\n- Update tests for fail-closed behavior and longer admin password requirements\n\nSigned-off-by: Jonathan Springer \\u003cjps@s390x.com\\u003e\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T21:59:47+00:00"
+    },
+    {
+      "sha": "13b08cb389d91eb6be5c51012e257b73cad349f8",
+      "message": "test: update admin tests for new PasswordPolicyService delegation\n\nUpdate test_validate_password_strength tests to reflect new policy:\n- 12-character minimum instead of 8\n- 3-of-4 complexity instead of individual boolean flags\n- Test with non-sequential passwords to avoid false rejections\n\nUpdate admin_create_user and admin_update_user tests:\n- validate_password_strength lambda now accepts email and is_admin args\n\nSigned-off-by: Jonathan Springer \\u003cjps@s390x.com\\u003e\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T22:10:08+00:00"
+    },
+    {
+      "sha": "0a503c228842fd1b18704c69e4d8fafaec7d762e",
+      "message": "chore: update secrets baseline after rebase and audit\n\nMark 22 entries as false positives:\n- Test passwords in test files\n- Documentation example passwords\n- Alembic migration revision ID\n\nSigned-off-by: Jonathan Springer \\u003cjps@s390x.com\\u003e\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T22:45:36+00:00"
+    }
+  ],
+  "files_changed": 14,
+  "additions": 1773,
+  "deletions": 269,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:02.266519",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:02.267330",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4412,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4412.json"
+  }
+}

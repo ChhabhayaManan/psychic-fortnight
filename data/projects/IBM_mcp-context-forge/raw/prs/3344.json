@@ -1,0 +1,83 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3344,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3344"
+  },
+  "metadata": {
+    "title": "fix(transport): protocol and transport hardening for auth and lifecycle consistency",
+    "state": "closed",
+    "created_at": "2026-02-28T13:31:20+00:00",
+    "updated_at": "2026-04-23T15:45:57+00:00",
+    "closed_at": "2026-04-23T15:45:54+00:00",
+    "merged_at": "2026-04-23T15:45:54+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "security",
+      "MUST",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n- harden JSON-RPC and protocol helper request validation/error mapping behavior\n- enforce admin-scoped access for diagnostics endpoint output\n- implement deterministic stateful streamable HTTP session close handling with affinity owner cleanup\n- align nginx upstream settings for replica-aware backend resolution and remove overlapping proxy-level security headers\n- extend unit coverage for RPC/protocol, OAuth callback handling, diagnostics authorization, and streamable HTTP lifecycle paths\n\n## Notes\n- includes current test update in `tests/unit/scripts/test_demo_a2a_agent_auth.py` from local formatting/lint pass",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3895793352",
+      "author": "MohanLaksh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-05T11:20:44+00:00",
+      "body": "# PR #3344 Test Failures Analysis\n\n## Failing Tests Summary\n\n### 1. `test_ping_invalid_method` - Expected 500, Got 400\n**Location**: `tests/e2e/test_main_apis.py::TestProtocolAPIs::test_ping_invalid_method`\n\n**Issue**: The PR changed the behavior to return 400 (Bad Request) with JSON-RPC error code -32600 for invalid methods, but the test expects 500.\n\n**Test Code** (line 453):\n```python\nassert response.status_code == 500  # Expects 500\n```\n\n**Actual Behavior**: Now returns 400 with proper JSON-RPC error mapping per the PR changes.\n\n---\n\n### 2. `test_get_version` - Expected 200, Got 403\n**Location**: `tests/e2e/test_main_apis.py::TestVersionAndDocs::test_get_version`\n\n**Issue**: The PR added admin-only access requirement to `/version` endpoint via `_has_version_admin_access()`, but the test expects public access (200).\n\n**Root Cause**: The test comment says \"no auth required\" but the PR intentionally restricted this endpoint to admins only for security (preventing information disclosure).\n\n---\n\n### 3. `test_execute_forwarded_request_returns_error_when_no_server`\n**Location**: `tests/e2e/test_session_pool_e2e.py::TestMultiWorkerSessionAffinityE2E`\n\n**Issue**: Test expects `'error'` key in response but gets `{'result': {}}` instead.\n\n**Root Cause**: The PR's error handling changes may have affected how forwarded requests handle missing server scenarios.\n\n---\n\n### 4. `test_affinity_logs_when_executing_forwarded_request`\n**Location**: `tests/e2e/test_session_pool_e2e.py::TestMultiWorkerSessionAffinityE2E`\n\n**Issue**: Same as #3 - expects `'error'` key but gets `{'result': {}}`.\n\n**Root Cause**: Related to session affinity forwarding error handling changes.\n\n---\n\n## Root Cause\n\nAll failures are **expected behavior changes** from the PR:\n1. **Better error codes**: 400 instead of 500 for invalid requests (JSON-RPC compliance)\n2. **Security hardening**: `/version` now requires admin access\n3. **Error handling improvements**: May have changed how certain edge cases are handled in session affinity\n\n## Action Required\n\nThe tests need to be **updated to match the new behavior**, not the code fixed. The PR's changes are intentional security and protocol compliance improvements.\n\n\nAlso,\n\n🔍 Areas for Consideration (Non-Blocking)\n1. Redundant req_id Extraction (Line 6042 vs 6012)\nImpact: Harmless but noisy. Consider removing or consolidating. Not a blocker.\n\n2. Error Context for Debugging (Optional Enhancement)\nCurrent behavior returns identical -32600 errors for all invalid request scenarios. Consider adding debug-only context:\n\nRationale: Helps operators diagnose client misconfigurations without leaking internals in production. Non-blocking if omitted.\n\n3. Session Close Idempotency (Document or Handle)\n_close_streamable_http_session() returns 500 on remove_session() failure. Clarify:\n\nShould already-closed sessions return 200 (idempotent) or 404 (session not found)?\nLog the exception type for debugging transient vs permanent failures: logger.exception(\"remove_session failed\", exc_info=True)\nRecommendation: Add docstring noting idempotency behavior and structured exception logging.\n\n4. Test Parametrization Coverage (Optional Expansion)\nCurrent tests use @pytest.mark.parametrize effectively. Consider extending to edge cases:\n\nInvalid jsonrpc versions: \"1.0\", \"3.0\", null, 123\nMethod edge cases: empty string \"\", numeric 12, null\nParams edge cases: non-dict when required (array, string, null)\nNot required for merge, but improves robustness.\n\n5. Nginx Configuration Documentation (Optional)\nThe removal of security headers from nginx is correct and aligns with the architecture (app middleware is source of truth). Consider noting this decision in [README.md](vscode-file://vscode-app/Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html) to prevent future regressions.\n\n\n🎯 Final Recommendation\nAPPROVE — Merge AFTER fixing the failing tests and optionally address:\n\n* (Nice-to-have) Remove redundant req_id extraction (line 6042)\n* (Nice-to-have) Document session close idempotency behavior in docstring\n* (Future) Expand test parametrization for edge cases\n* (Future) Add nginx security header decision to [README.md](vscode-file://vscode-app/Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html)\nNo security or performance issues detected. "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c806fa5204cf89b698e99f6cd090f8d5a0169ee7",
+      "message": "fix: protocol and transport hardening for auth and lifecycle consistency\n\nImprove RPC/protocol validation behavior and error mapping, enforce admin-only diagnostics access, and harden stateful streamable HTTP session teardown semantics.\n\nAlign nginx upstream behavior for replica-aware balancing and remove overlapping proxy security headers. Update and expand unit coverage across main/version/oauth/streamable transport paths.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-28T13:31:06+00:00"
+    },
+    {
+      "sha": "5258d3712ccb215ed89007446a2c96f08a9664b6",
+      "message": "chore: docstring hardening for lint consistency\n\nUpdate endpoint/helper docstrings for explicit args/returns/raises coverage and keep doctest examples aligned with current admin diagnostics access semantics.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-28T13:37:16+00:00"
+    },
+    {
+      "sha": "fb312f46f61aa00bedc964ce78bff47a6221f4c4",
+      "message": "test: add differential coverage for protocol/transport hardening paths\n\nCover RPC-path SamplingError and CompletionError mapping to JSON-RPC\n-32602, stateful session owner assertion (404/403 deny paths), ping\nendpoint non-dict body handling, and streamable HTTP session close\nerror branches (registry None, remove_session failure).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T03:09:13+00:00"
+    },
+    {
+      "sha": "9c151f968467660397d8161c7050c7d6827a3a6d",
+      "message": "fix: harden version endpoint auth and align test expectations\n\n- version.py: _has_version_admin_access now accepts string inputs from\n  require_admin_auth (which returns email after verifying admin status)\n- test_version.py: reference require_admin_auth instead of nonexistent require_auth\n- test_main_apis.py: ping invalid-method test expects 400 (not 500)\n- test_main_extended.py: fix params list->dict, remove stale RPCRequest patch\n\nUltraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-openagent)\n\nCo-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T13:31:52+00:00"
+    },
+    {
+      "sha": "fb54e31840d32f6e54ad2c5d340de8f52b387650",
+      "message": "refactor: harden RPC error responses — extract helper, skip redundant validation, remove data leaks\n\n- Extract _jsonrpc_invalid_request() helper to deduplicate 5 identical\n  error envelope constructions across ping() and _handle_rpc_authenticated()\n- Skip RPCRequest Pydantic validation for trusted internal Rust dispatch\n  (restores intentional perf optimization; manual type checks still run)\n- Remove session_id from JSONRPCError data to avoid reflecting client input\n- Remove full params dict from SamplingError/CompletionError JSON-RPC errors\n  to prevent request payload leakage in error responses\n\nUltraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-openagent)\n\nCo-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T13:32:07+00:00"
+    }
+  ],
+  "files_changed": 14,
+  "additions": 534,
+  "deletions": 99,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:02.663741",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:02.665630",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3344,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3344.json"
+  }
+}

@@ -1,0 +1,464 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3030,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3030"
+  },
+  "metadata": {
+    "title": "feat(rust): add Rust URL reputation plugin",
+    "state": "closed",
+    "created_at": "2026-02-18T09:40:55+00:00",
+    "updated_at": "2026-03-07T11:08:00+00:00",
+    "closed_at": "2026-02-22T23:38:39+00:00",
+    "merged_at": null,
+    "author": "cafalchio",
+    "labels": [
+      "rust",
+      "plugins",
+      "COULD"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #2907 \r\n\r\n---\r\n\r\n## 📝 Summary\r\n_What does this PR do and why?_\r\nThe url reputation plugin in python was a simple example. The Rust implementation has more features and checks.\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [X] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   Ok   |\r\n| Unit tests                | `make test`     |   Ok   |\r\n| Coverage ≥ 80%            | `make coverage` |  98.28%|\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] Tests added/updated for changes\r\n- [X] Documentation updated (if applicable)\r\n- [X] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n\r\nThe new url_reputation has the following checks.\r\n\r\n- whitelist_domains: check a set of whitelisted domains\r\n- allowed_patterns: regex patterns to be whitelisted\r\n- blocked_domains: set of domains to block\r\n- blocked_patterns: regex patterns to block \r\n- use_heuristic_check: true, heuristic checks of bad domains\r\n- entropy_threshold: 3.65, Heuristic: Shannon entropy measure\r\n- block_non_secure_http: true, Allow only https.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3825314700",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-19T11:46:04+00:00",
+      "body": "Nice work on the Rust acceleration for the url_reputation plugin — the heuristic checks (entropy, TLD validation, unicode security) are well-researched. A few issues to address:\n\n**Breaking: `resource_pre_fetch` signature removes `context` parameter**\n\nThe plugin framework dispatches hooks via `hook_ref.hook(payload, context)` (`manager.py:340`). Every other plugin implements `resource_pre_fetch(self, payload, context)` (OPA, Cedar, ClamAV, etc.). Removing `context` will cause a `TypeError` at runtime:\n\n```python\n# Framework always calls with two args:\nresult = await asyncio.wait_for(hook_ref.hook(payload, context), timeout=self.timeout)\n\n# But the new signature only accepts one:\nasync def resource_pre_fetch(self, payload: ResourcePreFetchPayload) -> ResourcePreFetchResult:\n```\n\nKeep the `context` parameter even if unused — otherwise the plugin will crash when the framework dispatches to it.\n\n**Debug `println!` statements left in production code**\n\n`heuristic.rs` has two debug print statements that will write to stdout in production:\n\n```rust\n// line 1135\nprintln!(\"Error {:?}\", errors);\n// line 1158\nprintln!(\"DOMAIN {}\", cleaned);\n```\n\nRemove these or convert to `log::debug!` / `tracing::debug!`.\n\n**Dead test: `test_whitelisted_subdomain`**\n\nThe `@pytest.mark.asyncio` decorator is commented out:\n```python\n#@pytest.mark.asyncio\nasync def test_whitelisted_subdomain():\n```\nThis test will never be collected by pytest.\n\n**Python fallback doesn't implement new features**\n\nThe Python fallback path only checks `blocked_domains` and `blocked_patterns` (the original logic). New features — whitelist, allowed_patterns, heuristics, block_non_secure_http — are Rust-only. Tests like `test_http_blocked_but_https_allowed`, `test_high_entropy_domain_blocked`, etc. will fail in environments without the Rust module. Either:\n- Add `@pytest.mark.skipif(not _RUST_AVAILABLE, ...)` to Rust-dependent tests, or\n- Implement feature parity in the Python fallback\n\n**Case sensitivity mismatch**\n\nThe Rust code lowercases the URL (`url.trim().to_lowercase()`) but whitelist/blocklist entries are not normalized. If config has `Example.COM`, the lowercased domain `example.com` won't match `Example.COM` in `domain_matches()`. The `test_mixed_case_domain_allowed` test would fail via the Rust path.\n\n**Silent regex compilation failures**\n\n```rust\n.filter_map(|p| Regex::new(p).ok())\n```\n\nInvalid regex patterns are silently dropped. An admin configuring `[a-z` as a pattern won't know it's being ignored. At minimum, log a warning for patterns that fail to compile.\n\nMinor:\n- `#[pyclass(from_py_object)]` on `PluginViolation` — verify this is a valid PyO3 0.28 attribute (the standard approach is `#[derive(FromPyObject)]`, which is already on `URLReputationConfig`)\n- Config changed `blocked_domains` from `List[str]` to `Set[str]` — existing YAML configs with list syntax should still work via Pydantic coercion, but worth verifying"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "40becf0024ed15c9ea033b78011f8e21bdcc0348",
+      "message": "Added placeholder files and project for url_reputation plugin.\n   - keep pattern and domain check\n   - introduce entropy check as a second check",
+      "author": "cafalchio",
+      "date": "2026-02-13T18:29:06+00:00"
+    },
+    {
+      "sha": "d23a760bd4f1f941ef36221bb14133d78fbd2ca2",
+      "message": "Added iana tld list to check for valid tlds in herustic",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:21:11+00:00"
+    },
+    {
+      "sha": "581f42483fbc8bfd9a84e039373fb99ac79d3be6",
+      "message": "moved check patterns and blocked list to its own file",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:21:51+00:00"
+    },
+    {
+      "sha": "da59ad1cb035fe46e199dd93140dc4fcc8201236",
+      "message": "Create heuristic check\n   - Check for shannon entropy\n   - tld in ianna list\n   - unicode security",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:22:25+00:00"
+    },
+    {
+      "sha": "12ae62b6ef11348d204856df4b3af4caa85693dc",
+      "message": "Added mod file and validade_url to pyo3 url_reputation module",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:23:34+00:00"
+    },
+    {
+      "sha": "0fbb8235fc8b02d84420ec07904177e94afa30dc",
+      "message": "Reestructured code, renamed plugin to engine,\n   - Added all checks in validade url function\n   - Tests cover over 97%",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:25:05+00:00"
+    },
+    {
+      "sha": "9d48a00b2f426c49ab8a9025ee27bae972bb7ed6",
+      "message": "Added rust version readme",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:38:15+00:00"
+    },
+    {
+      "sha": "e08617cc6d1beab52389ec09b56445a0acbde0f8",
+      "message": "Changed pattenr string lookup to regex match",
+      "author": "cafalchio",
+      "date": "2026-02-17T14:54:30+00:00"
+    },
+    {
+      "sha": "dc468cbca96b09c839f23b6ad2159461ec29a4e9",
+      "message": "moved structs to types file to reduce engine file size",
+      "author": "cafalchio",
+      "date": "2026-02-17T14:55:20+00:00"
+    },
+    {
+      "sha": "125e73b244ccb6d1cccfc4f25f68629f3cc48034",
+      "message": "refactored plugin to be a class that can be injected in python code\n   - Allow regex patterns\n   - Compile regex patterns on class __init__\n   - will allow for further init function as get iana db or  user config loader to be implement\n   - updated tests to 98% coverage",
+      "author": "cafalchio",
+      "date": "2026-02-17T15:21:20+00:00"
+    },
+    {
+      "sha": "2159bc26b93448020dcf9499ce3ef4efab3d7bcf",
+      "message": "Added py interface file for python IDE help",
+      "author": "cafalchio",
+      "date": "2026-02-17T15:39:43+00:00"
+    },
+    {
+      "sha": "4033c2abcec2b974a78ba6f17b43b934f3ca1280",
+      "message": "added blocked_domains logic and test",
+      "author": "cafalchio",
+      "date": "2026-02-17T15:40:32+00:00"
+    },
+    {
+      "sha": "e9a8420de6be3ae83530f066b207cfabf5c249bc",
+      "message": "Updated readme with the new logic and paper citation",
+      "author": "cafalchio",
+      "date": "2026-02-17T15:57:20+00:00"
+    },
+    {
+      "sha": "879f593ce8f676a6511505de4fdea57dc4feeba6",
+      "message": "Clipped and linted. Had to add allow dead coode in python class",
+      "author": "cafalchio",
+      "date": "2026-02-17T16:23:06+00:00"
+    },
+    {
+      "sha": "e5e15e11823b197ef41f0d48f9520d08a5bc92c9",
+      "message": "Fixed bindigs in python",
+      "author": "cafalchio",
+      "date": "2026-02-17T16:53:27+00:00"
+    },
+    {
+      "sha": "a8927b700db474e6c44ef8830452cbddaf1bca92",
+      "message": "removed unused crates and created makefile",
+      "author": "cafalchio",
+      "date": "2026-02-17T17:22:39+00:00"
+    },
+    {
+      "sha": "166358942b4d515165bd5332a353e15e5e6232f4",
+      "message": "Fix clippy warnings",
+      "author": "cafalchio",
+      "date": "2026-02-17T17:24:58+00:00"
+    },
+    {
+      "sha": "3563f94723c8e2872f19c65487db2d47fc0e4f76",
+      "message": "Added added pyi file to the url_reputation project",
+      "author": "cafalchio",
+      "date": "2026-02-17T18:36:36+00:00"
+    },
+    {
+      "sha": "effbfad4c3b1a600b8316cf2d9c147c5f70bee1e",
+      "message": "added missing fields to plugins config.yaml",
+      "author": "cafalchio",
+      "date": "2026-02-17T18:36:58+00:00"
+    },
+    {
+      "sha": "787148d90bcee325a4031659dbbac089eafc6962",
+      "message": "Fixed contains to check for domains with subdomains",
+      "author": "cafalchio",
+      "date": "2026-02-17T19:01:07+00:00"
+    },
+    {
+      "sha": "63420aa53dd2a1704623df3d68df74743b2e607a",
+      "message": "Added rust plugin to python url_reputation",
+      "author": "cafalchio",
+      "date": "2026-02-17T19:04:11+00:00"
+    },
+    {
+      "sha": "851cfbfd498f58e898cff607e9944a3b0dac10e7",
+      "message": "Fixed rust binding to python\n   - fix config yaml\n   - linted files",
+      "author": "cafalchio",
+      "date": "2026-02-17T20:47:32+00:00"
+    },
+    {
+      "sha": "5995dbf6a82af79a406ec2e393b554eab6ff041a",
+      "message": "Fix url_reputation test to run python and rust",
+      "author": "cafalchio",
+      "date": "2026-02-17T20:56:06+00:00"
+    },
+    {
+      "sha": "657033c759a811adc4116e8d17aab21b07972cb2",
+      "message": "Merge branch 'IBM:main' into feat/2907_Rust_implementation_of_url_reputation_plugin",
+      "author": "__cafa__",
+      "date": "2026-02-18T09:24:06+00:00"
+    },
+    {
+      "sha": "7a1c7500c1318054f3f99c840138c26c93d25baa",
+      "message": "Merge branch 'IBM:main' into feat/2907_Rust_implementation_of_url_reputation_plugin",
+      "author": "__cafa__",
+      "date": "2026-02-18T16:58:45+00:00"
+    },
+    {
+      "sha": "cfd8c52f44e3f2fc006cf32695b6dab3c7a69f83",
+      "message": "added uv to run pytest in make file",
+      "author": "cafalchio",
+      "date": "2026-02-18T17:15:31+00:00"
+    },
+    {
+      "sha": "6574f1b6eefe359289558b3f74d7b297e12700cf",
+      "message": "Added python tests to url_reputation\n   - Python tests will use rust if rust is available",
+      "author": "cafalchio",
+      "date": "2026-02-18T18:19:17+00:00"
+    },
+    {
+      "sha": "a1fde9817210b8986fd52aa423c0d11ca4f5d5b8",
+      "message": "change plugin package name to url_reputation_rust",
+      "author": "cafalchio",
+      "date": "2026-02-20T16:35:53+00:00"
+    },
+    {
+      "sha": "75362bc3e8e2198c03ecebdf4140b6961d921e7d",
+      "message": "Created plugin benchmark python vs rust",
+      "author": "cafalchio",
+      "date": "2026-02-20T16:36:29+00:00"
+    },
+    {
+      "sha": "689dd9a82a6e3e2d722dc7cf545f53c487dab16e",
+      "message": "Expose py function that returns pydict in plugin\n    - cleaned println\n    - returned context to pre_fetch",
+      "author": "cafalchio",
+      "date": "2026-02-20T16:49:39+00:00"
+    },
+    {
+      "sha": "08c0c9bbb88fb062f3c1d34a64a160d88ed74008",
+      "message": "Fixed issues in rust implementation and added benchmarks\n   - added log to regex compilation failure\n   - improved performance in_domain_list for blocked domains and whitelisted domains\n   - added Rust benchmark\n   - added python vs rust benchmark",
+      "author": "cafalchio",
+      "date": "2026-02-22T17:52:29+00:00"
+    },
+    {
+      "sha": "9f9bec273104fbdb9c6d137e83e66996bd09ee0a",
+      "message": "Added rust benchmark and fixed tests\n    - added benchmark for rust only\n    - skipped tests that depends on rust when rust is not present",
+      "author": "cafalchio",
+      "date": "2026-02-22T19:08:58+00:00"
+    },
+    {
+      "sha": "cc84856c34bff8715f1f4a020132dd1008bf7078",
+      "message": "Added placeholder files and project for url_reputation plugin.\n   - keep pattern and domain check\n   - introduce entropy check as a second check\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-13T18:29:06+00:00"
+    },
+    {
+      "sha": "0244ef50aaf5d4714678296a805b6b1859cdfd54",
+      "message": "Added iana tld list to check for valid tlds in herustic\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:21:11+00:00"
+    },
+    {
+      "sha": "d56b07e051c05b59a53d73e6b71816e38f76f335",
+      "message": "moved check patterns and blocked list to its own file\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:21:51+00:00"
+    },
+    {
+      "sha": "2101a90f249ebed95247246d18680f4dcbb6f91a",
+      "message": "Create heuristic check\n   - Check for shannon entropy\n   - tld in ianna list\n   - unicode security\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:22:25+00:00"
+    },
+    {
+      "sha": "60fc9874e06ba14b413b4a71c1a48f3a179a543c",
+      "message": "Added mod file and validade_url to pyo3 url_reputation module\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:23:34+00:00"
+    },
+    {
+      "sha": "6466cbd8fa28e33c7977778718e5ab470c4b3772",
+      "message": "Reestructured code, renamed plugin to engine,\n   - Added all checks in validade url function\n   - Tests cover over 97%\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:25:05+00:00"
+    },
+    {
+      "sha": "667b18b81b0877b6006736dcf36f250428ec95b3",
+      "message": "Added rust version readme\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:38:15+00:00"
+    },
+    {
+      "sha": "d90735647063f4fbaf54f2b05888ab95c54c67da",
+      "message": "Changed pattenr string lookup to regex match\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T14:54:30+00:00"
+    },
+    {
+      "sha": "7ae056db18fedfb0faae9ef2946f7f1e0287d189",
+      "message": "moved structs to types file to reduce engine file size\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T14:55:20+00:00"
+    },
+    {
+      "sha": "1814f86bbbf8bfbe05b272ce61a730b778561c54",
+      "message": "refactored plugin to be a class that can be injected in python code\n   - Allow regex patterns\n   - Compile regex patterns on class __init__\n   - will allow for further init function as get iana db or  user config loader to be implement\n   - updated tests to 98% coverage\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T15:21:20+00:00"
+    },
+    {
+      "sha": "c4c48e3700a4e261c6f9b17a7df52effa4d17bea",
+      "message": "Added py interface file for python IDE help\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T15:39:43+00:00"
+    },
+    {
+      "sha": "aa0de9626208fcd8cd81f38b458a5f70a43e4cc4",
+      "message": "added blocked_domains logic and test\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T15:40:32+00:00"
+    },
+    {
+      "sha": "997c458a351c0d714c8a19ab094e58f7d4a8a0f0",
+      "message": "Updated readme with the new logic and paper citation\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T15:57:20+00:00"
+    },
+    {
+      "sha": "e5a9e96e6fc8aab9f1d1dd2ff2b2e1d5c6777fe7",
+      "message": "Clipped and linted. Had to add allow dead coode in python class\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T16:23:06+00:00"
+    },
+    {
+      "sha": "9d316ff78c37b6cf3a1f0cd38d95fdc269f95c37",
+      "message": "Fixed bindigs in python\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T16:53:27+00:00"
+    },
+    {
+      "sha": "3111e7a19b2463912b324023c1207a42c7251653",
+      "message": "removed unused crates and created makefile\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T17:22:39+00:00"
+    },
+    {
+      "sha": "28395819f77c09eaec7ffce2c2323db87e04ab02",
+      "message": "Fix clippy warnings\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T17:24:58+00:00"
+    },
+    {
+      "sha": "bf6ac7c51528a0087cb02ad403707d04af5bb2aa",
+      "message": "Added added pyi file to the url_reputation project\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T18:36:36+00:00"
+    },
+    {
+      "sha": "9137a83bbbc80f4ef8cca1699c60e7a72ebe8ef5",
+      "message": "added missing fields to plugins config.yaml\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T18:36:58+00:00"
+    },
+    {
+      "sha": "0e20bb72958496e798ea5b196a8f1a00eb7dfbf6",
+      "message": "Fixed contains to check for domains with subdomains\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T19:01:07+00:00"
+    },
+    {
+      "sha": "c1ee44e2729ca7f1c10e65cf6e39465348fc7e86",
+      "message": "Added rust plugin to python url_reputation\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T19:04:11+00:00"
+    },
+    {
+      "sha": "9e2d735ad3089c7693a377069a269259ba993270",
+      "message": "Fixed rust binding to python\n   - fix config yaml\n   - linted files\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T20:47:32+00:00"
+    },
+    {
+      "sha": "6557194f9fa83f4e9742bb2d4b0ec05a3642599a",
+      "message": "Fix url_reputation test to run python and rust\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-17T20:56:06+00:00"
+    },
+    {
+      "sha": "97abd3f3913f78dedca39dad83e565b53ab219be",
+      "message": "added uv to run pytest in make file\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-18T17:15:31+00:00"
+    },
+    {
+      "sha": "27131c22bc526d4fcb5c396a85d90694ccb721f1",
+      "message": "Added python tests to url_reputation\n   - Python tests will use rust if rust is available\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-18T18:19:17+00:00"
+    },
+    {
+      "sha": "7369d74159572928eec635cec8c5d7f3a6eb4c4b",
+      "message": "change plugin package name to url_reputation_rust\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-20T16:35:53+00:00"
+    },
+    {
+      "sha": "d4f61151c84905ba45ba25a968cf5fb79fad103e",
+      "message": "Created plugin benchmark python vs rust\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-20T16:36:29+00:00"
+    },
+    {
+      "sha": "bc8dbf8136fb3519258031190d4f8fbb41165352",
+      "message": "Expose py function that returns pydict in plugin\n    - cleaned println\n    - returned context to pre_fetch\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-20T16:49:39+00:00"
+    },
+    {
+      "sha": "b640bafbcdaf71661c3ed3ff21f26e9fa9bf15cf",
+      "message": "Fixed issues in rust implementation and added benchmarks\n   - added log to regex compilation failure\n   - improved performance in_domain_list for blocked domains and whitelisted domains\n   - added Rust benchmark\n   - added python vs rust benchmark\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-02-22T17:52:29+00:00"
+    },
+    {
+      "sha": "4f90e0a62ed7a9ceeddc319619734ce6eb62898b",
+      "message": "Merge remote-tracking branch 'origin/feat/2907_Rust_implementation_of_url_reputation_plugin' into feat/2907_Rust_implementation_of_url_reputation_plugin",
+      "author": "cafalchio",
+      "date": "2026-02-22T19:20:53+00:00"
+    },
+    {
+      "sha": "989d0c2d085f73876b812a0e0926a68e304ed340",
+      "message": "Merge branch 'IBM:main' into feat/2907_Rust_implementation_of_url_reputation_plugin",
+      "author": "__cafa__",
+      "date": "2026-02-22T21:04:14+00:00"
+    },
+    {
+      "sha": "d557db0522884426b079b5575273c20ddc558918",
+      "message": "Added placeholder files and project for url_reputation plugin.\n   - keep pattern and domain check\n   - introduce entropy check as a second check",
+      "author": "cafalchio",
+      "date": "2026-02-13T18:29:06+00:00"
+    },
+    {
+      "sha": "62ba8816841d4b3f660fdc78e08e73ca79150db3",
+      "message": "Added mod file and validade_url to pyo3 url_reputation module",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:23:34+00:00"
+    },
+    {
+      "sha": "cd3db6c6da25f09fbded471f96c2a4d167a2aafe",
+      "message": "Reestructured code, renamed plugin to engine,\n   - Added all checks in validade url function\n   - Tests cover over 97%",
+      "author": "cafalchio",
+      "date": "2026-02-17T13:25:05+00:00"
+    },
+    {
+      "sha": "b6ad2dc14340bf7841fbebaccb1b8a5aff33d362",
+      "message": "Changed pattenr string lookup to regex match",
+      "author": "cafalchio",
+      "date": "2026-02-17T14:54:30+00:00"
+    },
+    {
+      "sha": "595ee4699e39ad14077551703e9d0a1b6d0f6315",
+      "message": "added blocked_domains logic and test",
+      "author": "cafalchio",
+      "date": "2026-02-17T15:40:32+00:00"
+    },
+    {
+      "sha": "5ae5f5e96da752ce7ee659e771f7844797e13ed8",
+      "message": "fix: resolve code review issues - case sensitivity, test coverage, Python fallback\n\n- Add case-insensitive domain matching (normalize to lowercase)\n- Improve Rust test coverage to 95.35% lines (24 tests, +5 new)\n- Enhance Python fallback with whitelist, block_non_secure_http\n- Add tests for invalid regex patterns, subdomain matching\n- Update README with current coverage metrics",
+      "author": "cafalchio",
+      "date": "2026-02-22T23:01:31+00:00"
+    }
+  ],
+  "files_changed": 22,
+  "additions": 2976,
+  "deletions": 28,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:14:22.715733",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:14:22.718170",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3030,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3030.json"
+  }
+}

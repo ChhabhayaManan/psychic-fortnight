@@ -1,0 +1,76 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3564,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3564"
+  },
+  "metadata": {
+    "title": "fix: redirect to login page on manual admin/logout call in the browser",
+    "state": "closed",
+    "created_at": "2026-03-09T17:04:07+00:00",
+    "updated_at": "2026-03-10T21:59:43+00:00",
+    "closed_at": "2026-03-10T21:59:42+00:00",
+    "merged_at": "2026-03-10T21:59:42+00:00",
+    "author": "marekdano",
+    "labels": [
+      "bug",
+      "ui",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Closes: #3555\r\n# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nFixed admin logout behavior to redirect browser users to the login page while maintaining OIDC front-channel logout compliance.\r\n\r\n### Root causes\r\n\r\nUser Experience: Users manually navigating to /admin/logout in browser are now automatically redirected to login page\r\n\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Log in to the app\r\n2. Manually enter admin/logout into browser\r\n3. Page will clear and show 'Logged out' message\r\n\r\n## 💡 Fix Description\r\n\r\n`mcpgateway/admin.py`\r\n- Added browser detection in `_admin_logout()` using the Accept header\r\n- GET requests with Accept: text/html (browser navigation) now redirect to /admin/login (303)\r\n- GET requests without Accept: text/html (OIDC front-channel callbacks) return 200 OK per OIDC spec\r\n- POST requests continue to redirect to /admin/login after clearing cookies\r\n\r\n`tests/unit/mcpgateway/test_admin_module.py`\r\n - Enhanced test_admin_logout_paths() to cover all three logout scenarios:\r\n - POST request → 303 redirect to login\r\n - GET with Accept: text/html (browser) → 303 redirect to login\r\n - GET without Accept: text/html (OIDC) → 200 OK\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |     ✅     |\r\n| Unit tests                            | `make test`          |     ✅     |\r\n| Coverage ≥ 80 %                       | `make coverage`      |     ✅     |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3920889164",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-10T09:12:35+00:00",
+      "body": "🍭 "
+    },
+    {
+      "id": "3922546175",
+      "author": "msureshkumar88",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T13:48:26+00:00",
+      "body": "# ✅ PR #3564 Review Update — All Recommended Changes Implemented\n\n**Reviewed by**: @msureshkumar88 \n**Status**: All 4 recommended actions have been successfully implemented\n\n---\n\n## Changes Verification Summary\n\n### ✅ 1. Cookie Clearing for All Logout Types (Medium Priority)\n**Status**: **IMPLEMENTED**\n\nThe cookie clearing logic (lines 4297-4308) is now **outside the if/else block**, ensuring that session cookies are cleared for all logout scenarios including:\n- POST requests (user-initiated)\n- GET requests with browser headers (manual navigation)\n- GET requests without browser headers (OIDC front-channel callbacks)\n\nThis fixes the medium-severity issue where OIDC front-channel logout callbacks were not properly clearing session cookies.\n\n### ✅ 2. Browser Detection Aligned with Middleware Patterns\n**Status**: **IMPLEMENTED**\n\nThe browser detection logic (lines 4269-4275) now matches the patterns used in [`auth_middleware.py:188`](mcp-context-forge/mcpgateway/middleware/auth_middleware.py:188) and [`rbac.py:264`](mcp-context-forge/mcpgateway/middleware/rbac.py:264):\n\n```python\naccept_header = request.headers.get(\"accept\", \"\")\nis_htmx = request.headers.get(\"hx-request\") == \"true\"\nreferer = request.headers.get(\"referer\", \"\")\nis_browser_request = \"text/html\" in accept_header or is_htmx or \"/admin\" in referer\n```\n\nThis ensures consistent behavior across the codebase for detecting browser vs API requests.\n\n### ✅ 3. Docstring Updated for Three Logout Scenarios\n**Status**: **IMPLEMENTED**\n\nThe function docstring (lines 4117-4125) now clearly documents all three logout scenarios:\n- POST: User-initiated logout from UI\n- GET with browser headers: Browser navigation to /admin/logout\n- GET without browser headers: OIDC front-channel logout callback\n\nThe docstring also includes a reference to the OpenID Connect Front-Channel Logout 1.0 specification.\n\n### ✅ 4. Edge Case Test Coverage Added\n**Status**: **IMPLEMENTED**\n\nComprehensive test coverage has been added (lines 499-523) for edge cases:\n- ✅ HX-Request header detection (HTMX requests)\n- ✅ Admin referer detection\n- ✅ Wildcard Accept header (`*/*`)\n- ✅ Multiple Accept types (`text/html,application/xhtml+xml`)\n\n---\n\n## Additional Improvements Implemented\n\nBeyond the recommended changes, the following enhancements were also made:\n\n1. **OIDC Spec Reference Added** (lines 4281-4284)\n   - Added explicit reference to OpenID Connect Front-Channel Logout 1.0 spec\n   - Includes URL: https://openid.net/specs/openid-connect-frontchannel-1_0.html\n\n2. **Improved Code Comments** (lines 4269-4271)\n   - Added comment explaining the need for consistency with auth_middleware.py and rbac.py\n   - Clarified the distinction between browser navigation and OIDC callbacks\n\n---\n\n## Final Verdict\n\n| Dimension | Previous Rating | Current Rating |\n| --------- | --------------- | -------------- |\n| Issue Completion | 🟢 Complete | 🟢 Complete |\n| Security Risk | 🟡 Medium | 🟢 Low |\n| PR Quality | 🟡 Needs Work | 🟢 Good |\n\n**Updated Recommendation**: ✅ **APPROVE**\n\nAll identified issues have been resolved:\n- ✅ Cookie clearing now works for all logout types (including OIDC callbacks)\n- ✅ Browser detection is consistent with existing middleware patterns\n- ✅ Documentation is complete and accurate\n- ✅ Comprehensive test coverage for edge cases\n\nThe PR is now ready for merge. The implementation correctly addresses issue #3555 while maintaining OIDC front-channel logout compliance and ensuring consistent behavior across the authentication system."
+    },
+    {
+      "id": "3925470190",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T21:12:16+00:00",
+      "body": "Rebased onto main (clean, no conflicts) and reviewed.\n\n**Design & Logic** — Sound. The fix correctly distinguishes three logout scenarios:\n1. Browser GET (Accept: text/html / HX-Request / admin Referer) → redirect to login (303)\n2. OIDC front-channel GET (no browser headers) → 200 OK per OpenID Connect Front-Channel Logout 1.0 spec\n3. POST (UI button) → redirect to login (or Keycloak RP-initiated logout)\n\n**Consistency** — The browser detection pattern (`\"text/html\" in accept_header or is_htmx or \"/admin\" in referer`) exactly matches the established pattern in `middleware/auth_middleware.py` and `middleware/rbac.py`.\n\n**Security** — No issues. Redirect target is hardcoded (`{root_path}/admin/login`), cookies are always cleared regardless of path, no open redirect or header injection vectors, `*/*` accept header correctly falls through to OIDC path.\n\n**Test coverage** — All new code paths are covered (6 test cases: POST redirect, browser GET redirect, OIDC GET 200, HTMX GET redirect, referer GET redirect, wildcard accept GET 200). All 59 admin tests pass.\n\n**Docs** — SSO tutorial update accurately describes the three scenarios.\n\nLGTM."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d51e3037a1b95f6f0df09285dd0e690567269f4b",
+      "message": "fix: redirect to login page on manual admin/logout call in the browser\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-09T16:54:17+00:00"
+    },
+    {
+      "sha": "9dead7439fdd6c1c1a4410b33a005e0f2ab25925",
+      "message": "fix: add to handle htmx header, add comments and update docs\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-10T13:09:11+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 76,
+  "deletions": 13,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:55.154808",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:55.156415",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3564,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3564.json"
+  }
+}

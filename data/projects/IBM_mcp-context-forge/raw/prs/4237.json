@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4237,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4237"
+  },
+  "metadata": {
+    "title": "feat: resolve virtual servers by name in RFC 9728 well-known and MCP endpoints",
+    "state": "open",
+    "created_at": "2026-04-16T07:44:30+00:00",
+    "updated_at": "2026-04-16T12:23:26+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "smorand",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n- The RFC 9728 `/.well-known/oauth-protected-resource` endpoint only accepted UUID server identifiers, requiring clients to use opaque hex strings like `b1a1acaa408744919481e10fca4ce9f2` in URLs\n- This adds **server name resolution** as a fallback, enabling human-readable URLs like `/servers/gdrive/mcp` while keeping full UUID backward compatibility\n- The `resource` URL in the well-known response always uses the **canonical UUID**, ensuring stable resource identifiers per RFC 9728\n\n## Changes\n\n- `mcpgateway/routers/well_known.py`: accept server name (validated against `SERVER_NAME_PATTERN`) in addition to UUID, resolve to canonical UUID via DB lookup\n- `mcpgateway/services/server_service.py`: add `resolve_server_id()` method that tries PK lookup first, then falls back to name lookup\n- `mcpgateway/transports/streamablehttp_transport.py`: use `resolve_server_id()` in `_validate_server_id` and `_check_server_oauth_enforcement` for consistent name support across MCP transport layer\n- `tests/unit/mcpgateway/routers/test_well_known_rfc9728.py`: update test expectations to reflect name resolution behavior\n\n## Security\n\nServer name input is validated against a strict alphanumeric pattern (`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,253}[a-zA-Z0-9]$`) to prevent path traversal and injection. Path traversal attempts like `/../admin` are rejected before any DB lookup.\n\n## Test plan\n\n- [x] UUID-based well-known still works (backward compatible)\n- [x] Name-based well-known resolves and returns canonical UUID in resource URL\n- [x] MCP endpoint `/servers/{name}/mcp` returns correct 401 + WWW-Authenticate\n- [x] Path traversal attempts rejected (404)\n- [x] Nonexistent server names return 404\n- [x] Existing unit tests pass (21 well-known + 121 server service tests)\n- [x] Tested on live deployment",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "702aaec667272480775281e6cb66318e512cb9bc",
+      "message": "feat: resolve virtual servers by name in RFC 9728 well-known and MCP endpoints\n\nThe well-known OAuth Protected Resource endpoint (RFC 9728) only accepted\nUUID server identifiers, forcing clients to use opaque hex strings in URLs.\nThis adds server name resolution as a fallback while keeping full UUID\nbackward compatibility.\n\nChanges:\n- well_known.py: accept server name in addition to UUID, resolve to\n  canonical UUID for the resource URL (RFC 9728 stability)\n- server_service.py: add resolve_server_id() that tries PK lookup first,\n  then falls back to name lookup\n- streamablehttp_transport.py: use resolve_server_id() in _validate_server_id\n  and _check_server_oauth_enforcement for consistent name support\n- Update tests to reflect name resolution behavior\n\nSecurity: server name input is validated against a strict alphanumeric\npattern (SERVER_NAME_PATTERN) to prevent path traversal and injection.\n\nSigned-off-by: Sébastien MORAND <sebastien.morand@ibm.com>",
+      "author": "Sébastien MORAND",
+      "date": "2026-04-16T07:43:42+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 60,
+  "deletions": 18,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:13.226707",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:13.227428",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4237,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4237.json"
+  }
+}

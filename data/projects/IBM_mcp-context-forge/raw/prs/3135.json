@@ -1,0 +1,98 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3135,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3135"
+  },
+  "metadata": {
+    "title": "perf(db): improve SQLAlchemy instrumentation thread safety",
+    "state": "open",
+    "created_at": "2026-02-24T09:18:00+00:00",
+    "updated_at": "2026-04-09T19:28:19+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "performance",
+      "blocked",
+      "COULD"
+    ],
+    "milestone": "Release 1.4.0",
+    "assignees": [
+      "vishu-bh"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #2327 due to repository maintenance. Your code and branch are intact. @rakdutta please verify everything looks good.\n\ncloses  #1689 \r\nThis pull request introduces a configurable, metrics-tracking background queue for deferred span writes in the SQLAlchemy observability instrumentation. The main goal is to improve reliability and monitoring of the span queue under load, making it easier to detect and diagnose dropped spans. It also exposes queue statistics via a new API endpoint and adds comprehensive unit tests for the new queue logic.\r\n\r\n**Instrumentation queue improvements:**\r\n\r\n* Added a new `InstrumentationQueue` class in `mcpgateway/instrumentation/sqlalchemy.py` that wraps a bounded queue, tracks dropped/total spans, and exposes drop rate and stats for monitoring. The queue size is configurable via the `INSTRUMENTATION_QUEUE_SIZE` environment variable and config setting. [[1]](diffhunk://#diff-38d9b9e49875118425f2b6590c467c4dbdfb7c76258aa42f82967881675955b3R29-R188) [[2]](diffhunk://#diff-628a7ee520f2dc2401c177833a25b8e5eaf2cbc22a7ca51b4c0e3343a4c99815R1029-R1037) [[3]](diffhunk://#diff-a3046da0d15a27e89f2afe639b25748a7ad4d9290af3e7b1b6c1a5533c8f0a8cR2044-R2047)\r\n* Replaced the previous global queue with an instance of `InstrumentationQueue` and updated span enqueueing logic to use its non-blocking methods and metrics.\r\n\r\n**Observability and API enhancements:**\r\n\r\n* Added a new API endpoint `/observability/instrumentation/queue-stats` to expose queue statistics (total, dropped, drop rate, max size) for admin users, aiding in operational monitoring. [[1]](diffhunk://#diff-8089103e8f88b28a15cd0554ac6639149357deec17df4fe6e0f9f8bbd8be8539R843-R871) [[2]](diffhunk://#diff-8089103e8f88b28a15cd0554ac6639149357deec17df4fe6e0f9f8bbd8be8539L26-R26)\r\n\r\n**Thread safety and bug fixes:**\r\n\r\n* Changed query tracking from a global dict to thread-local storage to prevent race conditions between request and background threads. Updated all access patterns accordingly. [[1]](diffhunk://#diff-38d9b9e49875118425f2b6590c467c4dbdfb7c76258aa42f82967881675955b3R29-R188) [[2]](diffhunk://#diff-38d9b9e49875118425f2b6590c467c4dbdfb7c76258aa42f82967881675955b3L168-R329) [[3]](diffhunk://#diff-38d9b9e49875118425f2b6590c467c4dbdfb7c76258aa42f82967881675955b3L195-R358)\r\n* Improved recursion guard logic in span writing to ensure instrumentation hooks are not recursively triggered, with robust cleanup even on errors. [[1]](diffhunk://#diff-38d9b9e49875118425f2b6590c467c4dbdfb7c76258aa42f82967881675955b3R199-R201) [[2]](diffhunk://#diff-38d9b9e49875118425f2b6590c467c4dbdfb7c76258aa42f82967881675955b3R246-R251)\r\n\r\n**Testing improvements:**\r\n\r\n* Added a new test module `test_instrumentation_queue.py` with unit tests for all aspects of `InstrumentationQueue`, including drop rate, stats, and locking.\r\n* Updated existing SQLAlchemy instrumentation tests to use the new thread-local and queue logic, ensuring correct isolation and cleanup between tests. [[1]](diffhunk://#diff-bd7fa318461c9688645471560d964e09bd48da7a29ba0d939a811401dfa6ab03L20-R40) [[2]](diffhunk://#diff-bd7fa318461c9688645471560d964e09bd48da7a29ba0d939a811401dfa6ab03L43-R60) [[3]](diffhunk://#diff-bd7fa318461c9688645471560d964e09bd48da7a29ba0d939a811401dfa6ab03L62-R72) [[4]](diffhunk://#diff-bd7fa318461c9688645471560d964e09bd48da7a29ba0d939a811401dfa6ab03L71-R83) [[5]](diffhunk://#diff-bd7fa318461c9688645471560d964e09bd48da7a29ba0d939a811401dfa6ab03L87-R101) [[6]](diffhunk://#diff-bd7fa318461c9688645471560d964e09bd48da7a29ba0d939a811401dfa6ab03L98-R119)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "65e5ed97c62b38cc9b1f84bc5899d5dc8faaed05",
+      "message": "class\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-19T09:19:12+00:00"
+    },
+    {
+      "sha": "c5193e64b9c83dff862e37a6fe8688e41b2c3aa3",
+      "message": "fix\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-22T10:52:28+00:00"
+    },
+    {
+      "sha": "ed5b4dab2c4483050f4511f5033e46b225214088",
+      "message": "text and lint\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-22T12:24:11+00:00"
+    },
+    {
+      "sha": "f120ad61f5b6b1ab13005895fce00f7bf7c6d338",
+      "message": "bandit\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-22T13:07:49+00:00"
+    },
+    {
+      "sha": "86568ed03483416a0500af66b8996abf52c3ee4c",
+      "message": "lint\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-27T05:13:50+00:00"
+    },
+    {
+      "sha": "d28660ff89a646db9e36659688f9ac6fc8251361",
+      "message": "testcase fix\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-02-16T09:39:53+00:00"
+    },
+    {
+      "sha": "418e19feea845d1e50fe0434ae1b398937a60bae",
+      "message": "test cov fix\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-02-16T11:31:53+00:00"
+    },
+    {
+      "sha": "63077431a11b9340c409bc2662201fa375e15e1a",
+      "message": "precommit\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-02-16T11:40:09+00:00"
+    },
+    {
+      "sha": "88fa736a8be4dd186e73f11942f022e2be03de79",
+      "message": "review\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-20T07:16:17+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 383,
+  "deletions": 23,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:36.477448",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:36.479055",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3135,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3135.json"
+  }
+}

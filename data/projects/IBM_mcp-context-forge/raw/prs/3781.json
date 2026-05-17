@@ -1,0 +1,140 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3781,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3781"
+  },
+  "metadata": {
+    "title": "feat: add natural-language tool execution",
+    "state": "open",
+    "created_at": "2026-03-21T18:17:14+00:00",
+    "updated_at": "2026-03-31T15:17:44+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "AbdulR11",
+    "labels": [
+      "enhancement",
+      "COULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #2248 \r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR adds a **Natural Language Tool Execution** API so users can run tools through conversational queries. The gateway classifies intent, matches tools, extracts parameters, confirms risky actions, executes tools, and formats responses back into natural language.\r\n\r\n### Problem Statement\r\nTool execution currently requires:\r\n- **Knowing tool IDs** ahead of time\r\n- **Manual JSON parameter input**\r\n- **Schema memorization**\r\n- **Context switching** away from natural conversation\r\n\r\n### Solution\r\n- **NL execution flow**: intent → tool matching → slot filling → confirmation → execution → response\r\n- **Conversation context** for follow-up clarification\r\n- **Safety checks** for destructive or sensitive operations\r\n- **Follow-up suggestions** for next actions\r\n\r\n### Key Components\r\n- **Service Layer**: NL orchestration + LLM prompts\r\n- **Router Endpoints**: `/api/v1/nl/*`\r\n- **Configuration**: feature flags + safety controls\r\n- **Tests**: service and router coverage\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n### Test Coverage\r\n- ✅ NL execution service flow (no tool, clarification, confirmation, success)\r\n- ✅ Router execution path and config guard\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Files Changed\r\n\r\n#### Core Implementation\r\n- `mcpgateway/services/nl_execution_service.py` - NL execution orchestration\r\n- `mcpgateway/routers/nl_router.py` - NL endpoints\r\n- `mcpgateway/config.py` - NL settings and feature flags\r\n- `mcpgateway/main.py` - Router registration\r\n\r\n#### Tests\r\n- `tests/unit/mcpgateway/services/test_nl_execution_service.py` - Service coverage\r\n- `tests/unit/mcpgateway/routers/test_nl_router.py` - Router coverage\r\n- `tests/unit/mcpgateway/routers/__init__.py` - Package marker for router tests\r\n\r\n### Usage Example\r\n\r\n**Execute with natural language:**\r\n```bash\r\nPOST /api/v1/nl/execute\r\n{\r\n  \"query\": \"What's the weather in San Francisco?\"\r\n}\r\n```\r\n\r\n**Confirm risky action:**\r\n```bash\r\nPOST /api/v1/nl/confirm\r\n{\r\n  \"session_id\": \"<session>\",\r\n  \"confirm\": true\r\n}\r\n```\r\n\r\n### Benefits\r\n\r\n**For Users:**\r\n- Execute tools conversationally without remembering schemas\r\n- Multi-turn clarification for missing details\r\n\r\n**For Operators:**\r\n- Safety confirmations for high-risk tools\r\n- Configurable model and rate limits\r\n\r\n### Configuration\r\n```bash\r\nMCPGATEWAY_NL_EXECUTION_ENABLED=true\r\nMCPGATEWAY_NL_EXECUTION_MODEL=gpt-4o\r\n```\r\n\r\n",
+  "comments": [
+    {
+      "id": "2969930061",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:12+00:00",
+      "body": "`NLExecutionService` imports `mcpgateway.services.semantic_search_service`, but that module/file does not exist in the repo (no `mcpgateway/services/semantic_search_service.py` or package). This will raise `ImportError` at import time and break the API when the NL router is included. Either add the missing semantic search service module or change the import to the correct existing service implementation.\n```suggestion\nfrom mcpgateway.services.tool_service import ToolService\nfrom mcpgateway.utils.redis_client import get_redis_client\n\ntry:\n    # Optional semantic search integration; may not be present in all deployments.\n    from mcpgateway.services.semantic_search_service import get_semantic_search_service\nexcept ImportError:  # pragma: no cover - defensive fallback when module is absent\n    def get_semantic_search_service(*args: Any, **kwargs: Any) -> Any:\n        \"\"\"Fallback when semantic_search_service is not available.\n\n        This preserves importability of nl_execution_service even if the\n        semantic search module is not present in the environment, and fails\n        explicitly when semantic search is actually requested.\n        \"\"\"\n        raise RuntimeError(\n            \"Semantic search service is not available: \"\n            \"missing 'mcpgateway.services.semantic_search_service'.\"\n        )\n```"
+    },
+    {
+      "id": "2969930098",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:12+00:00",
+      "body": "`_tool_result_to_dict()` checks `tool_result.isError`, but the `ToolResult` schema uses `is_error`. As written, errors will be silently treated as successes and the LLM formatting step won’t be told the result is an error. Read `is_error` (and ideally propagate `error_message` into the dict).\n```suggestion\n        is_error = bool(getattr(tool_result, \"is_error\", getattr(tool_result, \"isError\", False)))\n        error_message = getattr(tool_result, \"error_message\", None)\n        result: Dict[str, Any] = {\n            \"is_error\": is_error,\n            \"content\": content_text,\n            \"summary\": content_text,\n        }\n        if error_message is not None:\n            result[\"error_message\"] = error_message\n        return result\n```"
+    },
+    {
+      "id": "2969930113",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:12+00:00",
+      "body": "Slot filling validation errors are collected (`errors`) but never influence control flow: `needs_clarification` is based only on missing required params. This can proceed to tool execution with schema-invalid arguments. Consider treating non-empty `validation_errors` as either `needs_clarification` (ask user to correct) or an `error` response before invoking the tool.\n```suggestion\n            needs_clarification=bool(missing or errors),\n```"
+    },
+    {
+      "id": "2969930124",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:13+00:00",
+      "body": "Model/temperature/max_tokens overrides from the request aren’t applied to tool matching: `_match_tools()` always uses `self._resolve_model(None)` and `settings.nl_execution_temperature/max_tokens`. If the API allows per-request overrides, thread the resolved model and generation params into `_match_tools()` so intent classification, matching, and slot filling use a consistent configuration.\n```suggestion\n\n        # Allow per-request overrides for model, temperature, and max_tokens if provided\n        local_vars = locals()\n        model_override = local_vars.get(\"model\")\n        temperature_override = local_vars.get(\"temperature\")\n        max_tokens_override = local_vars.get(\"max_tokens\")\n\n        effective_model = self._resolve_model(model_override)\n        effective_temperature = (\n            settings.nl_execution_temperature\n            if temperature_override is None\n            else temperature_override\n        )\n        effective_max_tokens = (\n            settings.nl_execution_max_tokens\n            if max_tokens_override is None\n            else max_tokens_override\n        )\n\n        result = await self._llm.generate_json(\n            db,\n            effective_model,\n            prompt,\n            temperature=effective_temperature,\n            max_tokens=effective_max_tokens,\n```"
+    },
+    {
+      "id": "2969930134",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:13+00:00",
+      "body": "`_keyword_search()` loads all matching tools (`.all()`) and only then slices to `limit`, which can cause unnecessary full scans and large result materialization. Apply a SQL `LIMIT` at the query level to bound work (and consider escaping `%`/`_` in user input if needed).\n```suggestion\n                select(DbTool)\n                .where(\n                    DbTool.enabled.is_(True),\n                    or_(\n                        DbTool.name.ilike(pattern),\n                        DbTool.description.ilike(pattern),\n                        DbTool.original_description.ilike(pattern),\n                    ),\n                )\n                .limit(limit)\n            )\n            .scalars()\n            .all()\n        )\n        results = []\n        for tool in rows:\n```"
+    },
+    {
+      "id": "2969930150",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:13+00:00",
+      "body": "`/confirm` executes tools but doesn’t enforce the NL rate limit (`_enforce_rate_limit`). This leaves an unthrottled path for repeated confirmations/tool execution. Apply the same rate limiting used by `/execute` (and likely `/parse`) to `/confirm` as well.\n```suggestion\n    _ensure_enabled(payload.model)\n    _enforce_rate_limit(request, limit=settings.nl_execution_rate_limit)\n```"
+    },
+    {
+      "id": "2969930161",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:13+00:00",
+      "body": "`NoDecode` from `pydantic_settings` is used as `NoDecode()` in several `Annotated[...]` types, but elsewhere in the same file it’s used as `NoDecode` (without calling). `NoDecode` is metadata, not a factory; calling it is likely to raise at import/type evaluation time. Use `Annotated[list[str], NoDecode]` consistently."
+    },
+    {
+      "id": "2969930172",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:14+00:00",
+      "body": "SSRF protection defaults were weakened: `ssrf_allow_localhost` and `ssrf_allow_private_networks` now default to `True`, and `ssrf_dns_fail_closed` defaults to `False`. This makes it much easier for tools/gateways to reach internal networks/loopback and to bypass protections via DNS failures. Unless this is explicitly intended (and documented/migrated), these should default to the safer values (block localhost/private; fail-closed on DNS)."
+    },
+    {
+      "id": "2969930176",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:14+00:00",
+      "body": "`normalize_x_frame_options()` no longer strips whitespace / treats empty strings as `None`. If an env var is set to an empty or whitespace-only value, it will now be returned unchanged and may produce an invalid `X-Frame-Options` header. Consider restoring the previous normalization for empty/whitespace-only strings."
+    },
+    {
+      "id": "2969930182",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:14+00:00",
+      "body": "`plugins_can_override_rbac` now defaults to `True`, allowing plugin auth hooks to override RBAC by default. This is a high-impact security posture change and is risky as a default (especially for deployments that enable plugins without realizing this). Default should be `False` (audit-only) with an explicit opt-in to override RBAC.\n```suggestion\n    plugins_can_override_rbac: bool = Field(default=False, description=\"Allow plugin HTTP auth hook grant decisions to override RBAC checks\")\n```"
+    },
+    {
+      "id": "2969930185",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:14+00:00",
+      "body": "`mcp_require_auth` is now a non-optional bool defaulting to `False`, and the previous logic that derived it from `auth_required` was removed. This changes the default behavior to allow unauthenticated access to MCP endpoints (public-only) even when `AUTH_REQUIRED=true`. If that behavior change isn’t intentional and explicitly documented/migrated, consider restoring the old defaulting behavior or default `mcp_require_auth` to `True` when `auth_required` is enabled."
+    },
+    {
+      "id": "2969930187",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:15+00:00",
+      "body": "`settings` is imported but never used in this test file, which will fail linting in setups that enforce unused imports. Remove the unused import or use it in an assertion."
+    },
+    {
+      "id": "2969930193",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:23:15+00:00",
+      "body": "This PR is described as adding NL tool execution, but `config.py` also changes several unrelated defaults/flags (e.g., `llmchat_enabled` default, SSRF defaults, `mcp_require_auth`, plugin override behavior) and adds large new config sections. If these are intentional, they should be called out explicitly in the PR description (and potentially split into a separate PR) to reduce rollout risk and make review/approval clearer."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3986371140",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-21T18:23:15+00:00",
+      "body": "## Pull request overview\n\nThis PR introduces a Natural Language (NL) tool execution API in the MCP Gateway, enabling users to execute tools via conversational queries with intent classification, tool matching, slot filling, optional confirmation, and natural-language response formatting.\n\n**Changes:**\n- Added `NLExecutionService` to orchestrate NL intent → match → slot-fill → confirm → execute → respond flow.\n- Added `/api/v1/nl/*` FastAPI router endpoints for execute/parse/confirm/context/feedback.\n- Added unit tests covering core service flow and router behavior, plus new config flags for NL execution.\n\n### Reviewed changes\n\nCopilot reviewed 6 out of 7 changed files in this pull request and generated 13 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `mcpgateway/services/nl_execution_service.py` | Implements NL orchestration, context, safeguards, and tool invocation/formatting logic |\r\n| `mcpgateway/routers/nl_router.py` | Adds NL endpoints and basic rate limiting/feature gating |\r\n| `mcpgateway/config.py` | Adds NL execution settings (and also includes several unrelated security/default changes) |\r\n| `tests/unit/mcpgateway/services/test_nl_execution_service.py` | Unit tests for NL execution service paths |\r\n| `tests/unit/mcpgateway/routers/test_nl_router.py` | Unit tests for NL router gating and service invocation |\r\n| `tests/unit/mcpgateway/routers/__init__.py` | Marks router tests as a package |\n</details>\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (1)</summary>\n\n**mcpgateway/config.py:1000**\n* `get_security_status()` compares `self.jwt_secret_key` directly to a string. Since `jwt_secret_key` is a `SecretStr`, this comparison is unreliable and can report `secure_secrets=True` even when the default secret is configured. Extract the actual secret value (`get_secret_value()`) before comparing.\n```\n        return {\n            \"secure_secrets\": self.jwt_secret_key != \"my-test-key\",  # nosec B105 - checking for default value\n            \"auth_enabled\": self.auth_required,\n            \"ssl_verification\": not self.skip_ssl_verify,\n            \"debug_disabled\": not self.debug,\n            \"cors_restricted\": \"*\" not in self.allowed_origins if self.cors_enabled else True,\n            \"ui_protected\": not self.mcpgateway_ui_enabled or self.auth_required,\n```\n</details>\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a25d5094137416a40f8b9cec5fdc3cdd742033de",
+      "message": "feat: add natural-language tool execution\n\nSigned-off-by: AbdulR11 <147985851+AbdulR11@users.noreply.github.com>",
+      "author": "AbdulR11",
+      "date": "2026-03-21T18:13:26+00:00"
+    },
+    {
+      "sha": "5c4569df544ef9c46ec33308c94abd88b3c1340a",
+      "message": "Merge branch 'main' into natural-language-tool",
+      "author": "AbdulR11",
+      "date": "2026-03-31T15:17:42+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 2821,
+  "deletions": 3969,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:01.469893",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:01.471602",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3781,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3781.json"
+  }
+}

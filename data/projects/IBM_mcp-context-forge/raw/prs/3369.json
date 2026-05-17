@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3369,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3369"
+  },
+  "metadata": {
+    "title": "fix(api): apply query and header mappings on tool invocation (#1405)",
+    "state": "closed",
+    "created_at": "2026-03-02T01:19:31+00:00",
+    "updated_at": "2026-04-13T06:37:06+00:00",
+    "closed_at": "2026-04-13T06:37:04+00:00",
+    "merged_at": "2026-04-13T06:37:04+00:00",
+    "author": "martinalexandruibm",
+    "labels": [
+      "bug",
+      "python",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "jonpspri",
+      "martinalexandruibm"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nSolves backend part of https://github.com/IBM/mcp-context-forge/issues/1405\r\n\r\n---\r\n\r\n## 📝 Summary\r\nApply the query and header mappings defined on a tool when it gets invoked\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [ ] No secrets or credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4059748273",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-05T19:01:41+00:00",
+      "body": "Nice work, Martin — this fills an important gap where query/header mappings were fully wired through the schema, DB, admin UI, and tool CRUD paths but weren't being applied during actual REST invocation.\n\n**What the PR does well:**\n- `apply_mapping_into_target()` is clean and well-scoped — pure function, no side effects, easy to reason about\n- Cache payload propagation follows the established pattern (extract to locals before DB close)\n- Only activates for REST integration type, consistent with schema validation\n\n**Changes I made during rebase/review:**\n- Rebased onto current `main` and resolved two merge conflict regions in the test file (mapping tests collided with recently-added retry/timeout tests)\n- Squashed the 10 PR commits into a single clean commit preserving your authorship\n- **Fixed 2 test regressions** in `TestRustMcpExecutionPlan` — the mock tool `SimpleNamespace` objects were missing `query_mapping`/`header_mapping` attributes needed after they were added to `_build_tool_cache_payload`\n- **Added 9 unit tests** for `apply_mapping_into_target` covering: key renaming, target merging, overwrite semantics, `None`/empty mapping handling, unmapped key exclusion, and input immutability\n- Added assertions verifying `query_mapping`/`header_mapping` presence in `_build_tool_cache_payload` output\n- Removed spurious `query_mapping`/`header_mapping` from gateway mock (gateways don't have these fields)\n- Applied Black formatting\n\nAll 285 tests in `test_tool_service.py` pass.\n\n**One design note for awareness** (not blocking): when `query_mapping` is set, only explicitly mapped argument fields are included in the outgoing payload — unmapped fields are excluded. This differs from the no-mapping path which preserves all fields. This is reasonable for the REST passthrough use case (precise control over what gets sent), and I've added a test that documents this behavior explicitly.\n\nLGTM — approving."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6681062d1b8e08cdb6074f285f2c07425fce4bb1",
+      "message": "fix(api): apply query and header mappings on tool invocation (#1405)\n\nWhen a tool has query_mapping or header_mapping configured, apply those\nmappings during REST tool invocation so that argument fields are correctly\ntranslated into query parameters and HTTP headers.\n\nCloses #1405\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Martin Alexandru",
+      "date": "2026-04-05T18:37:14+00:00"
+    },
+    {
+      "sha": "42d6f9d080ecc5695ccfcc6be804408a3a99c56a",
+      "message": "fix(test): add unit tests for apply_mapping_into_target and fix regressions\n\n- Add 9 unit tests for the apply_mapping_into_target utility covering\n  key renaming, target merging, overwrite semantics, None/empty mapping\n  handling, unmapped key exclusion, and input immutability\n- Fix 2 TestRustMcpExecutionPlan tests broken by missing query_mapping\n  and header_mapping attributes on mock tool SimpleNamespace objects\n- Add assertions verifying query_mapping and header_mapping are included\n  in _build_tool_cache_payload output\n- Remove spurious query_mapping/header_mapping from gateway mock (gateways\n  do not have these fields)\n- Apply Black formatting to apply_mapping_into_target\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-05T18:47:53+00:00"
+    },
+    {
+      "sha": "09cd04059cc170c25d05866ef981ac55ffb9f2ce",
+      "message": "fix(api): harden query/header mapping with security validation, type guards, and tests\n\nTighten Dict[str, Any] to Dict[str, str] for query_mapping and header_mapping\nin schemas, DB model, and Pydantic validation. Add schema-level size constraints\n(max 50 entries, 128 char keys/values) on ToolCreate and ToolUpdate.\n\nAt invocation time, validate header mapping targets against sensitive header\npatterns (Authorization, Proxy-Authorization, X-API-Key, etc.) and RFC 7230\nheader name syntax to prevent auth header overwrite and CRLF injection. Add\nisinstance guards with dict-content validation matching the tool_oauth_config\npattern, and wrap mapping call sites in try/except for clear error messages\nwhen mappings are corrupt.\n\nIncludes debug-level logging for unmapped keys, improved docstrings and inline\ncomments, mock_tool fixture defaults, and test coverage for GET method,\nempty-dict mappings, URL-template param availability in headers, sensitive\nheader rejection, CRLF injection rejection, and content validation.\n\nCloses #1405\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-12T19:16:50+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 685,
+  "deletions": 33,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:06.184234",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:06.185646",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3369,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3369.json"
+  }
+}

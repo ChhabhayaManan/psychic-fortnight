@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1867,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1867"
+  },
+  "metadata": {
+    "title": "Postgresql read replicas 1861",
+    "state": "closed",
+    "created_at": "2026-01-02T18:55:42+00:00",
+    "updated_at": "2026-01-02T18:55:55+00:00",
+    "closed_at": "2026-01-02T18:55:54+00:00",
+    "merged_at": "2026-01-02T18:55:53+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Implements PostgreSQL streaming replication with a dedicated performance testing profile. This separates the high-capacity configuration from the standard monitoring stack, allowing developers to choose between lightweight monitoring and full performance testing setups.\r\n\r\n## New Makefile Targets\r\n\r\n```bash\r\n# Standard monitoring (unchanged behavior)\r\nmake monitoring-up      # 3 gateway replicas, single PostgreSQL\r\nmake monitoring-down\r\nmake monitoring-clean\r\n\r\n# Performance testing (new)\r\nmake performance-up     # 5 gateway replicas, PostgreSQL primary + replica\r\nmake performance-down\r\nmake performance-clean\r\nmake performance-logs\r\n```\r\n\r\n## Configuration Comparison\r\n\r\n| Setting | `monitoring-up` | `performance-up` |\r\n|---------|-----------------|------------------|\r\n| Compose file | docker-compose.yml | docker-compose-performance.yml |\r\n| Gateway replicas | 3 | 5 |\r\n| PostgreSQL | Single instance | Primary + streaming replica |\r\n| PgBouncer | Connects to primary | Load balances across primary + replica |\r\n| Prometheus | Single exporter | Primary + replica exporters with role labels |\r\n\r\n## New Files\r\n\r\n### `docker-compose-performance.yml`\r\nFull performance configuration including:\r\n- 5 gateway replicas (vs 3 in standard)\r\n- PostgreSQL WAL replication settings (wal_level=replica, max_wal_senders=4)\r\n- `postgres-replica` service with automatic pg_basebackup initialization\r\n- `postgres_exporter_replica` for monitoring the replica\r\n- PgBouncer configured for round-robin load balancing across both hosts\r\n- Uses `prometheus-performance.yml` for scraping\r\n\r\n### `infra/monitoring/prometheus-performance.yml`\r\nPrometheus configuration with:\r\n- Primary PostgreSQL exporter target with `role: primary` label\r\n- Replica PostgreSQL exporter target with `role: replica` label\r\n- Enables per-server metrics in Grafana dashboards\r\n\r\n### `infra/postgres/init-replication.sh`\r\nInitialization script that:\r\n- Runs on PostgreSQL first start via `/docker-entrypoint-initdb.d/`\r\n- Adds replication entry to `pg_hba.conf`\r\n- Enables streaming replication connections from Docker network\r\n\r\n### `infra/monitoring/grafana/provisioning/dashboards/postgresql-replication.json`\r\nGrafana dashboard with:\r\n- Primary/Replica status indicators\r\n- Replication lag monitoring (bytes and time)\r\n- Connection distribution across servers\r\n- Transaction rates by server\r\n- Cache hit rate comparison\r\n- WAL replication pipeline visualization\r\n\r\n## Architecture\r\n\r\n```\r\n                                    ┌─────────────────┐\r\n                                    │     Nginx       │\r\n                                    │  (load balancer)│\r\n                                    └────────┬────────┘\r\n                                             │\r\n                    ┌────────────────────────┼────────────────────────┐\r\n                    │                        │                        │\r\n             ┌──────┴──────┐          ┌──────┴──────┐          ┌──────┴──────┐\r\n             │  Gateway 1  │          │  Gateway 2  │   ...    │  Gateway 5  │\r\n             └──────┬──────┘          └──────┬──────┘          └──────┬──────┘\r\n                    │                        │                        │\r\n                    └────────────────────────┼────────────────────────┘\r\n                                             │\r\n                                    ┌────────┴────────┐\r\n                                    │    PgBouncer    │\r\n                                    │ (round-robin)   │\r\n                                    └────────┬────────┘\r\n                                             │\r\n                              ┌──────────────┴──────────────┐\r\n                              │                             │\r\n                    ┌─────────┴─────────┐         ┌─────────┴─────────┐\r\n                    │  PostgreSQL       │         │  PostgreSQL       │\r\n                    │  Primary          │────────▶│  Replica          │\r\n                    │  (read/write)     │ WAL     │  (read-only)      │\r\n                    └───────────────────┘ stream  └───────────────────┘\r\n```\r\n\r\n## Usage\r\n\r\n### Start Performance Stack\r\n```bash\r\nmake performance-up\r\n```\r\n\r\nThis starts:\r\n- 5 gateway replicas behind Nginx\r\n- PostgreSQL primary with WAL replication enabled\r\n- PostgreSQL replica with streaming replication\r\n- PgBouncer load balancing reads across both databases\r\n- Full Prometheus/Grafana monitoring with replication metrics\r\n\r\n### Run Benchmarks\r\n```bash\r\nmake load-test-ui\r\n# Access Locust at http://localhost:8089\r\n# Access Grafana at http://localhost:3000 (admin/changeme)\r\n```\r\n\r\n### Monitor Replication\r\n```bash\r\n# Check replication status\r\ndocker exec mcp-context-forge-postgres-1 psql -U postgres -c \\\r\n  \"SELECT client_addr, state, sent_lsn, replay_lsn FROM pg_stat_replication;\"\r\n\r\n# View replication lag\r\n# Grafana → PostgreSQL Replication dashboard\r\n```\r\n\r\n### Clean Up\r\n```bash\r\nmake performance-down   # Stop containers\r\nmake performance-clean  # Stop and remove volumes\r\n```\r\n\r\n## Bottleneck Analysis\r\n\r\nWith this configuration at 3000 concurrent users:\r\n\r\n| Component | Typical CPU | Notes |\r\n|-----------|-------------|-------|\r\n| Gateway (x5) | 300-400% each | Distributed load |\r\n| PostgreSQL Primary | 100-180% | Handles writes + some reads |\r\n| PostgreSQL Replica | 40-80% | Handles read overflow |\r\n| PgBouncer | 40-60% | Connection pooling |\r\n| Nginx | 50-80% | Request routing |\r\n\r\nThe primary PostgreSQL becomes the bottleneck under write-heavy workloads since all writes must go to primary. For read-heavy workloads, the replica provides significant scaling headroom.\r\n\r\n## Related Issues\r\n\r\n- Closes #1861 - PostgreSQL Read Replicas for Horizontal Scaling\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "bf8b5b0c89d2cc18a599f170e5e774e3b5348361",
+      "message": "Tuning postgresql parallel workers\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-02T12:01:56+00:00"
+    },
+    {
+      "sha": "3d4fa232a2a25aab3035319cd18b7e77971f271c",
+      "message": "Add PostgreSQL read replicas - closes #1861\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-02T18:48:43+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 1387,
+  "deletions": 145,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:38.879538",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:38.880499",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1867,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1867.json"
+  }
+}

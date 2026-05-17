@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2579,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2579"
+  },
+  "metadata": {
+    "title": "feat(infra): zero-config TLS for Nginx via Docker Compose profile",
+    "state": "closed",
+    "created_at": "2026-01-30T06:01:59+00:00",
+    "updated_at": "2026-01-31T15:47:39+00:00",
+    "closed_at": "2026-01-30T06:34:46+00:00",
+    "merged_at": "2026-01-30T06:34:46+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\nImplements zero-configuration TLS for the Docker Compose stack via a new `--profile tls` profile. This enables HTTPS with a single command, auto-generating self-signed certificates on first run.\n\n- **One command TLS**: `make compose-tls` starts the stack with HTTPS on port 8443\n- **Auto-generates certs**: Self-signed certificates created automatically if `./certs/` is empty\n- **Custom certificates**: Place your own `cert.pem`/`key.pem` in `./certs/` before starting\n- **Optional HTTPS redirect**: `make compose-tls-https` forces all HTTP traffic to HTTPS\n- **Composable**: Works alongside other profiles (`--profile tls --profile monitoring`)\n\n## Changes\n\n### New Files\n| File | Description |\n|------|-------------|\n| `infra/nginx/nginx-tls.conf` | TLS-enabled nginx configuration with HTTP:80 and HTTPS:443 |\n| `infra/nginx/docker-entrypoint.sh` | Entrypoint script handling `NGINX_FORCE_HTTPS` env var |\n\n### Modified Files\n| File | Changes |\n|------|---------|\n| `docker-compose.yml` | Added `cert_init` and `nginx_tls` services with `tls` profile |\n| `Makefile` | Added `compose-tls`, `compose-tls-https`, `compose-tls-down`, `compose-tls-logs`, `compose-tls-ps` targets |\n| `infra/nginx/Dockerfile` | Added entrypoint script, improved healthcheck for TLS |\n| `docs/docs/deployment/tls-configuration.md` | Added Quick Start section for zero-config TLS |\n| `docs/docs/deployment/compose.md` | Added TLS section with commands table |\n| `docs/docs/deployment/.pages` | Added tls-configuration.md to navigation |\n| `README.md` | Added TLS option to Docker Compose quick start |\n\n## Usage\n\n```bash\n# Start with TLS (HTTP + HTTPS both available)\nmake compose-tls\n\n# Start with forced HTTPS redirect\nmake compose-tls-https\n\n# Use custom certificates\nmkdir -p certs\ncp /path/to/cert.pem certs/cert.pem\ncp /path/to/key.pem certs/key.pem\nmake compose-tls\n\n# Test endpoints\ncurl http://localhost:8080/health      # HTTP\ncurl -sk https://localhost:8443/health  # HTTPS\n```\n\n## Test plan\n\n- [x] `make compose-tls` starts stack with both HTTP:8080 and HTTPS:8443 working\n- [x] `make compose-tls-https` redirects HTTP requests to HTTPS (301)\n- [x] Auto-generated certificates work (TLS 1.2/1.3)\n- [x] Custom certificates are detected and used when present in `./certs/`\n- [x] `cert_init` container correctly skips generation when certs exist\n- [x] Combined profiles work (`--profile tls --profile monitoring`)\n- [x] Documentation is complete and accurate\n\nCloses #2571",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "7a2a984ea2bd19327862f30c4f32ae30453c24b1",
+      "message": "feat(infra): add zero-config TLS for nginx via Docker Compose profile\n\nAdd a new `--profile tls` Docker Compose profile that enables HTTPS\nwith zero configuration. Certificates are auto-generated on first run\nor users can provide their own CA-signed certificates.\n\nFeatures:\n- One command TLS: `make compose-tls` starts with HTTPS on port 8443\n- Auto-generates self-signed certs if ./certs/ is empty\n- Custom certs: place cert.pem/key.pem in ./certs/ before starting\n- Optional HTTP->HTTPS redirect via `make compose-tls-https`\n- Environment variable NGINX_FORCE_HTTPS=true for redirect mode\n- Works alongside other profiles (monitoring, benchmark)\n\nNew files:\n- infra/nginx/nginx-tls.conf: TLS-enabled nginx configuration\n- infra/nginx/docker-entrypoint.sh: Handles NGINX_FORCE_HTTPS env var\n\nNew Makefile targets:\n- compose-tls: Start with HTTP:8080 + HTTPS:8443\n- compose-tls-https: Force HTTPS redirect (HTTP->HTTPS)\n- compose-tls-down: Stop TLS stack\n- compose-tls-logs: Tail TLS service logs\n- compose-tls-ps: Show TLS stack status\n\nDocker Compose additions:\n- cert_init service: Auto-generates certs using alpine/openssl\n- nginx_tls service: TLS-enabled nginx reverse proxy\n\nDocumentation:\n- Updated tls-configuration.md with Quick Start section\n- Updated compose.md with TLS section\n- Added to deployment navigation\n- Updated README.md quick start\n\nCloses #2571\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-30T06:01:32+00:00"
+    },
+    {
+      "sha": "d88f753fafa1270d05135226bc972997d50e579d",
+      "message": "fix(nginx): use smart port detection for HTTPS redirect\n\nFix hard-coded :8443 port in HTTPS redirect that broke internal\ncontainer-to-container calls.\n\nProblem:\n- External access via port 8080 correctly redirected to :8443\n- Internal container calls (no port) also redirected to :8443\n- But nginx_tls only listens on 443 internally, so internal redirects failed\n\nSolution:\nAdd a map directive that detects request origin based on Host header:\n- Requests with :8080 in Host → redirect to :8443 (external)\n- Requests without port → redirect without port, defaults to 443 (internal)\n\nTested:\n- External: curl http://localhost:8080/health → https://localhost:8443/health ✓\n- Internal: curl http://nginx_tls/health → https://nginx_tls/health (443) ✓\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-30T06:29:36+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 1010,
+  "deletions": 5,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:26.406991",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:26.408628",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2579,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2579.json"
+  }
+}

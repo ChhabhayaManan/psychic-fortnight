@@ -1,0 +1,80 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3292,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3292"
+  },
+  "metadata": {
+    "title": "[FEATURE][AUTH]: Just-in-Time (JIT) access and temporary privilege elevation",
+    "state": "closed",
+    "created_at": "2026-02-26T12:56:49+00:00",
+    "updated_at": "2026-05-08T05:11:35+00:00",
+    "closed_at": "2026-05-08T05:11:34+00:00",
+    "merged_at": null,
+    "author": "yiannis2804",
+    "labels": [
+      "enhancement",
+      "security",
+      "COULD",
+      "api",
+      "pdp-requirement"
+    ],
+    "milestone": "Release 1.4.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #2227\r\n\r\n---\r\n\r\n## Sweng Group 5\r\n\r\n## 📝 Summary\r\nImplements Just-in-Time (JIT) access and temporary privilege elevation to enforce least-privilege principles (FedRAMP AC-6, HIPAA). Instead of granting standing elevated access, users request temporary roles with a justification, an admin approves or rejects the request, and access automatically expires after the specified duration.\r\n\r\n**New files:**\r\n- `mcpgateway/db.py` — `JITGrant` SQLAlchemy model with full lifecycle tracking\r\n- `mcpgateway/schemas.py` — Pydantic schemas for request, approve, reject, revoke, and response\r\n- `mcpgateway/services/jit_service.py` — `JITService` with create, approve, reject, revoke, and `expire_grants` methods\r\n- `mcpgateway/routers/jit.py` — REST API router with 7 endpoints\r\n- `mcpgateway/alembic/versions/a1b2c3d4e5f6_add_jit_grants_table.py` — Alembic migration for `jit_grants` table\r\n- `docs/docs/manage/jit.md` — Full feature documentation with API examples, config reference, and compliance table\r\n- `tests/unit/mcpgateway/services/test_jit_service.py` — 17 unit tests at 97% coverage\r\n\r\n**Modified files:**\r\n- `mcpgateway/main.py` — JIT router registered alongside RBAC router\r\n- `mcpgateway/config.py` — 6 new JIT config settings (`JIT_ENABLED`, `JIT_MAX_DURATION_HOURS`, `JIT_DEFAULT_DURATION_HOURS`, `JIT_REQUIRE_JUSTIFICATION`, `JIT_REQUIRE_APPROVAL`, `JIT_APPROVAL_TIMEOUT_HOURS`)\r\n\r\n**API endpoints added:**\r\n- `POST /jit` — Request temporary elevated access\r\n- `GET /jit` — List all grants (admin only)\r\n- `GET /jit/mine` — List current user's own grants\r\n- `GET /jit/{id}` — Get grant by ID\r\n- `POST /jit/{id}/approve` — Approve a pending grant (admin only)\r\n- `POST /jit/{id}/reject` — Reject a pending grant (admin only)\r\n- `POST /jit/{id}/revoke` — Revoke an active grant (self or admin)\r\n\r\n**Grant lifecycle:** `pending → active → expired` (auto) or `pending → rejected` or `active → revoked`\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Feature / Enhancement\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n| Check | Command | Status |\r\n|---|---|---|\r\n| Lint suite | `make lint` | ✅ Passed |\r\n| Unit tests | `make test` | ✅ 17/17 passed, 0 failures |\r\n| Coverage ≥ 80% | `make coverage` | ✅ 97% on `jit_service.py` |\r\n| Package verify | `make verify` | ✅ 10/10 Mascarpone |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (`docs/docs/manage/jit.md`)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n- Alembic migration `a1b2c3d4e5f6` creates the `jit_grants` table with indexes on `requester_email`, `status`, `expires_at`, and `created_at`\r\n- The `expire_grants()` method in `JITService` is designed to be called by a scheduler (e.g. APScheduler) to auto-expire active grants — scheduler integration can be added as a follow-up\r\n- Break-glass emergency access and notification system (email/Slack/webhook) are deferred to follow-up issues per the original issue scope",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "866093d178ada433b742e5b36e39cd1cb632cbcd",
+      "message": "feat: implement Just-in-Time (JIT) access and temporary privilege elevation (#2227)\n\n- Add JITGrant SQLAlchemy model to db.py with full lifecycle tracking\n- Add JIT schemas (request, approve, reject, revoke, response) to schemas.py\n- Add JITService with create, approve, reject, revoke, expire_grants methods\n- Add JIT REST API router with endpoints: POST /jit, GET /jit, GET /jit/mine,\n  GET /jit/{id}, POST /jit/{id}/approve, POST /jit/{id}/reject, POST /jit/{id}/revoke\n- Register JIT router in main.py alongside RBAC router\n- Add Alembic migration a1b2c3d4e5f6 for jit_grants table\n- Add 17 unit tests with 97% coverage\n\nCloses #2227\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-26T12:30:11+00:00"
+    },
+    {
+      "sha": "62c768942f6da84c0f8bd6fd495378c809d3e5cb",
+      "message": "docs: add JIT access documentation (#2227)\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-26T12:32:02+00:00"
+    },
+    {
+      "sha": "686ee6644a0d2c29a8d86c0ed7edfba3bd16ddce",
+      "message": "feat: add JIT access configuration settings to config.py (#2227)\n\n- Add jit_enabled, jit_max_duration_hours, jit_default_duration_hours\n- Add jit_require_justification, jit_require_approval, jit_approval_timeout_hours\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-26T12:40:02+00:00"
+    },
+    {
+      "sha": "00f91773812f2a33405eb13d33ccc78ad3e8b8dc",
+      "message": "docs: add JIT config environment variables to jit.md (#2227)\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-26T12:41:18+00:00"
+    },
+    {
+      "sha": "cc195e902325d0a30f17712b6a3939aa7729b6e7",
+      "message": "fix: address reviewer feedback for JIT access PR (#2227)\n\n- Fix Alembic down_revision to point to latest head (b2d9c6e4f1a7)\n- Add ORM relationships to JITGrant model for consistency with existing patterns\n- Add router-level deny-path tests (unauthenticated, 403, 404, invalid status)\n- Fix token scoping middleware mock in test_main.py to prevent 403 interference\n- Fix metrics settings conftest to override DB_METRICS_RECORDING_ENABLED=false\n- Fix test_tool_service_coverage mock fields and plugin_manager for pydantic validation\n- Rebase onto upstream/main\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-27T12:31:56+00:00"
+    },
+    {
+      "sha": "c19a0e641736ff3a74bb7909c152cbc09c4532ca",
+      "message": "fix: resolve all pre-existing test failures surfaced after rebase (#2227)\n\n- Convert jit_service tests from asyncio.get_event_loop() to pytest.mark.asyncio\n- Fix log_aggregator tests: set _use_sql_percentiles and enabled directly on instance\n- Fix metrics_buffer/rollup tests: use usefixtures reset_metrics_settings\n- Fix dcr_service test: update client_name assertion to MCP Gateway\n- Fix prompt_service test: patch get_plugin_manager directly to return None\n- Fix tool_service_coverage test: add missing mock fields and patch _plugin_manager\n- Update services conftest: add patch_is_postgresql autouse fixture\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-27T20:58:59+00:00"
+    }
+  ],
+  "files_changed": 19,
+  "additions": 2072,
+  "deletions": 2,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:11:41.444220",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:41.445259",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3292,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3292.json"
+  }
+}

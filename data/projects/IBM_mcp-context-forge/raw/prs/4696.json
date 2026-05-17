@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4696,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4696"
+  },
+  "metadata": {
+    "title": "fix(db): resolve database connection pool multiplication",
+    "state": "open",
+    "created_at": "2026-05-11T07:50:14+00:00",
+    "updated_at": "2026-05-11T12:04:49+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "performance",
+      "SHOULD",
+      "db"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4645\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes database connection pool multiplication bug where setting `DB_POOL_SIZE=15` and `DB_MAX_OVERFLOW=30` resulted in ~200 connections instead of expected 45.\r\n\r\n**Root causes addressed:**\r\n1. **Per-worker pool multiplication**: Each gunicorn worker gets independent SQLAlchemy pool (workers × pool_size)\r\n2. **Observability session proliferation**: 4-6 independent sessions per traced request\r\n3. **SQL instrumentation overhead**: 3 sessions per SQL query span\r\n4. **Missing engine disposal**: Stale connections in forked workers\r\n\r\n**Key improvements:**\r\n- Added startup warning showing actual max connections formula: `workers × (pool_size + max_overflow)`\r\n- Implemented `engine.dispose()` in gunicorn `post_fork()` hook per SQLAlchemy best practice\r\n- Optimized SQL instrumentation from 3 sessions to 1 per query (**67% reduction**)\r\n- Added session reuse infrastructure via `obs_db` parameter in observability service\r\n- Enhanced database logging with connection pool guidance\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Files modified:**\r\n- `mcpgateway/main.py:1605-1615` - Startup warning for connection pool multiplication\r\n- `gunicorn.config.py:121-129` - Added `engine.dispose()` in `post_fork()`\r\n- `mcpgateway/instrumentation/sqlalchemy.py:64-101` - Optimized from 3 sessions to 1 per query\r\n- `mcpgateway/services/observability_service.py:29-33` - Added session reuse documentation\r\n- `mcpgateway/db.py:140-154` - Enhanced logging with pool guidance\r\n- `tests/unit/mcpgateway/instrumentation/test_sqlalchemy.py:177-221` - Updated test expectations + new rollback test\r\n- `tests/unit/mcpgateway/test_main.py::test_startup_warns_about_db_pool_multiplication_with_gunicorn` - New test ensuring proper logging at startup. \r\n - `tests/unit/mcpgateway/test_main.py::test_lifespan_logs_db_pool_warning_with_gunicorn_workers`: Tests the DB pool warning when `GUNICORN_WORKERS` is set\r\n - `tests/unit/mcpgateway/test_main.py::test_lifespan_logs_db_pool_warning_with_gunicorn_cmd_args`: Tests the DB pool warning when `GUNICORN_CMD_ARGS` is set\r\n\r\n**Impact:**\r\n- For a request with 10 SQL queries: **30 sessions → 10 sessions** (67% reduction)\r\n- Cleaner worker fork behavior with proper engine disposal\r\n- Operators now see clear warnings about actual connection counts at startup",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "dafb4d9a558826b90cd8ad03f531c33cae97789c",
+      "message": "fix: resolve database connection pool multiplication (Issue #4645)\n\n- Add startup warning showing actual max connections formula (workers × pool_size)\n- Implement engine.dispose() in gunicorn post_fork hook per SQLAlchemy guidance\n- Optimize SQL instrumentation from 3 sessions to 1 session per query (67% reduction)\n- Add session reuse infrastructure via obs_db parameter in observability service\n- Enhance database logging with connection pool guidance\n- Update test expectations for new single-session commit pattern\n- Add rollback test for SQL instrumentation error handling\n- Fix ruff PLW1508: use string default for os.environ.get()\n\nCloses #4645\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-11T07:47:14+00:00"
+    },
+    {
+      "sha": "45ce72d4ab2d7a662464634c359ad153cede1f2d",
+      "message": "add new test ensuring proper logging and fix pylint issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-11T08:20:39+00:00"
+    },
+    {
+      "sha": "6222724677a25e75845bd98f2d79d09d7212830b",
+      "message": "add tests to verify the DB pool warning when GUNICORN flags are set\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-11T11:32:27+00:00"
+    },
+    {
+      "sha": "e146d49d5952e61673a1e24e287fae139b6c825d",
+      "message": "fix .secrets.baseline\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-11T11:59:38+00:00"
+    },
+    {
+      "sha": "5f3f7420f50c0a44d4e51e0c83b694a595970a9c",
+      "message": "fix .secrets.baseline\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-11T12:04:44+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 325,
+  "deletions": 41,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:22.779855",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:22.780928",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4696,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4696.json"
+  }
+}

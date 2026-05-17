@@ -1,0 +1,108 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3479,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3479"
+  },
+  "metadata": {
+    "title": "[FEAT][UI]: Role based Admin UI visibility gating",
+    "state": "closed",
+    "created_at": "2026-03-04T19:43:07+00:00",
+    "updated_at": "2026-04-02T14:02:03+00:00",
+    "closed_at": "2026-04-02T14:02:01+00:00",
+    "merged_at": "2026-04-02T14:02:01+00:00",
+    "author": "madhav165",
+    "labels": [
+      "enhancement",
+      "ui",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# ✨ Feature / Enhancement PR\n\n## 🔗 Epic / Issue\nCloses #3478\n\n---\n\n## 🚀 Summary (1-2 sentences)\nAdds separate UI section/header hide configuration for admin vs non-admin users. Admins can retain full UI access in deployments where non-admin views are restricted, including embedded mode where logout and team selector auto-hiding now only applies to non-admins.\n\n---\n\n## 🧪 Checks\n\n- [x] `make lint` passes\n- [x] `make test` passes\n- [ ] CHANGELOG updated (if user-facing)\n\n---\n\n## 📓 Notes\n\n### New Environment Variables\n\n| Variable | Applies to | Default |\n|---|---|---|\n| `MCPGATEWAY_UI_HIDE_SECTIONS` | non-admin users | `[]` |\n| `MCPGATEWAY_UI_HIDE_HEADER_ITEMS` | non-admin users | `[]` |\n| `MCPGATEWAY_UI_HIDE_SECTIONS_ADMIN` | admin users | `[]` (see all) |\n| `MCPGATEWAY_UI_HIDE_HEADER_ITEMS_ADMIN` | admin users | `[]` (see all) |\n\n### Visibility Resolution\n\n```mermaid\nflowchart TD\n    A[Request to /admin/] --> B{is_admin?}\n    B -->|yes| C[Use _ADMIN env vars]\n    B -->|no| D[Use existing env vars]\n    D --> E{MCPGATEWAY_UI_EMBEDDED?}\n    E -->|yes| F[Add logout, team_selector to hidden headers]\n    E -->|no| G[No embedded defaults]\n    C --> H[Apply query param / cookie overrides]\n    F --> H\n    G --> H\n    H --> I[Map hidden sections → hidden tabs]\n    I --> J[Return visibility config]\n```\n\n### Backward Compatibility\n\nExisting deployments without `_ADMIN` vars behave identically — admins see everything (empty list = no hiding), non-admin behavior unchanged.\n\n### Files Changed\n\n- `mcpgateway/config.py` — 2 new fields with shared validators\n- `mcpgateway/admin.py` — `get_ui_visibility_config()` gains `is_admin` param\n- `.env.example` — Document new vars\n- `docker-compose.yml`, `docker-compose-embedded.yml` — Add new vars\n- `charts/mcp-stack/values.yaml`, `values.schema.json` — Helm chart entries\n- `docs/docs/config.schema.json` — Schema entries\n- `docs/docs/manage/admin-ui-customization.md` — Role-based visibility docs\n- `tests/unit/mcpgateway/test_config.py` — 5 new tests\n- `tests/unit/mcpgateway/test_admin.py` — 6 new tests",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3903370546",
+      "author": "rakdutta",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T12:10:44+00:00",
+      "body": "I verified all six acceptance scenarios (admin vs non-admin hide lists, admin-specific hide overrides, embedded header defaults, and query-param/cookie overrides) — behavior matches the acceptance criteria.\nLGTM "
+    },
+    {
+      "id": "4050874132",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-02T14:01:28+00:00",
+      "body": "Reviewed and rebased onto current main. Clean implementation — the role-based branching logic is correct, embedded-mode bypass for admins works as designed, query/cookie overrides remain strictly additive (no visibility bypass), and `is_admin` is derived server-side from authenticated user state.\n\nAdded tests during review for full differential coverage: backward-compat default param, admin cookie/query interaction, route-level integration verifying `admin_ui()` wires `is_admin` through to `get_ui_visibility_config`, and JSON-array parsing for admin header items.\n\nResolved one rebase conflict: `docs/docs/config.schema.json` was deleted on main in #4001 — dropped the PR's additions to that file. Also included `.secrets.baseline` update for test line shifts."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "11077e84bb9b7ff82cc5c141c9071fb08278e306",
+      "message": "feat(ui): add admin-specific UI hide section/header config fields\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-04T19:27:29+00:00"
+    },
+    {
+      "sha": "a037dc5eff5b3685f28934493c67275d1c58f343",
+      "message": "feat(ui): make get_ui_visibility_config role-aware for admin vs non-admin\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-04T19:30:55+00:00"
+    },
+    {
+      "sha": "16603ea9f21d80b9f399137cf327f5e7c5f21acf",
+      "message": "docs: add admin UI hide vars to env, docker-compose, charts, schema, and docs\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-04T19:34:38+00:00"
+    },
+    {
+      "sha": "07e3d3abe9eef34f45abcbedb657258c27679187",
+      "message": "style: black formatting for config description\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-04T19:41:54+00:00"
+    },
+    {
+      "sha": "78f68866a68bf5a16ca0b1aeebdcc6f3b1c098f6",
+      "message": "fix(config): apply section alias normalization to admin hide list\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-27T09:21:06+00:00"
+    },
+    {
+      "sha": "a04ec8193e9c8c4bba5636a5535b986dc05ef187",
+      "message": "test(ui): add coverage for admin visibility default param, cookie, and query+cookie interaction\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T13:03:19+00:00"
+    },
+    {
+      "sha": "7c32dfdc077a8b423e42fe4cd2e12688b05b5d3a",
+      "message": "test(ui): add route-level admin visibility test and JSON-array header config test\n\nAddress codex review gaps:\n- Route-level integration test verifying admin_ui() passes is_admin\n  through to get_ui_visibility_config and applies admin hide lists\n- JSON-array parsing test for mcpgateway_ui_hide_header_items_admin\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T13:50:38+00:00"
+    },
+    {
+      "sha": "fdedb56db14fc3260775b000f7e8c1c510f71fa8",
+      "message": "chore: update secrets baseline after test line shifts\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T14:00:45+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 390,
+  "deletions": 73,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:30.265684",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:30.267315",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3479,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3479.json"
+  }
+}

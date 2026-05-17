@@ -1,0 +1,145 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4048,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4048"
+  },
+  "metadata": {
+    "title": "fix(OAuth): OAuth flows now use gateway CA certificates for self-signed servers",
+    "state": "closed",
+    "created_at": "2026-04-06T09:40:48+00:00",
+    "updated_at": "2026-04-24T07:46:13+00:00",
+    "closed_at": "2026-04-24T07:46:11+00:00",
+    "merged_at": "2026-04-24T07:46:11+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "MUST",
+      "api",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4025\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes a bug where OAuth authorization-code callback flow and other OAuth flows (client credentials, password) failed to use the gateway's configured custom CA certificate during token exchange with self-signed or custom CA upstream OAuth servers.\r\n\r\n**Problem**: When a gateway was configured with a `ca_certificate` to trust self-signed OAuth servers, the OAuth callback and token exchange paths ignored this configuration and used the shared HTTP client, which only respected the global `SKIP_SSL_VERIFY` setting. This caused SSL verification failures like:\r\n\r\n```\r\nFailed to exchange code for token: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate\r\n```\r\n\r\n**Solution**: Updated all OAuth flows to use isolated HTTP clients with custom SSL contexts when gateway CA certificates are provided. The fix ensures consistent CA trust handling across all gateway upstream connection paths.\r\n\r\n**Key Changes**:\r\n- `OAuthManager` now accepts `ca_certificate`, `client_cert`, and `client_key` parameters for all OAuth methods\r\n- All OAuth flows (authorization code, client credentials, password) create isolated `httpx.AsyncClient` instances with custom SSL contexts when CA certs are provided\r\n- Fixed undefined variable bug in `gateway_service.py` (was referencing non-existent `gateway` variable)\r\n- Fixed ORM attribute access after session closure in `tool_service.py` and `resource_service.py` by extracting `client_cert` and `client_key` into local variables\r\n- Added MIME type registration for `.md` and `.markdown` extensions (unrelated bug fix discovered during testing)\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅     |\r\n| Coverage ≥ 80%            | `make coverage` | ✅     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Files Modified** (10 files, 227 insertions, 33 deletions):\r\n- `mcpgateway/services/oauth_manager.py` - Core OAuth flow updates\r\n- `mcpgateway/routers/oauth_router.py` - Pass gateway CA cert to OAuth manager\r\n- `mcpgateway/services/gateway_service.py` - Fixed undefined variable bug\r\n- `mcpgateway/services/tool_service.py` - Extract client cert/key into local variables\r\n- `mcpgateway/services/resource_service.py` - Extract client cert/key + MIME type fix\r\n- `mcpgateway/admin.py` - Pass gateway CA cert to OAuth manager\r\n- `tests/unit/mcpgateway/test_oauth_manager.py` - Updated test assertions\r\n- `tests/unit/mcpgateway/services/test_gateway_service.py` - Added CA cert to test fixtures\r\n- `tests/unit/mcpgateway/services/test_tool_service.py` - Added CA cert to test fixtures\r\n- `tests/unit/mcpgateway/test_admin.py` - Updated mock gateway\r\n\r\n**Technical Details**:\r\n- Uses `get_cached_ssl_context()` utility for SSL context creation with caching\r\n- Isolated HTTP clients prevent global SSL settings from affecting gateway-specific OAuth flows\r\n- Supports both CA certificate trust and mTLS (client certificate authentication)\r\n- Maintains backward compatibility - CA cert parameters are optional",
+  "comments": [
+    {
+      "id": "3058359953",
+      "author": "marekdano",
+      "created_at": "2026-04-09T14:00:40+00:00",
+      "body": "```suggestion\n                        response = await client.post(token_url, data=token_data, timeout=self.request_timeout)\n```\nMissing timeout parameter when CA certificate is used. The pattern is inconsistent with other flows (client_credentials, password), which correctly include the timeout.\n"
+    },
+    {
+      "id": "3058368397",
+      "author": "marekdano",
+      "created_at": "2026-04-09T14:02:00+00:00",
+      "body": "Remove this duplicate assertion."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4082888693",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-09T14:02:45+00:00",
+      "body": "The PR looks good, just left a couple of requests and please fix the pre-commit and test coverage failures"
+    },
+    {
+      "id": "4106673334",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-14T14:22:28+00:00",
+      "body": "@bogdanmariusc10 - thanks for resolving conflicts\n\nI found few issues:\n\n### Summary\n\nThis PR fixes a real bug: OAuth token exchange flows in `OAuthManager` ignored the gateway's `ca_certificate / client_cert / client_key` when making POST requests to token endpoints, causing SSL verification failures against self-signed upstream OAuth servers. The core fix (propagating these TLS parameters through all four OAuth methods) is sound and consistent. However, there is one correctness gap in a code path not touched by this PR, plus design issues worth addressing.\n\n  ---\n### Findings\n\n#### Blocking\n\n  `mcpgateway/services/token_storage_service.py:283`\n\n  `oauth_manager.refresh_token(refresh_token, oauth_config)` is called without `ca_certificate, client_cert, or client_key`. The gateway object is already in scope (fetched a few lines above) and has all three attributes. This means auto-refresh of an expired access token for a self-signed CA gateway will still fail with `CERTIFICATE_VERIFY_FAILED` — the exact error this PR set out to fix.\n\n ***Suggestion:*** change to `await oauth_manager.refresh_token(refresh_token, oauth_config, ca_certificate=gateway.ca_certificate, client_cert=gateway.client_cert, client_key=gateway.client_key)`.\n\n  ---\n#### High\n\n  `mcpgateway/services/oauth_manager.py:278, 376, 1273, 1390` — Redundancy\n\n `from mcpgateway.utils.ssl_context_cache import get_cached_ssl_context` is placed inside the retry loop (`for attempt in range(self.max_retries)`), executing on every retry iteration. Python caches the module so the runtime cost is negligible after the first call, but the pattern is confusing — it looks like a fresh import per attempt.\n\n  ***Suggestion:*** move the import outside the retry loop, or to module level if the helper extraction above is done.\n\n  ---\n#### Medium\n\n  `tests/unit/mcpgateway/test_oauth_manager.py (~line 692)` — Test coverage\n\n  `test_password_flow_with_ca_certificate` is the only one of the four new CA-cert tests that does not assert `mock_get_ssl.assert_called_once_with(ca_cert, client_cert=client_cert, client_key=client_key)`. The other three tests (_exchange_code_for_tokens, client_credentials, refresh_token) all have this assertion. Without it, the test does not verify that `get_cached_ssl_context` is actually invoked with the correct arguments.\n\n  ***Suggestion:*** add `mock_get_ssl.assert_called_once_with(ca_cert, client_cert=client_cert, client_key=client_key)` after `assert result == \"password_ca_token\"`.\n\n  `tests/unit/mcpgateway/services/test_tool_service.py:513–515` — Test coverage\n\n  For the gateway-level OAuth test, the updated assertions only check that `ca_certificate, client_cert, and client_key` keys exist in `call_args[1]` — not their actual values. The adjacent tool-level OAuth test does verify is `None`.\n\n  ***Suggestion:*** assert specific values — `assert call_args[1][\"ca_certificate\"] == mock_gateway.ca_certificate` etc., or at minimum is None where applicable, to match the specificity of the tool-level OAuth test.\n\n  `mcpgateway/services/oauth_manager.py:278, 376, 1273, 1390` — Consistency\n\n  `# First-Party` is an isort section header placed inside function bodies before inline imports. This label has no semantic meaning inside a function body — it appears only by convention in module-level import blocks.\n\n  ***Suggestion:*** remove the `# First-Party` comment from inside function bodies."
+    },
+    {
+      "id": "4112139201",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-15T08:50:42+00:00",
+      "body": "### Summary\n\n  Propagates `ca_certificate, client_cert, and client_key` from the gateway model through to all OAuth token exchange/refresh call sites in `OAuthManager`, using the existing `get_cached_ssl_context` utility so that OAuth flows work against upstream servers with self-signed or custom CA certificates. The core change is correct and consistent across all six affected call sites.\n\n### Findings\n\n#### Blocking\n\n- `tests/unit/mcpgateway/test_oauth_manager.py:1395` — Correctness\n  `test_refresh_token_missing_access_token` silently lost its assertion — `assert \"No access_token in refresh response\" in str(exc_info.value)` was deleted as a merge artifact when new tests were inserted above. The test now only checks that some `OAuthError` is raised, weakening coverage of the specific error message path. Restore the assertion after the with `pytest.raises(OAuthError)` as `exc_info: block`.\n\n- `mcpgateway/services/resource_service.py:254-258` — Design\n  MIME type registration (`text/markdown for .md/.markdown`) is unrelated to OAuth/SSL and is silently bundled into this bug-fix PR. It also runs in `__init__` rather than `initialize()`, so it runs at import time in all test environments. Either split into a separate PR, or move into `initialize()` and add a comment explaining why it's here.\n\n#### High\n\n- `mcpgateway/utils/ssl_context_cache.py:200-215` — Correctness\n  Cache eviction is a full wipe on overflow — every insert beyond the 100-entry limit clears all prior entries, causing cache thrash under steady traffic with many distinct CA certs. This is pre-existing in `main` and unchanged by this PR, so not blocking here, but worth a follow-up issue.\n\n- `mcpgateway/services/oauth_manager.py:1383` — Consistency\n  refresh_token's CA cert path checks `response.status_code == 200` manually while `_client_credentials_flow` and `_password_flow` call `response.raise_for_status()`. The PR preserves this pre-existing asymmetry in both paths rather than unifying them. Not blocking; worth a follow-up to align error handling.\n\n#### Medium\n\n- `mcpgateway/services/tool_service.py:3778,4608` — Consistency\n  Two code paths handle cert params differently — one reads from `gateway_payload` dict, the other from the gateway ORM object directly. Both are correct for their respective flows but easy to conflate during future edits. A brief comment at each site explaining which flow it serves and why the source differs would help.\n\n- `tests/unit/mcpgateway/services/test_tool_service.py:3540-3562` — Test coverage\n  Updated assertions check that `ca_certificate/client_cert/client_key kwargs` are present in the call but don't assert their values. The gateway fixture has all three as `None;` only checking key presence leaves a gap if a future change passes wrong values. Change to `assert call_args[1][\"ca_certificate\"] is None` etc., matching the stricter style in `test_gateway_service.py`."
+    },
+    {
+      "id": "4120155969",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-16T10:30:26+00:00",
+      "body": "This PR fixes a critical bug where OAuth flows failed with SSL verification errors when using self-signed certificates.\r\n\r\n#### Key Findings\r\n\r\n- ✅ Technically sound: Proper isolated HTTP clients with custom SSL contexts\r\n- ✅ Comprehensive: All 4 OAuth flows updated (auth code, client credentials, password, refresh)\r\n- ✅ Well-tested: 97 OAuth manager tests passing, new CA cert scenarios added\r\n- ✅ Backward compatible: No breaking changes\r\n- ✅ Production-critical: Essential for self-signed cert deployments\r\n\r\n#### Changes\r\n \r\n- 10 files changed: +227 additions, -33 deletions\r\n- Test coverage: ≥80% maintained\r\n- Security: No concerns identified\r\n- Performance: Minimal impact\r\n\r\nLGTM 🚀 after fixing the secret check issue https://github.com/IBM/mcp-context-forge/actions/runs/24500225136/job/71604786282?pr=4048\r\n"
+    },
+    {
+      "id": "4120157620",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-16T10:30:46+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7a2ed6a4d53ccc2de28340ff3b0721edd9a9faef",
+      "message": "fix: OAuth flows now use gateway CA certificates for self-signed servers\n\n- Updated OAuthManager to accept ca_certificate, client_cert, and client_key parameters\n- Modified all OAuth flows (authorization code, client credentials, password) to use isolated HTTP clients with custom SSL contexts\n- Fixed gateway_service.py to use function parameters instead of undefined gateway variable\n- Fixed tool_service.py and resource_service.py to extract client_cert/client_key from gateway_payload into local variables\n- Updated oauth_router.py to pass gateway CA cert to OAuth manager\n- Added MIME type registration for .md and .markdown extensions in resource_service.py\n- Updated all related tests to include new CA cert parameters\n\nThis resolves SSL verification failures when OAuth servers use self-signed certificates or custom CAs.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-06T09:31:07+00:00"
+    },
+    {
+      "sha": "f4c3f5bc7a50c43a81c0f1582b922a447329f06c",
+      "message": "chore: fix trailing whitespace (black formatting)\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-06T09:45:21+00:00"
+    },
+    {
+      "sha": "de3340ab4c4281b8b18b87fa98ae1a9c9f08d987",
+      "message": "feat: add CA certificate support to refresh_token method\n\n- Updated refresh_token method signature to accept ca_certificate, client_cert, and client_key parameters\n- Added test coverage for refresh_token with CA certificates\n- Enables OAuth token refresh with self-signed or custom CA upstream servers\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-06T10:27:16+00:00"
+    },
+    {
+      "sha": "cb119dce0ad35a342023966b987947bab9607cf5",
+      "message": "fix: add timeout parameter to SSL context client.post call and improve test coverage\n\n- Add missing timeout parameter to httpx client.post call when using SSL context (line 1277)\n- Fix doctest in OAuthManager.get_access_token to accept new CA certificate parameters\n- Add test_exchange_code_for_tokens_with_ca_certificate to cover SSL context code path\n- Add pragma: allowlist secret comments to mock private keys in tests\n- Update .secrets.baseline with new line numbers\n- Achieve 100% diff coverage for oauth_manager.py\n\nCloses #4025\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-14T11:18:36+00:00"
+    },
+    {
+      "sha": "8845aecaefa2107bf1494cc5c41914df020e6f0a",
+      "message": "fix: propagate CA certificate through OAuth token refresh and optimize imports\n\nFixes four issues identified in PR review:\n\nBLOCKING: token_storage_service.py - Add missing CA cert parameters to\noauth_manager.refresh_token() call. Without these, auto-refresh of expired\ntokens fails with CERTIFICATE_VERIFY_FAILED for self-signed CA gateways.\n\nHIGH: oauth_manager.py - Move get_cached_ssl_context import to module level\n(line 35) and remove redundant imports from inside 4 retry loops:\n- client_credentials_flow (line 274-277)\n- get_access_token password flow (line 368-371)\n- _exchange_code_for_tokens (line 1265-1268)\n- refresh_token (line 1382-1385)\n\nMEDIUM: test_oauth_manager.py - Add missing assertion in\ntest_password_flow_with_ca_certificate (line 1465) to verify\nget_cached_ssl_context is called with correct parameters.\n\nLOW: test_oauth_manager.py - Update 4 test patch paths from\nmcpgateway.utils.ssl_context_cache.get_cached_ssl_context to\nmcpgateway.services.oauth_manager.get_cached_ssl_context after moving\nimport to module level (lines 1222, 1425, 1461, 1493).\n\nAll OAuth manager tests (97 tests) pass successfully.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-15T07:43:02+00:00"
+    },
+    {
+      "sha": "f8e4da54c824872db311018edd395e1ca6e82e9a",
+      "message": "fix: address PR #4048 review findings\n\n- Restore missing assertion in test_refresh_token_missing_access_token\n  * Added back: assert 'No access_token in refresh response' in str(exc_info.value)\n  * Ensures specific error message path is validated\n\n- Document MIME type registration in ResourceService.__init__\n  * Added comment explaining why registration happens in __init__ vs initialize()\n  * Clarifies that many tests depend on this without calling initialize()\n  * Notes that mimetypes registration is idempotent and safe\n\n- Strengthen test assertions for CA certificate parameters\n  * Changed from presence checks to value assertions in test_tool_service.py\n  * Now validates: assert call_args[1]['ca_certificate'] is None\n  * Matches stricter assertion style in test_gateway_service.py\n\nAll affected tests verified passing.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-16T08:28:42+00:00"
+    },
+    {
+      "sha": "da67cf6ca4ca1ee0b27a1a8ae03c7fb784d24b5b",
+      "message": "fix: exclude test_oauth_manager from detect-private-key hook\n\nThe test file contains mock private key strings needed for testing OAuth\nfunctionality with client certificates. These are properly marked with\npragma comments and should be excluded from the private key detection.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-16T10:39:34+00:00"
+    },
+    {
+      "sha": "4b1e172242ec4988621318248ff3586938808389",
+      "message": "refactor: extract _post_token_request helper and fix formatting\n\n- Extract duplicated SSL branching logic from 4 OAuth flow methods\n  into _post_token_request, removing redundant timeout on AsyncClient\n- Add ORM session-safety comments in tool_service.py cert param sites\n- Auto-fix formatting via isort/black on PR-touched files\n- Fix pydantic version-pinned assertion in test_python_deploy\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T19:40:08+00:00"
+    },
+    {
+      "sha": "ce7d3ae7699456fe6e82fad22c5d629743ab5488",
+      "message": "remove test_oauth_manager.py from detect-private-key hook\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-24T06:35:16+00:00"
+    }
+  ],
+  "files_changed": 19,
+  "additions": 346,
+  "deletions": 142,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:21.408399",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:21.409189",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4048,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4048.json"
+  }
+}

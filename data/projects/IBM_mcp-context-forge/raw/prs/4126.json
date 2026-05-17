@@ -1,0 +1,65 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4126,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4126"
+  },
+  "metadata": {
+    "title": "feat(openshift): add OpenShift deployment commands for TLS cert fetching and image building",
+    "state": "open",
+    "created_at": "2026-04-10T15:28:05+00:00",
+    "updated_at": "2026-04-13T10:51:05+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "Lang-Akshay",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\r\n\r\nAdds two `make` targets (`oc-tls` and `oc-image`) that streamline deploying ContextForge to an OpenShift cluster from a macOS developer workstation running Colima as the local Docker runtime.\r\n\r\n## Motivation\r\n\r\nPushing a locally-built container image to an OpenShift internal registry from macOS requires two friction-heavy manual steps:\r\n\r\n1. Trusting the cluster's self-signed TLS certificate inside the Colima VM so Docker doesn't reject pushes with `x509: certificate signed by unknown authority`.\r\n2. Building the production image, tagging it for the target registry, authenticating, pre-creating the ImageStream, and pushing — all in the correct order with correct environment variables.\r\n\r\nBoth steps had no automation and were undocumented, forcing developers to rediscover the process each time. These targets encode the steps as first-class, repeatable `make` commands.\r\n\r\n## Changes\r\n\r\n**`Makefile`** — 88 lines added, 0 deleted.\r\n\r\nAdded a new `OPENSHIFT DEPLOYMENT` section with:\r\n\r\n### Variables\r\n\r\n| Variable | Default | Purpose |\r\n|---|---|---|\r\n| `REGISTRY_URL` | _(required)_ | OpenShift internal registry host (e.g. `default-route-openshift-image-registry.apps.cluster.example.com`) |\r\n| `OC_TAG` | `rust` | Image tag applied when pushing |\r\n| `OC_NAMESPACE` | `contextforge` | Target OpenShift namespace / project |\r\n| `OC_TOKEN` | _(required)_ | Token from `oc whoami -t` used for `docker login` |\r\n\r\n### `oc-tls`\r\n\r\nFetches the cluster router TLS certificate via `oc extract secret/router-certs-default` and installs it inside the Colima VM so Docker trusts the OpenShift registry:\r\n\r\n1. Validates `oc` and `colima` are available.\r\n2. Extracts the cert to `~/openshift-registry.crt` and verifies it contains at least one `BEGIN CERTIFICATE` block.\r\n3. Validates `REGISTRY_URL` is set (prints actionable export command if not).\r\n4. Copies the cert into `/etc/docker/certs.d/<REGISTRY_URL>/` and `/usr/local/share/ca-certificates/` inside Colima.\r\n5. Runs `update-ca-certificates` and restarts the Docker daemon.\r\n\r\n### `oc-image`\r\n\r\nBuilds the production image and pushes it to the OpenShift internal registry:\r\n\r\n1. Validates both `REGISTRY_URL` and `OC_TOKEN` are set (prints actionable export commands for each missing variable).\r\n2. Calls `make docker-prod` (existing full Rust-enabled production build, no cache).\r\n3. Tags the resulting image as `<REGISTRY_URL>/<OC_NAMESPACE>/mcpgateway:<OC_TAG>`.\r\n4. Logs in to the registry with `docker login` using the `oc` token.\r\n5. Pre-creates the ImageStream (`oc create imagestream`) idempotently (`|| true`).\r\n6. Pushes the image and prints a verification command.\r\n\r\n## Usage\r\n\r\n```bash\r\n# 1. Log in to your cluster\r\noc login --token=<token> --server=https://<api-server>\r\n\r\n# 2. Set required variables\r\nexport REGISTRY_URL=$(oc get route default-route -n openshift-image-registry -o jsonpath=\"{.spec.host}\")\r\nexport OC_TOKEN=$(oc whoami -t)\r\n\r\n# 3. Trust the registry TLS cert inside Colima (once per cluster / cert rotation)\r\nmake oc-tls\r\n\r\n# 4. Build and push\r\nmake oc-image\r\n\r\n# Optional overrides\r\nmake oc-image OC_NAMESPACE=my-project OC_TAG=dev\r\n```\r\n\r\n## Testing\r\n\r\nValidated end-to-end on an OpenShift 4.x cluster:\r\n\r\n- `oc-tls` successfully extracts the cert, installs it in the Colima VM, and eliminates x509 errors on subsequent pushes.\r\n- `oc-image` builds a fresh image via `docker-prod`, tags, authenticates, pre-creates the ImageStream, and pushes without error.\r\n- Missing-variable guards (`REGISTRY_URL`, `OC_TOKEN`) print unambiguous export hints and exit non-zero when variables are absent.\r\n\r\n## Notes\r\n\r\n- No application code, schemas, or tests were modified. This is a pure developer-tooling addition.\r\n- Requires `oc` CLI and `colima` to be installed on the developer machine.\r\n- The `OC_TOKEN` variable should **never** be committed to source control; it is intended to be set in the shell environment only.\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4098053278",
+      "author": "claudia-gray",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-13T10:38:28+00:00",
+      "body": "## Review - https://github.com/IBM/mcp-context-forge/pull/4126/\r\n\r\nLGTM. \r\nFollowed Usage steps 1-4 and all were successful. Verified with `oc get imagestream mcpgateway -n \"namespace\"`\r\n\r\nTested with optioanl overrides, using different namespace and also ran successfully."
+    },
+    {
+      "id": "4098121629",
+      "author": "Yosiefeyob",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-13T10:51:05+00:00",
+      "body": "LGTM. Tested make oc-tls worked fine, cert extracted and trusted in Colima with no  errors after running it.\n\nmake oc-image pushed successfully to the contextforge namespace without issues.\nmake oc-image OC_NAMESPACE=test1 worked and verified the imagestream landed correctly with oc get imagestream.\n\nOne thing to flag, If you pass a namespace that doesn't exist you get a 500 Internal Server Error, could be more descriptive if it said something like \"Namespace does not exist, run: oc new-project <name>\" .Otherwise great addition, makes the whole deployment process a lot smoother. Good to go!"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ce691af2120f546ac02e12995d1137224cf9ce8a",
+      "message": "feat(openshift): add OpenShift deployment commands for TLS cert fetching and image building\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-10T15:01:15+00:00"
+    },
+    {
+      "sha": "e989abcf07d25c4965a8520bd2f3d283d7f43fef",
+      "message": "fix(openshift): update oc-tls help text and improve certificate trust process for Colima, Docker Desktop, and Linux\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-10T15:42:24+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 106,
+  "deletions": 0,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:07:49.302868",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:49.304470",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4126,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4126.json"
+  }
+}

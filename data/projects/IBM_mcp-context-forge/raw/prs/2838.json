@@ -1,0 +1,64 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2838,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2838"
+  },
+  "metadata": {
+    "title": "Fix gunicorn worker crashes on macOS",
+    "state": "closed",
+    "created_at": "2026-02-11T09:39:53+00:00",
+    "updated_at": "2026-02-11T10:07:12+00:00",
+    "closed_at": "2026-02-11T09:46:16+00:00",
+    "merged_at": null,
+    "author": "madhav165",
+    "labels": [
+      "bug"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n---\r\n\r\n## Summary\r\n\r\nDisables gunicorn's `--preload` option by default on macOS to prevent worker processes from crashing with SIGSEGV errors.\r\n\r\n## Problem\r\n\r\nOn macOS, running `make serve` causes gunicorn workers to crash immediately after spawning:\r\n\r\n```\r\n[2026-02-11 14:07:39 +0530] [55715] [WARNING] Worker (pid:55773) was sent SIGSEGV!\r\n```\r\n\r\nThis happens because macOS has strict fork-safety requirements. When `--preload` is used, the application code (including SQLAlchemy and asyncio) is loaded in the master process before workers are forked. The forked workers inherit invalid state and crash when trying to use these libraries.\r\n\r\n## Changes\r\n\r\n### gunicorn.config.py\r\n- Import `platform` module\r\n- Set `preload_app = platform.system() != \"Darwin\"` to disable preload on macOS\r\n- Add explicit `worker_class = \"uvicorn.workers.UvicornWorker\"` configuration\r\n\r\n### run-gunicorn.sh  \r\n- Detect macOS via `uname -s` check\r\n- Set `GUNICORN_PRELOAD_APP=false` by default on macOS\r\n- Keep `GUNICORN_PRELOAD_APP=true` default on Linux and other platforms\r\n\r\n## Testing\r\n\r\n- [x] Tested on macOS with `make serve` - workers spawn and stay running\r\n- [x] Verified `--preload` flag is not passed on macOS\r\n- [x] Verified `Preload App: false` shown in startup logs on macOS\r\n- [x] Linux behavior unchanged (preload still enabled by default)\r\n\r\n## Backwards Compatibility\r\n\r\n- Users can override with `GUNICORN_PRELOAD_APP=true` if they need preload on macOS\r\n- Linux and other platforms unaffected\r\n- No changes to application code\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    pass    |\r\n| Unit tests                            | `make test`          |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "7c970ca3b953ec90824621d5ad1eae9c4905b319",
+      "message": "Implement pagination for tokens\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-10T17:40:46+00:00"
+    },
+    {
+      "sha": "6bab498c05417f73ee4e0bc01e558b4b04d6afe5",
+      "message": "fix: token listing, auto-refresh after create/revoke, and Details button\n\n- Use jsonable_encoder + orjson for datetime serialization in tokens partial\n- Pre-encode token JSON for safe HTML attribute embedding\n- Auto-refresh token list after create/revoke, reset to page 1\n- Fix document.body null error by using document.addEventListener\n- Add HTMX load trigger fallback on tab switch\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-10T19:38:16+00:00"
+    },
+    {
+      "sha": "50e9816f07362fa2ce2a376c1bc3adc49a56e019",
+      "message": "minor changes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-11T08:13:21+00:00"
+    },
+    {
+      "sha": "56c05ce3ad5a28fb3a29b4677b3c40f166b97016",
+      "message": "fix: disable preload on macOS to prevent worker SIGSEGV crashes\n\nOn macOS, gunicorn's preload feature causes SIGSEGV crashes when using\nuvicorn workers with async libraries (SQLAlchemy, asyncio). This is due\nto macOS's strict fork-safety requirements.\n\nChanges:\n- Disable preload_app by default on macOS in both config and shell script\n- Add worker_class config explicitly to gunicorn.config.py\n\nUsers can override with GUNICORN_PRELOAD_APP=true if needed.\n\nRefs: https://github.com/benoitc/gunicorn/issues/2761\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-11T09:36:40+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 542,
+  "deletions": 57,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:42.548978",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:42.550801",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2838,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2838.json"
+  }
+}

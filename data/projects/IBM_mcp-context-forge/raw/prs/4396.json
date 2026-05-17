@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4396,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4396"
+  },
+  "metadata": {
+    "title": "fix(sso): Add support for Microsoft Entra ID email verification claims",
+    "state": "closed",
+    "created_at": "2026-04-22T14:22:02+00:00",
+    "updated_at": "2026-04-23T08:27:26+00:00",
+    "closed_at": "2026-04-23T08:27:24+00:00",
+    "merged_at": "2026-04-23T08:27:24+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "security",
+      "SHOULD",
+      "api",
+      "client-green",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4391\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nAdds support for Microsoft Entra ID (Azure AD) email verification claims to fix authentication failures for Entra ID users in RC2+.\r\n\r\n**Problem:**\r\nMicrosoft Entra ID does not follow the OIDC standard for email verification:\r\n- Work/School accounts omit the `email_verified` claim entirely\r\n- B2B/External ID scenarios use non-standard claims: `verified_primary_email` and `verified_secondary_email`\r\n\r\nThis caused authentication to fail for organizations using Entra ID SSO, blocking upgrades from RC1 to RC2+.\r\n\r\n**Solution:**\r\nExtended email verification logic to support Microsoft-specific claims while maintaining backward compatibility:\r\n- Checks `email_verified` (standard OIDC) first\r\n- Falls back to `verified_primary_email` (Microsoft B2B/External ID)\r\n- Falls back to `verified_secondary_email` (Microsoft B2B/External ID)\r\n- Pass-through when no claims present (supports work/school accounts)\r\n\r\n**Impact:**\r\n- Unblocks Entra ID users from upgrading to RC2+\r\n- Maintains security by blocking login when claims explicitly indicate unverified email\r\n- No breaking changes to existing SSO providers\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n**Test Coverage:**\r\n- Added 10 new normalization tests for Microsoft claims\r\n- Added 13 new verification logic tests\r\n- All existing 318 tests continue to pass\r\n- Total: 341 tests passing\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Implementation Details:**\r\n\r\n1. **Modified [`_is_email_verified_claim()`](mcpgateway/services/sso_service.py:994-1050)**\r\n   - Extended to check Microsoft-specific claims\r\n   - Maintains claim precedence: `email_verified` > `verified_primary_email` > `verified_secondary_email`\r\n   - Pass-through behavior when all claims absent\r\n\r\n2. **Modified [`_build_normalized_user_info()`](mcpgateway/services/sso_service.py:1663-1676)**\r\n   - Propagates Microsoft claims to normalized user info\r\n   - Ensures verification status flows through authentication pipeline\r\n\r\n3. **Test Coverage:**\r\n   - [`test_sso_user_normalization.py`](tests/unit/mcpgateway/services/test_sso_user_normalization.py:280-372) - Normalization scenarios\r\n   - [`test_sso_service.py`](tests/unit/mcpgateway/services/test_sso_service.py:362-413) - Claim verification logic\r\n\r\n**Claim Precedence Examples:**\r\n\r\n```\r\n// Standard claim takes precedence\r\n{\r\n  \"email_verified\": true,\r\n  \"verified_primary_email\": false\r\n}\r\n→ Result: Login allowed\r\n\r\n// Primary takes precedence over secondary\r\n{\r\n  \"verified_primary_email\": true,\r\n  \"verified_secondary_email\": false\r\n}\r\n→ Result: Login allowed\r\n\r\n// No claims = pass-through (Entra work accounts)\r\n{\r\n  \"email\": \"user@company.com\"\r\n}\r\n→ Result: Login allowed\r\n```\r\n\r\n**Security Considerations:**\r\n- Explicit false values block login (provider flagged as unverified)\r\n- Maintains fail-closed behavior for security\r\n- No changes to existing provider behavior",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "efd1feb5e125eaa40c1fabacc1c937fb072c24d4",
+      "message": "fix(auth): Add support for Microsoft Entra ID email verification claims\n\nMicrosoft Entra ID (Azure AD) does not follow the OIDC standard for email\nverification and uses alternative claim names in different scenarios:\n\n- Work/School accounts: Omit email_verified claim entirely\n- B2B/External ID: Use verified_primary_email or verified_secondary_email\n\nThis commit extends the email verification logic to support these Microsoft-\nspecific claims while maintaining backward compatibility with standard OIDC.\n\nChanges:\n- Extended _is_email_verified_claim() to check verified_primary_email and\n  verified_secondary_email claims in addition to standard email_verified\n- Updated _build_normalized_user_info() to propagate Microsoft claims\n- Added comprehensive test coverage for all claim scenarios\n- Maintains precedence: email_verified > verified_primary_email >\n  verified_secondary_email\n\nClaim precedence ensures standard OIDC claims take priority, with Microsoft\nclaims serving as fallbacks. Absence of all claims results in pass-through\n(allows login) to support providers that don't include verification status.\n\nFixes authentication failures for Entra ID users in RC2+ while maintaining\nsecurity by blocking login when any claim explicitly indicates unverified\nemail (false/0/\"false\").\n\nTest coverage: 341 tests pass including 23 new tests for Microsoft claims\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-22T14:18:12+00:00"
+    },
+    {
+      "sha": "e4f3986d7c31490443b49af5427210406d1704e8",
+      "message": "refactor(sso): consolidate email-verification claim coercion\n\nCollapse the duplicated bool/int/str coercion ladder in\n``_is_email_verified_claim`` and ``_build_normalized_user_info`` into a\nsingle ``_coerce_email_verified_claim`` helper driven by an\n``_EMAIL_VERIFIED_CLAIMS`` precedence tuple.  This removes the\nasymmetric fall-through for unrecognized Microsoft-claim value types\n(the policy is now symmetric and fail-secure across all three claims),\neliminates a dead branch that duplicated the policy, and adds info /\nwarning logs when a non-standard claim verifies an email or when an\nunrecognized claim type is rejected.  The normalization step now stores\n``email_verified`` as a coerced ``bool`` so downstream consumers cannot\nmisread a raw ``\"false\"`` string as truthy.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T06:56:34+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 213,
+  "deletions": 30,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:55.662026",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:55.662852",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4396,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4396.json"
+  }
+}

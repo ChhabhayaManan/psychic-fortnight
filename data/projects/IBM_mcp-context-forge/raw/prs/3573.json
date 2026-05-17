@@ -1,0 +1,61 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3573,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3573"
+  },
+  "metadata": {
+    "title": "Fix: Display OAuth 2.0 support and configuration in Server Administration UI",
+    "state": "closed",
+    "created_at": "2026-03-10T05:45:40+00:00",
+    "updated_at": "2026-03-12T14:37:21+00:00",
+    "closed_at": "2026-03-12T14:37:18+00:00",
+    "merged_at": "2026-03-12T14:37:18+00:00",
+    "author": "rakdutta",
+    "labels": [
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Closes #3572 and https://github.com/IBM/mcp-context-forge/issues/3575\r\n\r\n## Summary\r\nFixes a bug where **OAuth 2.0 support and configuration details were not visible** in the Server Administration UI.  \r\nThis made it difficult for administrators to determine whether a server supports OAuth or to inspect its configuration.\r\n\r\n## Changes\r\n\r\n### Server List UI Enhancements\r\n- Added a new **Auth** column in the servers table to indicate OAuth support.\r\n- Displays an **OAuth badge** when OAuth is enabled.\r\n- Displays a **dash (-)** when OAuth is not configured.\r\n- Updated table row rendering and **empty-state colspan** to support the additional column.\r\n\r\n### OAuth Configuration Display\r\n- The **server details page** now includes a dedicated **OAuth 2.0 configuration section** when OAuth is enabled.\r\n- The following OAuth metadata is displayed:\r\n  - Authorization servers\r\n  - Token endpoint\r\n  - Supported scopes\r\n\r\n### Backend Data Handling\r\n- The `admin_get_server` endpoint now returns a **masked version of server data** using `.masked()` to ensure sensitive fields are not exposed.\r\n\r\n### Test Updates\r\n- Updated unit tests to align with the new `.masked()` behavior.\r\n- Tests now mock and validate masked server responses.\r\n\r\n---\r\n\r\n## Files Updated\r\n\r\n**Backend**\r\n- `mcpgateway/admin.py` – Updated `admin_get_server` to return masked server data.\r\n\r\n**Frontend**\r\n- `mcpgateway/templates/servers_partial.html` – Added Auth column and updated empty-state rendering.\r\n- `mcpgateway/static/admin.js` – Added OAuth configuration display in server details view.\r\n\r\n**Tests**\r\n- `tests/unit/mcpgateway/test_admin.py`\r\n- `tests/unit/mcpgateway/test_admin_module.py`\r\n\r\nUnit tests were updated to reflect the new `.masked()` method usage and expected response structure.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3927765576",
+      "author": "TS0713",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-11T08:26:18+00:00",
+      "body": "LGTM ✅\nThe fix correctly addresses the vulnerability. `admin_get_server` now calls `server.masked().model_dump(by_alias=True)` which ensures sensitive OAuth credentials `(client_secret, password, refresh_token, access_token, private_key)` are redacted before being returned to the admin UI.\nWhat was verified:\n\n`_mask_oauth_config is recursive `— handles nested dicts and lists correctly\n`_SENSITIVE_OAUTH_KEYS` covers the core sensitive fields\nBoth list and detail endpoints go through convert_server_to_read → .masked(), so behavior is consistent\nAll unit tests (`test_admin_get_server_success, test_admin_get_server_edge_cases`) and e2e tests (test_admin_server_lifecycle) pass\nManual testing confirms OAuth details display correctly in the admin UI for both gateway and virtual servers\n\nMinor hardening suggestions (non-blocking for this PR):\n\nConsider adding camelCase variants (clientSecret, accessToken) to `_SENSITIVE_OAUTH_KEYS` for OAuth providers that use camelCase (Google, Azure, AWS)\nConsider adding api_key, bearer_token, jwt_secret to _SENSITIVE_OAUTH_KEYS for broader coverage"
+    },
+    {
+      "id": "3936803426",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T13:54:20+00:00",
+      "body": "## Review: Approved\n\nRebased onto main (clean, no conflicts), squashed 6 commits into 1 clean commit, and added explicit `masked()` call assertions in unit tests.\n\n### Security\n- `.masked()` properly redacts sensitive OAuth fields (`client_secret`, `password`, `refresh_token`, `access_token`, `id_token`, `token`, `secret`, `private_key`) via `_mask_oauth_config()` before returning data to the admin UI — good security improvement.\n- JS uses `textContent` exclusively — no XSS risk.\n\n### Logic & Consistency\n- `oauth_config` is `Dict[str, Any]`, so inner keys correctly stay snake_case (`authorization_servers`, `token_endpoint`, `scopes_supported`), while the outer field is correctly accessed as `server.oauthConfig` (camelCase from `by_alias=True`).\n- Auth column badge styling matches other list badges (tools, resources, visibility).\n- Detail section follows the same `mt-6 border-t pt-4` pattern as other sections in `viewServer()`.\n- Colspan correctly updated 13 → 14.\n\n### Test Coverage\n- Backend `.masked()` call path covered by unit tests with explicit `assert_called_once()` assertions (added during review).\n- `ServerRead.masked()` separately tested in `test_schemas_validators_extra.py`.\n\n### Minor Note (not blocking)\n- `server.oauthConfig || server.oauth_config` fallback on line 6990 of admin.js is unnecessary since `by_alias=True` always produces `oauthConfig`, but it's harmless defensive coding."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a99e2d9eb26ca1cc5d80cf874f695f6747a22274",
+      "message": "fix(ui): display OAuth 2.0 support and configuration in Server Administration UI\n\n- Add Auth column to servers list table with OAuth badge indicator\n- Add OAuth 2.0 configuration section in server detail view showing\n  authorization servers, token endpoint, and supported scopes\n- Use ServerRead.masked() in admin_get_server to redact sensitive\n  OAuth config fields (client_secret, tokens, etc.) before returning\n- Add explicit masked() call assertions in unit tests\n\nCloses #3572\nCloses #3575\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-12T13:30:34+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 125,
+  "deletions": 4,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:58.879107",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:58.881190",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3573,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3573.json"
+  }
+}

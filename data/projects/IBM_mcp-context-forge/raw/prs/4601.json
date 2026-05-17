@@ -1,0 +1,86 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4601,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4601"
+  },
+  "metadata": {
+    "title": "feat: URL hardening consolidation - plugin framework + shared helpers + test vectors (Issues #4434, #4435)",
+    "state": "closed",
+    "created_at": "2026-05-05T11:23:29+00:00",
+    "updated_at": "2026-05-11T10:39:04+00:00",
+    "closed_at": "2026-05-11T10:39:03+00:00",
+    "merged_at": null,
+    "author": "MohanLaksh",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nThis PR implements URL percent-encoding hardening consolidation across the gateway and plugin framework validators, addressing two related issues:\n\n- **Issue #4434**: Extract shared URL-hardening helpers into `mcpgateway/common/_url_hardening.py`\n- **Issue #4435**: Share percent-encoding test vectors in `tests/helpers/url_encoding_vectors.py`\n\n## Background & Motivation\n\nThe gateway's `SecurityValidator.validate_url()` had comprehensive URL percent-encoding hardening (from PR #4335), but the **plugin framework's validator lacked these protections**. Additionally, both validators had **duplicate helper implementations**, and test vectors for encoding edge cases were embedded in a single test file.\n\n## What Was Done (3 Phases)\n\n### Phase 1: Plugin Framework Hardening (Prerequisite)\n**Problem**: Plugin framework `SecurityValidator.validate_url()` was vulnerable to bypasses that the gateway already blocked.\n\n**Changes** (`mcpgateway/plugins/framework/validators.py`):\n- Added URL decoding via `_unquote_if_needed()` helper\n- Added `_decode_strict()` for strict UTF-8 validation\n- Added regex patterns: `_PERCENT_U_ESCAPE_RE` (IIS `%uXXXX`), `_JS_ESCAPE_RE` (JS `\\uXXXX`/`\\xXX`)\n- Updated `validate_url()` to decode URLs **before** pattern checks\n- **Blocks**: IIS-style `%uXXXX` escapes, JS-style unicode escapes, invalid UTF-8 (U+FFFD), C0 control characters, protocol-relative URLs (`//evil.com`)\n- Updated existing plugin tests to match new error messages\n\n### Phase 2: Extract Shared Helpers (#4434)\n**Problem**: Both gateway and plugin validators had copy-pasted URL hardening logic.\n\n**Changes**:\n- Created `mcpgateway/common/_url_hardening.py` with 4 coarse-grained helpers:\n  - `_unquote_if_needed()` - decode percent-encoding only when `%` present (hot-path optimization)\n  - `_decode_and_check_encoding()` - single-pass decode + double-encoding detection + IIS/JS-escape + U+FFFD rejection\n  - `_check_structural_forbidden_chars()` - IPv6 brackets, control chars, spaces, protocol-relative URLs\n  - `_check_netloc()` - decode netloc, check spaces/credentials\n- Refactored `mcpgateway/common/validators.py` to import from shared module\n- Refactored `mcpgateway/plugins/framework/validators.py` to import from shared module\n- Removed duplicate helper definitions from both files\n- Fixed `TestUrlHardeningHelpers` to import from correct location\n- Fixed `test_ipv6_double_check_netloc_brackets` (added netloc bracket check)\n\n**Design constraint**: `_url_hardening.py` is **stdlib-only** (no `mcpgateway.config.settings` dependency) to keep plugin framework self-contained.\n\n### Phase 3: Shared Test Vectors (#4435)\n**Problem**: Percent-encoding test vectors were embedded only in `test_validators_advanced.py`, not shared with plugin tests.\n\n**Changes**:\n- Created `tests/helpers/url_encoding_vectors.py` with 10 vector lists following `_VECTORS` naming:\n  - `ENCODED_CRLF_VECTORS`, `ENCODED_HTML_TAG_VECTORS`, `ENCODED_DANGEROUS_PROTOCOL_VECTORS`\n  - `ENCODED_IPV6_BRACKET_VECTORS`, `ENCODED_WHITESPACE_AUTHORITY_VECTORS`\n  - `DOUBLE_ENCODED_VECTORS`, `IIS_UNICODE_ESCAPE_VECTORS`, `JS_UNICODE_ESCAPE_VECTORS`\n  - `UTF8_OVERLONG_VECTORS`, `LEGITIMATE_ENCODED_ACCEPTED_VECTORS`\n- Refactored `TestValidateUrlPercentEncoding` in `test_validators_advanced.py` to use shared vectors\n- Added `TestSecurityValidatorPercentEncoding` in plugin `test_validators.py` using shared vectors\n- **64 new tests added** (32 per suite) exercising identical encoding edge cases\n\n## Verification\n\n- ✅ All 303 validator tests pass (3 skipped)\n- ✅ `make verify` - 10/10 rating, package ready\n- ✅ `make bandit` - no security issues\n- ✅ `make interrogate` - 100% docstring coverage\n- ✅ `make pylint` - 10.00/10 rating\n- ✅ `make pre-commit` - all hooks pass\n- ✅ `make ruff` - no linting errors\n\n**Note**: `make doctest` shows 5 pre-existing failures in `tool_service.py` and `content_security.py` (unrelated to this PR - verified on base branch `f855e54d5`).\n\n## Commits\n\n1. `fb255a6d8` - fix(security): add URL percent-encoding hardening to plugin framework validator\n2. `0090ac24f` - refactor: extract shared URL-hardening helpers into _url_hardening.py (#4434)\n3. `ea98a4f7b` - feat(validation): share percent-encoding test vectors (Phase 3)\n4. `cd4a69dd5` - fix(lint): remove unused imports and variables in validators\n5. `dc57b37da` - fix(lint): resolve ruff errors in _url_hardening.py and test_validators_advanced.py\n6. `579b260cb` - chore: update .secrets.baseline with current timestamps\n\n## Files Changed\n\n**New files:**\n- `mcpgateway/common/_url_hardening.py` - shared URL-hardening helpers\n- `tests/helpers/url_encoding_vectors.py` - shared test vectors\n\n**Modified:**\n- `mcpgateway/common/validators.py` - use shared helpers\n- `mcpgateway/plugins/framework/validators.py` - use shared helpers + Phase 1 hardening\n- `tests/unit/mcpgateway/validation/test_validators_advanced.py` - use shared vectors\n- `tests/unit/mcpgateway/plugins/framework/test_validators.py` - add Phase 3 tests + Phase 1 hardening\n\n## Closes\n\nCloses #4434\nCloses #4435",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "fb255a6d83f6bd8ff50a81a2b2d7e8b092cfcdb5",
+      "message": "fix(security): add URL percent-encoding hardening to plugin framework validator\n\nAdd URL decoding and security checks to plugin framework's SecurityValidator.validate_url()\nto mirror the gateway's hardening from PR #4335.\n\nChanges:\n- Add urllib.parse.unquote import\n- Add _unquote_if_needed() and _decode_strict() helpers\n- Add _PERCENT_U_ESCAPE_RE and _JS_ESCAPE_RE regex patterns\n- Update validate_url() to decode URLs before pattern checks\n- Block IIS-style %uXXXX escapes, JS-style \\uXXXX/\\xXX escapes\n- Block invalid UTF-8 sequences (U+FFFD detection)\n- Block C0 control characters in decoded values\n- Block protocol-relative URLs\n- Update existing tests to match new error messages\n\nPart of #4434 and #4435. Verified: all 61 plugin framework tests pass.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-05T10:07:55+00:00"
+    },
+    {
+      "sha": "0090ac24f5355b3669ff428fb4b84853042e350e",
+      "message": "refactor: extract shared URL-hardening helpers into _url_hardening.py (#4434)\n\nExtract URL percent-encoding helpers from gateway and plugin validators\ninto a shared stdlib-only module for maintainability.\n\nChanges:\n- Create mcpgateway/common/_url_hardening.py with 4 coarse-grained helpers:\n  * _unquote_if_needed() - decode percent-encoding when needed\n  * _decode_and_check_encoding() - single-pass decode + double-encoding +\n    IIS/JS-escape + U+FFFD rejection\n  * _check_structural_forbidden_chars() - IPv6 brackets, control chars,\n    spaces, protocol-relative URLs\n  * _check_netloc() - decode netloc, check spaces/credentials\n- Update gateway validators.py to import and use shared helpers\n- Update plugin framework validators.py to import and use shared helpers\n- Remove duplicate helper definitions from both validator files\n- Fix TestUrlHardeningHelpers to import from correct location\n- Fix test_ipv6_double_check_netloc_brackets for netloc bracket check\n\nNo behavior change - all 271 validator tests pass (3 skipped).\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-05T10:20:04+00:00"
+    },
+    {
+      "sha": "ea98a4f7b32db0d68c4c027d4c560ae56852f992",
+      "message": "feat(validation): share percent-encoding test vectors (Phase 3)\n\nExtract URL percent-encoding test vectors into shared tests/helpers/url_encoding_vectors.py\nfollowing issue #4435 spec with _VECTORS naming convention.\n\n- Create tests/helpers/url_encoding_vectors.py with 10 vector lists:\n  ENCODED_CRLF_VECTORS, ENCODED_HTML_TAG_VECTORS, ENCODED_DANGEROUS_PROTOCOL_VECTORS,\n  ENCODED_IPV6_BRACKET_VECTORS, ENCODED_WHITESPACE_AUTHORITY_VECTORS,\n  DOUBLE_ENCODED_VECTORS, IIS_UNICODE_ESCAPE_VECTORS, JS_UNICODE_ESCAPE_VECTORS,\n  UTF8_OVERLONG_VECTORS, LEGITIMATE_ENCODED_ACCEPTED_VECTORS\n- Refactor TestValidateUrlPercentEncoding in test_validators_advanced.py to use shared vectors\n- Add TestSecurityValidatorPercentEncoding in plugin test_validators.py using shared vectors\n- Both test classes now use identical parametrize decorators from shared location\n- 64 new tests added (32 per suite) exercising the same encoding edge cases\n- All 303 validator tests pass (3 skipped)\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-05T10:35:57+00:00"
+    },
+    {
+      "sha": "cd4a69dd587de31e30d918ebb482c056a73649bb",
+      "message": "fix(lint): remove unused imports and variables in validators\n\n- Remove unused urllib.parse.unquote import from gateway validators.py\n- Remove unused decoded_netloc variable assignment in gateway validators.py\n- Remove unused _check_netloc import from plugin framework validators.py\n\nRuff F401/F841 errors resolved.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-05T10:41:52+00:00"
+    },
+    {
+      "sha": "dc57b37dae1dea6482ece1b7b37c82164a3af917",
+      "message": "fix(lint): resolve ruff errors in _url_hardening.py and test_validators_advanced.py\n\n- Add ParseResult import to fix F821 undefined name error\n- Fix None comparison to use 'is None' (E711)\n- Replace 'import mcpgateway.common.validators as validators' with\n  'from mcpgateway.common import validators' (PLR0402)\n\nRuff F821, E711, PLR0402 errors resolved.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-05T10:58:03+00:00"
+    },
+    {
+      "sha": "579b260cbde64a5a5d384638ee6e50ca98fcbb0c",
+      "message": "chore: update .secrets.baseline with current timestamps\n\nPre-commit hook detect-secrets updated line numbers and timestamp\nin the baseline file.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-05T11:18:30+00:00"
+    },
+    {
+      "sha": "ebdf4f941c14bfd0e7dba478bf6e81917354159f",
+      "message": "fix(lint): remove unused ParseResult import from _url_hardening.py\n\nThe string type hint \"ParseResult\" doesn't require the actual import.\nVulture flagged the import as unused (90% confidence).\n\nFixes CI vulture check error.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-06T06:12:56+00:00"
+    },
+    {
+      "sha": "4ff28b2c013d539dc79e17b1c56d4872a4d344c7",
+      "message": "Merge branch 'main' into feat/plugin-url-hardening-and-shared-vectors",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-06T06:14:26+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 453,
+  "deletions": 191,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:03:53.125736",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:53.126501",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4601,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4601.json"
+  }
+}

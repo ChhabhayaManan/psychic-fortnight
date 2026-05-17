@@ -1,0 +1,84 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1705,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1705"
+  },
+  "metadata": {
+    "title": "fix #1609: optimize gateway sync bulk operations",
+    "state": "closed",
+    "created_at": "2025-12-21T16:26:13+00:00",
+    "updated_at": "2025-12-21T23:56:48+00:00",
+    "closed_at": "2025-12-21T23:56:48+00:00",
+    "merged_at": "2025-12-21T23:56:48+00:00",
+    "author": "KhanTabish01",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 📌 Summary\r\nGateway sync operations cause lock escalation when processing large numbers of tools/resources/prompts due to row-by-row deletes and unbatched inserts.\r\n\r\n## 🔁 Reproduction Steps\r\nSync gateway with 100+ tools/resources/prompts - observe lock contention and slow performance under concurrent load.\r\n\r\n## 🐞 Root Cause\r\nRow-by-row deletes (N DELETE statements) and large unflushed inserts holding database locks too long, causing lock escalation from row to page/table level.\r\n\r\n## 💡 Fix Description\r\n- Replaced row-by-row deletes with bulk DELETE using `db.execute(delete(Model).where(Model.id.in_(ids)))`\r\n- Added 50-item chunked inserts with `db.flush()` after each batch\r\n- Enabled DB-level CASCADE via `ondelete=\"CASCADE\"` on ForeignKeys\r\n- Added `passive_deletes=True` to relationships for ORM efficiency\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          | ✅     |\r\n| Unit tests                            | `make test`          | ✅     |\r\n| Coverage ≥ 90 %                       | `make coverage`      | ✅     |\r\n| Manual regression no longer fails     | Code review          | ✅     |\r\n\r\n## 📐 MCP Compliance\r\n- [x] Matches current MCP spec (internal optimization only)\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3602022709",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-21T21:59:52+00:00",
+      "body": "Optimizes gateway sync bulk operations to reduce database lock contention and improve performance.\r\n\r\n## Changes\r\n\r\n### 1. Bulk DELETE Operations\r\n\r\n**Before:** Row-by-row deletes using `db.delete(obj)` in a loop (N DELETE statements)\r\n\r\n**After:** Single bulk DELETE using `db.execute(delete(Model).where(Model.id.in_(ids)))`\r\n\r\n- Reduces N DELETE statements to 1 per entity type\r\n- Chunked to 500 items per query to avoid SQLite's 999 parameter limit\r\n\r\n### 2. Foreign Key Safe Deletions\r\n\r\nChild records are now explicitly deleted before parent records to prevent FK constraint violations on PostgreSQL/MariaDB:\r\n\r\n- **Tools:** `ToolMetric`, `server_tool_association` → `Tool`\r\n- **Resources:** `ResourceMetric`, `server_resource_association`, `ResourceSubscription` → `Resource`\r\n- **Prompts:** `PromptMetric`, `server_prompt_association` → `Prompt`\r\n\r\n### 3. Session State Management\r\n\r\nAdded `db.expire(gateway)` after bulk deletes to clear cached relationships and prevent SQLAlchemy from attempting to re-delete already-deleted items.\r\n\r\n### 4. Chunked Inserts\r\n\r\n**Before:** Single `db.add_all(items)` for all items\r\n\r\n**After:** Items added in 50-item chunks with `db.flush()` after each chunk to:\r\n- Prevent excessive memory usage in SQLAlchemy's identity map\r\n- Reduce lock hold time\r\n\r\n### 5. Database-Level CASCADE (db.py)\r\n\r\nAdded `ondelete=\"CASCADE\"` to Tool/Resource/Prompt → Gateway foreign keys and `passive_deletes=True` to Gateway relationships as a safety net for direct Gateway deletions.\r\n\r\n## Affected Functions\r\n\r\nAll 3 gateway sync paths updated consistently:\r\n- `_sync_oauth_protected_gateway`\r\n- `update_gateway`\r\n- `_reactivate_gateway_async`\r\n\r\n## Database Compatibility\r\n\r\n| Database | Status |\r\n|----------|--------|\r\n| SQLite | ✅ Chunking avoids 999 parameter limit |\r\n| PostgreSQL | ✅ Explicit child deletes prevent FK violations |\r\n| MariaDB | ✅ Same as PostgreSQL |\r\n\r\n## Performance Impact\r\n\r\n| Operation | Before | After |\r\n|-----------|--------|-------|\r\n| Delete 100 tools | 100 DELETE statements | 1 DELETE statement |\r\n| Insert 100 tools | 1 large transaction | 2 smaller transactions (50+50) |\r\n\r\nAddresses #1609 partially\r\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7306dd312a365eea971a37d41fe335bcad48573f",
+      "message": "fix #1609: optimize gateway sync bulk operations\n\nReplace row-by-row deletes with bulk DELETE statements across three\ngateway sync paths (OAuth, update, reactivation) to prevent lock\nescalation. Add 50-item chunked inserts with progressive flushing\nto avoid excessive lock holding.\n\nEnable database-level cascade deletions via ondelete='CASCADE' on\ngateway foreign keys and passive_deletes=True on relationships for\nimproved performance.\n\n- Bulk DELETE reduces N operations to 1 SQL statement\n- Chunked inserts prevent lock escalation (50-item batches)\n- DB-level CASCADE delegates deletion to database engine\n- No API or behavioral changes (backward compatible)\n\nSigned-off-by: Tabish Khan <tkhan1051@gmail.com>",
+      "author": "Tabish Khan",
+      "date": "2025-12-21T16:24:16+00:00"
+    },
+    {
+      "sha": "19423ab4a9bf34cc6edab3aec54bf70ad421389f",
+      "message": "FK fix\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-21T21:36:41+00:00"
+    },
+    {
+      "sha": "7dd01ad01ee7f634fda23adca852a21d82c3fc8a",
+      "message": "Rebase and fix\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-21T21:46:51+00:00"
+    },
+    {
+      "sha": "d7d0decf60ed4402dc4d0240ee175617291ce5ae",
+      "message": "Rebase and fix\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-21T22:32:30+00:00"
+    },
+    {
+      "sha": "84c470bbc10c7da15eaf5152d50114fd2cad4951",
+      "message": "Rebase and fix\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-21T23:10:56+00:00"
+    },
+    {
+      "sha": "5c32e267b6635a35fe4d167ec6bec1007297b1f7",
+      "message": "Rebase and fix\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-21T23:43:54+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 232,
+  "deletions": 80,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:53.800902",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:53.803113",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1705,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1705.json"
+  }
+}

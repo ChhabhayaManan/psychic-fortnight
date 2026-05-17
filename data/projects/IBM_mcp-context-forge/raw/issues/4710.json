@@ -1,0 +1,32 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4710,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4710"
+  },
+  "metadata": {
+    "title": "[BUG]: cpex permissive mode (TRANSFORM) silently discards violation from result.violation",
+    "state": "open",
+    "created_at": "2026-05-11T21:59:40+00:00",
+    "updated_at": "2026-05-12T12:48:58+00:00",
+    "closed_at": null,
+    "author": "gandhipratik203",
+    "labels": [
+      "bug",
+      "triage"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nOperator-set `mode: \"permissive\"` maps to cpex's internal `PluginMode.TRANSFORM`. TRANSFORM mode logs violations at WARNING level:\n\n    WARNING — Plugin RateLimiter (transform) raised violation — pipeline continues:\n    [RATE_LIMIT] Rate limit exceeded\n\n…but does NOT surface the violation in `PluginResult.violation` — the field returns `None`. Callers and tests have no programmatic way to inspect what was blocked under permissive mode.\n\n## Why it matters\n\n- **Observability gap**: permissive mode is the natural choice for \"log violations but don't enforce yet\" (staged rollout). With violations dropped from `PluginResult`, downstream metrics / audit trails / structured logs lose them. The only remaining signal is a WARNING-level log line, which is fine for human eyeballing but useless for programmatic consumers.\n- **Test brittleness**: assertions like `result.violation is not None` under permissive mode now silently break.\n\n## Mapping (operator → framework, set in cpex's `_migrate_legacy_modes`)\n\n- `enforce`    → `sequential`   (raises + surfaces violation in result)\n- `permissive` → `transform`    (suppresses raise + suppresses violation)  ← gap\n- `disabled`   → `disabled`     (skips plugin entirely)\n\nThe cpex docstring on `TRANSFORM` says *\"blocking results are suppressed\"* — ambiguous between \"doesn't halt\" and \"discarded from result\". Current implementation is the latter; the former matches the operator's mental model for permissive mode.\n\n## Proposed fixes (any one)\n\n1. Surface the violation in `PluginResult.violation` even under TRANSFORM — only suppress the *raise*. Operator gets enforcement off + observability on.\n2. Add a separate `PluginResult.suppressed_violation` field for the caught-but-not-raised case so the existing `.violation` semantics (raised → halt) are preserved.\n3. Document the current behavior as intentional and provide an alternative pattern (callback / sink) for permissive-mode observability.\n\nRelated: #4709 (separate issue — label-surface asymmetry between `/admin/plugins` and `/v1/tools/plugin_bindings/`, from the same cpex framework refactor lineage).",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:29.159209",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:29.160490",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4710,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4710.json"
+  }
+}

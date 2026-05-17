@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4409,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4409"
+  },
+  "metadata": {
+    "title": "ci: route lightweight workflow jobs to ubuntu-slim runners",
+    "state": "closed",
+    "created_at": "2026-04-23T09:35:29+00:00",
+    "updated_at": "2026-04-23T10:01:16+00:00",
+    "closed_at": "2026-04-23T10:01:14+00:00",
+    "merged_at": "2026-04-23T10:01:14+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 📝 Summary\n\nMove CI jobs that don't need cores or RAM from `ubuntu-latest` (4 CPU, 16 GB) to `ubuntu-slim` (1 CPU, 5 GB). The intent is to free up the larger runners for jobs that actually use them (pylint, pytest, cargo, docker buildx, playwright) without slowing the lightweight ones meaningfully.\n\n**Workflow changes**\n\n- **`lint.yml`** — added a per-tool `runner` field in the matrix. `ruff`, `vulture`, `interrogate`, `radon`, and the `syntax-check` matrix (yamllint/jsonlint/tomllint) now run on `ubuntu-slim`. `pylint` stays on `ubuntu-latest` because it imports the project and fans out with `--jobs=0`.\n- **`linting-full.yml`** — whole job moves to `ubuntu-slim`. `make linting-full` runs `actionlint`, `reviewdog`, `commitlint`, `helm lint/chart-testing/unittest`, `gosec`, `govulncheck` — none of which need the larger runner.\n- **`dependency-review.yml`**, **`helm-publish.yml`** (lint + publish), **`license-check.yml`**, **`vitest.yml`**, **`python-package.yml`** — single-purpose jobs with no compilation or parallel test workload, flipped outright.\n\n**Pre-commit fix (separate commit)**\n\nThe `check-ci-workflows` hook imported `pyyaml` but ran under bare `python3`, which fails when the system Python lacks pyyaml. Switched its `entry` to `uv run --no-project --with pyyaml python3 …` so it self-bootstraps without polluting the system Python or rebuilding the project venv.\n\n## 🏷️ Type of Change\n\n- [x] Chore (deps, CI, tooling)\n\n## 📓 Notes\n\nWorkflows left on `ubuntu-latest` deliberately: `pytest`, `pytest-rust`, `rust.*`, `docker-multiplatform`, `docker-scan`, `docker-release`, `playwright`, `alembic-upgrade-validation`, `sql-sanitizer`, `wrapper`, `pre-commit`, `lint-web`. These either compile, run parallel test suites, build container images, or were judged borderline and left for a follow-up after observing slim behavior in practice.\n\n`ubuntu-slim` is a relatively new GitHub-hosted runner tier; if any of the migrated jobs misbehave under 1 CPU / 5 GB, the fix is a one-line revert per workflow.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "1757908487dc9b707d043f75f46cc27a9d4bbd16",
+      "message": "chore(pre-commit): run check-ci-workflows hook via uv\n\nThe check-ci-workflows hook imports pyyaml but ran under bare `python3`,\nwhich fails on environments where the system Python doesn't have pyyaml\ninstalled. Switch to `uv run --no-project --with pyyaml python3` so the\nhook self-bootstraps its dependency without polluting the system Python\nor rebuilding the project venv.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T09:34:46+00:00"
+    },
+    {
+      "sha": "71e17f7f0cf944549d8f64293f0cba3fe7504b22",
+      "message": "ci: route lightweight workflow jobs to ubuntu-slim runners\n\nMove jobs that don't need cores or RAM from ubuntu-latest (4 CPU, 16 GB)\nto ubuntu-slim (1 CPU, 5 GB) to free up the larger runners for jobs that\nactually use them.\n\n- lint.yml: ruff, vulture, interrogate, radon, and the syntax-check\n  matrix (yamllint/jsonlint/tomllint) move to ubuntu-slim. pylint stays\n  on ubuntu-latest since it imports the project and fans out with\n  --jobs=0.\n- linting-full.yml: actionlint, reviewdog, commitlint, helm\n  lint/chart-testing/unittest, gosec, govulncheck — none of these need\n  the larger runner.\n- dependency-review.yml, helm-publish.yml (lint + publish),\n  license-check.yml, vitest.yml, python-package.yml: single-purpose\n  jobs with no compilation or parallel test workload.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T09:34:58+00:00"
+    },
+    {
+      "sha": "ca113cb7ce197a066766862d40f1cc8e99c56c10",
+      "message": "ci: revert license-check to ubuntu-latest\n\nLicense-check installs Rust via rustup and compiles cargo-license from\nsource, which is too heavy for ubuntu-slim (1 CPU, 5 GB).\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T09:43:39+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 14,
+  "deletions": 9,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:59.689784",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:59.690662",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4409,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4409.json"
+  }
+}

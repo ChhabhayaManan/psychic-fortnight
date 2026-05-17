@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4335,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4335"
+  },
+  "metadata": {
+    "title": "fix(security): block URL-encoded injection patterns in SecurityValidator.validate_url()",
+    "state": "closed",
+    "created_at": "2026-04-20T10:23:12+00:00",
+    "updated_at": "2026-04-26T07:40:57+00:00",
+    "closed_at": "2026-04-26T07:40:56+00:00",
+    "merged_at": "2026-04-26T07:40:56+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "security",
+      "MUST",
+      "api",
+      "release-fix",
+      "pentesting"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4318\r\n**Jira Issue:** https://jsw.ibm.com/browse/ICACF-19\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes a security vulnerability in `SecurityValidator.validate_url()` where URL-encoded injection patterns could bypass security checks. The gateway test endpoint and 6 other endpoints were vulnerable to CRLF injection, XSS, and JavaScript protocol injection via percent-encoding.\r\n\r\n**Root Cause:** Security pattern checks operated on the original URL string before decoding, allowing attackers to hide malicious patterns using URL encoding (e.g., `%0d%0a` for CRLF, `%3Cscript%3E` for XSS).\r\n\r\n**Fix:** Added `urllib.parse.unquote()` to decode URLs before all pattern-based security checks while preserving structural validation on the original URL.\r\n\r\n**Impact:** Protects all 7 endpoints using `SecurityValidator.validate_url()` across the codebase from injection attacks.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅     |\r\n| Coverage ≥ 80%            | `make coverage` | ✅     |\r\n\r\n**Security Testing:** All 27 injection test vectors now blocked:\r\n- ✅ CRLF injection (literal `\\r\\n` and encoded `%0d%0a`)\r\n- ✅ XSS attacks (`<script>` and `%3Cscript%3E`)\r\n- ✅ JavaScript protocol (`javascript:` and `javascript%3A`)\r\n- ✅ Credential injection (`user:pass` and `user%3Apass`)\r\n- ✅ Space injection and IPv6 bypasses\r\n- ✅ All valid URLs still accepted\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Security Impact:** This vulnerability allowed attackers to bypass URL validation using percent-encoding. For example:\r\n- `http://example.com/%0d%0aInjected-Header:Exploit` (CRLF injection)\r\n- `http://example.com/%3Cscript%3Ealert(1)%3C/script%3E` (XSS)\r\n\r\n**Protected Endpoints:**\r\n1. Gateway test endpoint (`/admin/gateways/test`)\r\n2. Tool URL validation\r\n3. LLM provider service URLs\r\n4. OpenAPI spec URLs\r\n5. LLM chat router URLs\r\n6. Plugin framework URLs\r\n7. LLM proxy service URLs\r\n\r\n**Implementation Details:**\r\n- Decode once at start of `validate_url()` using `urllib.parse.unquote()`\r\n- Use `decoded_value` for all pattern-based security checks\r\n- Keep structural checks (scheme, IPv6, length) on original value\r\n- Return original URL (not decoded) for actual use\r\n\r\n**Backward Compatibility:** ✅ No breaking changes - all valid URLs continue to work as before.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "62b95f80079398833738f7bfbc2fc89e1a1e42ce",
+      "message": "fix: block URL-encoded injection patterns in SecurityValidator.validate_url()\n\nDecode URLs before security checks to prevent bypasses via URL encoding.\nAddresses CRLF injection, XSS, JavaScript protocol, and other attack vectors\nthat could be hidden using percent-encoding (%0d%0a, %3Cscript%3E, etc.).\n\nChanges:\n- Add urllib.parse.unquote() at start of validate_url()\n- Use decoded_value for all pattern-based security checks:\n  - CRLF injection detection\n  - XSS/HTML tag detection\n  - JavaScript protocol detection\n  - Space validation\n  - Dangerous URL pattern matching\n\nStructural checks (scheme, IPv6, protocol-relative, length) remain on\noriginal value as they validate URL structure, not content.\n\nAll 27 injection test vectors now blocked. Fixes ICACF-19.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-20T10:20:09+00:00"
+    },
+    {
+      "sha": "9d3d113441a65afb865100c90a285ffd839dd59b",
+      "message": "fix(security): harden validators against double-encoding and encoded injection bypass\n\nExtend percent-encoding defense to all SecurityValidator entry points\n(validate_no_xss, validate_uri, sanitize_display_text, validate_sql_parameter)\nand mirror hardening in the plugin framework standalone validator. Block\ndouble-encoded payloads, IIS %uXXXX escapes, JS \\uXXXX/\\xXX escapes, and\ninvalid UTF-8 overlong sequences. Add _parse_ip_network_cached for CIDR\nparsing performance. Comprehensive regression tests for both core and plugin\nvalidators.\n\nCloses #4318\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-25T08:17:17+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 823,
+  "deletions": 46,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:37.380980",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:37.382082",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4335,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4335.json"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4265,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4265"
+  },
+  "metadata": {
+    "title": "fix(testing): playwright admin_api fixture to stop duplicating JWT auth, fix linting",
+    "state": "open",
+    "created_at": "2026-04-17T08:11:14+00:00",
+    "updated_at": "2026-05-05T08:42:11+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "marekdano",
+    "labels": [],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "marekdano",
+      "jonpspri"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #https://github.com/IBM/mcp-context-forge/issues/4190\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nConsolidated duplicate `admin_api` fixtures across the Playwright test suite to eliminate JWT authentication inconsistencies and the `InsecureKeyLengthWarning`.\r\n\r\n---\r\n\r\n## Problem Statement\r\n\r\nThe Playwright test tree had **four separate** `admin_api` (or equivalent) fixture definitions:\r\n\r\n| File                                                 | Fixture Name      |\r\n| ---------------------------------------------------- | ----------------- |\r\n| `tests/playwright/entities/test_entity_lifecycle.py` | `admin_api`       |\r\n| `tests/playwright/security/owasp/conftest.py`        | `owasp_admin_api` |\r\n| `tests/playwright/operations/conftest.py`            | `admin_api`       |\r\n| `tests/playwright/teams/conftest.py`                 | `admin_api`       |\r\n\r\nAll four hardcoded `_create_jwt_token(...)` calls, picking up the Python `Settings()` default for `JWT_SECRET_KEY` (`\"my-test-key\"`, 11 bytes) instead of the compose default (`\"my-test-key-but-now-longer-than-32-bytes\"`, 40 bytes). This caused:\r\n\r\n- **401 Invalid authentication credentials** when `JWT_SECRET_KEY` wasn't exported\r\n- **InsecureKeyLengthWarning** from `jwt.api_jwt` due to 11-byte key\r\n\r\n## Changes Made\r\n\r\n### 1. Consolidated admin_api Fixture\r\n\r\n**File:** [`tests/playwright/conftest.py`](tests/playwright/conftest.py:332-373)\r\n\r\nAdded a single authoritative `admin_api` fixture with documented token resolution priority:\r\n\r\n```python\r\n@pytest.fixture(scope=\"session\")\r\ndef admin_api(playwright: Playwright) -> Generator[APIRequestContext, None, None]:\r\n    \"\"\"Consolidated admin-authenticated API context for all Playwright tests.\r\n\r\n    Token resolution priority (fail-closed):\r\n    1. MCP_AUTH env var (from Makefile / compose bootstrap) — preferred\r\n    2. MCPGATEWAY_BEARER_TOKEN env var (legacy name used by other tools)\r\n    3. Locally-signed JWT using Settings().jwt_secret_key (fallback)\r\n\r\n    This fixture replaces the four duplicate admin_api/owasp_admin_api fixtures\r\n    previously scattered across entities, OWASP, operations, and teams conftests.\r\n    Per-directory non-admin fixtures (viewer_api, owasp_user_a_api, etc.) remain\r\n    local since they intentionally mint throwaway users.\r\n    \"\"\"\r\n    # Implementation with priority-based token resolution\r\n```\r\n\r\n**Token Resolution Priority:**\r\n\r\n1. `MCP_AUTH` env var (Makefile-generated, signed with gateway's secret) — **preferred**\r\n2. `MCPGATEWAY_BEARER_TOKEN` env var (legacy name)\r\n3. Locally-signed JWT using `Settings().jwt_secret_key` (fallback)\r\n\r\n### 2. Removed Duplicate Fixtures\r\n\r\n#### [`tests/playwright/entities/test_entity_lifecycle.py`](tests/playwright/entities/test_entity_lifecycle.py)\r\n\r\n- **Removed:** Lines 39-53 (`admin_api` fixture)\r\n- **Kept:** `_make_jwt` helper (used by `viewer_api`)\r\n\r\n#### [`tests/playwright/security/owasp/conftest.py`](tests/playwright/security/owasp/conftest.py)\r\n\r\n- **Removed:** Lines 56-70 (`owasp_admin_api` fixture)\r\n- **Updated:** All fixture parameters from `owasp_admin_api` to `admin_api`:\r\n  - `owasp_user_a_api` (line 57)\r\n  - `owasp_user_b_api` (line 75)\r\n  - `two_teams_setup` (line 93)\r\n  - `private_server_owned_by_user_a` (line 162)\r\n\r\n#### [`tests/playwright/security/owasp/test_a01_broken_access_control.py`](tests/playwright/security/owasp/test_a01_broken_access_control.py)\r\n\r\n- **Updated:** `non_admin_ctx` fixture parameter from `owasp_admin_api` to `admin_api` (lines 216, 229)\r\n\r\n#### [`tests/playwright/operations/conftest.py`](tests/playwright/operations/conftest.py)\r\n\r\n- **Removed:** Lines 32-46 (`admin_api` fixture)\r\n- **Kept:** `_make_jwt` helper (used by `non_admin_api`)\r\n\r\n#### [`tests/playwright/teams/conftest.py`](tests/playwright/teams/conftest.py)\r\n\r\n- **Removed:** Lines 74-88 (`admin_api` fixture)\r\n- **Kept:** `_make_jwt` helper and utility functions (`create_test_user`, `delete_test_user`, `invite_and_accept`)\r\n\r\n### 3. Updated JWT_SECRET_KEY Default\r\n\r\n**File:** [`mcpgateway/config.py`](mcpgateway/config.py:287)\r\n\r\n```python\r\n# Before\r\njwt_secret_key: SecretStr = Field(default=SecretStr(\"my-test-key\"))  # 11 bytes\r\n\r\n# After\r\njwt_secret_key: SecretStr = Field(default=SecretStr(\"my-test-key-but-now-longer-than-32-bytes\"))  # 40 bytes\r\n```\r\n\r\n**Benefits:**\r\n\r\n- Matches compose default in `.env.example` and `docker-compose.yml`\r\n- Eliminates `InsecureKeyLengthWarning` in test runs\r\n- Makes local dev and compose environments symmetric without requiring `.env`\r\n\r\n## Acceptance Criteria\r\n\r\n- ✅ Single `admin_api` fixture in `tests/playwright/conftest.py` with documented token priority order\r\n- ✅ Four duplicate fixtures removed (entities lifecycle, OWASP, operations, teams)\r\n- ✅ No `InsecureKeyLengthWarning` during test runs with new 40-byte default\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n- [x] Testing - Playwright\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    ✅    |\r\n| Unit tests                | `make test`     |    ✅    |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [ ] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "217dfac0ef25005ad939cac4aadf1031afcae957",
+      "message": "fix: playwright admin_api fixture to stop duplicating JWT auth, fix linting\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-17T08:02:18+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 72,
+  "deletions": 91,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:06:22.575980",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:22.576962",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4265,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4265.json"
+  }
+}

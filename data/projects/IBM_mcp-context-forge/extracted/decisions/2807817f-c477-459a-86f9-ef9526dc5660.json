@@ -1,0 +1,39 @@
+{
+  "id": "2807817f-c477-459a-86f9-ef9526dc5660",
+  "title": "[FIX][UI]: Preserve edit server selections across infinite scroll pages and searches",
+  "summary": "# 🐛 Bug-fix PR\r\n\r\nFixes #3042 \r\n\r\n---\r\n\r\n## 📌 Summary\r\nFix three interrelated bugs in the \"Edit Virtual Server\" modal when a gateway has many tools, resources, or prompts. All three stem from tracking selection state only through DOM-visible checkboxes rather than a persistent in-memory store. Because the selector uses HTMX infinite scroll (20 items per page), anything not currently rendered in the DOM is invisible to the state-management code.\r\n\r\n**Bugs fixed:**\r\n1. **Performance / data loss on Save**: `FormData` only collects checked checkboxes currently in the DOM. Tools on unloaded scroll pages are silently dropped.\r\n2. **Partial selection on modal open**: Only first-page tools appear selected; tools on pages 2+ show unchecked until scrolled to.\r\n3. **Selections lost across searches**: Searching replaces the container HTML; previously-checked tools not in the original server associations are discarded.\r\n\r\n## 🔁 Reproduction Steps\r\n1. Create a virtual server with 30+ associated tools.\r\n2. Open \"Edit\" for that server - observe only ~20 tools are checked (Bug 2).\r\n3. Search \"foo\", select Tool X (not originally associated), then search \"bar\" - Tool X is now unchecked (Bug 3).\r\n4. Scroll to load more tools, check some, then click \"Save Changes\" - only DOM-visible tools are saved (Bug 1).\r\n\r\n## 🐞 Root Cause\r\nSelection state was tracked exclusively via DOM checkboxes. The HTMX infinite scroll loads 20 items per page and appends them to the container. Tools/resources/prompts on pages not yet scrolled to have no DOM representation, so:\r\n- `FormData(form)` misses them on save\r\n- `setEditServerAssociations()` can only check what's in the DOM\r\n- Search replace destroys checkbox state; restore only reads `data-server-tools` (original associations), ignoring user changes\r\n\r\nAdditionally, `server.associatedTools` returns tool **names** while the form submission needs **UUIDs**. Without the UUIDs upfront, off-screen tools can never be included in the form payload.\r\n\r\n## 💡 Fix Description\r\nIntroduce a persistent in-memory selection store (`window.editServerSelections`) keyed by container ID, holding `Set<UUID>`:\r\n\r\n1. **Backend (additive)**: Add `associated_tool_ids` (UUIDs) to `ServerRead` alongside existing `associated_tools` (names). One new field with default `[]`, one new line in `convert_server_to_read`.\r\n\r\n2. **Store seeding**: On modal open in `editServer()`, reset the store and seed it from `server.associatedToolIds`, `server.associatedResources`, and `server.associatedPrompts`.\r\n\r\n3. **Change listener**: Event delegation on each edit-server container updates the store on every checkbox change (add on check, delete on uncheck).\r\n\r\n4. **afterSwap handlers**: When infinite scroll pages load and auto-check associated items, also add their UUIDs to the store.\r\n\r\n5. **Search functions**: Before replacing container HTML, flush current DOM checked/unchecked state into the store. After loading search results, restore checkboxes from the store.\r\n\r\n6. **Form submission**: In `handleEditServerFormSubmit`, sync DOM state to store, then override `FormData` with the full store contents - ensuring off-screen selections are included.\r\n\r\n7. **Cleanup**: Reset the store when the edit modal closes.\r\n\r\n**Key design decision**: All existing behavior is preserved unchanged - `hx-on::after-swap`, `hx-trigger=\"load\"`, `setEditServerAssociations`, `initToolSelect`, the setTimeout restore block. The store is purely additive overlay, not a replacement.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |   pass     |\r\n| Unit tests                            | `make test`          |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "reasoning": "# 🐛 Bug-fix PR\r\n\r\nFixes #3042 \r\n\r\n---\r\n\r\n## 📌 Summary\r\nFix three interrelated bugs in the \"Edit Virtual Server\" modal when a gateway has many tools, resources, or prompts. All three stem from tracking selection state only through DOM-visible checkboxes rather than a persistent in-memory store. Because the selector uses HTMX infinite scroll (20 items per page), anything not currently rendered in the DOM is invisible to the state-management code.\r\n\r\n**Bugs fixed:**\r\n1. **Performance / data loss on Save**: `FormData` only collects checked checkboxes currently in the DOM. Tools on unloaded scroll pages are silently dropped.\r\n2. **Partial selection on modal open**: Only first-page tools appear selected; tools on pages 2+ show unchecked until scrolled to.\r\n3. **Selections lost across searches**: Searching replaces the container HTML; previously-checked tools not in the original server associations are discarded.\r\n\r\n## 🔁 Reproduction Steps\r\n1. Create a virtual server with 30+ associated tools",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "madhav165",
+    "crivetimihai"
+  ],
+  "tags": [
+    "MUST",
+    "rest",
+    "ui",
+    "ica",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "fac600da-ba42-4fb0-8392-0cff4b5375c8",
+      "source_type": "pr",
+      "source_id": "3056",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/3056",
+      "contributor": "madhav165",
+      "timestamp": "2026-02-19T07:31:11Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3056.json"
+    }
+  ],
+  "timestamp": "2026-02-19T07:31:11Z",
+  "created_at": "2026-05-17T17:23:46.236353",
+  "updated_at": "2026-05-17T17:23:46.236356",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:46.236922",
+    "artifact_type": "decisions",
+    "artifact_id": "2807817f-c477-459a-86f9-ef9526dc5660"
+  }
+}

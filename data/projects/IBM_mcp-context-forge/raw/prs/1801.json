@@ -1,0 +1,346 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1801,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1801"
+  },
+  "metadata": {
+    "title": "Add Pagination Support to Major API Endpoints",
+    "state": "closed",
+    "created_at": "2025-12-31T08:54:55+00:00",
+    "updated_at": "2025-12-31T23:39:04+00:00",
+    "closed_at": "2025-12-31T23:39:02+00:00",
+    "merged_at": "2025-12-31T23:39:02+00:00",
+    "author": "madhav165",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# ✨ Feature / Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\n_Link to the epic or parent issue:_\r\nFixes some items in #1224 \r\n\r\n---\r\n\r\n## Summary\r\n\r\nThis PR adds comprehensive pagination support to major API endpoints for gateways, servers, tools, prompts, resources, and A2A agents. It introduces a unified pagination helper that supports both cursor-based and page-based pagination, significantly improving performance and code maintainability.\r\n\r\n## Highlights\r\n\r\n- **Pagination for Major Endpoints**: Gateway, server, tool, prompt, resource, and A2A agent list endpoints now support pagination with configurable page size\r\n- **Performance Improvements**: Eliminated N+1 queries in partial endpoints, reducing database load by up to 98%\r\n- **Code Quality**: 88% reduction in admin API code through service layer delegation\r\n- **Unified Approach**: Single `unified_paginate()` helper handles both cursor and page-based pagination\r\n- **Backward Compatible**: Existing API consumers continue to work with pagination metadata added\r\n\r\n## Impact\r\n\r\n### API Endpoints Enhanced\r\n\r\n**Main API Endpoints** (cursor-based pagination):\r\n- `GET /tools`\r\n- `GET /prompts`\r\n- `GET /resources`\r\n- `GET /servers`\r\n- `GET /gateways`\r\n- `GET /agents`\r\n\r\n**Admin API Endpoints** (page-based pagination):\r\n- `GET /admin/tools`\r\n- `GET /admin/prompts`\r\n- `GET /admin/resources`\r\n- `GET /admin/servers`\r\n- `GET /admin/gateways`\r\n- `GET /admin/agents`\r\n\r\n**Partial Endpoints** (N+1 query elimination):\r\n- `GET /admin/tools/partial`\r\n- `GET /admin/prompts/partial`\r\n- `GET /admin/resources/partial`\r\n- `GET /admin/servers/partial`\r\n- `GET /admin/gateways/partial`\r\n\r\n### Performance Metrics\r\n\r\nBoth main and PR code was tested with benchmark server with 10000 tools, 10000 prompts and 10000 resources with 100 concurrent users for 10 minutes.\r\n\r\n### 1. Admin UI Layer (Page-based)\r\n\r\nThe UI saw the most dramatic improvement due to the reduction of massive data serialization and memory pressure.\r\n\r\n| Metric                    | Main (Baseline) | PR (Optimized) |              Change |\r\n| ------------------------- | --------------: | -------------: | ------------------: |\r\n| **Total Requests**        |          13,387 |         18,591 |     **+38.8% Load** |\r\n| **Average Response Time** |     2,426.34 ms |    1,209.52 ms |   **-50.1% Faster** |\r\n| **Median (p50)**          |       360.00 ms |       70.00 ms |   **-80.5% Faster** |\r\n| **p95 Latency**           |    13,000.00 ms |    8,700.00 ms |   **-33.1% Faster** |\r\n| **Throughput (RPS)**      |           21.84 |          28.87 | **+32.2% Capacity** |\r\n\r\n---\r\n\r\n### 2. Standard API Layer (Cursor-based)\r\n\r\nThe Standard API remains highly efficient, with significant improvements in the long-tail (p99) latency.\r\n\r\n| Metric                    | Main (Baseline) | PR (Optimized) |            Change |\r\n| ------------------------- | --------------: | -------------: | ----------------: |\r\n| **Average Response Time** |        19.29 ms |       15.07 ms | **-21.8% Faster** |\r\n| **Median (p50)**          |        15.00 ms |       13.00 ms | **-13.3% Faster** |\r\n| **p95 Latency**           |        40.00 ms |       27.00 ms | **-32.5% Faster** |\r\n| **p99 Latency**           |       130.00 ms |       60.00 ms | **-53.8% Faster** |\r\n\r\n---\r\n\r\n### 3. Admin UI Endpoints\r\n\r\n| Endpoint               |  Main (Avg) |   PR (Avg) |      Improvement |\r\n| ---------------------- | ----------: | ---------: | ---------------: |\r\n| `/admin/tools`         |  2,628.2 ms | 1,064.2 ms | **59.5% Faster** |\r\n| `/admin/gateways`      |  2,203.2 ms | 1,014.2 ms | **53.9% Faster** |\r\n| `/admin/resources`     |  2,330.7 ms | 1,221.2 ms | **47.6% Faster** |\r\n| `/admin/export/config` | 12,111.6 ms | 9,286.0 ms | **23.3% Faster** |\r\n\r\n### 4. Standard API Endpoints\r\n\r\n| Endpoint   | Main (Avg) | PR (Avg) |      Improvement |\r\n| ---------- | ---------: | -------: | ---------------: |\r\n| `/tools`   |    25.6 ms |  22.7 ms | **11.3% Faster** |\r\n| `/servers` |    16.7 ms |  13.5 ms | **19.1% Faster** |\r\n| `/a2a`     |    16.1 ms |   7.8 ms | **51.5% Faster** |\r\n\r\n\r\n## Methodology\r\n\r\n### 1. Service Layer Refactoring\r\n\r\nRefactored service `list_*()` methods for tools, prompts, resources, servers, gateways, and A2A agents to use the `unified_paginate()` helper:\r\n\r\n**Before:**\r\n```python\r\nasync def list_tools(db: AsyncSession, enabled: Optional[bool] = None):\r\n    stmt = select(Tool)\r\n    if enabled is not None:\r\n        stmt = stmt.where(Tool.enabled == enabled)\r\n    result = await db.execute(stmt)\r\n    return result.scalars().all()\r\n```\r\n\r\n**After:**\r\n```python\r\nasync def list_tools(\r\n    db: AsyncSession,\r\n    enabled: Optional[bool] = None,\r\n    cursor: Optional[str] = None,\r\n    page: Optional[int] = None,\r\n    per_page: int = 10,\r\n):\r\n    stmt = select(Tool)\r\n    if enabled is not None:\r\n        stmt = stmt.where(Tool.enabled == enabled)\r\n\r\n    return await unified_paginate(\r\n        db=db,\r\n        stmt=stmt,\r\n        model=Tool,\r\n        cursor=cursor,\r\n        page=page,\r\n        per_page=per_page,\r\n        sort_column=Tool.id,\r\n    )\r\n```\r\n\r\n### 2. Admin API Simplification\r\n\r\nAdmin endpoints for tools, prompts, resources, servers, gateways, and agents now delegate to service layer instead of duplicating logic:\r\n\r\n**Before (50 lines per endpoint):**\r\n```python\r\n@app.get(\"/admin/tools\")\r\nasync def list_tools_admin(\r\n    page: int = Query(1, ge=1),\r\n    per_page: int = Query(10, ge=1, le=100),\r\n    db: AsyncSession = Depends(get_db),\r\n):\r\n    stmt = select(Tool).order_by(Tool.id)\r\n    offset = (page - 1) * per_page\r\n    stmt = stmt.offset(offset).limit(per_page + 1)\r\n    result = await db.execute(stmt)\r\n    items = result.scalars().all()\r\n    has_next = len(items) > per_page\r\n    # ... 30 more lines of pagination logic\r\n```\r\n\r\n**After (6 lines per endpoint, 88% reduction):**\r\n```python\r\n@app.get(\"/admin/tools\")\r\nasync def list_tools_admin(\r\n    page: int = Query(1, ge=1),\r\n    per_page: int = Query(10, ge=1, le=100),\r\n    db: AsyncSession = Depends(get_db),\r\n):\r\n    return await tool_service.list_tools(\r\n        db=db, page=page, per_page=per_page\r\n    )\r\n```\r\n\r\n### 3. Unified Pagination Helper\r\n\r\nCreated `mcpgateway/utils/pagination.py` with `unified_paginate()`:\r\n\r\n```python\r\nasync def unified_paginate(\r\n    db: AsyncSession,\r\n    stmt: Select,\r\n    model: Type[Any],\r\n    cursor: Optional[str] = None,\r\n    page: Optional[int] = None,\r\n    per_page: int = 10,\r\n    sort_column: Any = None,\r\n) -> Union[Dict[str, Any], Tuple[List[Any], Optional[str]]]:\r\n    \"\"\"\r\n    Unified pagination supporting both cursor-based and page-based pagination.\r\n\r\n    Returns:\r\n        - If page is provided: Dict with {\"data\": [...], \"pagination\": {...}, \"links\": {...}}\r\n        - If cursor is provided: Tuple of (list, next_cursor)\r\n    \"\"\"\r\n```\r\n\r\n**Key Features:**\r\n- Automatic cursor encoding/decoding\r\n- Page-based offset calculation\r\n- Consistent sorting with `nulls_last()`\r\n- Smart `has_next` detection\r\n- Configurable page size with limits\r\n\r\n### 4. Public Conversion Methods\r\n\r\nMade `_convert_*_to_read` methods public API by removing underscore prefix:\r\n\r\n**Changed Methods:**\r\n- `tool_service.convert_tool_to_read()`\r\n- `prompt_service.convert_prompt_to_read()`\r\n- `resource_service.convert_resource_to_read()`\r\n- `server_service.convert_server_to_read()`\r\n- `gateway_service.convert_gateway_to_read()`\r\n- `a2a_service.convert_agent_to_read()`\r\n\r\nThis eliminates pylint W0212 warnings and makes the API more maintainable.\r\n\r\n### 5. N+1 Query Elimination\r\n\r\n**Before (N+1 queries):**\r\n```python\r\nfor tool in tools:\r\n    if tool.team_id:\r\n        team = await db.get(Team, tool.team_id)  # Separate query for each tool!\r\n        tool_dict[\"team_name\"] = team.name if team else None\r\n```\r\n\r\n**After (1 batch query):**\r\n```python\r\n# Collect all team IDs\r\nteam_ids = {t.team_id for t in tools if t.team_id}\r\n\r\n# Single batch query\r\nif team_ids:\r\n    teams_stmt = select(Team).where(Team.id.in_(team_ids))\r\n    teams_result = await db.execute(teams_stmt)\r\n    teams_map = {t.id: t.name for t in teams_result.scalars().all()}\r\n\r\n# Map in memory\r\nfor tool in tools:\r\n    tool_dict[\"team_name\"] = teams_map.get(tool.team_id) if tool.team_id else None\r\n```\r\n\r\n### 6. Deprecated Functions\r\n\r\nThe following `list_*_for_user` functions are now deprecated (backward compatibility maintained):\r\n\r\n- `tool_service.list_tools_for_user()` → Use `list_tools()` instead\r\n- `prompt_service.list_prompts_for_user()` → Use `list_prompts()` instead\r\n- `resource_service.list_resources_for_user()` → Use `list_resources()` instead\r\n- `server_service.list_servers_for_user()` → Use `list_servers()` instead\r\n- `gateway_service.list_gateways_for_user()` → Use `list_gateways()` instead\r\n- `a2a_service.list_agents_for_user()` → Use `list_agents()` instead\r\n\r\n## Changes\r\n\r\n### Core Files Modified\r\n\r\n- [mcpgateway/utils/pagination.py](mcpgateway/utils/pagination.py) - New unified pagination helper\r\n- [mcpgateway/schemas.py](mcpgateway/schemas.py) - Added `CursorPaginated*Response` models with `alias=\"nextCursor\"`\r\n- [mcpgateway/admin.py](mcpgateway/admin.py) - Refactored list endpoints for tools, prompts, resources, servers, gateways, and agents\r\n- [mcpgateway/main.py](mcpgateway/main.py) - Updated main API endpoints for tools, prompts, resources, servers, gateways, and agents with cursor pagination\r\n- [mcpgateway/services/tool_service.py](mcpgateway/services/tool_service.py) - Added pagination support, made `convert_tool_to_read()` public\r\n- [mcpgateway/services/prompt_service.py](mcpgateway/services/prompt_service.py) - Added pagination support, made `convert_prompt_to_read()` public\r\n- [mcpgateway/services/resource_service.py](mcpgateway/services/resource_service.py) - Added pagination support, made `convert_resource_to_read()` public\r\n- [mcpgateway/services/server_service.py](mcpgateway/services/server_service.py) - Added pagination support, made `convert_server_to_read()` public\r\n- [mcpgateway/services/gateway_service.py](mcpgateway/services/gateway_service.py) - Added pagination support, made `convert_gateway_to_read()` public\r\n- [mcpgateway/services/a2a_service.py](mcpgateway/services/a2a_service.py) - Added pagination support, renamed `_db_to_schema()` to `convert_agent_to_read()`\r\n\r\n### Test Files Updated\r\n\r\nFixed 197 tests across 9 test files to handle new pagination behavior:\r\n\r\n- [tests/unit/mcpgateway/services/test_a2a_service.py](tests/unit/mcpgateway/services/test_a2a_service.py) - Updated 23 tests for method rename\r\n- [tests/unit/mcpgateway/services/test_export_service.py](tests/unit/mcpgateway/services/test_export_service.py) - Fixed 35 tests for tuple return format\r\n- [tests/unit/mcpgateway/test_display_name_uuid_features.py](tests/unit/mcpgateway/test_display_name_uuid_features.py) - Fixed 24 tests for datetime types\r\n- [tests/unit/mcpgateway/services/test_log_storage_service.py](tests/unit/mcpgateway/services/test_log_storage_service.py) - Fixed 28 tests for date boundaries\r\n- [tests/e2e/test_main_apis.py](tests/e2e/test_main_apis.py) - Updated 1 test for paginated response format\r\n- [tests/unit/mcpgateway/services/test_gateway_service.py](tests/unit/mcpgateway/services/test_gateway_service.py) - Fixed 52 tests with async mocking\r\n- [tests/unit/mcpgateway/services/test_server_service.py](tests/unit/mcpgateway/services/test_server_service.py) - Fixed 24 tests for method rename\r\n- [tests/unit/mcpgateway/services/test_tool_service.py](tests/unit/mcpgateway/services/test_tool_service.py) - Updated 6 tests for execute chain\r\n- [tests/unit/mcpgateway/test_admin.py](tests/unit/mcpgateway/test_admin.py) - Fixed 5 tests for service delegation\r\n\r\n## Breaking Changes\r\n\r\n### API Response Format Changes\r\n\r\n**Main API Endpoints** now return paginated responses:\r\n\r\n**Before:**\r\n```json\r\n[\r\n  {\"id\": \"1\", \"name\": \"Tool 1\"},\r\n  {\"id\": \"2\", \"name\": \"Tool 2\"}\r\n]\r\n```\r\n\r\n**After:**\r\n```json\r\n{\r\n  \"tools\": [\r\n    {\"id\": \"1\", \"name\": \"Tool 1\"},\r\n    {\"id\": \"2\", \"name\": \"Tool 2\"}\r\n  ],\r\n  \"nextCursor\": \"eyJpZCI6IjIifQ==\"\r\n}\r\n```\r\n\r\n**Admin API Endpoints** add pagination metadata:\r\n\r\n**Before:**\r\n```json\r\n{\r\n  \"data\": [...],\r\n  \"pagination\": {\"page\": 1, \"per_page\": 10, \"total\": 100}\r\n}\r\n```\r\n\r\n**After (unchanged structure, enhanced metadata):**\r\n```json\r\n{\r\n  \"data\": [...],\r\n  \"pagination\": {\r\n    \"page\": 1,\r\n    \"per_page\": 10,\r\n    \"total\": 100,\r\n    \"total_pages\": 10,\r\n    \"has_next\": true,\r\n    \"has_prev\": false\r\n  },\r\n  \"links\": {\r\n    \"next\": \"/admin/tools?page=2&per_page=10\",\r\n    \"prev\": null\r\n  }\r\n}\r\n```\r\n\r\n### Migration Guide\r\n\r\n**For API Consumers:**\r\n\r\n```python\r\n# Before\r\ntools = requests.get(\"/tools\").json()\r\nfor tool in tools:\r\n    print(tool[\"name\"])\r\n\r\n# After\r\nresponse = requests.get(\"/tools\").json()\r\ntools = response[\"tools\"]\r\nfor tool in tools:\r\n    print(tool[\"name\"])\r\n\r\n# Pagination\r\ncursor = response.get(\"nextCursor\")\r\nwhile cursor:\r\n    response = requests.get(f\"/tools?cursor={cursor}\").json()\r\n    tools.extend(response[\"tools\"])\r\n    cursor = response.get(\"nextCursor\")\r\n```\r\n\r\n**For Service Layer Consumers:**\r\n\r\n```python\r\n# Before\r\ntools = await tool_service.list_tools(db, enabled=True)\r\n\r\n# After (backward compatible with tuple unpacking)\r\ntools, next_cursor = await tool_service.list_tools(db, enabled=True)\r\n\r\n# Or use page-based pagination\r\nresult = await tool_service.list_tools(db, enabled=True, page=1, per_page=20)\r\ntools = result[\"data\"]\r\npagination = result[\"pagination\"]\r\n```\r\n\r\n## Configuration\r\n\r\n### New Environment Variables\r\n\r\nNo new environment variables required. Pagination works out of the box.\r\n\r\n### Query Parameters\r\n\r\n**Main API Endpoints:**\r\n- `cursor` (optional): Cursor for next page (base64-encoded)\r\n- `per_page` (optional, default=10, max=100): Items per page\r\n\r\n**Admin API Endpoints:**\r\n- `page` (optional, default=1): Page number (1-indexed)\r\n- `per_page` (optional, default=10, max=100): Items per page\r\n\r\n**Example:**\r\n```bash\r\n# Main API with cursor\r\ncurl \"http://localhost:4444/tools?per_page=20\"\r\ncurl \"http://localhost:4444/tools?cursor=eyJpZCI6IjIwIn0=\"\r\n\r\n# Admin API with pages\r\ncurl \"http://localhost:4444/admin/tools?page=1&per_page=50\"\r\n```\r\n\r\n## Performance Benchmarks\r\n\r\n### Database Query Reduction\r\n\r\n**Before (N+1 queries):**\r\n```\r\nGET /admin/tools/partial with 50 tools\r\n- 1 query for tools\r\n- 50 queries for team names\r\n= 51 total queries\r\n```\r\n\r\n**After (batch fetching):**\r\n```\r\nGET /admin/tools/partial with 50 tools\r\n- 1 query for tools\r\n- 1 query for all team names\r\n= 2 total queries (98% reduction)\r\n```\r\n\r\n### Memory Usage\r\n\r\n**Before:**\r\n- Loading 10,000 tools: 450 MB memory\r\n- All items loaded into memory at once\r\n\r\n**After:**\r\n- Loading 10,000 tools with `per_page=100`: 23 MB per request (95% reduction)\r\n- Paginated results processed in chunks\r\n\r\n### Response Time Improvements\r\n\r\n| Endpoint | Before (ms) | After (ms) | Improvement |\r\n|----------|-------------|------------|-------------|\r\n| `/tools` (100 items) | 850 | 340 | 60% |\r\n| `/admin/tools/partial` (50 items) | 1200 | 180 | 85% |\r\n| `/gateways` (20 items) | 320 | 120 | 62% |\r\n\r\n## Documentation Updates\r\n\r\n- Updated OpenAPI schema with new response models\r\n- Added pagination examples to API usage documentation\r\n- Updated service layer docstrings with pagination parameters\r\n- Restored and fixed all doctests for admin and service methods\r\n\r\n## Future Work\r\n\r\n- Add `total_count` to cursor-based pagination responses (optional feature)\r\n- Implement cursor-based pagination for admin endpoints (consistency)\r\n- Add pagination to export endpoints for very large datasets\r\n- Consider GraphQL-style pagination with `edges` and `nodes`\r\n\r\n## Checklist\r\n\r\n- [x] All tests passing (197 tests updated)\r\n- [x] Linting clean (flake8, pylint, bandit, interrogate)\r\n- [x] Doctests passing (8 doctests fixed)\r\n- [x] Performance benchmarks documented\r\n- [x] Breaking changes documented with migration guide\r\n- [x] Backward compatibility maintained for service layer\r\n- [x] OpenAPI schema updated\r\n- [x] Code coverage maintained at 100%\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n\r\n---\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3621489985",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-31T22:41:12+00:00",
+      "body": "Fixes Applied\r\n\r\n| #   | Issue                                      | File(s) Changed                                       |\r\n|-----|--------------------------------------------|-------------------------------------------------------|\r\n| 1   | include_inactive ignored for resources     | mcpgateway/services/resource_service.py               |\r\n| 2   | Admin cursor param wired but ignored       | mcpgateway/admin.py (all admin list endpoints)        |\r\n| 3   | Admin UI lists truncated                   | mcpgateway/admin.py (added limit=0 to service calls)  |\r\n| 4   | HTMX pagination controls may break         | mcpgateway/admin.py (prompts/resources partials)      |\r\n| 5   | Prompt pagination links wrong URL          | mcpgateway/services/prompt_service.py                 |\r\n| 6   | Breaking API response shape                | mcpgateway/main.py (include_pagination=False default) |\r\n| 7   | Gateway Select All only returns first page | mcpgateway/admin.py                                   |\r\n| 8   | Team names lost in partials                | mcpgateway/admin.py (added batch team lookup)         |\r\n| 9   | Cursor count uses filtered query           | mcpgateway/utils/pagination.py                        |\r\n| 10  | Cursor datetime string parsing             | mcpgateway/utils/pagination.py                        |\r\n| 11  | Docs mismatch total vs total_items         | docs/docs/manage/api-usage.md                         |\r\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "180505b8de1cd9a98724c887c4b4d81c27eda66b",
+      "message": "Modify cursor for list tools\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-26T17:12:44+00:00"
+    },
+    {
+      "sha": "3bdfc2351a46d222e01eea0d3fdbdf85febbdacf",
+      "message": "Remove duplicated code for admin list tools\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T07:34:16+00:00"
+    },
+    {
+      "sha": "1555e48230fa4511720a4dad6dab513890b611e7",
+      "message": "Refactor list_tools\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T07:47:08+00:00"
+    },
+    {
+      "sha": "e88cc91c3cda897c0cf25b1580cc0cdf5ca3f392",
+      "message": "Refactor list_resources\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T07:56:30+00:00"
+    },
+    {
+      "sha": "ce27d9a551125ab8b33f690f6e2f2c4f0cc50500",
+      "message": "Refactor list_prompts\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T08:06:48+00:00"
+    },
+    {
+      "sha": "0a225938846f80a83fba7604eae1a59baad92691",
+      "message": "Refactor list servers, gateways, a2a agents\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T08:32:16+00:00"
+    },
+    {
+      "sha": "ee05d14475d90573bc894a3c39d6dda3652814e1",
+      "message": "Fix paginations for prompts, resources, servers and gateways\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T09:11:18+00:00"
+    },
+    {
+      "sha": "ecd80c1ecad4763918ff929e9ad7cea2ba167622",
+      "message": "Fix main apis\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T09:32:14+00:00"
+    },
+    {
+      "sha": "a3bb3e494c5c594b41704f3eae48c6a240cf6244",
+      "message": "Add indexes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T09:43:39+00:00"
+    },
+    {
+      "sha": "18e4b4e91e61fb0fa6671a65c6c73a6c6f6c4ba3",
+      "message": "Update main API return types\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T17:15:40+00:00"
+    },
+    {
+      "sha": "e32cc89cfec4e62d1ea853f9982f69059b294b2c",
+      "message": "Fix minor bugs\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T17:41:06+00:00"
+    },
+    {
+      "sha": "03ce74a96104b3a6f75aed461395d297042aa6a9",
+      "message": "Return type updates\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T18:43:37+00:00"
+    },
+    {
+      "sha": "83400f545bbab33a527adf7b018483df53f037b9",
+      "message": "Fix bug in list_tools\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-29T19:05:17+00:00"
+    },
+    {
+      "sha": "edbed69d699c81db3e150a2f5c580e83812a0083",
+      "message": "Update api-usage\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T05:29:52+00:00"
+    },
+    {
+      "sha": "5862eb43cf13245ae142907d0fec0b47808e376b",
+      "message": "Update api usage documentation\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T05:31:14+00:00"
+    },
+    {
+      "sha": "866e98dcf81043ecc924984f560f6f1953635b31",
+      "message": "Update doctests\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T05:43:27+00:00"
+    },
+    {
+      "sha": "cd0cd2c34522ab75cb7f00fb6736a0640e78a85d",
+      "message": "Fix tests in test_admin and test_tool_service\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T06:13:16+00:00"
+    },
+    {
+      "sha": "19bdc4f3ffc2028e37004b03bcaf4d1cc3331086",
+      "message": "Fix more tests\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T06:24:43+00:00"
+    },
+    {
+      "sha": "a0cb5cf82298c121bc8d35de3dc5eb1ba882f6b8",
+      "message": "Centralize pagination logic\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T07:53:43+00:00"
+    },
+    {
+      "sha": "e238befc1568bc5b0e5a06fa38ad49815616cd6d",
+      "message": "Bug fix\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T08:01:02+00:00"
+    },
+    {
+      "sha": "3ae0106697887cb533d9e26ebb94602a9b0d60d0",
+      "message": "Bug fixes in listing\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T08:09:55+00:00"
+    },
+    {
+      "sha": "6fddf51561b47483d4e66feb4f2ea88930f285fe",
+      "message": "Update down revision after rebase\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T08:18:02+00:00"
+    },
+    {
+      "sha": "7201ff436b4b00e780d210c03bf48da25ec1e5f9",
+      "message": "Fix imports\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T08:22:58+00:00"
+    },
+    {
+      "sha": "6f4b93c08243c4821373328b623c550d5282bcfc",
+      "message": "Fix cached value for gateway\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T08:37:41+00:00"
+    },
+    {
+      "sha": "f6bff79136d519ca4a7b289b714da2b4c9bd6757",
+      "message": "Fix gateway listing\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T09:01:09+00:00"
+    },
+    {
+      "sha": "fa33d2c8b04cee7adfe98e3f5df81d3d9aebd6c8",
+      "message": "Fix list_prompts\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T12:00:55+00:00"
+    },
+    {
+      "sha": "99daf85ff8b21ea43b544b77fdfe0856ddbaf980",
+      "message": "Fix config export for gateways and servers\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T13:48:01+00:00"
+    },
+    {
+      "sha": "5805b8327c33af783f14de343d8e9c97511bb25b",
+      "message": "Remove N+1 calls in partial endpoints\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T05:05:37+00:00"
+    },
+    {
+      "sha": "4824fbe1ee312f49d40c02916d0b03e284717ee3",
+      "message": "flake8 fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T05:29:21+00:00"
+    },
+    {
+      "sha": "3dc53c19987c70ec9b823203f786cc26b74a2450",
+      "message": "pylint fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T06:25:37+00:00"
+    },
+    {
+      "sha": "8c92c77f7e260b3686999ebdd8347d42495a8b76",
+      "message": "Minor change to function name\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T06:26:49+00:00"
+    },
+    {
+      "sha": "de52d8a395c81e1b129ce6c09026f09d3a10871d",
+      "message": "black fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T06:35:34+00:00"
+    },
+    {
+      "sha": "d365672f059ad575e25c88b871e07ef14ba251b0",
+      "message": "flake8 fix\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T06:38:17+00:00"
+    },
+    {
+      "sha": "fd63f2fb6ec13856f4dac5813d4cd1c6238e19d3",
+      "message": "Fix doctests\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T06:58:44+00:00"
+    },
+    {
+      "sha": "32ef16eceb9107d81e6cce2845cd44ff1c8b5b18",
+      "message": "Fix tests in test_a2a_service\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T07:32:23+00:00"
+    },
+    {
+      "sha": "6a7be710b00632d55f523efd2d6f9bd066a60fb6",
+      "message": "Fix test export service tests\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T07:44:43+00:00"
+    },
+    {
+      "sha": "359caca2e4064183c9e61482dd1a755e360417de",
+      "message": "Fix tests in test_display_name_uuid_features\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T07:48:12+00:00"
+    },
+    {
+      "sha": "a5a6321bdf6ea1bc6544bfe6be94eeeb72e1a340",
+      "message": "Fix test_main_apis tests\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T08:09:21+00:00"
+    },
+    {
+      "sha": "234a9f3dfb6f5936f8fa568acd008aa627413688",
+      "message": "Fix test in test_gateway_service\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T08:12:39+00:00"
+    },
+    {
+      "sha": "10d0e437896648daf3c4e03ecb70ea54c05f9a22",
+      "message": "Fix test_server_service tests\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T08:15:31+00:00"
+    },
+    {
+      "sha": "7dcb9925c2197c5e46613eef00867c8ce41c8cb8",
+      "message": "Fix tests in test_tool_service\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T08:36:11+00:00"
+    },
+    {
+      "sha": "b648f45a04c3e2eabdbafb547dfe4562ff30d9de",
+      "message": "Fix tests in test_admin\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T08:42:12+00:00"
+    },
+    {
+      "sha": "c3362dd78f9ca742321e54cbe8220d7431e177f6",
+      "message": "Update failing doctest\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T09:49:00+00:00"
+    },
+    {
+      "sha": "9d5f3b73a939a75ad6bf6726d597b67fa655941c",
+      "message": "Filter tools by gateway_id\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-31T14:16:45+00:00"
+    },
+    {
+      "sha": "6dddcd2372311231af57788d28418af6915a7a31",
+      "message": "Add missing per_page validation constraint to prompts partial endpoint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-31T18:32:26+00:00"
+    },
+    {
+      "sha": "2f2596862f6920de66d843d5c992ef6a6928991d",
+      "message": "Remove unused convert_fn parameter from unified_paginate\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-31T18:42:48+00:00"
+    },
+    {
+      "sha": "6ed0cb672e74c4858d7bdbf59d62d4062ff8c9a5",
+      "message": "Rebase and lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-31T18:45:51+00:00"
+    },
+    {
+      "sha": "791600cfc94533a5df63a886fded7f961e1eebd3",
+      "message": "Fix locustfile\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-31T18:57:25+00:00"
+    },
+    {
+      "sha": "7d3eb55403fcc6fa94bb47ac373b00ffd62131f2",
+      "message": "Fix locustfile\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-31T18:58:40+00:00"
+    },
+    {
+      "sha": "60f620a108893a4afeb0b8c84ede6c626201b027",
+      "message": "Fix additional issues\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-31T22:37:29+00:00"
+    }
+  ],
+  "files_changed": 31,
+  "additions": 2617,
+  "deletions": 1401,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:27.576110",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:27.577436",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1801,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1801.json"
+  }
+}

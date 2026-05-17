@@ -1,0 +1,119 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1924,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1924"
+  },
+  "metadata": {
+    "title": "1918 implement mcp client session pooling",
+    "state": "closed",
+    "created_at": "2026-01-05T21:36:16+00:00",
+    "updated_at": "2026-01-06T13:20:59+00:00",
+    "closed_at": "2026-01-06T13:20:58+00:00",
+    "merged_at": "2026-01-06T13:20:58+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "experimental",
+      "performance"
+    ],
+    "milestone": "Release 1.0.0-BETA-2",
+    "assignees": []
+  },
+  "description": "# MCP Session Pool Implementation and Tests\r\n\r\nCloses #1918, Closes #1925\r\n\r\n## Summary\r\n\r\nImplements MCP client session pooling with comprehensive test coverage to reduce per-request latency by 10-20x through session reuse while maintaining strict user/tenant isolation.\r\n\r\n## Changes\r\n\r\n### Core Implementation (from #1918)\r\n\r\n**Session Pool Features:**\r\n- Session isolation by composite key: `(url, identity_hash, transport_type)`\r\n- Identity extraction for rotating tokens (e.g., JWT decode)\r\n- Health checks: staleness-based and optional explicit RPC with feature flag\r\n- Idle pool key eviction and stale session reaping\r\n- Circuit breaker for failing endpoints\r\n- Metrics and admin endpoint visibility\r\n\r\n**Configuration:**\r\n- `MCP_SESSION_POOL_ENABLED` - Master switch (default: true)\r\n- `MCP_SESSION_POOL_EXPLICIT_HEALTH_RPC` - Optional explicit list_tools() call (default: false)\r\n- Timeout consolidation: `HEALTH_CHECK_TIMEOUT` as single source of truth\r\n- Auto-alignment: pool health check interval uses `min(health_check_interval, mcp_session_pool_health_check_interval)`\r\n\r\n**Files Modified:**\r\n- `mcpgateway/services/mcp_session_pool.py` - Core pool implementation\r\n- `mcpgateway/main.py` - Pool initialization with auto-alignment\r\n- `mcpgateway/config.py` - Pool settings and feature flags\r\n- `mcpgateway/services/gateway_service.py` - Pool integration for health checks\r\n- `.env.example`, `docker-compose.yml`, `charts/mcp-stack/values.yaml`, `README.md` - Configuration docs\r\n\r\n### Test Suite (from #1925)\r\n\r\n**Unit Tests:**\r\n- `tests/unit/mcpgateway/services/test_mcp_session_pool.py` - 43 tests\r\n  - Timeout consolidation (`_validate_session` uses configurable timeout)\r\n  - Identity hashing and tenant isolation\r\n  - Pool key determinism\r\n  - Circuit breaker behavior\r\n  - Idle eviction and session reaping\r\n\r\n- `tests/unit/mcpgateway/services/test_gateway_explicit_health_rpc.py` - 6 tests\r\n  - Feature flag behavior (off by default)\r\n  - Timeout configuration usage\r\n\r\n- `tests/unit/mcpgateway/test_main_pool_init.py` - 5 tests\r\n  - Auto-alignment of health check intervals\r\n  - Transport timeout uses `health_check_timeout`\r\n\r\n**Integration Tests:**\r\n- `tests/integration/test_mcp_session_pool_integration.py` - 12 tests\r\n  - Cross-user session isolation\r\n  - Concurrent access (10+ users)\r\n  - Session lifecycle\r\n  - Transport isolation (SSE vs HTTP)\r\n  - Pool disabled behavior\r\n\r\n**E2E Tests:**\r\n- `tests/e2e/test_session_pool_e2e.py` - 10 tests\r\n  - Identity extractor with rotating tokens\r\n  - Idle eviction via metrics\r\n  - Pool hit performance benefits\r\n\r\n- `tests/e2e/test_admin_mcp_pool_metrics.py` - 14 tests\r\n  - Metrics security (no raw headers leaked)\r\n  - Required fields present\r\n  - Eviction/reaping tracking\r\n\r\n**Total: 90 tests, all passing**\r\n\r\n## Key Design Decisions\r\n\r\n1. **Session Isolation**: Sessions isolated by `(url, identity_hash, transport_type)` to prevent cross-user data leakage\r\n\r\n2. **Explicit Health RPC Off by Default**: The `list_tools()` call during health checks is optional (feature flag) to avoid ~5ms latency per check. Pool's internal staleness check handles health via `_validate_session`\r\n\r\n3. **Timeout Consolidation**: Removed separate `mcp_session_pool_transport_timeout` setting; uses `health_check_timeout` directly for consistency\r\n\r\n4. **Auto-Alignment**: Pool health check interval automatically uses `min()` of gateway and pool settings\r\n\r\n5. **Auth Header Pinning**: Sessions keep original headers until TTL/eviction (documented behavior for performance)\r\n\r\n## Test Commands\r\n\r\n```bash\r\n# Run all session pool tests\r\nuv run pytest tests/unit/mcpgateway/services/test_mcp_session_pool.py \\\r\n  tests/unit/mcpgateway/services/test_gateway_explicit_health_rpc.py \\\r\n  tests/unit/mcpgateway/test_main_pool_init.py \\\r\n  tests/integration/test_mcp_session_pool_integration.py \\\r\n  tests/e2e/test_session_pool_e2e.py \\\r\n  tests/e2e/test_admin_mcp_pool_metrics.py \\\r\n  -v --with-integration\r\n\r\n# Run just unit tests\r\nmake test PYTEST_ARGS=\"-k mcp_session_pool\"\r\n```\r\n\r\n## Verification\r\n\r\nPer `todo/verification-plan-detailed.md`:\r\n- [x] All unit, integration, and E2E tests pass\r\n- [x] No cross-identity session reuse\r\n- [x] Explicit health RPC optional and disabled by default\r\n- [x] Metrics endpoint secure (no secrets leaked)\r\n- [x] Config, schema, README, Helm values consistent\r\n- [x] Timeout consolidation complete\r\n- [x] Auto-alignment of health check intervals\r\n- [x] `_validate_session` uses configurable timeout\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "c6c2abb1ca9cf099b736305155aeea2887374e84",
+      "message": "[Performance] Implement MCP client session pooling to reduce per-request overhead #1918\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-05T21:22:11+00:00"
+    },
+    {
+      "sha": "4eed5dca4751dfe79e4af058c9da965be2f99683",
+      "message": "[Performance] Implement MCP client session pooling to reduce per-request overhead #1918\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-05T21:35:59+00:00"
+    },
+    {
+      "sha": "03e7923f9350a6082e83b846edaf5cd9b7b90f9b",
+      "message": "[Performance] Implement MCP client session pooling to reduce per-request overhead #1918\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-05T21:49:10+00:00"
+    },
+    {
+      "sha": "017300a2dd48fc6f7e06affade1ddef91dd27053",
+      "message": "[Performance] Implement MCP client session pooling to reduce per-request overhead #1918\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-05T22:10:00+00:00"
+    },
+    {
+      "sha": "cf0ce0d9ea420b88c91dfeeaad7513d33809384f",
+      "message": "[Performance] Implement MCP client session pooling to reduce per-request overhead #1918\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-05T23:53:29+00:00"
+    },
+    {
+      "sha": "62a6da7fbdc5065f8fa06b6d16d065d3bec06034",
+      "message": "[Performance] Implement MCP client session pooling to reduce per-request overhead #1918\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-06T00:00:58+00:00"
+    },
+    {
+      "sha": "8f9bebb8bc0baf43d6cffa85ae139f8912a5d3ce",
+      "message": "Implement MCP Session Pool Isolation Verification Tests #1925\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-06T03:25:54+00:00"
+    },
+    {
+      "sha": "df64508e10c9e737d8cdaf1862d836dfdbf7b83d",
+      "message": "Update documentation and mitigations\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-06T06:42:03+00:00"
+    },
+    {
+      "sha": "4f73f679940f9a436c1954679db6bcbb5d38cb82",
+      "message": "Update documentation and mitigations\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-06T06:49:31+00:00"
+    },
+    {
+      "sha": "569aa7c891469548d134cb0239c69b893892b006",
+      "message": "Update documentation and mitigations\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-06T06:56:33+00:00"
+    },
+    {
+      "sha": "828289dbfeaaadd4abc3ffff0eba7075bb60a904",
+      "message": "Update documentation and mitigations\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-06T07:15:32+00:00"
+    },
+    {
+      "sha": "8a10f40b08c777028f2942e076fea598a606c6e5",
+      "message": "Update documentation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-06T11:41:21+00:00"
+    },
+    {
+      "sha": "530f4fafecb7b795bcefa8c72289abad4fe8ae6f",
+      "message": "Disabled by default\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-06T11:50:23+00:00"
+    }
+  ],
+  "files_changed": 27,
+  "additions": 7307,
+  "deletions": 223,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:44.158811",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:44.160678",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1924,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1924.json"
+  }
+}

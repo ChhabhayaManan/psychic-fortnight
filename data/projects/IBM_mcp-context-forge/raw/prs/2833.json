@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2833,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2833"
+  },
+  "metadata": {
+    "title": "Add pagination for token listing",
+    "state": "closed",
+    "created_at": "2026-02-11T08:21:25+00:00",
+    "updated_at": "2026-02-14T04:01:18+00:00",
+    "closed_at": "2026-02-13T22:17:41+00:00",
+    "merged_at": "2026-02-13T22:17:41+00:00",
+    "author": "madhav165",
+    "labels": [
+      "ica"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# ✨ Feature / Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\nCloses #2764\r\n\r\n---\r\n\r\n## Summary\r\n\r\n- Add server-side paginated HTMX endpoint (`GET /admin/tokens/partial`) for the tokens tab, matching the existing pattern used by teams, tools, and other admin tables\r\n- Extract token listing into a dedicated `tokens_partial.html` template with OOB pagination controls\r\n- Fix token list not auto-refreshing after create (clicking \"I've Saved It\") or revoke — switched from `htmx.ajax()` to element-based `htmx.trigger()` which properly processes OOB swaps\r\n- Add `count_user_tokens()` to `TokenCatalogService` and return accurate `total` in the REST API's `TokenListResponse`\r\n\r\n## Changes\r\n\r\n### Backend\r\n- **`mcpgateway/admin.py`**: New `GET /admin/tokens/partial` endpoint with pagination, team filtering, inactive filtering, and `render=controls` mode\r\n- **`mcpgateway/services/token_catalog_service.py`**: Added `count_user_tokens()` for accurate total counts\r\n- **`mcpgateway/routers/tokens.py`**: Use `count_user_tokens()` in list endpoint so `total` reflects all matching tokens, not just the current page\r\n\r\n### Frontend\r\n- **`mcpgateway/templates/tokens_partial.html`**: New partial template (bare cards + OOB pagination div), follows the same pattern as `teams_partial.html`\r\n- **`mcpgateway/templates/admin.html`**: Tokens table uses `innerHTML` swap with `refreshTokens` custom trigger; show-inactive checkbox also uses `innerHTML`\r\n- **`mcpgateway/static/admin.js`**: `loadTokensList()` sets `hx-get` on `#tokens-table` and fires `htmx.trigger(el, \"refreshTokens\")` instead of `htmx.ajax()`; modal dismiss triggers list refresh\r\n\r\n### Tests\r\n- **`tests/unit/mcpgateway/routers/test_tokens.py`**: Added test for `count_user_tokens`\r\n- \r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n- [ ] CHANGELOG updated (if user-facing)\r\n\r\n---\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3796022537",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T09:20:05+00:00",
+      "body": "Thanks for this PR, @madhav165! The pagination implementation is solid — correct `total_count` via separate count queries, good use of `paginate_query` in the admin partial, and the team visibility change is well-justified. A few items:\n\n**1. SQL wildcard injection via `ilike` (medium severity)**\n`admin.py` new code: `EmailApiToken.name.ilike(f\"%{q}%\")` — the `q` parameter is passed directly without escaping LIKE wildcards (`%`, `_`). A user searching for `%` or `_` gets unintended broad matches. The codebase already has `_escape_like()` in `email_auth_service.py:709-718`. Please sanitize `q` the same way:\n```python\nsafe_q = q.replace(\"\\\\\", \"\\\\\\\\\").replace(\"%\", \"\\\\%\").replace(\"_\", \"\\\\_\")\n```\n\n**2. `list_all_tokens` admin endpoint: `total_count` stays 0 when `user_email` is None**\nThe `else` branch sets `tokens = []` and `total_count` remains 0. This means the admin endpoint cannot paginate all tokens — it returns `total: 0` when no `user_email` filter is provided.\n\n**3. N+1 revocation queries in API endpoints**\nYou added `get_token_revocations_batch` and use it in `admin_tokens_partial_html` and `admin_search_tokens` — great improvement. But `list_tokens`, `list_all_tokens`, and `list_team_tokens` still call `get_token_revocation` per token in a loop. Consider using the batch method there too."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "00753ed6649ee792224ae6ed59579f2eed394fb5",
+      "message": "feat: add pagination for token listing\n\n- Add server-side paginated HTMX endpoint (GET /admin/tokens/partial)\n- Extract token listing into tokens_partial.html template with OOB pagination\n- Fix token list auto-refresh after create/revoke\n- Add count_user_tokens(), list_user_and_team_tokens() to TokenCatalogService\n- Add /tokens/search API for server-side token search by name\n- Add alembic migration for token permissions on team_admin role\n- Batch fetch revocation info to eliminate N+1 queries\n- Allow team admins to view and manage team tokens\n\nCloses #2764\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T21:52:48+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 2357,
+  "deletions": 250,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:40.849512",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:40.852637",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2833,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2833.json"
+  }
+}

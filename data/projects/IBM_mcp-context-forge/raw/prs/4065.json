@@ -1,0 +1,64 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4065,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4065"
+  },
+  "metadata": {
+    "title": "Fixed time in test to avoid test failing due time window",
+    "state": "closed",
+    "created_at": "2026-04-07T10:38:23+00:00",
+    "updated_at": "2026-04-11T12:19:04+00:00",
+    "closed_at": "2026-04-11T12:18:47+00:00",
+    "merged_at": null,
+    "author": "cafalchio",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #4063\r\n\r\n---\r\n\r\n## 📝 Summary\r\nFix timing race condition in `test_redis_fallback_enforces_limit_via_memory` that caused intermittent test failures. The test was failing when the three sequential requests spanned across a 1-second window boundary in the FixedWindowAlgorithm, causing the counter to reset and incorrectly allow the third request.\r\n\r\n**Solution:** Added `patch('time.time', return_value=1000.0)` to freeze time during test execution, ensuring all three requests occur within the same 1-second window.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅     |\r\n| Coverage ≥ 80%            | `make coverage` | ✅     |\r\n\r\n**Specific test verification:**\r\n```bash\r\npytest tests/unit/mcpgateway/plugins/plugins/rate_limiter/test_rate_limiter.py::test_redis_fallback_enforces_limit_via_memory -v\r\n# Result: PASSED [100%]\r\n```\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n**Root Cause Analysis:**\r\n- Rate limit configured as `\"2/s\"` (2 requests per second)\r\n- FixedWindowAlgorithm resets counter at exact 1-second boundaries\r\n- If requests execute at `t=0.9s`, `t=1.0s`, `t=1.1s`, the third request gets a fresh window and is incorrectly allowed\r\n\r\n**Code Change:**\r\n```python\r\n# Before (flaky):\r\nr1 = await plugin.tool_pre_invoke(payload, ctx)\r\nr2 = await plugin.tool_pre_invoke(payload, ctx)\r\nr3 = await plugin.tool_pre_invoke(payload, ctx)\r\n\r\n# After (deterministic):\r\nfrozen_time = 1000.0\r\nwith patch('time.time', return_value=frozen_time):\r\n    r1 = await plugin.tool_pre_invoke(payload, ctx)\r\n    r2 = await plugin.tool_pre_invoke(payload, ctx)\r\n    r3 = await plugin.tool_pre_invoke(payload, ctx)\r\n```\r\n\r\n**Important:** This is NOT a plugin bug — the FixedWindowAlgorithm is working correctly. The test just needed deterministic timing to avoid flakiness.\r\n\r\n**Files Changed:**\r\n- `tests/unit/mcpgateway/plugins/plugins/rate_limiter/test_rate_limiter.py` (lines 1269-1278)\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4067940762",
+      "author": "gandhipratik203",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-07T12:13:20+00:00",
+      "body": "Looks good to me — once the CI on secrets detection passes."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "150cd241e5f985826f53044b8c3a859212e008bb",
+      "message": "Mocked time in test to avoid test failing when plugin invoke is outside the window\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T10:33:53+00:00"
+    },
+    {
+      "sha": "da302c42b173cb26ec095af4916aa06e1f372c44",
+      "message": "updated secrets\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-08T07:47:40+00:00"
+    },
+    {
+      "sha": "4009f7a8f698ac347a27e8524cf1133103a96846",
+      "message": "style: apply black formatting to test_rate_limiter.py\n\nUse double quotes in patch() call to satisfy black.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-10T12:45:49+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 6,
+  "deletions": 3,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:07:26.746445",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:26.747096",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4065,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4065.json"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2204,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2204"
+  },
+  "metadata": {
+    "title": "Optimization: Fix Gateway N+1 Queries via Eager Loading",
+    "state": "closed",
+    "created_at": "2026-01-20T08:54:54+00:00",
+    "updated_at": "2026-01-20T23:17:59+00:00",
+    "closed_at": "2026-01-20T23:17:57+00:00",
+    "merged_at": "2026-01-20T23:17:57+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# ✨ Performance Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\nCloses #1994\r\n\r\n---\r\n\r\n## 🚀 Summary (1-2 sentences)\r\nThis PR resolves the N+1 query performance issue in the Gateway service by implementing eager loading for the team relationship. It introduces the email_team relationship and team property to the Gateway model and updates service methods to fetch all necessary data in a single database query, mirroring the optimization recently applied to the Server model.\r\n\r\n---\r\n\r\n## 🛠️ Fix Description\r\nThis PR addresses the N+1 query issue where retrieving a Gateway entity resulted in an additional database query to fetch the associated team name.\r\n\r\n**1. Database Model Updates (mcpgateway/db.py)**\r\n\r\n- Added an email_team relationship to the Gateway model. This relationship is configured to lazily load by default but can be eagerly loaded using joinedload.\r\n- Added a team property to the Gateway model. This property serves as a proxy to retrieve the team name from the email_team relationship, ensuring consistent access without explicit query calls in the application logic.\r\n\r\n**2. Service Layer Optimization (`mcpgateway/services/gateway_service.py`)**\r\n\r\n- Eager Loading: Updated `get_gateway`, `update_gateway`, `set_gateway_state`, `create_gateway`, `delete_gateway`, and `_sync_gateway_with_oauth` method to use `db.execute()` with `joinedload(DbGateway.email_team)`. This instructs SQLAlchemy to fetch the Gateway and its associated `EmailTeam` in a single SQL query using a LEFT JOIN.\r\n- Removed Helper: Deleted the `_get_team_name` helper method, which was previously responsible for the secondary query effectively eliminating the N+1 problem.\r\n\r\n**3. Test Updates (`tests/unit/mcpgateway/services/test_gateway_service.py`)**\r\n\r\n- Refactored unit tests to mock db.execute instead of db.get, reflecting the change in the service layer from simple primary key lookups to complex select statements with options.\r\n- Updated mock_gateway fixtures to include the email_team relationship, ensuring tests accurately simulate the new data structure.\r\n\r\n---\r\n\r\n### ⚡ Impact Assessment\r\n\r\nThe following table demonstrates the reduction in database queries for key Gateway operations:\r\n\r\n| Operation | Previous Queries | New Queries | Improvement |\r\n|-----------|------------------|-------------|-------------|\r\n| `get_gateway()` | 2+ (One for gateway + one per team lookup) | 1 (Gateway + Team via JOIN) | **50% Reduction** |\r\n| `update_gateway()` | 2+ | 1 | **50% Reduction** |\r\n| `set_gateway_state()` | 2+ | 1 | **50% Reduction** |\r\n| `delete_gateway()` | Lazy loaded (N queries) | 1 (Eager loaded) | **Optimized** |\r\n| `_sync_gateway_with_oauth()` | Lazy loaded (N queries) | 1 (Eager loaded) | **Optimized** |\r\n\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [ ] `make lint` passes\r\n- [ ] `make test` passes\r\n- [ ] CHANGELOG updated (if user-facing)\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\nThis implementation follows the pattern established in PR #1962 and #1975 for the Server model. The _get_team_name helper method, which was responsible for the extra N+1 query, has been removed entirely.\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3684693749",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-20T23:17:50+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e5458087fc124ba1b4ea836cce018a0d6ebabbf4",
+      "message": "fix(perf): resolve Gateway N+1 queries via eager loading\n\nAdd email_team relationship and team property to Gateway model, mirroring\nthe optimization applied to Server model in PR #1962 and #1975.\n\nChanges:\n- Add email_team relationship to Gateway model (db.py)\n- Add team property for convenient access to team name\n- Update gateway_service.py to use joinedload(DbGateway.email_team)\n- Remove _get_team_name helper method (no longer needed)\n- Update tests to mock db.execute instead of db.get\n\nThis reduces database queries by ~50% for gateway operations that need\nteam information, eliminating the N+1 query pattern.\n\nCloses #1994\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T22:14:09+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 61,
+  "deletions": 67,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:53.263916",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:53.265294",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2204,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2204.json"
+  }
+}

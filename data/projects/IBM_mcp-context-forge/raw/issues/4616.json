@@ -1,0 +1,34 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4616,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4616"
+  },
+  "metadata": {
+    "title": "[CHORE][SECURITY]: Enforce gRPC reflection descriptor limits incrementally during reflection",
+    "state": "open",
+    "created_at": "2026-05-06T09:19:54+00:00",
+    "updated_at": "2026-05-06T09:20:06+00:00",
+    "closed_at": null,
+    "author": "jonpspri",
+    "labels": [
+      "chore",
+      "security",
+      "mcp-protocol",
+      "COULD"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "### 🔧 Chore Summary\n\n`mcpgateway/services/grpc_service.py::_enforce_descriptor_limits()` (added in PR #3202) caps three things on reflected gRPC `FileDescriptorProto`:\n- per-blob byte size (1 MiB)\n- count (1024)\n- aggregate byte size (8 MiB)\n\nThe limits work, but they run **after** the entire reflection response has been collected, deduplicated into a `set[bytes]`, and parsed into `FileDescriptorProto` objects. A malicious or compromised gRPC server can therefore force the gateway to allocate close to the aggregate cap before the rejection.\n\n### ⚙️ Why now\n\nPR #3202 mitigates this in practice by adding a per-call gRPC deadline (review B6) — a slow upstream gets cut off. But a fast malicious upstream that returns 8 MiB of garbage `FileDescriptorProto` payloads can still spike memory and CPU before the cap fires.\n\n### 📐 Proposed fix\n\nMove the size/count checks **inside** the `for file_desc_proto_bytes in resp.file_descriptor_response.file_descriptor_proto:` loop in `_perform_reflection`:\n\n```python\nrunning_total = 0\nfor file_desc_proto_bytes in resp.file_descriptor_response.file_descriptor_proto:\n    if len(file_desc_proto_bytes) > _GRPC_MAX_DESCRIPTOR_BYTES:\n        raise GrpcServiceError(...)\n    running_total += len(file_desc_proto_bytes)\n    if running_total > _GRPC_MAX_TOTAL_DESCRIPTOR_BYTES:\n        raise GrpcServiceError(...)\n    if len(file_descriptor_bytes_set) >= _GRPC_MAX_DESCRIPTOR_COUNT:\n        raise GrpcServiceError(...)\n    file_descriptor_bytes_set.add(file_desc_proto_bytes)\n    # … existing parse + extract ...\n```\n\nDrop the post-loop `_enforce_descriptor_limits()` once the inline checks cover all three axes.\n\n### 📋 Acceptance Criteria\n\n- Per-blob, running-total, and count limits all checked before adding to the set.\n- Limit-exceeded raises `GrpcServiceError` and `service.reachable = False` (matching current outer error handler).\n- Unit tests:\n  - server returns one oversized blob → caught at first blob, no later blob parsed\n  - server returns N+1 small blobs → caught at blob N+1, no later blob parsed\n  - cumulative total exceeds limit at blob K → caught at blob K, no later blob parsed\n- The existing `TestSecurityHardening` tests in `tests/unit/mcpgateway/services/test_grpc_service.py` continue to pass against the new helper (or the helper's existing post-loop check is removed and tests adapted).\n\n### 🔗 Context\n\n- Source: deep-review of PR #3202, item #15 in [PR comment](https://github.com/IBM/mcp-context-forge/pull/3202#issuecomment-4386420357).\n- Adjacent code: `_enforce_descriptor_limits()` and `_perform_reflection()` in `mcpgateway/services/grpc_service.py`.\n",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:42.417328",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:42.417959",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4616,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4616.json"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2865,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2865"
+  },
+  "metadata": {
+    "title": "feat: add slow-time-server for timeout, resilience, and load testing",
+    "state": "closed",
+    "created_at": "2026-02-12T07:46:22+00:00",
+    "updated_at": "2026-02-15T15:02:01+00:00",
+    "closed_at": "2026-02-15T15:01:59+00:00",
+    "merged_at": "2026-02-15T15:01:59+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "testing",
+      "mcp-servers",
+      "test-automation"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\nImplements #2783. Adds a configurable-latency Go MCP server (`mcp-servers/go/slow-time-server/`) modelled on fast-time-server that introduces artificial delays on every tool call. Serves as a testing target for gateway timeout enforcement, circuit breaker behaviour, session pool resilience, and load testing under realistic slow-tool conditions.\n\n- **5 MCP tools**: `get_slow_time`, `convert_slow_time`, `get_instant_time`, `get_timeout_time`, `get_flaky_time`\n- **4 latency distributions**: fixed, uniform, normal, exponential\n- **Failure simulation**: configurable rate (0.0-1.0) and mode (timeout, error, panic)\n- **Runtime reconfiguration** via REST `POST /api/v1/config`\n- **Invocation stats** with p50/p95/p99 percentiles\n- **32 unit tests** with race detection, all passing\n- **Docker Compose** integration in both `docker-compose.yml` (testing profile, port 8889) and `docker-compose-performance.yml`\n- **Locust load test** with 4 scenarios: slow time, timeout storm, mixed latency, circuit breaker\n- **Documentation** at `docs/docs/using/servers/go/slow-time-server.md`\n\n## Files\n\n| Area | Files | Description |\n|------|-------|-------------|\n| Server | `mcp-servers/go/slow-time-server/` (main.go, rest_handlers.go, openapi.go, main_test.go, Makefile, Dockerfile, README.md) | Core implementation |\n| Docker | `docker-compose.yml`, `docker-compose-performance.yml` | Service + auto-registration |\n| Load test | `tests/loadtest/locustfile_slow_time_server.py` | 4 Locust user classes |\n| Docs | `docs/docs/using/servers/go/slow-time-server.md`, `.pages` | User documentation |\n| Meta | `mcp-servers/AGENTS.md` | Directory listing update |\n\n## Test plan\n\n- [x] `go test -race -timeout=90s ./...` -- 32/32 pass\n- [x] `go vet ./...` -- clean\n- [x] `go build` -- clean\n- [x] `docker compose --profile testing config --services` -- validates YAML, shows both new services\n\nCloses #2783",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "bcd5c7cba1114b439e8a3b9a850515fbe48ff57a",
+      "message": "feat: add slow-time-server for timeout, resilience, and load testing\n\nImplements #2783. A configurable-latency Go MCP server modelled on\nfast-time-server that introduces artificial delays on every tool call,\nserving as a testing target for gateway timeout enforcement, circuit\nbreaker behaviour, session pool resilience, and load testing.\n\nServer features:\n- 5 MCP tools: get_slow_time, convert_slow_time, get_instant_time,\n  get_timeout_time, get_flaky_time\n- 2 MCP resources: latency://config, latency://stats\n- 1 MCP prompt: test_timeout\n- 4 latency distributions: fixed, uniform, normal, exponential\n- Failure simulation with configurable rate and mode\n- Runtime reconfiguration via REST POST /api/v1/config\n- Invocation statistics with p50/p95/p99 percentiles\n- Multi-transport: stdio, SSE, Streamable HTTP, dual, REST\n- 32 unit tests with race detection, all passing\n\nIntegration:\n- docker-compose.yml: testing profile (port 8889) + auto-registration\n- docker-compose-performance.yml: dedicated performance testing service\n- Locust load test with 4 scenarios (slow, timeout storm, mixed, circuit breaker)\n- Documentation in docs/docs/using/servers/go/slow-time-server.md\n\nCloses #2783\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-12T07:46:05+00:00"
+    },
+    {
+      "sha": "4760ea76e3b6d80418375ef61734d8f438fe5f8e",
+      "message": "fix: address review issues in slow-time-server PR\n\n- Fix healthcheck in docker-compose-performance.yml to use binary's\n  built-in health check instead of curl (scratch image has no curl)\n- Replace mixed atomic+mutex with plain increments under mutex in\n  invocationStats.record() for clarity\n- Remove dead generateTestTimeoutPrompt() function and unused strings\n  import from rest_handlers.go\n- Remove unused json and uuid imports from locust test file\n- Align env var naming (SLOW_TIME_LATENCY) between compose files\n\nCloses #2783\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T14:03:47+00:00"
+    },
+    {
+      "sha": "3a7dc1d0b6329b285045c67f3c0dd674430b0f24",
+      "message": "fix: move slow-time-server to dedicated resilience profile\n\nThe slow-time-server deliberately introduces latency and failures,\nwhich breaks existing tests when included in the testing profile.\nMove it to a dedicated 'resilience' profile so it must be explicitly\nopted into.\n\n- docker-compose.yml: profiles [\"testing\"] -> [\"resilience\"]\n- Makefile: add resilience-up/down/logs targets\n- docs: update profile references\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T14:33:30+00:00"
+    },
+    {
+      "sha": "175f894059d18ca4477c045263c3b9b5b310866b",
+      "message": "feat: add Makefile targets for resilience load testing\n\nAdd dedicated targets for running Locust and JMeter tests against\nthe slow-time-server, ensuring these tests only run when explicitly\ninvoked rather than as part of the regular testing profile.\n\nNew targets:\n- resilience-locust: headless Locust run (10 users, 120s)\n- resilience-locust-ui: Locust web UI on port 8090\n- resilience-jmeter: JMeter baseline (20 threads, 5min)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T14:52:11+00:00"
+    }
+  ],
+  "files_changed": 20,
+  "additions": 4576,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:56.461566",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:56.462853",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2865,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2865.json"
+  }
+}

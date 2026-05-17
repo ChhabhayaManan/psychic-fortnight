@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4047,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4047"
+  },
+  "metadata": {
+    "title": "fix(ui): token revoke button sends DELETE with empty token ID (#4046)",
+    "state": "closed",
+    "created_at": "2026-04-06T02:19:38+00:00",
+    "updated_at": "2026-04-06T17:06:22+00:00",
+    "closed_at": "2026-04-06T17:06:22+00:00",
+    "merged_at": "2026-04-06T17:06:22+00:00",
+    "author": "kimsehwan96",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4046\r\n\r\n---\r\n\r\n## 📝 Summary\r\nThe token revoke button in the admin UI used an undefined Jinja2 variable `{{token_id}}` in its `hx-delete` attribute, causing `DELETE /admin/tokens/` (missing ID) → 404. Additionally, no `DELETE /admin/tokens/{id}` endpoint exists in `admin.py`.\r\n\r\nFixed by replacing the broken HTMX `hx-delete` with `data-action=\"token-revoke\"`, delegating to the existing JS `revokeToken()` handler which calls the correct `DELETE /tokens/{token_id}` endpoint. This also adds the missing confirmation dialog that the HTMX path lacked.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    pass    |\r\n| Unit tests                | `make test`     |    pass    |\r\n| Coverage ≥ 80%            | `make coverage` |   pass     |\r\n\r\nAlso I've done Playwright E2E test `pytest tests/playwright/security/test_token_lifecycle.py` (passed)\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n**Root cause:** `tokens_partial.html:104` — `{{token_id}}` is not a valid template variable in the `{% for token in data %}` loop. The correct variable is `{{token.id}}`, which is used correctly on the adjacent line 106 (`data-token-id=\"{{ token.id }}\"`). \r\n\r\nThis bug was introduced in #2833 and was never caught because:\r\n\r\n1. Unit tests only checked `isinstance(response, HTMLResponse)` without parsing the rendered HTML\r\n2. Playwright's `revoke_token()` helper has a fallback API path that silently bypasses the broken UI button\r\n\r\n**Changes:**\r\n- `tokens_partial.html` — Replace `hx-delete`/`hx-swap` with `data-action=\"token-revoke\"`\r\n- `test_admin.py` — 3 unit tests verifying button attributes and visibility gating\r\n- `test_token_lifecycle.py` — 2 Playwright E2E tests for UI revoke flow regression\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4063110126",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-06T16:28:43+00:00",
+      "body": "Nice catch, @kimsehwan96 — this was a real bug that's been lurking since #2833.\n\n## Review\n\n**Bug diagnosis is spot-on.** `{{token_id}}` was undefined in the `{% for token in data %}` loop, so `hx-delete` rendered as `DELETE /admin/tokens/` (empty ID) → 404. And even if the ID had resolved correctly, there's no `DELETE /admin/tokens/{id}` endpoint in `admin.py` — the actual endpoint is `DELETE /tokens/{token_id}` in `routers/tokens.py`.\n\n**Fix is correct and consistent.** Replacing the broken HTMX path with `data-action=\"token-revoke\"` delegates to the existing `revokeToken()` JS handler in `tokens.js`, which already:\n- Calls the correct `DELETE /tokens/{tokenId}` endpoint\n- Includes a confirmation dialog (which the HTMX path lacked)\n- Sends auth headers and a revocation reason\n- Shows success/error notifications and refreshes the list\n\nThis is consistent with the other token actions (`token-details`, `token-usage`) in the same panel, all of which use the `data-action` + event delegation pattern.\n\n**Tests are well-written.** The 3 unit tests verify the rendered HTML attributes and visibility gating, and the 2 Playwright E2E tests specifically click the UI button (bypassing the page object's fallback API path) to catch exactly this class of regression.\n\n**No security or performance concerns.** The JS handler uses proper auth headers and hits the permissioned endpoint.\n\n## Changes made\n\nI rebased onto `main` (clean, no conflicts) and force-pushed to your branch — no code changes, just the rebase.\n\nLGTM — approving."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "9927654f2be3773a3ae973d9e4ec0f13482461dd",
+      "message": "fix(ui): token revoke button sends DELETE with empty token ID (#4046)\n\nThe revoke button in tokens_partial.html used an undefined Jinja2\nvariable `{{token_id}}` in hx-delete, rendering as `/admin/tokens/`\n(missing ID) and returning 404. Additionally, no DELETE endpoint\nexisted at `/admin/tokens/{id}` in admin.py.\n\nReplace the broken HTMX hx-delete with `data-action=\"token-revoke\"`\nto delegate to the existing JS `revokeToken()` handler, which calls\nthe correct `DELETE /tokens/{token_id}` endpoint with confirmation\ndialog, error handling, and list refresh.\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-04-06T02:17:07+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 189,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:20.343147",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:20.344432",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4047,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4047.json"
+  }
+}

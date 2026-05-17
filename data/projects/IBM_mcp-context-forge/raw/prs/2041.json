@@ -1,0 +1,77 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2041,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2041"
+  },
+  "metadata": {
+    "title": "Add cache auth/crypto key material and derived objects",
+    "state": "closed",
+    "created_at": "2026-01-12T06:27:56+00:00",
+    "updated_at": "2026-01-15T03:48:34+00:00",
+    "closed_at": "2026-01-15T03:48:30+00:00",
+    "merged_at": "2026-01-15T03:48:30+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "performance",
+      "blocked"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## :rocket: Performance Improvement PR\r\n\r\n### :pushpin: Summary\r\nCache JWT keys, derived AESGCM objects, SSL contexts and signature validation to reduce per-request CPU and I/O overhead:\r\n- Cache JWT public/private key contents with mtime tracking and `@lru_cache`\r\n- Cache derived AES key bytes and `AESGCM` instances; invalidate when `AUTH_ENCRYPTION_SECRET` changes\r\n- Add SSL context caching keyed by CA certificate hash in `resource_service`, `tool_service`, and `gateway_service`\r\n- Add `clear_ssl_context_cache()` helpers and call them from autouse test fixtures for isolation\r\n- Cache Ed25519 public key loads and validation results; add `clear_signature_caches()`\r\n\r\n### :link: Related Issue\r\nCloses: #1831\r\n\r\n### :chart_with_upwards_trend: Root Cause\r\n- Auth and crypto helpers re-read or re-derived secrets and keys on every call (file I/O + repeated crypto allocations)\r\n- `get_key()` re-hashed passphrase and recreated `AESGCM` on each encode/decode\r\n- JWT verification/creation read key files per request\r\n- SSL contexts were created repeatedly for the same CA certificates\r\n- Signature validation re-parsed public keys and re-verified identical payloads repeatedly\r\n\r\n### :wrench: Solution\r\n- JWT: `_read_key_file_cached()` uses file `mtime` and caches contents; `get_jwt_public_key_or_secret()` / `get_jwt_private_key_or_secret()` are `@lru_cache(maxsize=1)`\r\n- AESGCM: `_crypto_cache` maps passphrase → `(key_bytes, AESGCM)` and is cleared when passphrase rotates; `get_key()` and `_get_aesgcm()` reuse cached objects\r\n- SSL contexts: module-level `_ssl_context_cache: dict[str, ssl.SSLContext]` keyed by SHA-256(cert_pem); `_get_cached_ssl_context()` returns cached `SSLContext` and limits cache size\r\n- Gateway: added `_get_cached_ssl_context()` + `clear_ssl_context_cache()` and updated `create_ssl_context()` to reuse cache (previously missing)\r\n- Tests: added `clear_ssl_context_cache()` calls in autouse fixtures for `test_gateway_service.py`, `test_resource_service.py`, and `test_tool_service.py` to guarantee test isolation\r\n- Signature validation: cache loaded public keys and validation results; provide `clear_signature_caches()` for tests\r\n- Benchmarks: extended scripts to include gateway SSL caching benchmark; added warm-up and cached vs uncached timings\r\n\r\n### :test_tube: Verification\r\n| Test | Command | Status |\r\n|------|---------|--------|\r\n| Unit tests (212 tests) | `pytest tests/unit/mcpgateway/utils/test_jwt_config_helper.py tests/unit/mcpgateway/utils/test_services_auth.py tests/unit/mcpgateway/utils/test_validate_signature.py tests/unit/mcpgateway/services/test_resource_service.py tests/unit/mcpgateway/services/test_tool_service.py -v` | :white_check_mark: 212/212 pass |\r\n| Cache-clear fixtures | Unit test coverage | :white_check_mark: pass |\r\n| Module imports | All cache clearing functions | :white_check_mark: pass |\r\n\r\n### :bar_chart: Performance Results\r\n**Benchmark Testing:**\r\n\r\n| Component | Uncached (per-op) | Cached (per-op) | Speedup | Improvement |\r\n|-----------|------------------:|---------------:|--------:|------------:|\r\n| **JWT key read** | 0.5394ms | 0.0003ms | **1972.8x** | 99.9% |\r\n| **Ed25519 signature validate** | 0.4010ms | 0.0089ms | **45.2x** | 97.8% |\r\n| **AESGCM encode** | 0.0606ms | 0.0271ms | **2.24x** | 55.3% |\r\n| **SSL context (gateway_service)** | 0.8071ms | 0.5080ms | **1.59x** | 37.1% |\r\n| **SSL context (resource_service)** | 0.9935ms | 0.8033ms | **1.24x** | 19.1% |\r\n| **SSL context (tool_service)** | 0.6847ms | 0.6120ms | **1.12x** | 10.6% |\r\n\r\n### :trophy: Key Improvements\r\n- **JWT key caching:** Eliminates file I/O on every auth request - nearly 2000x speedup\r\n- **Signature validation:** 45x faster by caching validation results - massive savings on repeated verifications\r\n- **SSL context caching:** 1.12-1.59x faster across all services; gateway_service improvements were largest (this was the missing piece)\r\n- **AESGCM reuse:** 2.24x faster by reducing object allocation overhead",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "0fd1d945360844b8a4b75334872ce6feedb99da4",
+      "message": "cache auth/crypto key material and derived objects\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-12T06:17:18+00:00"
+    },
+    {
+      "sha": "4d6d7b6018cc910335f0913f3e81093e8614eb17",
+      "message": "lint fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-12T06:47:27+00:00"
+    },
+    {
+      "sha": "0a0180bfe25d72953d14004a2c01ddd1155ba10a",
+      "message": "fixes for test\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-12T08:40:51+00:00"
+    },
+    {
+      "sha": "d862c68290a058a705da51601c0002aa88e2e251",
+      "message": "fix pylint code duplication\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-12T09:05:44+00:00"
+    },
+    {
+      "sha": "523a94e2108696dc2ddb44b2e7b4b38febf395b1",
+      "message": "fix linting uses\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-12T09:18:03+00:00"
+    },
+    {
+      "sha": "8a8d688a6e70d345fbf9348d7c4862ab6ae15ceb",
+      "message": "Lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-15T03:48:21+00:00"
+    }
+  ],
+  "files_changed": 14,
+  "additions": 466,
+  "deletions": 46,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:18.868755",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:18.869380",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2041,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2041.json"
+  }
+}

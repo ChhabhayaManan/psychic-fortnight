@@ -1,0 +1,169 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3774,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3774"
+  },
+  "metadata": {
+    "title": "feat: add retry-with-exponential-backoff plugin",
+    "state": "closed",
+    "created_at": "2026-03-20T18:40:10+00:00",
+    "updated_at": "2026-03-28T16:43:47+00:00",
+    "closed_at": "2026-03-28T16:43:45+00:00",
+    "merged_at": "2026-03-28T16:43:45+00:00",
+    "author": "madhu-mohan-jaishankar",
+    "labels": [
+      "plugins",
+      "wxo",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3746\r\n\r\n---\r\n\r\n## 📝 Summary\r\n<html>\r\n<body>\r\n<!--StartFragment--><p style=\"box-sizing: border-box; margin-top: 0px; margin-bottom: 16px; color: rgb(31, 35, 40); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, &quot;Noto Sans&quot;, Helvetica, Arial, sans-serif, &quot;Apple Color Emoji&quot;, &quot;Segoe UI Emoji&quot;; font-size: 16px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal; background-color: rgb(255, 255, 255); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;\">This PR implements an<span> </span><strong style=\"box-sizing: border-box; font-weight: 600;\">active retry-with-exponential-backoff plugin</strong><span> </span>(<code node=\"[object Object]\" style=\"box-sizing: border-box; font-family: &quot;Monaspace Neon&quot;, ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;, monospace; font-size: 13.6px; tab-size: 4; white-space: break-spaces; background-color: rgba(129, 139, 152, 0.12); border-radius: 6px; margin: 0px; padding: 0.2em 0.4em;\">RetryWithBackoffPlugin</code>) for the MCP ContextForge gateway. Unlike the previous advisory-only stub (which simply annotated metadata without retrying), this is a fully active plugin that:</p><ol style=\"box-sizing: border-box; margin-top: 0px; margin-bottom: 16px; padding-left: 2em; color: rgb(31, 35, 40); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, &quot;Noto Sans&quot;, Helvetica, Arial, sans-serif, &quot;Apple Color Emoji&quot;, &quot;Segoe UI Emoji&quot;; font-size: 16px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal; background-color: rgb(255, 255, 255); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;\"><li style=\"box-sizing: border-box;\"><strong style=\"box-sizing: border-box; font-weight: 600;\">Detects transient tool failures</strong><span> </span>via three failure-signal strategies (see below).</li><li style=\"box-sizing: border-box; margin-top: 0.25em;\"><strong style=\"box-sizing: border-box; font-weight: 600;\">Signals the gateway to re-invoke the tool</strong><span> </span>by returning a non-zero<span> </span><code node=\"[object Object]\" style=\"box-sizing: border-box; font-family: &quot;Monaspace Neon&quot;, ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;, monospace; font-size: 13.6px; tab-size: 4; white-space: break-spaces; background-color: rgba(129, 139, 152, 0.12); border-radius: 6px; margin: 0px; padding: 0.2em 0.4em;\">retry_delay_ms</code><span> </span>field in<span> </span><code node=\"[object Object]\" style=\"box-sizing: border-box; font-family: &quot;Monaspace Neon&quot;, ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;, monospace; font-size: 13.6px; tab-size: 4; white-space: break-spaces; background-color: rgba(129, 139, 152, 0.12); border-radius: 6px; margin: 0px; padding: 0.2em 0.4em;\">ToolPostInvokeResult</code>.</li><li style=\"box-sizing: border-box; margin-top: 0.25em;\"><strong style=\"box-sizing: border-box; font-weight: 600;\">Computes a full-jitter exponential backoff delay</strong><span> </span>to prevent thundering-herd on concurrent failures.</li><li style=\"box-sizing: border-box; margin-top: 0.25em;\"><strong style=\"box-sizing: border-box; font-weight: 600;\">Respects a gateway-level<span> </span><code node=\"[object Object]\" style=\"box-sizing: border-box; font-family: &quot;Monaspace Neon&quot;, ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;, monospace; font-size: 13.6px; tab-size: 4; white-space: break-spaces; background-color: rgba(129, 139, 152, 0.12); border-radius: 6px; margin: 0px; padding: 0.2em 0.4em;\">max_tool_retries</code><span> </span>ceiling</strong>, clamping both global and per-tool override configs.</li><li style=\"box-sizing: border-box; margin-top: 0.25em;\"><strong style=\"box-sizing: border-box; font-weight: 600;\">Optionally accelerates hot-path failure detection via a Rust extension</strong><span> </span>(<code node=\"[object Object]\" style=\"box-sizing: border-box; font-family: &quot;Monaspace Neon&quot;, ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;, monospace; font-size: 13.6px; tab-size: 4; white-space: break-spaces; background-color: rgba(129, 139, 152, 0.12); border-radius: 6px; margin: 0px; padding: 0.2em 0.4em;\">retry_with_backoff_rust</code>) while transparently falling back to a pure-Python implementation.</li></ol><h3 style=\"box-sizing: border-box; margin-top: 24px; margin-bottom: 16px; font-size: 1.25em; font-weight: 600; line-height: 1.25; color: rgb(31, 35, 40); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, &quot;Noto Sans&quot;, Helvetica, Arial, sans-serif, &quot;Apple Color Emoji&quot;, &quot;Segoe UI Emoji&quot;; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal; background-color: rgb(255, 255, 255); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;\">Architecture: Separation of Concerns</h3><p style=\"box-sizing: border-box; margin-top: 0px; margin-bottom: 16px; color: rgb(31, 35, 40); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, &quot;Noto Sans&quot;, Helvetica, Arial, sans-serif, &quot;Apple Color Emoji&quot;, &quot;Segoe UI Emoji&quot;; font-size: 16px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal; background-color: rgb(255, 255, 255); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;\">The design cleanly separates responsibilities between the plugin and the gateway:</p>\r\n\r\n| Concern | Owner |\r\n|---|---|\r\n| Failure detection | Plugin (`_is_failure`) |\r\n| Backoff delay calculation | Plugin (`_compute_delay_ms`) |\r\n| Per-invocation retry state | Plugin (`_STATE` dict keyed by `tool:request_id`) |\r\n| Sleep + retry loop execution | Gateway (`tool_service.py` `invoke_tool`) |\r\n\r\n<br class=\"Apple-interchange-newline\"><!--EndFragment-->\r\n</body>\r\n</html>\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   ✅    |\r\n| Unit tests                | `make test`     |   ✅    |\r\n| Coverage ≥ 80%            | `make coverage` |    ✅    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## ⚡ Performance Benchmarks (Rust vs Python)\r\n\r\nThe Rust extension (`retry_with_backoff_rust`) is an optional drop-in accelerator for the hot failure-detection path. If the `.so` is not installed, the plugin transparently falls back to pure Python with no behavioural difference.\r\n\r\n### Sequential latency (200,000 iterations each)\r\n\r\n| Scenario | Python | Rust | Speedup |\r\n|---|---|---|---|\r\n| Failure (`is_error=True`) | 505 ns | 233 ns | **2.2×** |\r\n| Retryable status (`sc=500`) | 551 ns | 207 ns | **2.7×** |\r\n| Success (`is_error=False`) | 79 ns | 126 ns | 1.6× Python |\r\n| Non-retryable (`sc=200`) | 124 ns | 133 ns | 1.1× Python |\r\n| **Average** | **315 ns** | **175 ns** | **1.8×** |\r\n\r\n### Concurrent throughput (50 tools × 40 reqs, 8 threads, 300 reps)\r\n\r\n| Implementation | calls/sec |\r\n|---|---|\r\n| Python fallback | 160,622 |\r\n| Rust extension | 168,634 |\r\n| Advantage | **1.05× Rust** |\r\n\r\n**Key callouts:**\r\n- The failure path (the actual retry case) is **2.2–2.7× faster in Rust** — this is the hot path that matters.\r\n- The success path is marginally slower (~1.6×) due to FFI string marshalling overhead — acceptable since no delay logic executes on success.\r\n- Under concurrent load, Rust uses a `Mutex`-protected `HashMap` — no GIL dependency, correct under true parallelism.\r\n- If the `.so` is not installed, the plugin **transparently falls back to pure Python** with no behaviour change.\r\n\r\n---\r\n## 📓 Notes (optional)\r\nDesign Decisions\r\nGateway owns the sleep and loop; plugin owns detection and delay — This avoids blocking the plugin chain and keeps the plugin stateless from the gateway's perspective. The gateway's existing invoke_tool method was extended with a retry_attempt counter parameter and a recursive tail-call for retries.\r\n\r\nretry_delay_ms = 0 on success — On a successful tool invocation, the plugin resets the per-invocation state and returns retry_delay_ms=0. The gateway treats 0 as \"no retry needed.\"\r\n\r\nState keyed by (tool_name, request_id) — Each independent tool invocation gets fresh retry state. Retries of the same invocation share state because the gateway passes the same GlobalContext (and thus the same request_id) on every retry attempt. State is cleaned up on success or max-retry exhaustion to avoid memory leaks.\r\n\r\ncheck_text_content is off by default — Signal 3 (text content JSON parsing) is an opt-in escape hatch for pre-2025-spec MCP servers. It is disabled by default because it can false-positive on tools that legitimately return dictionaries containing status_code as informational payload (e.g., monitoring or proxy tools).\r\n\r\nRust extension is optional and zero-cost when absent — The try/except ImportError pattern is the standard Python idiom for optional compiled extensions. The import cost is zero after the first module load.\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4013566213",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-26T12:04:00+00:00",
+      "body": "https://docs.rs/pyo3-log/latest/pyo3_log/\nplease add logs with pyo3_logs"
+    },
+    {
+      "id": "4015977635",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-26T17:18:36+00:00",
+      "body": "Looks good"
+    },
+    {
+      "id": "4020396898",
+      "author": "lucarlig",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-27T10:58:26+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "4021959710",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-27T15:30:36+00:00",
+      "body": "No changes since last review.  Approve."
+    },
+    {
+      "id": "4021977315",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-27T15:33:24+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "9f3d7c7446b24260eedda09c9c57ce2dc68202d2",
+      "message": "feat: add retry-with-exponential-backoff plugin\n\n- Add retry_delay_ms field to PluginResult in models.py\n- Add recursive retry loop in tool_service.py invoke_tool (retry_attempt param)\n- Fix manager.py to propagate retry_delay_ms signal across plugin chain\n- Add RetryWithBackoffPlugin with full-jitter exponential backoff\n- Add plugin-manifest.yaml and package __init__.py\n- Add 35 unit tests covering all components\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-20T18:36:57+00:00"
+    },
+    {
+      "sha": "acc32bd9a69cbc60b879941c4b0db6faf555dee0",
+      "message": "feat: #3746 implemented retry with backoff (RUST/Python)\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-25T02:17:21+00:00"
+    },
+    {
+      "sha": "c686b5c4149ed365fefc5865a862b9591ee62a14",
+      "message": "#3746 add README.md for retry_with_backoff\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-25T13:41:58+00:00"
+    },
+    {
+      "sha": "19d27a1bbf78ef378b253b793938a726df8fcfee",
+      "message": "#3746 resolve lint failures and add Rust plugin Makefile/deny.toml\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-25T16:00:52+00:00"
+    },
+    {
+      "sha": "f0283324687042f9b2b3eb272ca0e9905ecd2a2f",
+      "message": "#3746 add pyo3-stub-gen support and Python stub for retry_with_backoff Rust plugin\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-25T16:50:13+00:00"
+    },
+    {
+      "sha": "171ed90f1c35951b0595b53a9a70ac1a868bdc0d",
+      "message": "#3746 cover tool_service retry path to satisfy diff-cover 95% threshold\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-25T17:50:17+00:00"
+    },
+    {
+      "sha": "60a00d7f2eb33fe802702a9a0a1ce19202406d62",
+      "message": "benchmark\n\nSigned-off-by: Dima Zakharov <zakharov@ibm.com>",
+      "author": "Dima Zakharov",
+      "date": "2026-03-26T15:00:33+00:00"
+    },
+    {
+      "sha": "add1c7ead1cf63bc97dc9d96afe6d7cd04bdabdf",
+      "message": "#3746 retry on exception path — honour plugin retry_delay_ms when tool raises\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-26T15:26:19+00:00"
+    },
+    {
+      "sha": "8413cd6070281b66f4e55ed24511e8b657b18455",
+      "message": "benchmark script\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-03-26T15:46:28+00:00"
+    },
+    {
+      "sha": "270233a4edf3f9e4773115e38175054de1084b29",
+      "message": "#3746 add Rust unit tests and pyo3-log integration for retry_with_backoff\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-26T16:50:24+00:00"
+    },
+    {
+      "sha": "212b14a93b3eb8d1e368c99ec187f07a03286e07",
+      "message": "#3746 cargo fmt: apply rustfmt to lib.rs\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-26T17:07:57+00:00"
+    },
+    {
+      "sha": "1949a9493f675ea1c43a7cccf82aa7c87da19e23",
+      "message": "Coverage targets\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-03-26T17:10:12+00:00"
+    },
+    {
+      "sha": "8eb1e28ef62442ccfcd641768671407b2a7e9060",
+      "message": "summary coverage fix\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-03-26T17:17:43+00:00"
+    },
+    {
+      "sha": "fa46568b7640cae27f30ca052b18c53e04529174",
+      "message": "#3746 address PR review comments: clarify retry count and document resource retry limitation\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-27T12:49:26+00:00"
+    },
+    {
+      "sha": "03bbd997ca0c089460c5aaaa1c8ffd953be3d794",
+      "message": "#3746 address review: harden retry plugin, add timeout retry path, fix Rust monotonic clock\n\n- Refactor retry logic into _run_timeout_post_invoke and _retry_tool_invocation\n  helpers, eliminating 4 copies of timeout post-invoke and 3 copies of retry\n  invocation code\n- Add retry support for timeout path via ToolTimeoutError.retry_delay_ms\n- Add status-code-aware isError handling: non-transient HTTP errors (400, 401,\n  404) are no longer blindly retried when the gateway can extract the status\n  code from httpx.HTTPStatusError\n- Switch Rust state TTL from SystemTime to Instant (monotonic clock) to match\n  Python's time.monotonic() and avoid wall-clock jump issues\n- Add defensive guard in _run_timeout_post_invoke for None plugin_manager\n- Add state TTL eviction, docstrings, and check_text_content to plugin manifest\n- Add tests: timeout retry path, timeout no-retry re-raise,\n  _run_timeout_post_invoke hook invocation, HTTP status forwarding to plugin,\n  non-/servers/ MCP path passthrough\n- Remove unused ToolHookType imports in test_tool_service_coverage.py\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-28T13:36:22+00:00"
+    }
+  ],
+  "files_changed": 26,
+  "additions": 4220,
+  "deletions": 161,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:58.839497",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:58.840570",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3774,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3774.json"
+  }
+}

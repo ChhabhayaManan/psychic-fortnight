@@ -1,0 +1,122 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3873,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3873"
+  },
+  "metadata": {
+    "title": "fix[bug]: handle non-JSON responses and query params in REST tools (#3855, #3857) ",
+    "state": "closed",
+    "created_at": "2026-03-26T12:33:28+00:00",
+    "updated_at": "2026-04-14T15:19:07+00:00",
+    "closed_at": "2026-04-14T15:19:05+00:00",
+    "merged_at": "2026-04-14T15:19:05+00:00",
+    "author": "rakdutta",
+    "labels": [
+      "bug",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": [
+      "gcgoncalves",
+      "brian-hussey"
+    ]
+  },
+  "description": "  Closes #3855 and #3857                                                                                                                                                                                                                            \r\n  \r\n  This PR enhances REST tool robustness by improving error handling, query parameter processing, and input validation. It also streamlines the admin UI tool testing workflow.                                                                      \r\n                             \r\n  Backend Improvements\r\n\r\n  Non-JSON Response Handling (#3855)                                                                                                                                                                                                                \r\n  - New _handle_json_parse_error() helper function for graceful fallback when JSON parsing fails\r\n  - Handles multiple exception types: json.JSONDecodeError, orjson.JSONDecodeError, UnicodeDecodeError, AttributeError                                                                                                                              \r\n  - Supports REST APIs returning HTML error pages, plain text, XML, or responses with encoding issues                 \r\n  - Returns raw text as {\"response_text\": <truncated>} instead of crashing                                                                                                                                                                          \r\n                                                                                                                                                                                                                                                    \r\n  Response Truncation (Security Enhancement)                                                                                                                                                                                                        \r\n  - New configurable setting: REST_RESPONSE_TEXT_MAX_LENGTH (default: 5000 chars, range: 1000-100000)                                                                                                                                               \r\n  - Truncates non-JSON response text to prevent exposing excessive sensitive data in error responses                                                                                                                                                \r\n  - Applies to both success and error responses                                                                                                                                                                                                     \r\n  - Logs warning when truncation occurs with original and truncated lengths                                                                                                                                                                         \r\n                                                                                                                                                                                                                                                    \r\n  Query Parameter Handling (#3857)                                                                                                                                                                                                                  \r\n  - GET requests: URL query params merged with input arguments (URL params take precedence on conflicts)                                                                                                                                            \r\n  - POST/PUT/PATCH/DELETE: Query params preserved in URL to support signed URLs (Azure SAS, AWS presigned URLs, webhook signatures)                                                                                                                 \r\n  - Added conflict warning when URL query params override input arguments for better debugging                                     \r\n                                                                                                                                                                                                                                                    \r\n  jq Filter Validation                                                                                                                                                                                                                              \r\n  - Added validation to detect simple email addresses mistakenly used as jq filters (e.g., user@example.com)                                                                                                                                        \r\n  - Uses regex pattern ^[^.\\[\\]|]+@[^.\\[\\]|]+\\.[^.\\[\\]|]+$ to catch basic email patterns without false positives                                                                                                                                    \r\n  - Logs warning and treats invalid filters as empty (returns unfiltered data)                                  \r\n                                                                                                                                                                                                                                                    \r\n  Frontend Enhancements                                                                                                                                                                                                                             \r\n                                                                                                                                                                                                                                                    \r\n  Admin UI Tool Testing Workflow                                                                                                                                                                                                                    \r\n  - New invokeTool(toolName) function called by \"Invoke\" buttons in Tools table\r\n  - Fetches tool details via API (fetchToolDetails) and populates modal dynamically                                                                                                                                                                 \r\n  - Dynamic form generation from tool input schema (createFormInput, generateToolFormFields)\r\n  - Refactored runToolTest() and runToolValidation() to use consistent tools/call method structure:                                                                                                                                                 \r\n  {                                                                                                                                                                                                                                                 \r\n    method: \"tools/call\",                                                                                                                                                                                                                           \r\n    params: { name: toolName, arguments: {...} }                                                                                                                                                                                                    \r\n  }                                                                                                                                                                                                                                                 \r\n  - Enhanced error logging for better debugging                                                                                                                                                                                                     \r\n                                                                                                                                                                                                                                                    \r\n  Test Coverage                                                                                                                                                                                                                                     \r\n                             \r\n  Comprehensive test suite added:                                                                                                                                                                                                                   \r\n  - TestJqFilterEmailValidation: Email address detection and valid filter preservation\r\n  - TestRestToolQueryParamHandling: GET/POST/PUT/PATCH/DELETE param handling, conflict warnings                                                                                                                                                     \r\n  - TestRestToolNonJsonResponses: HTML, plain text, XML, encoding errors, empty responses      \r\n  - Truncation tests: large responses, small responses, custom config values     ",
+  "comments": [
+    {
+      "id": "3043769153",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-07T08:28:53+00:00",
+      "body": "It might be good to export this and the other new functions added, so that we can unit test them directly."
+    },
+    {
+      "id": "3043777987",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-07T08:30:41+00:00",
+      "body": "Consider adding unit tests for fetchToolDetails, createFormInput, generateToolFormFields and invokeTool."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4048797939",
+      "author": "TS0713",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-02T07:12:49+00:00",
+      "body": "- Fixes the Admin UI issue where Test/Invoke buttons were not working — the missing invokeTool() and runToolTest() functions are now properly added, and the request format is corrected to tools/call. I verified this flow manually and it’s working end-to-end now.\n\n- Fixes the REST POST query parameter issue — query params are now correctly preserved in the URL for POST/PUT requests. I tested this as well, and signed URL / query-based APIs are working as expected.\n\n- Handles non-JSON responses (HTML, text, etc.) — prevents crashes and makes the system more robust.\n\n- Manually tested on gateway admin UI by adding REST tools - 1 with query params and other returns HTML result as part of final response - Both working as expected \n\nOverall, these are useful fixes across both UI and backend, and everything looks clean and well-tested.\n\nI approve this PR."
+    },
+    {
+      "id": "4059963084",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-05T23:58:28+00:00",
+      "body": "Nice work on this one — the core idea of handling non-JSON REST responses and fixing query param handling for signed URLs is solid and well-motivated.\n\n## What I changed during rebase\n\nThe branch had significant merge conflicts since `admin.js` was split into ES modules (#3137) after this PR was opened. I rebased onto current `main`, squashed the 22 commits into one clean commit, and made the following adjustments:\n\n### JS changes ported to modular structure\n- All JS changes now target `mcpgateway/admin_ui/tools.js` and `admin_ui/admin.js` instead of the old monolithic `admin.js`\n- Used `fetchWithTimeout` (already imported) instead of raw `fetch` + `getCookie` for consistency with the existing `testTool()` function\n- Replaced `innerHTML` assignments with safe DOM methods (`removeChild`, `createElement`, `textContent`) to avoid XSS vectors\n\n### Fixed unreachable 4xx/5xx error handling (critical)\nThe original code placed the non-JSON error response handling *after* `response.raise_for_status()`, which throws `httpx.HTTPStatusError` for 4xx/5xx — making the error branch unreachable for the exact cases #3855 describes.\n\nFixed by catching `HTTPStatusError` and handling the error response in the except block:\n- Parses body with the same JSON/non-JSON fallback\n- Includes HTTP status code in the error message (`\"HTTP 500: <truncated html>\"`)\n- Sets `structured_content={\"status_code\": N}` so the retry plugin can distinguish retriable (503) from non-retriable (404) errors — matching the existing pattern at line 5040\n\nThe original `elif status not in [200, 201, 202, 206]` branch is retained for non-standard 2xx codes (203, 205, 207).\n\n### Test fix\nUpdated the HTML error response test to actually raise `httpx.HTTPStatusError` from `raise_for_status()` instead of mocking it to no-op — the original test passed but didn't exercise the real production code path.\n\n## Verification\n- 290/290 tests in `test_tool_service.py` pass (18 new)\n- 323/323 tests in `test_tool_service_coverage.py` pass\n- Linters clean (black, isort, eslint)"
+    },
+    {
+      "id": "4066742438",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T08:31:31+00:00",
+      "body": ""
+    },
+    {
+      "id": "4107070334",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-14T15:11:55+00:00",
+      "body": "Verified, working fine. 👍 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7cc3c75d56a8981043103cac0a490a1b588a5548",
+      "message": "fix: handle non-JSON responses and query params in REST tools (#3855, #3857)\n\nBackend:\n- Add _handle_json_parse_error() for graceful fallback when REST APIs return\n  HTML, plain text, XML, or responses with encoding issues\n- Catch json.JSONDecodeError, orjson.JSONDecodeError, UnicodeDecodeError, and\n  AttributeError during response parsing (httpx uses stdlib json, not orjson)\n- Add configurable REST_RESPONSE_TEXT_MAX_LENGTH (default: 5000, range: 1000-100000)\n  to truncate non-JSON response text and limit sensitive data exposure\n- Fix query param handling: GET requests merge URL params with input args\n  (URL params take precedence on conflicts); POST/PUT/PATCH/DELETE preserve\n  query params in URL for signed URL support (Azure SAS, AWS presigned, etc.)\n- Add jq filter validation to detect email addresses mistakenly used as filters\n\nFrontend (admin_ui):\n- Fix runToolTest/runToolValidation to use tools/call JSON-RPC method\n  instead of tool name as method (MCP protocol compliance)\n- Add invokeTool() function for \"Invoke\" button in Tools table\n- Port all JS changes to modular admin_ui/ structure (Vite bundled)\n\nCloses #3855\nCloses #3857\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-05T23:02:49+00:00"
+    },
+    {
+      "sha": "c0ad12f9650ade1a9b3e95069f42dbc36431f869",
+      "message": "export funcyion in tools.js\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-09T09:28:35+00:00"
+    },
+    {
+      "sha": "7c4115b7ddddd48ba3e5ad6b2844dd4b6c5212ce",
+      "message": "pre-commit\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-13T10:16:16+00:00"
+    },
+    {
+      "sha": "158277e25a0993f67c1ae2ed1f8ef7225e59ab6f",
+      "message": "resolve rebase conflicts - merge mapping features with signed URL support\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-14T12:25:13+00:00"
+    },
+    {
+      "sha": "31aef153ab5abe278f72ebe28af532571c19648f",
+      "message": "rebase conflict issue\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-14T12:51:44+00:00"
+    },
+    {
+      "sha": "a27ee1b02d9d95565c73ca5072c24b403426bcb1",
+      "message": "Update .secrets.baseline\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-04-14T14:08:46+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 1335,
+  "deletions": 70,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:28.634834",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:28.636126",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3873,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3873.json"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4131,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4131"
+  },
+  "metadata": {
+    "title": "test: speed up slow docker-entrypoint and sensitive-logging tests",
+    "state": "closed",
+    "created_at": "2026-04-11T00:27:41+00:00",
+    "updated_at": "2026-04-11T11:36:11+00:00",
+    "closed_at": "2026-04-11T11:36:09+00:00",
+    "merged_at": "2026-04-11T11:36:09+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nTwo CI test-runtime wins from analyzing the pytest `--durations` output:\n\n- **`test_install_plugin_requirements_retries_three_times_then_fails`**: ~4.2s → ~0.04s. The test forces three pip failures, and `docker-entrypoint.sh` slept 2s between retries. Made the delay configurable via `PLUGIN_REQUIREMENTS_RETRY_DELAY_SECONDS` (default `2`, preserving production behavior), and the test sets it to `0`.\n- **`test_runtime_logger_calls_do_not_embed_sensitive_values`**: ~3.7s → ~0.6s. The scan was `ast.parse()`-ing every `mcpgateway/**/*.py` file containing `logger.` (~150 files). Added a cheap substring pre-filter so only files that mention a sensitive identifier (`token`, `password`, `credentials`, etc.) are parsed.\n\nAlso audited the rest of `tests/` for similar patterns. Remaining `asyncio.sleep(N)` calls in unit tests are inside mock coroutines that get cancelled by the test harness (idiomatic cancellation/timeout pattern), and the other `rglob(\"*.py\")` scan in `test_policies.py` is narrowly scoped to the framework directory.\n\n## Test plan\n\n- [x] `uv run pytest tests/unit/test_docker_entrypoint.py` — 5 passed, retry test at 0.04s\n- [x] `uv run pytest tests/security/test_input_validation.py::TestSensitiveLoggingRegressions` — 5 passed, scan test at 0.56s\n- [x] Production default preserved: `sleep 2` still applies when `PLUGIN_REQUIREMENTS_RETRY_DELAY_SECONDS` is unset",
+  "comments": [
+    {
+      "id": "3067233722",
+      "author": "Copilot",
+      "created_at": "2026-04-11T00:30:21+00:00",
+      "body": "`PLUGIN_REQUIREMENTS_RETRY_DELAY_SECONDS` is user-controlled, and this script runs with `set -euo pipefail`. If the env var is set to a non-numeric value (or a negative), `sleep \"${retry_delay}\"` will error and terminate the entrypoint, potentially masking the real pip failure. Consider validating `retry_delay` (numeric and >= 0) and either falling back to the default (2s) with a warning or emitting a clear error message before exiting."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4092987983",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T00:30:22+00:00",
+      "body": "## Pull request overview\n\nSpeeds up CI by reducing unnecessary waiting in the plugin-requirements retry path and by cutting down the amount of AST parsing performed by the sensitive-logging regression scan.\n\n**Changes:**\n- Make the plugin requirements retry sleep configurable via `PLUGIN_REQUIREMENTS_RETRY_DELAY_SECONDS` (defaulting to 2s).\n- Update the docker-entrypoint unit test helper to set retry delay to `0` for faster retries during tests.\n- Add a substring pre-filter in the sensitive-logging scan to avoid parsing files unlikely to reference sensitive identifiers.\n\n### Reviewed changes\n\nCopilot reviewed 4 out of 4 changed files in this pull request and generated 1 comment.\n\n| File | Description |\n| ---- | ----------- |\n| `docker-entrypoint.sh` | Adds configurable retry delay for plugin requirements installation attempts. |\n| `tests/unit/test_docker_entrypoint.py` | Sets retry delay to `0` in tests to avoid real waiting during pip-failure retries. |\n| `tests/security/test_input_validation.py` | Optimizes sensitive-logging scan by pre-filtering file contents before AST parsing. |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c007c67121dad25a967a472687e42e547b254d41",
+      "message": "test: speed up docker-entrypoint retry and sensitive-logging scan tests\n\n- docker-entrypoint.sh: make plugin requirements retry delay configurable\n  via PLUGIN_REQUIREMENTS_RETRY_DELAY_SECONDS (default 2s); test sets 0\n  to avoid waiting 4s for the retry-exhaustion path.\n- tests/security/test_input_validation.py: add text-level pre-filter so\n  the runtime logger scan only ast.parse() files that could plausibly\n  contain a sensitive identifier.\n\nCuts test_install_plugin_requirements_retries_three_times_then_fails\nfrom ~4.2s to ~0.04s and\ntest_runtime_logger_calls_do_not_embed_sensitive_values from ~3.7s to\n~0.6s in CI.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-11T00:27:17+00:00"
+    },
+    {
+      "sha": "55432b832dcc638a4c754fd88fffddbe8abe1582",
+      "message": "fix(entrypoint): validate PLUGIN_REQUIREMENTS_RETRY_DELAY_SECONDS\n\nA non-numeric or negative value would cause `sleep` to fail under\n`set -euo pipefail`, masking the real pip install failure. Validate\nthe env var up front and fall back to the 2s default with a warning\nif it is not a non-negative number. Adds a regression test covering\nthe invalid-value path.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-11T00:39:48+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 46,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:51.910282",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:51.911673",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4131,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4131.json"
+  }
+}

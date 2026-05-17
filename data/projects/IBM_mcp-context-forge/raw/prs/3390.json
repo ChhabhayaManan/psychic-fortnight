@@ -1,0 +1,199 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3390,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3390"
+  },
+  "metadata": {
+    "title": "fix(rbac): backfill admin.overview and servers.use permissions to viewer roles",
+    "state": "closed",
+    "created_at": "2026-03-02T12:56:37+00:00",
+    "updated_at": "2026-03-18T16:08:01+00:00",
+    "closed_at": "2026-03-18T16:07:58+00:00",
+    "merged_at": "2026-03-18T16:07:58+00:00",
+    "author": "rakdutta",
+    "labels": [
+      "bug",
+      "ica",
+      "rbac",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "closes issue #3329\n\n## Description\n\nEnsures `viewer`, `platform_viewer`, `developer`, and `team_admin` roles have the correct permission set on both new and existing deployments.\n\n### Problem\n\nThe `admin.overview` and `servers.use` permissions were missing from certain roles in existing databases. These permissions existed in the bootstrap definition but were never backfilled via a migration for users who had already run prior migrations.\n\n### Solution\n\n- Added Alembic migration `abf8ac3b6008` to backfill the missing permissions into existing role records.\n- Updated `bootstrap_db.py` default role definitions so new deployments receive the correct permissions from first boot.\n\n---\n\n## Changes\n\n### `mcpgateway/alembic/versions/abf8ac3b6008_add_admin_overview_and_tools_execute_to_.py` *(new)*\n\nData migration that adds missing permissions to existing role records:\n\n| Role | Permissions Added |\n|---|---|\n| `viewer` | `admin.overview`, `servers.use` |\n| `platform_viewer` | `admin.overview`, `servers.use` |\n| `developer` | `admin.overview` |\n| `team_admin` | `admin.overview` |\n\n- Idempotent: skips roles not found and skips permissions already present\n- Supports SQLite (plain JSON) and PostgreSQL (`CAST … AS JSONB`)\n- Symmetric `downgrade()` removes the added permissions\n- Guards against missing `roles` table (fresh DBs handled by `bootstrap_db.py`)\n\n### `mcpgateway/bootstrap_db.py`\n\nUpdated default role definitions in `bootstrap_default_roles()`:\n\n- `team_admin`: added `admin.overview`\n- `developer`: added `admin.overview`\n- `viewer`: added `admin.overview`, `servers.use`\n- `platform_viewer`: added `admin.overview`, `servers.use`\n\n### `docs/docs/manage/rbac.md`\n\nUpdated permission tables and role listings to reflect the new permissions.\n\n### `tests/unit/mcpgateway/db/test_rbac_permission_backfill_migration.py` *(new)*\n\nTests for the migration covering module structure, upgrade/downgrade logic, idempotency, edge cases, and round-trip verification.\n\n### `tests/unit/mcpgateway/services/test_rbac_permission_matrix.py`\n\nUpdated permission fixtures to match the new role definitions.\n\n---\n\n## Testing\n\n- Run `alembic upgrade head` on an existing SQLite or PostgreSQL database and verify the four roles have the new permissions.\n- Run `alembic downgrade -1` and verify the permissions are removed.\n- Bootstrap a fresh database and confirm the roles are created with the correct permissions from `bootstrap_db.py`.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3877375177",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-02T16:49:55+00:00",
+      "body": ""
+    },
+    {
+      "id": "3879930966",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-03T03:08:12+00:00",
+      "body": "## Review: APPROVED\n\nRebased onto main (clean, no conflicts), squashed 5 commits into a single conventional commit preserving original author.\n\n### Changes Reviewed\n\n**Migration (`abf8ac3b6008`)**\n- Migration chain verified: `down_revision = \"d9e0f1a2b3c4\"` is correct (single head confirmed via `alembic heads`)\n- Logic is correct: idempotent add/remove, PostgreSQL JSONB CAST + SQLite plain JSON branching\n- Consistent with established codebase patterns (`9f5d93ced2b3`, `b2d9c6e4f1a7`, `a31c6ffc2239`)\n- `print()` is the correct convention (412 uses across 44 migration files; only 1 outlier uses `logging`)\n- Symmetric downgrade properly reverses the upgrade\n\n**Bootstrap (`bootstrap_db.py`)**\n- Additions match the migration backfill exactly\n- Subset hierarchy preserved: viewer < developer < team_admin\n\n**Security**\n- `admin.overview` is enforced at `admin.py:1557` with `allow_admin_bypass=False` — all roles need it explicitly\n- `tools.execute` is enforced on tool invocation endpoints (`main.py`, `streamablehttp_transport.py`)\n- No write/create/update/delete permissions granted to viewer roles — only read + execute access\n- `tools.execute` for viewers is appropriate: MCP protocol requires tool invocation for basic functionality\n\n### Fixes Applied During Review\n- Removed emoji from print statement (consistency with reference migrations)\n- Added `# pylint: disable=no-member` (matches `d9e0f1a2b3c4` pattern)\n- **Updated `test_rbac_permission_matrix.py`** — synced permission constants with new bootstrap definitions (280 tests pass)\n- **Added `test_rbac_permission_backfill_migration.py`** — 33 tests covering module structure, `_load_permissions` edge cases, upgrade/downgrade logic, idempotency, edge cases\n\n### Test Results\n- 33/33 migration tests pass\n- 280/280 permission matrix tests pass"
+    },
+    {
+      "id": "3882376172",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-03T12:53:04+00:00",
+      "body": "## Review: Approved with fixes applied\n\nReviewed the full diff, rebased onto latest main (`b4d8770`), and applied the following fixes:\n\n### Issues found and fixed\n\n1. **Downgrade regression (high)**: The migration included `servers.use` in `ROLE_PERMISSION_ADDITIONS` for `developer` and `team_admin`, but those roles already have `servers.use` in their baseline definitions. This meant `downgrade()` would strip a pre-existing permission, breaking transport access. **Fixed** by removing `servers.use` from developer/team_admin entries — upgrade is still idempotent (skips if present), but downgrade no longer destroys pre-existing state.\n\n2. **Bootstrap/migration inconsistency**: `servers.use` was being backfilled by the migration for `viewer` and `platform_viewer` but was missing from `bootstrap_db.py`. New deployments would lack it while migrated deployments would have it. **Fixed** by adding `servers.use` to both roles in bootstrap.\n\n3. **E2E test alignment**: The new RBAC transport e2e tests (merged in #3424) expected non-admin users to be denied `tools.execute` on the default `/mcp` endpoint. However, all non-admin users auto-receive `platform_viewer` (global scope), which now includes `tools.execute`. **Fixed** by updating 4 e2e tests to expect success instead of denial, matching the intent of #3329.\n\n4. **Test coverage gaps**: Migration test fixtures used unrealistic baselines (developer/team_admin missing `servers.use`), masking the downgrade regression. **Fixed** with realistic fixtures and a new round-trip restoration test.\n\n5. **Documentation drift**: Updated RBAC docs (role tables, permission categories, available permissions, info boxes) and role descriptions to reflect the new viewer/platform_viewer capabilities.\n\n6. **Unrelated changes**: Reverted `uv.lock` dependency bumps (cookiecutter, fastapi, filelock) that were unrelated to the RBAC fix.\n\n### Verification\n\n- 323 unit tests passing\n- Migration/bootstrap/test constants/docs all cross-checked for consistency\n- Downgrade safety verified: no pre-existing permissions in removal lists\n\nCloses #3329"
+    },
+    {
+      "id": "3882377244",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-03T12:53:12+00:00",
+      "body": "## Review: Approved with fixes applied\n\nReviewed the full diff, rebased onto latest main, and applied the following fixes:\n\n### Issues found and fixed\n\n1. **Downgrade regression (high)**: The migration included `servers.use` in `ROLE_PERMISSION_ADDITIONS` for `developer` and `team_admin`, but those roles already have `servers.use` in their baseline definitions. This meant `downgrade()` would strip a pre-existing permission, breaking transport access. **Fixed** by removing `servers.use` from developer/team_admin entries — upgrade is still idempotent (skips if present), but downgrade no longer destroys pre-existing state.\n\n2. **Bootstrap/migration inconsistency**: `servers.use` was being backfilled by the migration for `viewer` and `platform_viewer` but was missing from `bootstrap_db.py`. New deployments would lack it while migrated deployments would have it. **Fixed** by adding `servers.use` to both roles in bootstrap.\n\n3. **E2E test alignment**: The new RBAC transport e2e tests (merged in #3424) expected non-admin users to be denied `tools.execute` on the default `/mcp` endpoint. However, all non-admin users auto-receive `platform_viewer` (global scope), which now includes `tools.execute`. **Fixed** by updating 4 e2e tests to expect success instead of denial, matching the intent of #3329.\n\n4. **Test coverage gaps**: Migration test fixtures used unrealistic baselines (developer/team_admin missing `servers.use`), masking the downgrade regression. **Fixed** with realistic fixtures and a new round-trip restoration test.\n\n5. **Documentation drift**: Updated RBAC docs (role tables, permission categories, available permissions, info boxes) and role descriptions to reflect the new viewer/platform_viewer capabilities.\n\n6. **Unrelated changes**: Reverted `uv.lock` dependency bumps (cookiecutter, fastapi, filelock) that were unrelated to the RBAC fix.\n\n### Verification\n\n- 323 unit tests passing\n- Migration/bootstrap/test constants/docs all cross-checked for consistency\n- Downgrade safety verified: no pre-existing permissions in removal lists\n\nCloses #3329"
+    },
+    {
+      "id": "3883408905",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-03T15:38:09+00:00",
+      "body": "Hi @rakdutta , looks like lots of doc strings still mention about test permissions and some tests have `tools.execute` too. Let's limit this PR to `servers.use` as discussed."
+    },
+    {
+      "id": "3891116542",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-04T18:12:03+00:00",
+      "body": "Minor changes to PR description, alembic script name to remove references to tools.execute and removal of unrelated changes in uv.lock. Ready to merge."
+    },
+    {
+      "id": "3968275384",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-18T14:30:50+00:00",
+      "body": "## Review: fix(rbac): backfill admin.overview and servers.use permissions to viewer roles\n\n### Rebased & Fixed\n- Rebased onto current `main` (3c5375eff), resolved 3 merge conflicts (uv.lock x2, e2e tests).\n- **Fixed critical issue**: migration `down_revision` pointed to `e1f2a3b4c5d6` which created multiple Alembic heads. Updated to `64acf94cb7f2` (actual current head on main). Without this fix, `alembic upgrade head` would fail on any deployment.\n\n### Code Review\n\n**Migration (`abf8ac3b6008`)** — Correct and well-structured:\n- Idempotent: skips if permissions already present, skips if roles table missing\n- Handles both SQLite (plain JSON) and PostgreSQL (CAST AS JSONB)\n- Symmetric downgrade removes only what was added\n- Downgrade is safe for developer/team_admin: their pre-existing `servers.use` is preserved because it's not in their `ROLE_PERMISSION_ADDITIONS` entry\n\n**Bootstrap ↔ Migration consistency** — Verified exact match:\n| Role | Migration adds | Bootstrap now includes |\n|---|---|---|\n| viewer | `admin.overview`, `servers.use` | ✅ both present |\n| platform_viewer | `admin.overview`, `servers.use` | ✅ both present |\n| developer | `admin.overview` | ✅ present (already had `servers.use`) |\n| team_admin | `admin.overview` | ✅ present (already had `servers.use`) |\n\nNew and migrated deployments will have identical permission sets.\n\n**Security** — No privilege escalation:\n- `admin.overview` is read-only (dashboard visibility via token scoping middleware)\n- `servers.use` enables MCP transport access (SSE/WS/Streamable HTTP) but does not grant `tools.execute`\n- Viewers still cannot execute tools — e2e tests still verify denial on the default global endpoint\n\n**Test coverage** — 98% on migration file (43 tests), 282 permission matrix tests pass. Only uncovered line is the PostgreSQL CAST branch (expected with SQLite test DB).\n\n**Minor notes (non-blocking)**:\n- E2e test assertions are slightly weaker after removing `_assert_access_denied_tool_call` helper (inline checks don't verify \"access denied\" message text for all roles). Acceptable for e2e where error format varies.\n- `test_main.py` patches for `a2a_service=None` are unrelated but fix pre-existing test failures. Harmless.\n\nAll 325 unit tests pass. Single Alembic head confirmed."
+    },
+    {
+      "id": "3968687082",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-18T15:20:04+00:00",
+      "body": "Updated review after addressing feedback:\r\n\r\n- **Restored `_assert_access_denied_tool_call()` helper** in e2e tests — the inline replacements were broken (checked `result.isError` but actual response uses `error` key with JSON-RPC code -32003). E2e file now has zero diff vs main.\r\n- **Added `test_downgrade_strips_pre_existing_permissions`** documenting the known limitation: downgrade is not provenance-aware and will remove listed permissions even if they pre-existed. Accepted trade-off for a migration targeting system-bootstrapped roles with known baselines.\r\n- **admin.overview for team-scoped roles**: real gap (template omits `team_id`), but pre-existing in main — not introduced by this PR. `platform_viewer` (global) benefits immediately.\r\n\r\nAll 332 unit tests pass. Single Alembic head confirmed."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ca06bf23950949518e576fc2c019836bfd3d86c4",
+      "message": "fix(rbac): backfill admin.overview and tools.execute permissions to viewer roles\n\nAdd Alembic migration to backfill missing permissions into existing role\nrecords and update bootstrap_db.py so new deployments receive the correct\npermissions from first boot.\n\nRoles updated:\n- viewer: admin.overview, tools.execute\n- platform_viewer: admin.overview, tools.execute\n- developer: admin.overview\n- team_admin: admin.overview\n\nThe migration is idempotent, supports both PostgreSQL (JSONB) and SQLite,\nand includes a symmetric downgrade.\n\nCloses #3329\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-03T03:02:11+00:00"
+    },
+    {
+      "sha": "deee43d3907040027103838b9d041e277a9b7dfa",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T08:15:19+00:00"
+    },
+    {
+      "sha": "992fdfba351a50d2f7b654686f02343fef5b69ed",
+      "message": "alembic\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-03T09:18:50+00:00"
+    },
+    {
+      "sha": "755b86cb8001b2ef5e7c6bae20a3f503c134a587",
+      "message": "test case fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-03T09:44:59+00:00"
+    },
+    {
+      "sha": "65014d4644fb36f28f947a5148ebb885f29cbfdd",
+      "message": "fix(rbac): add missing servers.use to viewer bootstrap and improve test coverage\n\nAdd servers.use permission to viewer and platform_viewer role definitions\nin bootstrap_db.py to match what the Alembic migration backfills. Without\nthis, new deployments would lack servers.use for viewer roles while migrated\ndeployments would have it, causing inconsistent tool-testing behavior.\n\nAlso adds migration tests covering servers.use addition/removal for all\nroles and reverts unrelated uv.lock dependency bumps.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T12:11:06+00:00"
+    },
+    {
+      "sha": "2468ad25536b0276c89f89bde29d0a35586b3a9e",
+      "message": "docs(rbac): update role descriptions and permission tables for viewer roles\n\nUpdate viewer and platform_viewer role descriptions from \"Read-only\" to\n\"Read and test\" to reflect the addition of tools.execute and servers.use\npermissions. Update RBAC documentation to include admin.overview,\ntools.execute, and servers.use in the built-in roles table, permission\ncategories, and available permissions reference.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T12:18:43+00:00"
+    },
+    {
+      "sha": "034f02c85ad53b7e5bb1695ebb03d97ae6fe2177",
+      "message": "fix(rbac): correct migration docstrings to include servers.use\n\nThe module docstring and upgrade/downgrade docstrings only mentioned\nadmin.overview and tools.execute, but ROLE_PERMISSION_ADDITIONS also\nincludes servers.use for all four roles. Align documentation with code.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T12:29:01+00:00"
+    },
+    {
+      "sha": "d9acd432fc7548ab9c422a73080712e3740dd938",
+      "message": "fix(rbac): safe downgrade, realistic test fixtures, e2e test alignment\n\nFix migration downgrade regression: remove servers.use from developer and\nteam_admin entries in ROLE_PERMISSION_ADDITIONS since those roles already\nhave it in their baseline definitions. Without this, a downgrade would\nstrip a pre-existing permission, breaking transport access.\n\nUpdate migration test fixtures with realistic baselines (developer and\nteam_admin include servers.use) and add a round-trip test that verifies\nupgrade->downgrade restores exact original permissions for all roles.\n\nUpdate e2e RBAC tests: since all non-admin users auto-receive\nplatform_viewer (global) which now includes tools.execute, the tests\nthat expected denial on the default /mcp endpoint now correctly expect\nsuccess. This aligns with the intent of issue #3329.\n\nFix remaining stale \"read-only\" text in rbac.md migration info box\nfor platform_viewer.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T12:47:05+00:00"
+    },
+    {
+      "sha": "a711d8d6a0cd6110b56812790f11aa2feb09c7c8",
+      "message": "remove tools.execute\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-03T14:47:53+00:00"
+    },
+    {
+      "sha": "ecd1ac3a45f0889b10ca744402baa5c06afa7388",
+      "message": "fix(rbac): remove stale tools.execute references and fix test consistency\n\nThe previous commit removed tools.execute from the migration and\nbootstrap_db.py but left it in docs, test constants, and e2e tests.\nThis commit completes the cleanup:\n\n- Fix migration docstring formatting artifacts (double commas, extra spaces)\n- Revert viewer/platform_viewer description to \"Read-only access\"\n- Remove tools.execute from rbac.md viewer/platform_viewer permission tables\n- Remove tools.execute from test_rbac_permission_matrix.py constants\n- Replace hardcoded stale permission lists in migration backfill tests\n  with ROLE_PERMISSION_ADDITIONS references\n- Restore original e2e deny assertions for tool execution (non-admin\n  users lack global tools.execute)\n- Add integration tests for upgrade()/downgrade() via public entry points\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T16:32:02+00:00"
+    },
+    {
+      "sha": "815a0bdf66afe4b3b915e17ad8ed8936e7c6b18f",
+      "message": "fix: rename alembic migration file to reflect servers.use instead of tools.execute\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-04T18:09:42+00:00"
+    },
+    {
+      "sha": "778d11d23704de1f76c2414950cf27f33e242b85",
+      "message": "down_revision\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-09T04:56:34+00:00"
+    },
+    {
+      "sha": "e377a746ba7779ce5aa49aaa0fb7f69f19d20223",
+      "message": "down revision in test\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-09T05:18:06+00:00"
+    },
+    {
+      "sha": "7a7e0725bf72db6830e7bb6addb6717d8da7a201",
+      "message": "test case fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-09T06:21:24+00:00"
+    },
+    {
+      "sha": "78a821218c0ff16f6d24169899a8759eb6fd30f7",
+      "message": "fix(rbac): update migration down_revision to current head\n\nPoint migration abf8ac3b6008 down_revision from e1f2a3b4c5d6 to\n64acf94cb7f2 (the actual current Alembic head on main) to eliminate\nthe multiple-heads condition that would break alembic upgrade.\n\nUpdate the corresponding test constant to match.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T13:34:19+00:00"
+    },
+    {
+      "sha": "c332fb7d9f220034dacd0c2f6b8918e156e830e1",
+      "message": "fix(rbac): restore e2e denial helper and add downgrade edge-case test\n\nRestore _assert_access_denied_tool_call() in the e2e test — the\nreplacement inline assertions were broken (checked result.isError\nbut the actual response uses the error key with JSON-RPC code -32003)\nand weaker (did not verify \"access denied\" message or error code).\n\nAdd a migration test documenting the known downgrade limitation: if a\nrole already had a backfilled permission before the migration ran,\ndowngrade() will remove it. This is an accepted trade-off for a simple\ndata migration targeting system-bootstrapped roles.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T14:45:27+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 719,
+  "deletions": 6,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:14.439756",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:14.440885",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3390,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3390.json"
+  }
+}

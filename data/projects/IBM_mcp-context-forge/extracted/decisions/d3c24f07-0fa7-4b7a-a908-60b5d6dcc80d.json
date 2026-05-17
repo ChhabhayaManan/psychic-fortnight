@@ -1,0 +1,39 @@
+{
+  "id": "d3c24f07-0fa7-4b7a-a908-60b5d6dcc80d",
+  "title": "fix(security): enforce token_teams narrowing across all Layer 2 RBAC paths",
+  "summary": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3924\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes pre-existing security gaps where `token_teams` (Layer 1 scoping) was either not forwarded or ignored in several RBAC code paths, allowing narrowed or public-only tokens to satisfy permission checks using roles from teams outside their scope.\r\n\r\n**Key Fixes:**\r\n- **Gap 2**: Fixed admin bypass suppression for `token_teams=[]` by changing from separate `if` to `elif` in `check_permission()` (lines 126-136)\r\n- **Gap 6**: Fixed critical bug where `base_condition` was unconditionally appended even for `token_teams=[]`, now properly excludes ALL team roles for public-only tokens (lines 528-550)\r\n\r\n**Already Implemented (Verified):**\r\n- Gap 1: Explicit team_id validation (lines 502-508)\r\n- Gap 3: `check_admin_permission` accepts `token_teams` (lines 389-410, rbac.py 784-793)\r\n- Gap 4: Token minting forwards `token_teams` (tokens.py line 96)\r\n- Gap 5: Admin UI menu forwards `token_teams` (admin.py line 510)\r\n\r\n**Design Decision:** Implemented strict isolation where `token_teams=[]` means public-only access at both Layer 1 (visibility) and Layer 2 (RBAC), providing defense-in-depth security.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   Passed ✅     |\r\n| Unit tests                | `make test`     |    Passed ✅    |\r\n| Coverage ≥ 80%            | `make coverage` |    Passed ✅    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Test Coverage Added\r\nAdded 9 comprehensive regression tests in `test_permission_service_token_narrowing.py`:\r\n\r\n1. **Explicit team_id validation (2 tests)**:\r\n   - `test_explicit_team_id_rejects_out_of_scope_team` - Verifies rejection when team_id not in token_teams\r\n   - `test_explicit_team_id_allows_in_scope_team` - Verifies access when team_id is in token_teams\r\n\r\n2. **Admin bypass behavior (3 tests)**:\r\n   - `test_admin_bypass_suppressed_for_public_only_non_admin_perm` - Verifies bypass suppression for token_teams=[]\r\n   - `test_admin_bypass_works_for_narrowed_token` - Verifies bypass works for narrowed tokens\r\n   - `test_admin_bypass_works_for_unnarrowed_token` - Verifies bypass works for un-narrowed tokens\r\n\r\n3. **Admin permission checks (2 tests)**:\r\n   - `test_check_admin_permission_respects_token_teams` - Verifies token_teams=[] filters out team roles\r\n   - `test_check_admin_permission_allows_with_proper_scope` - Verifies proper scoping allows access\r\n\r\n4. **Team role filtering (2 tests)**:\r\n   - `test_public_only_token_excludes_all_team_roles` - Verifies token_teams=[] excludes ALL team roles\r\n   - `test_narrowed_token_includes_specified_teams` - Verifies narrowed tokens filter to specified teams\r\n\r\n### Security Impact\r\nThese fixes prevent privilege escalation scenarios where:\r\n- A session narrowed to team-A could pass Layer 2 checks for team-B operations\r\n- A public-only token (token_teams=[]) could benefit from team-scoped roles or admin bypass\r\n- Token minting could derive permissions from out-of-scope teams\r\n\r\n### Files Modified\r\n- `mcpgateway/services/permission_service.py` - Core RBAC logic fixes\r\n- `mcpgateway/admin.py` - Admin UI menu token scope forwarding (verified)\r\n- `mcpgateway/middleware/rbac.py` - RBAC middleware token scope forwarding (verified)\r\n- `mcpgateway/routers/tokens.py` - Token minting token scope forwarding (verified)\r\n- `tests/unit/mcpgateway/services/test_permission_service_token_narrowing.py` - Comprehensive test coverage\r\n- `.secrets.baseline` - Updated baseline for secret scanning",
+  "reasoning": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3924\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes pre-existing security gaps where `token_teams` (Layer 1 scoping) was either not forwarded or ignored in several RBAC code paths, allowing narrowed or public-only tokens to satisfy permission checks using roles from teams outside their scope.\r\n\r\n**Key Fixes:**\r\n- **Gap 2**: Fixed admin bypass suppression for `token_teams=[]` by changing from separate `if` to `elif` in `check_permission()` (lines 126-136)\r\n- **Gap 6**: Fixed critical bug where `base_condition` was unconditionally appended even for `token_teams=[]`, now properly excludes ALL team roles for public-only tokens (lines 528-550",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "bogdanmariusc10",
+    "crivetimihai"
+  ],
+  "tags": [
+    "MUST",
+    "security",
+    "rbac",
+    "release-fix",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "5dff1c34-e8eb-4a16-b521-c673a1b39f57",
+      "source_type": "pr",
+      "source_id": "3932",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/3932",
+      "contributor": "bogdanmariusc10",
+      "timestamp": "2026-03-30T15:00:46Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3932.json"
+    }
+  ],
+  "timestamp": "2026-03-30T15:00:46Z",
+  "created_at": "2026-05-17T17:24:53.564029",
+  "updated_at": "2026-05-17T17:24:53.564033",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:24:53.564645",
+    "artifact_type": "decisions",
+    "artifact_id": "d3c24f07-0fa7-4b7a-a908-60b5d6dcc80d"
+  }
+}

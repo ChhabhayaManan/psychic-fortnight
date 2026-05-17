@@ -1,0 +1,125 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3339,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3339"
+  },
+  "metadata": {
+    "title": "fix(sse): use loopback for internal RPC calls in session registry",
+    "state": "closed",
+    "created_at": "2026-02-28T09:33:15+00:00",
+    "updated_at": "2026-03-08T23:08:42+00:00",
+    "closed_at": "2026-03-08T23:08:30+00:00",
+    "merged_at": "2026-03-08T23:08:30+00:00",
+    "author": "jonpspri",
+    "labels": [
+      "bug",
+      "security",
+      "SHOULD",
+      "release-fix",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Replace client-facing `base_url` with `http://127.0.0.1:{settings.port}/rpc` for internal self-calls in `generate_response()`, consistent with existing loopback patterns in `mcp_session_pool.py` and `streamablehttp_transport.py`\n- Remove the `base_url` parameter from `respond()` and `generate_response()` along with the URL-parsing logic (`urlparse`, path extraction)\n- Fix integration test to use `try/finally` for reliable cleanup and patch `settings.port` to match the mock RPC server\n\n## Motivation\n\nWhen the gateway is behind a reverse proxy or service mesh, the client-facing URL is not reachable from the server itself, causing internal RPC calls to fail. Using loopback avoids this issue.\n\nCloses #3049\n\n## Test plan\n\n- [ ] Unit tests updated to remove `base_url` parameter from all `respond()` and `generate_response()` call sites\n- [ ] `test_generate_response_uses_loopback_url` verifies the constructed URL is `http://127.0.0.1:{settings.port}/rpc`\n- [ ] Integration test (`test_redis_broadcast_integration`) patches `settings.port` to match mock RPC server and uses `try/finally` for cleanup\n- [ ] Deleted obsolete `TestGenerateResponseServersPath` tests that covered removed URL-parsing logic",
+  "comments": [
+    {
+      "id": "2867297358",
+      "author": "Copilot",
+      "created_at": "2026-02-28T09:48:41+00:00",
+      "body": "The integration test hard-codes `rpc_port = 8000` for the mock `/rpc` server. This can be flaky in CI or on developer machines if port 8000 is already in use. Prefer binding to an ephemeral port (e.g., `0`) and then patching `settings.port` to the actual bound port."
+    },
+    {
+      "id": "2867297361",
+      "author": "Copilot",
+      "created_at": "2026-02-28T09:48:41+00:00",
+      "body": "The test cancels the `respond()` task but never awaits it after cancellation. This can leave pending tasks and intermittently produce \"Task was destroyed but it is pending\" warnings at teardown. After `task.cancel()`, await the task (suppressing `CancelledError`) or use `asyncio.gather(task, return_exceptions=True)` to ensure clean shutdown.\n```suggestion\n            task.cancel()\n            try:\n                await task\n            except asyncio.CancelledError:\n                pass\n```"
+    },
+    {
+      "id": "2867416004",
+      "author": "jonpspri",
+      "created_at": "2026-02-28T12:08:07+00:00",
+      "body": "Fixed."
+    },
+    {
+      "id": "2867416053",
+      "author": "jonpspri",
+      "created_at": "2026-02-28T12:08:12+00:00",
+      "body": "Fixed. Added `await task` with `CancelledError` suppression after `task.cancel()` to ensure clean shutdown."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3870296334",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-28T09:48:42+00:00",
+      "body": "## Pull request overview\n\nThis PR fixes SSE session-registry internal RPC self-calls by switching from a client-facing `base_url` to a loopback `/rpc` URL, preventing failures when the gateway is behind reverse proxies/service meshes (Issue #3049).\n\n**Changes:**\n- Updated `SessionRegistry.generate_response()` to call `http://127.0.0.1:{settings.port}/rpc` and removed `base_url` (and URL-parsing) from `respond()` / `generate_response()`.\n- Updated unit tests to match the new method signatures and added a unit test asserting the loopback URL is used.\n- Updated the Redis integration test to patch `settings.port` and ensure cleanup occurs via `try/finally`.\n\n### Reviewed changes\n\nCopilot reviewed 6 out of 10 changed files in this pull request and generated 2 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `mcpgateway/cache/session_registry.py` | Removes `base_url` plumbing and uses loopback for internal `/rpc` calls. |\r\n| `mcpgateway/main.py` | Updates SSE respond-task creation to match the new `respond()` signature. |\r\n| `tests/unit/mcpgateway/cache/test_session_registry.py` | Removes `base_url` from call sites to reflect signature changes. |\r\n| `tests/unit/mcpgateway/cache/test_session_registry_coverage.py` | Updates coverage tests and adds an assertion that loopback URL is used. |\r\n| `tests/unit/mcpgateway/cache/test_session_registry_extended.py` | Updates extended tests to match the new `respond()` signature. |\r\n| `tests/integration/test_session_registry_redis_integration.py` | Starts a mock `/rpc` server and patches `settings.port` for loopback self-calls, with improved cleanup. |\r\n| `package-lock.json` | Contains unrelated lockfile changes (including top-level `name`). |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3870404070",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-28T12:08:07+00:00",
+      "body": ""
+    },
+    {
+      "id": "3870404116",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-28T12:08:12+00:00",
+      "body": ""
+    },
+    {
+      "id": "3882414785",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-03T12:58:08+00:00",
+      "body": "## Review: Approved\n\n**Rebased** onto current `main` (no conflicts) and **cleaned up** auto-generated SVG/package-lock.json noise from the diff.\n\n### Code Review\n\n**Correctness:** The change is sound. When the gateway is behind a reverse proxy or service mesh, the client-facing URL from `update_url_protocol(request)` is unreachable from the server itself. Using `http://127.0.0.1:{settings.port}/rpc` for internal self-calls is the correct fix.\n\n**Consistency:** The loopback pattern matches existing usage in:\n- `mcp_session_pool.py:1559`\n- `streamablehttp_transport.py:2322, 2483`\n\nAll omit `app_root_path` because loopback bypasses any reverse proxy root path — this is correct.\n\n**Security:** No issues. The loopback URL is hardcoded (not derived from user input), auth tokens are still generated and forwarded, and session affinity headers are preserved.\n\n**Performance:** Removing the `urlparse` + path-splitting logic is a minor improvement.\n\n**Test coverage:** 100% statement coverage on `session_registry.py` (966/966). The new `test_generate_response_uses_loopback_url` test validates the constructed URL. Integration test improvements (ephemeral port, `try/finally` cleanup) are solid.\n\n**Cleanup commit:** Removed ~126K lines of unrelated auto-generated SVG diagrams and `package-lock.json` changes that were inadvertently included."
+    },
+    {
+      "id": "3912103469",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-08T22:19:20+00:00",
+      "body": "## Review: Approved\n\n**Rebased** onto main — clean linear history (3 commits, no merge commits).\n\n### Code Review\n\nThe change is sound and well-motivated:\n\n- **Correctness**: Replaces fragile URL-parsing logic (`urlparse`, path extraction to strip `/servers/{id}`) with a simple `http://127.0.0.1:{settings.port}/rpc` loopback call. This is the right approach — `generate_response()` is an internal self-call that should never go through the client-facing URL.\n\n- **Consistency**: The loopback pattern now matches 4 other identical call sites in `mcp_session_pool.py` (lines 1559, 1624) and `streamablehttp_transport.py` (lines 2450, 2611).\n\n- **Security**: Removing client-controlled `base_url` from internal RPC routing reduces attack surface. The `urlparse` import is also cleanly removed.\n\n- **Test coverage**: 100% line coverage on `session_registry.py`. Obsolete `TestGenerateResponseServersPath` tests (covering removed URL-parsing logic) correctly deleted. New `test_generate_response_uses_loopback_url` verifies the constructed URL is exactly `http://127.0.0.1:{settings.port}/rpc`.\n\n- **Integration test improvements**: Ephemeral port (port 0) instead of hardcoded 8000 avoids CI flakiness. `try/finally` for reliable cleanup. Awaits cancelled task to prevent \"Task was destroyed\" warnings.\n\n### Live Testing (behind nginx reverse proxy)\n\nTested all MCP methods through SSE behind nginx (localhost:8080 → gateway:4444):\n\n| Method | Result |\n|--------|--------|\n| `initialize` | PASS — full capabilities returned |\n| `ping` | PASS |\n| `tools/list` | PASS — 2 tools (server-scoped), 8 (utility) |\n| `resources/list` | PASS |\n| `prompts/list` | PASS |\n| `tools/call` (get-system-time) | PASS — correct timezone-aware timestamp |\n| `tools/call` (convert-time) | PASS — correct UTC→Tokyo conversion |\n\nConfirmed the old approach fails from inside the container (`localhost:8080` unreachable) while the new loopback (`127.0.0.1:4444`) works correctly."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "437553f18f9dc12cc7fb7b9fad78df0f238d452c",
+      "message": "fix(sse): use loopback for internal RPC calls in session registry (#3049)\n\nReplace client-facing base_url with http://127.0.0.1:{port}/rpc for\ninternal self-calls in generate_response(), consistent with existing\nloopback patterns in mcp_session_pool.py and streamablehttp_transport.py.\nThis avoids failures when the gateway is behind a reverse proxy or\nservice mesh where the client-facing URL is not reachable from the server.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-28T09:16:04+00:00"
+    },
+    {
+      "sha": "0fcec3b0bb0ccd24601086e458ba267cc83b0d6c",
+      "message": "fix(test): use ephemeral port and await cancelled task in redis integration test\n\n- Bind mock RPC server to port 0 instead of hardcoded 8000 to avoid\n  CI flakiness from port conflicts\n- Await cancelled respond task to prevent \"Task was destroyed but it\n  is pending\" warnings at teardown\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-28T12:08:36+00:00"
+    },
+    {
+      "sha": "f6e97f7d5a29f1d46a7398520d9b8807cd820f63",
+      "message": "chore: remove unrelated auto-generated file changes\n\nRemove auto-generated SVG diagrams and package-lock.json changes\nthat were inadvertently included in the bug fix commits.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T12:57:37+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 115,
+  "deletions": 234,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:59.583546",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:59.585895",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3339,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3339.json"
+  }
+}

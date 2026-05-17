@@ -1,0 +1,82 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3582,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3582"
+  },
+  "metadata": {
+    "title": "Fix: orjson.JSONDecodeError in prompt editing endpoints with proper validation",
+    "state": "closed",
+    "created_at": "2026-03-10T12:17:40+00:00",
+    "updated_at": "2026-03-12T02:21:18+00:00",
+    "closed_at": "2026-03-12T02:21:16+00:00",
+    "merged_at": "2026-03-12T02:21:16+00:00",
+    "author": "msureshkumar88",
+    "labels": [
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n## 🔗 Related Issue\r\nCloses #3561\r\n\r\n---\r\n\r\n## 📝 Summary\r\nFixed `orjson.JSONDecodeError` causing 500 Internal Server Error when editing prompts with malformed JSON in the arguments field. The application now properly validates JSON and returns appropriate 400 Bad Request errors with clear, actionable error messages.\r\n\r\n**Root Cause**: Direct `orjson.loads()` call without error handling in `admin_edit_prompt` (line 12318) caused unhandled exceptions.\r\n\r\n**Solution**: \r\n- Created `PromptArgumentsJSONError` custom exception in service layer\r\n- Added `validate_arguments_json()` static method with comprehensive validation\r\n- Updated both `admin_add_prompt` and `admin_edit_prompt` to use validation and handle errors\r\n- Added tests for `_safe_parse_json_field` to cover admin.py error paths\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅ 70 tests pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ 100% diff coverage (60/60 lines) |\r\n\r\n**Test Results:**\r\n- All 70 prompt-related tests pass (48 admin + 22 service)\r\n- 100% diff coverage on modified files (exceeds 95% requirement)\r\n- No regressions in existing functionality\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n  - Added 3 tests in `test_admin.py` for `_safe_parse_json_field` coverage\r\n  - Added 22 tests in `test_prompt_service_extended.py` for JSON validation\r\n- [x] Documentation updated (if applicable)\r\n  - Added comprehensive docstrings for new exception and validation method\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Changes Made\r\n\r\n**Service Layer** (`mcpgateway/services/prompt_service.py`):\r\n- Added `PromptArgumentsJSONError` exception (lines 168-200) with field name, error details, raw value, and context\r\n- Added `validate_arguments_json()` static method (lines 247-320) that:\r\n  - Handles None, empty strings, whitespace\r\n  - Converts non-string values to strings\r\n  - Validates JSON structure (must be array)\r\n  - Provides detailed error logging\r\n\r\n**Controller Layer** (`mcpgateway/admin.py`):\r\n- Updated `admin_add_prompt` (lines 12270-12314) to use validation and catch `PromptArgumentsJSONError`\r\n- Updated `admin_edit_prompt` (lines 12382-12442) to use validation and catch `PromptArgumentsJSONError`\r\n\r\n**Tests**:\r\n- `tests/unit/mcpgateway/test_admin.py`: Added 3 tests for `_safe_parse_json_field` (lines 10153-10195)\r\n- `tests/unit/mcpgateway/services/test_prompt_service_extended.py`: Added `TestPromptArgumentsJSONValidation` class with 22 tests (lines 394-623)\r\n\r\n### Error Response Example\r\n```json\r\n{\r\n  \"success\": false,\r\n  \"message\": \"Invalid JSON in arguments field: unexpected character: line 1 column 2 (char 1)\"\r\n}\r\n```\r\n\r\n### Architecture Benefits\r\n- **Separation of Concerns**: Validation logic in service layer, error handling in controller\r\n- **Reusability**: `validate_arguments_json()` can be used by other endpoints\r\n- **Maintainability**: Custom exception provides clear error context\r\n- **Testability**: Static method easy to test in isolation",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3923793292",
+      "author": "cafalchio",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T16:32:24+00:00",
+      "body": "Thanks Suresh, Well tested. LGTM"
+    },
+    {
+      "id": "3924028725",
+      "author": "cafalchio",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-10T17:07:49+00:00",
+      "body": "Thanks Suresh, LGTM"
+    },
+    {
+      "id": "3933372455",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-12T01:27:34+00:00",
+      "body": "Reviewed, rebased onto main, and manually tested (curl + Playwright UI).\n\n**Changes made during review:**\n- Removed unused `_safe_parse_json_field()` dead code from admin.py (~45 lines) and its 3 tests\n- Changed status code from 400 → 422 for consistency with tool JSON validation (PR #3477)\n- Restored a `_normalize_int_query` test assertion that was accidentally displaced\n- Fixed import ordering (isort) and applied black formatting\n- Squashed 3 commits into 1 clean commit, preserving original author\n\n**Verified:**\n- 1079 unit tests pass\n- 100% differential test coverage on all new lines\n- curl: 8/8 scenarios (valid, malformed, non-array, empty, missing args for both add/edit)\n- Playwright UI: error toast displays correctly on add and edit forms, valid submissions succeed\n- No security or performance concerns"
+    },
+    {
+      "id": "3933410488",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T01:46:50+00:00",
+      "body": "Re-approved after follow-up fixes addressing review findings. All tests pass, argument preservation verified end-to-end."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f70533507dffcea53edae032c6348e48a846ee8b",
+      "message": "fix(admin): validate prompt arguments JSON to return 422 instead of 500\n\nReplace raw orjson.loads() calls in admin_add_prompt and admin_edit_prompt\nwith PromptService.validate_arguments_json() which returns proper 422\nUnprocessable Entity responses for malformed JSON, consistent with the\ntool endpoint pattern from #3477.\n\n- Add PromptArgumentsJSONError exception to prompt_service.py\n- Add validate_arguments_json() static method with array type validation\n- Handle PromptArgumentsJSONError in both add/edit prompt endpoints\n- Return 422 status with field name in response for UI error display\n\nCloses #3561\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-12T01:02:33+00:00"
+    },
+    {
+      "sha": "84f8a1175c526f8c44b5957f5d8b45086ca552f3",
+      "message": "fix(admin): preserve existing arguments on edit when field absent\n\nAddress Codex review findings:\n- Distinguish None (field absent) from empty string (field cleared) in\n  admin_edit_prompt so PromptUpdate receives arguments=None for partial\n  updates, preserving existing argument schemas\n- Add assert_not_called() on register_prompt/update_prompt in invalid-JSON\n  tests to verify no side effects\n- Add test for missing-arguments edit case\n- Fix docstrings from \"400\" to \"422\"\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T01:43:07+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 447,
+  "deletions": 54,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:01.226898",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:01.228711",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3582,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3582.json"
+  }
+}

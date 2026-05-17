@@ -1,0 +1,88 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3317,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3317"
+  },
+  "metadata": {
+    "title": "fix(ui): hide selector container on zero search results in Virtual Server modals",
+    "state": "closed",
+    "created_at": "2026-02-27T12:38:32+00:00",
+    "updated_at": "2026-03-07T11:03:47+00:00",
+    "closed_at": "2026-02-27T15:31:36+00:00",
+    "merged_at": "2026-02-27T15:31:36+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "ui"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# Bug-fix PR\r\n\r\n## :pushpin: Summary\r\nIn the Add Server and Edit Server modals, searching in any of the four selector panels (MCP Servers, Associated Tools, Associated Resources, Associated Prompts) with a query that matches nothing left an empty styled bordered box visible in the UI. This PR hides the container and shows a contextual \"No X found containing `<query>`\" message instead.\r\n\r\n## 🔗 Related Issue\r\nCloses #3314\r\n\r\n## :repeat: Reproduction Steps\r\n1. Open the Add New Server or Edit modal for any Virtual Server\r\n2. In any selector panel, type a search string that matches nothing (e.g. `z`)\r\n3. Observe: empty bordered box remains above the \"No X found\" message\r\n\r\n## 🐞 Root Cause\r\nMultiple layered issues:\r\n\r\n1. **`admin.js` — 6 server-side search functions** (`serverSideToolSearch`, `serverSidePromptSearch`, `serverSideResourceSearch`, and their Edit counterparts): zero-results branch cleared `container.innerHTML` but never set `container.style.display = \"none\"`, leaving the empty styled div visible.\r\n\r\n2. **`admin.html` — missing HTML elements**: `noPromptsMessage`, `noResourcesMessage`, `noGatewayMessage`, and `noEditGatewayMessage` paragraphs were absent from the Add Server and Edit Server modals entirely, so no \"no results\" message could appear.\r\n\r\n3. **`admin.js` — `applySearch()` in `initGatewaySelect`**: client-side gateway search hid individual items but never hid the container itself. The \"no results\" element IDs were hardcoded to Add Server elements, so the Edit Server modal was completely unaffected.\r\n\r\n4. **Secondary regression from fix**: hiding a container on zero results, then changing the MCP Server selection (which triggers `reloadAssociatedItems()`), reloaded fresh content into the still-hidden container.\r\n\r\n## :bulb: Fix Description\r\n\r\n- Added `container.style.display = \"none\"` in the zero-results branch and `container.style.display = \"\"` at the start of all 6 server-side search functions to restore visibility on each new search.\r\n- Moved `container.style.display` toggling outside the `if (noMsg)` guard in `applySearch()` so hiding is unconditional regardless of whether the message element exists.\r\n- Made `applySearch()` dynamically resolve the correct message element IDs based on `selectId` (`\"Edit\"` → Edit modal elements, otherwise Add modal elements).\r\n- Added the 4 missing `noXMessage` HTML elements to their respective modals in `admin.html`.\r\n- After each `initToolSelect` / `initResourceSelect` / `initPromptSelect` call inside `reloadAssociatedItems()`, re-run the active search function so a previously-hidden container is correctly shown or re-filtered against the newly loaded content.\r\n\r\n## :test_tube: Verification\r\n\r\n| Check | Command | Status |\r\n|---|---|---|\r\n| Lint suite | `make lint` | |\r\n| Unit tests | `make test` | |\r\n| Coverage ≥ 90 % | `make coverage` | |\r\n| Search returns zero results → box hidden | Manual (Add Server) | |\r\n| Search returns zero results → box hidden | Manual (Edit Server) | |\r\n| Clear search after no-results → box shows | Manual | |\r\n| Change MCP Server with active search query | Manual | |\r\n\r\n## :triangular_ruler: MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## :white_check_mark: Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3867061311",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-27T13:52:46+00:00",
+      "body": "Testing in UI works as expected.\n\nThe added DOM handling and visibility toggles appear consistent across create/edit flows and align with the intended behavior fix."
+    },
+    {
+      "id": "3867556822",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-27T15:28:11+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "1da0a8650ebc93f6b73230bf6361c673f24433f5",
+      "message": "hide selector container and show message on zero search results in Virtual Server modals\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-27T12:04:01+00:00"
+    },
+    {
+      "sha": "463f208631d915df8a43898efc7052e606a7552e",
+      "message": "fix tests\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-27T13:36:22+00:00"
+    },
+    {
+      "sha": "fbb0e49e185a903797eea5810f2a59f4ab55d95b",
+      "message": "web-lint tests\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-27T13:40:27+00:00"
+    },
+    {
+      "sha": "5603de8c6caac9f24ae1822bb8233e30abdeb722",
+      "message": "fix(ui): review fixes and differential tests for zero-result container hiding (#3314)\n\n- Remove redundant innerHTML assignment in ensureNoResultsElement\n- Fix noEditGatewayMessage HTML formatting for consistency\n- Add 28 tests covering ensureNoResultsElement and container\n  visibility toggling for all 6 server-side search functions\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T15:05:00+00:00"
+    },
+    {
+      "sha": "5a88e82b2eee9adc7de6318c4a2959db1dd3b52c",
+      "message": "test(ui): add missing tests for applySearch visibility and error paths (#3314)\n\n- Add initGatewaySelect/applySearch tests: container hidden on zero\n  results, restored on match, Edit vs Add modal ID resolution\n- Add error catch visibility tests: container stays visible after\n  fetch failure for both Add and Edit tool search\n- Addresses coverage gaps for reloadAssociatedItems-adjacent logic\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T15:27:23+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 775,
+  "deletions": 19,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:51.212633",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:51.213603",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3317,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3317.json"
+  }
+}

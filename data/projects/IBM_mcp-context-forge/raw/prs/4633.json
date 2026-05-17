@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4633,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4633"
+  },
+  "metadata": {
+    "title": "fix(sso): increase code max_length from 512 to 4096 (supersedes #4491)",
+    "state": "closed",
+    "created_at": "2026-05-06T19:46:53+00:00",
+    "updated_at": "2026-05-06T20:14:33+00:00",
+    "closed_at": "2026-05-06T20:14:31+00:00",
+    "merged_at": "2026-05-06T20:14:31+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR — Supersedes #4491\n\nFixes #4490\nSupersedes #4491 (rebase against `main` was blocked because the source fork is org-owned; pushing to the contributor's branch is not permitted by GitHub for non-org members. See PR #4491 for original review thread and approval.)\n\nOriginal fix authored by **@ecthelion77** (Olivier Gintrand, Forterro). His commit is preserved as-is on this branch — only rebased onto current `main` and supplemented with a regression test.\n\n## 📌 Summary\n\nThe SSO callback endpoint rejects valid Microsoft Entra ID authorization codes with HTTP 422 because the `code` query parameter is limited to `max_length=512`. Entra ID v2 authorization codes routinely exceed 1500 characters, **completely breaking SSO login** for all Azure AD / Entra ID users.\n\nThis is a **regression** introduced in #4337 when input validation constraints were added to SSO parameters.\n\n## 🔁 Reproduction Steps\n\n1. Configure SSO with Microsoft Entra ID\n2. Attempt SSO login via admin UI\n3. Entra ID redirects to `/api/v1/sso/callback?code=<1500+ char code>&state=...`\n4. HTTP 422: `string_too_long` on `code` parameter\n\nSee #4490 for full error payload.\n\n## 🐞 Root Cause\n\n\\`\\`\\`python\n# mcpgateway/routers/sso.py:309 (before)\ncode: Optional[str] = Query(None, max_length=512, ...)\n\\`\\`\\`\n\nMicrosoft Entra ID v2 authorization codes are 1200–2000+ characters. The 512 limit triggers a Pydantic validation error before token exchange.\n\n## 💡 Fix\n\nIncrease `max_length` from **512** to **4096** for the `code` query parameter.\n\n- RFC 6749 / OAuth 2.1 leave authorization code size undefined\n- Verified provider lengths: Google ~30, GitHub ~20, AWS Cognito ~36, Keycloak ~43, Microsoft Entra ID 1200–2000+\n- 4096 sits safely below nginx's default 8K request-line buffer and AWS ALB's 16K limit\n- Security boundary remains the token exchange + HMAC state verification, not code length\n- Adjacent `oauth_router.py` uses 2048 for a separate flow (DCR-based gateway OAuth); intentional asymmetry\n\n### Production change (Olivier's commit, unchanged):\n\\`\\`\\`diff\n-    code: Optional[str] = Query(None, max_length=512, description=\\\"Authorization code from SSO provider\\\"),\n+    code: Optional[str] = Query(None, max_length=4096, description=\\\"Authorization code from SSO provider\\\"),\n\\`\\`\\`\n\n### Added regression test (this branch):\n\nThe existing `tests/unit/mcpgateway/routers/test_sso_router.py` calls `handle_sso_callback(...)` directly with short literal codes — bypassing FastAPI's `Query()` validation entirely. **No test would have caught the 512 regression**, and none would catch a future revert.\n\nPer AGENTS.md (\\\"Security-sensitive changes must include deny-path regression tests\\\"), this PR adds a B5 regression block to `tests/security/test_query_param_validation.py` that:\n\n- Mirrors the router signature constants (`SSO_CODE_MAX_LENGTH = 4096`, `SSO_STATE_MAX_LENGTH = 128`) — matches the file's existing drift-detection pattern (B2/B3/B4 blocks)\n- Parametrizes 5 real-world provider code samples (incl. Entra ID v2 ~1550 chars and the 4096 boundary)\n- Adds an explicit regression guard: \\`assert SSO_CODE_MAX_LENGTH > 512\\` pinned to issue #4490\n\n## 🧪 Verification\n\n| Check | Command | Status |\n|-------|---------|--------|\n| Lint (ruff/black/isort) | `make ruff black isort` | ✅ |\n| New regression tests | `pytest tests/security/test_query_param_validation.py` | ✅ 158/158 passing |\n| Manual regression no longer fails | Tested with Entra ID (per #4491) | ✅ |\n\n## 📐 MCP Compliance\n\n- [x] No impact on MCP protocol\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n\n- [x] Code formatted (ruff/black/isort clean)\n- [x] No secrets/credentials committed\n- [x] Signed-off-by included in both commits (DCO compliant)\n- [x] Regression test added per AGENTS.md security guidance",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "8d8ed06a5426b7b730a5e813d5960b515c3bd5cf",
+      "message": "fix: increase SSO code max_length from 512 to 4096\n\nEntra ID (Microsoft) v2 authorization codes can exceed 1500 characters.\nThe previous 512 limit caused HTTP 422 on SSO callback, breaking login.\n\nFixes: string_too_long validation error on /api/v1/sso/callback\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-27T14:32:25+00:00"
+    },
+    {
+      "sha": "fd101a5ca2dca36429bf192bc11a410c8548e2dc",
+      "message": "test(sso): pin code max_length to 4096 with regression guard\n\nAdds a B5 regression block to test_query_param_validation.py that mirrors\nthe router signature for the SSO callback code/state length bounds and\nincludes provider-specific length samples (Google, GitHub, Cognito,\nKeycloak, Entra ID v2 ~1550 chars, plus the 4096 boundary).\n\nThe explicit assertion 'SSO_CODE_MAX_LENGTH > 512' is the regression\nguard for issue #4490 - reverting below 513 would reintroduce the\nHTTP 422 string_too_long error that broke SSO login for all Microsoft\nEntra ID users.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-06T19:42:32+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 38,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:58.964555",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:58.966595",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4633,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4633.json"
+  }
+}

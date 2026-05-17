@@ -1,0 +1,39 @@
+{
+  "id": "672ef22a-15ea-46e5-809d-0ae5eec32bda",
+  "title": "[BUG]: Slow startup with multiple replicas — all N instances serialize on Alembic migration lock",
+  "summary": "## Summary",
+  "reasoning": "## Summary\n\n`make testing-up` starts **3 gateway replicas** (default `GATEWAY_REPLICAS=3`) simultaneously. Every replica calls `bootstrap_db()` → `alembic upgrade head` inside an advisory lock. Because the lock serializes migrations, startup time scales linearly with replica count: **3 replicas = 3× migration time before any instance is healthy.**\n\nOn PostgreSQL the instances queue correctly but wait needlessly. On SQLite the lock is silently broken in multi-container setups (each container has its own `/tmp`), so all migrations race concurrently against the same file.\n\n---\n\n## Steps to Reproduce\n\n```bash\nmake testing-up          # starts 3 gateway replicas by default\ndocker compose logs -f gateway   # observe all three instances running alembic upgrade head\n```\n\nExpected: only one instance runs migrations; others wait or skip.\nActual: all three acquire or spin on the lock, delaying readiness by 2–3× migration time.\n\n---\n\n## Root Cause\n\n### 1. Default replica count is 3\n\n`docker-compos",
+  "confidence": 0.7000000000000001,
+  "related_services": [],
+  "contributors": [
+    "Lang-Akshay"
+  ],
+  "tags": [
+    "messaging",
+    "database",
+    "docker",
+    "rest",
+    "decision",
+    "bug"
+  ],
+  "source_refs": [
+    {
+      "id": "3b233e27-6017-45ee-bc5d-2981f7ca677e",
+      "source_type": "issue",
+      "source_id": "4783",
+      "url": "https://github.com/IBM/mcp-context-forge/issues/4783",
+      "contributor": "Lang-Akshay",
+      "timestamp": "2026-05-15T15:15:29Z",
+      "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4783.json"
+    }
+  ],
+  "timestamp": "2026-05-15T15:15:29Z",
+  "created_at": "2026-05-17T18:22:39.092595",
+  "updated_at": "2026-05-17T18:22:39.092599",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T18:22:39.093933",
+    "artifact_type": "decisions",
+    "artifact_id": "672ef22a-15ea-46e5-809d-0ae5eec32bda"
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4068,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4068"
+  },
+  "metadata": {
+    "title": "Feature/plugin multi tenancy with per tool plugin config",
+    "state": "closed",
+    "created_at": "2026-04-07T13:33:41+00:00",
+    "updated_at": "2026-04-07T20:55:57+00:00",
+    "closed_at": "2026-04-07T20:55:55+00:00",
+    "merged_at": "2026-04-07T20:55:55+00:00",
+    "author": "madhu-mohan-jaishankar",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #\r\n\r\n---\r\n\r\n## 📝 Summary\r\nThis PR combines two related pieces of work that together form the foundation of plugin multi-tenancy in ContextForge.\r\n\r\n**1. Per-tool plugin binding API (`/v1/tools/plugin_bindings`)**\r\n\r\nAdds four new endpoints for configuring per-tool plugin policies on a per-team basis:\r\n\r\n- `POST /v1/tools/plugin_bindings` — create or update bindings (upsert)\r\n- `GET /v1/tools/plugin_bindings` — list all bindings\r\n- `GET /v1/tools/plugin_bindings/{team_id}` — list bindings for a specific team\r\n- `DELETE /v1/tools/plugin_bindings/{id}` — delete a binding by ID\r\n\r\nEach binding is a `(team_id, tool_name, plugin_id)` triple stored in a new `tool_plugin_bindings` table. POSTing an existing triple performs an in-place upsert, preserving the original `id` and `created_*` fields. A single request can configure multiple teams and multiple tools at once.\r\n\r\nSupported plugin types: `OUTPUT_LENGTH_GUARD`, `RATE_LIMITER`, `SECRETS_DETECTION`.\r\n\r\nSecurity:\r\n- Non-admin callers are restricted to teams they belong to — cross-team requests return HTTP 403.\r\n- Platform admins and sidecar/automation tokens (`is_admin: true, teams: null`) bypass the team guard and can configure any team.\r\n- `tools.manage_plugins` permission is required for write operations; `tools.read` for reads.\r\n- `tools.manage_plugins` is seeded into the `team_admin` role on new installations and backfilled via migration for existing ones.\r\n\r\nPerformance: a single `team_id IN (...)` prefetch replaces the previous per-triple SELECT loop, and all inserts/updates are flushed in a single `db.flush()` call after the loop.\r\n\r\n**2. Tenant plugin manager (`TenantPluginManagerFactory`)**\r\n\r\nAdds a per-context plugin manager that dynamically loads and routes plugins per tenant/team at tool execution time. The `TenantPluginManagerFactory` resolves the correct plugin pipeline for the calling team rather than applying a single global plugin stack. The tool service, resource service, and prompt service are updated to use the tenant-aware manager when executing MCP operations.\r\n\r\nKey changes:\r\n- `plugins/framework/manager.py` — `TenantPluginManagerFactory` with per-team plugin loading and lifecycle management\r\n- `plugins/framework/__init__.py` — factory registration and context propagation\r\n- `plugins/framework/models.py` — tenant-scoped plugin model additions\r\n- `services/tool_service.py`, `resource_service.py`, `prompt_service.py` — use tenant plugin manager at execution time\r\n- `services/base_service.py` — base plumbing for tenant context propagation\r\n\r\nTogether these two pieces form a complete multi-tenancy plugin system: the API lets teams declare which plugins apply to which tools, and the tenant manager enforces those policies at runtime.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅ 69 new tests passing |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\nNew Alembic migrations (applied in order):\r\n- `b1c2d3e4f5a6` — creates the `tool_plugin_bindings` table\r\n- `c2d3e4f5a6b7` — backfills `tools.manage_plugins` into the `team_admin` role for existing installations\r\n\r\nFor sidecar/automated processes that need to configure bindings across all teams in a single request, use an API token with `is_admin: true, teams: null` and assign the `platform_admin` role.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "698b59048ba38aabf6628675c0d33c9e29e62165",
+      "message": "add per-context plugin manager with TenantPluginManagerFactory\n\nIntroduce context-scoped plugin isolation via a new TenantPluginManagerFactory\nsingleton. Each virtual server/tenant receives its own TenantPluginManager with\nan independently merged plugin config, while the __global__ manager continues to\nserve non-context-aware call sites.\n\n- Add TenantPluginManager (disables Borg state sharing) and\n  TenantPluginManagerFactory (async-safe, deduplicating cache/factory)\n- Update framework __init__ accessors: init_plugin_manager_factory(),\n  get_plugin_manager(server_id), shutdown/reset helpers\n- Wire services (tool, prompt, resource, classification) to pass server_id\n  when resolving plugin managers\n- Update main.py lifespan to initialize factory eagerly at startup\n- Add PluginConfigOverride model and shallow config merge logic\n- Add architecture doc and 756-line test suite for tenant-scoped plugin execution\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-06T22:23:15+00:00"
+    },
+    {
+      "sha": "3458132b32a0f20933942934a8563fc4dc0b596e",
+      "message": "ran pre-commit to update secrets\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T08:01:37+00:00"
+    },
+    {
+      "sha": "21f08fdfce82826fdbdbdf917b03d627e2a50242",
+      "message": "Update architecture, linted and secrets\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T08:31:22+00:00"
+    },
+    {
+      "sha": "b537c14653c82e68b2195fcf6fd4beccbb8c03d5",
+      "message": "updated secrets\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T08:49:33+00:00"
+    },
+    {
+      "sha": "0ae2ebe6bdb504df37d69ca81c46f88a44cc4f9a",
+      "message": "audited and scan secrets\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T09:07:12+00:00"
+    },
+    {
+      "sha": "9b02f705d29f54dd770ddadef65bd7de02e09e63",
+      "message": "feat: add per-tool plugin binding API with validation and tests\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-03T16:45:15+00:00"
+    },
+    {
+      "sha": "6932078c5d8e9a73f5173c91e66c7f2ae03cc825",
+      "message": "test: improve router and service test quality for tool plugin bindings\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T01:09:50+00:00"
+    },
+    {
+      "sha": "5373044dcfd78c09d71f94627693077ed3c8b045",
+      "message": "fix: rebase migration onto cbedf4e580e0 to resolve multiple Alembic heads\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T08:53:35+00:00"
+    },
+    {
+      "sha": "52fe7e62410214fdf1275d3617976735fcc8f2c8",
+      "message": "chore: update secrets baseline with migration revision IDs\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T10:30:23+00:00"
+    },
+    {
+      "sha": "cc0f151a0976ee23deb7f15a4a78364e167490ec",
+      "message": "chore: mark migration revision IDs as non-secrets in baseline\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T10:35:09+00:00"
+    },
+    {
+      "sha": "4377d01e3c6771a0fadefad4f94920745540ce0e",
+      "message": "feat: grant tools.manage_plugins to team_admin; fix service UUID and team guard\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T12:49:47+00:00"
+    },
+    {
+      "sha": "1f41133dbf17b02f1dfd7399a54c41cfa469eebd",
+      "message": "chore: add migration revision IDs to secrets baseline\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T13:10:40+00:00"
+    },
+    {
+      "sha": "7ab7e5cae2f053273c0c2e35a7ab291da423d317",
+      "message": "feat: wire per-tool plugin bindings into tool invocation pipeline\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T17:18:31+00:00"
+    },
+    {
+      "sha": "75d58d0027b9a652cfb7392ffcec7add7c5039f2",
+      "message": "Added dynamic plugin for rust endpoitns\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T18:45:49+00:00"
+    },
+    {
+      "sha": "e4433d01c90a5605c82918986ed70effe88cf0dd",
+      "message": "Updated secrets and lint\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T18:55:10+00:00"
+    },
+    {
+      "sha": "59c17adcd4d0fbd27962a7a3fd19e55343ab5315",
+      "message": "fixed linter\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T19:13:27+00:00"
+    },
+    {
+      "sha": "4df392afac804ee9d5c9cd462f0be80b8b735e00",
+      "message": "test: Fix mocking problem in test_main_sighup\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-07T20:23:34+00:00"
+    }
+  ],
+  "files_changed": 51,
+  "additions": 5382,
+  "deletions": 769,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:27.444102",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:27.444680",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4068,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4068.json"
+  }
+}

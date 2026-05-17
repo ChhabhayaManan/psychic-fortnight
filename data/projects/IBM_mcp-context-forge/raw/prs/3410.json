@@ -1,0 +1,100 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3410,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3410"
+  },
+  "metadata": {
+    "title": "[FIX]: Add missing permission patterns for /rpc, /mcp, /sse transport endpoints in token scoping",
+    "state": "closed",
+    "created_at": "2026-03-03T06:20:33+00:00",
+    "updated_at": "2026-03-03T09:30:27+00:00",
+    "closed_at": "2026-03-03T09:30:26+00:00",
+    "merged_at": "2026-03-03T09:30:26+00:00",
+    "author": "madhav165",
+    "labels": [
+      "security",
+      "ica"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 📌 Summary\n\nScoped API tokens with explicit `scopes.permissions` were returning `403 Insufficient permissions for this operation` on `POST /rpc` and `/mcp` transport endpoints (as reported in #3409), because `_PERMISSION_PATTERNS` in `token_scoping.py` had no entries for these paths — the middleware defaults to deny for unmapped paths.\n\nDuring the fix, we also discovered that `/sse` had the same gap and that both `/rpc` and the `GET /sse` handler were incorrectly gated with `tools.execute` instead of `servers.use`, which would block tokens that only need `resources.read` from using these transports.\n\nCloses #3409\n\n## 🐞 Root Cause\n\n1. **`/rpc` and `/mcp` were missing from `_PERMISSION_PATTERNS`** (the reported 403s): `_check_permission_restrictions()` defaults to **deny** for any path not in the map when a token has explicit `scopes.permissions`. This caused all scoped tokens to get 403 on `POST /rpc` and `POST|GET|DELETE /mcp`, regardless of what permissions they carried. Admin tokens (with `teams: null`) were unaffected because they hit the `not permissions → return True` early-exit, masking the bug.\n\n2. **`/sse` also missing from `_PERMISSION_PATTERNS`** (discovered during fix): Same issue — `GET /sse` had no permission pattern entry, so scoped tokens would also get 403.\n\n3. **Wrong permission on `/rpc` and `/sse`**: The `GET /sse` handler used `@require_permission(\"tools.execute\")` while the per-server equivalent (`/{server_id}/sse`) already used `servers.use`. Transport endpoints multiplex many MCP operations (`tools/call`, `resources/list`, `initialize`, etc.) — gating at `tools.execute` blocks legitimate `resources.read`-only tokens. Fine-grained per-method RBAC is already enforced downstream by `_ensure_rpc_permission()`.\n\n4. **`/mcp` and `/sse` missing from `general_endpoints`**: Server-scoped tokens were denied before reaching transport handlers because these paths weren't in the server-restriction allowlist.\n\n## 💡 Changes\n\n**`mcpgateway/middleware/token_scoping.py`**:\n- Added `_PERMISSION_PATTERNS` entries: `POST /rpc` → `SERVERS_USE`, `GET /sse` → `SERVERS_USE`, `POST|GET|DELETE /mcp` → `SERVERS_USE`\n- Added `/mcp` and `/sse` to `general_endpoints` for server-scoped token allowlist\n\n**`mcpgateway/main.py`**:\n- Changed `GET /sse` handler from `@require_permission(\"tools.execute\")` to `@require_permission(\"servers.use\")`\n\nFine-grained per-method RBAC is enforced downstream:\n- `/rpc` → `_ensure_rpc_permission()` checks `tools.execute`, `resources.read`, etc. per MCP method\n- `/sse` → `generate_response()` forwards each message to `/rpc` with the original Bearer token, so the same per-method checks apply\n- `/mcp` → ASGI transport layer enforces its own RBAC\n\n**`tests/unit/mcpgateway/middleware/test_token_scoping.py`** (77 tests, +140 lines):\n- `test_transport_endpoints_whitelisted_for_server_scoped_tokens` — server-restriction allowlist for `/rpc`, `/mcp`, `/sse`\n- `test_rpc_endpoint_allowed_with_servers_use_permission` — unit-level allow/deny\n- `test_mcp_streamable_http_endpoint_allowed_with_servers_use_permission` — unit-level allow/deny\n- `test_sse_endpoint_allowed_with_servers_use_permission` — unit-level allow/deny\n- `test_permission_restricted_token_blocked_from_rpc` — full middleware deny-path (403)\n- `test_permission_restricted_token_blocked_from_mcp` — full middleware deny-path (403)\n- `test_permission_restricted_token_blocked_from_sse` — full middleware deny-path (403)\n- `test_permission_restrictions_rpc_denied_without_servers_use` — renamed/updated from stale test\n\n## 📐 MCP Compliance\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed\n- [x] Deny-path regression tests included",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3881022028",
+      "author": "kevalmahajan",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-03T08:25:20+00:00",
+      "body": "Tested manually, works as expected. Code Changes look good."
+    },
+    {
+      "id": "3881252232",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-03T09:16:09+00:00",
+      "body": "Transport-level fix is correct and well-tested. Reviewed:\n\n- `_PERMISSION_PATTERNS` entries for `/rpc`, `/sse`, `/mcp` are consistent with existing server-scoped transport patterns (all use `Permissions.SERVERS_USE`)\n- `general_endpoints` whitelist addition is necessary (these paths have no server ID)\n- `/sse` decorator change from `tools.execute` to `servers.use` aligns with `/{server_id}/sse`\n- Two-layer security model is maintained: middleware gates transport, downstream enforces per-method RBAC\n- Default-deny for unmapped paths preserved\n- Tests cover allow/deny for all three endpoints at both unit and middleware integration level\n- No security or performance regressions\n\n**Note:** During review we identified a pre-existing architectural gap where `_ensure_rpc_permission()` checks RBAC roles but not token `scopes.permissions`, and several RPC methods lack any permission check. This gap was previously masked because scoped tokens were denied from `/rpc` entirely. This PR correctly opens transport access; the per-method enforcement is tracked as a high-priority follow-up in #3422."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "3e0e2de24940c40f00cefa8acf01d02572147c51",
+      "message": "fix(security): add POST /rpc to permission patterns to unblock scoped api tokens\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-03T06:09:16+00:00"
+    },
+    {
+      "sha": "bf4b422a243c18550bae93dc575af4151ccd9563",
+      "message": "fix(security): add /mcp streamable-http transport to permission patterns for scoped tokens\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-03T06:14:19+00:00"
+    },
+    {
+      "sha": "4db38a8ed3700444b7706029ba642688504c4c59",
+      "message": "test(security): add deny-path integration tests and fix general_endpoints for /rpc and /mcp\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-03T06:35:58+00:00"
+    },
+    {
+      "sha": "7b4abffb8ef101bae74cfde278cae51085767eb8",
+      "message": "Add more general endpoints\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-03T06:38:36+00:00"
+    },
+    {
+      "sha": "0a6b642a3eb88bc78c1148f040a79bb656f611b8",
+      "message": "fix(security): use servers.use for all transport endpoints and add /sse permission pattern\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-03T07:24:51+00:00"
+    },
+    {
+      "sha": "c37a517e867566153c5922f53aa3b0ab4b5c0ef0",
+      "message": "test(security): add server-restriction whitelist test for /rpc, /mcp, /sse transport endpoints\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-03T07:26:39+00:00"
+    },
+    {
+      "sha": "961df49a6226bfbe7d283c79ff14112c856139db",
+      "message": "test(security): add deny-path integration test for GET /sse permission enforcement\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-03T07:38:43+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 146,
+  "deletions": 9,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:07.975230",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:07.978709",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3410,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3410.json"
+  }
+}

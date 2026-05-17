@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2514,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2514"
+  },
+  "metadata": {
+    "title": "2256_chore/fix-gatewayservice-uninitialized-services",
+    "state": "closed",
+    "created_at": "2026-01-27T07:18:53+00:00",
+    "updated_at": "2026-01-29T10:24:53+00:00",
+    "closed_at": "2026-01-29T10:24:51+00:00",
+    "merged_at": "2026-01-29T10:24:51+00:00",
+    "author": "Nayana-R-Gowda",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Signed-off-by: NAYANAR <nayana.r7813@gmail.com>\r\n\r\nCloses #2256 \r\n\r\nThis change refactors GatewayService to reuse the globally-initialized service singletons (ToolService, PromptService, ResourceService) instead of creating private, uninitialized instances.\r\nBy importing the module-level services created and initialized in mcpgateway.main, all gateway operations now share the same EventService/Redis client.\r\nThis ensures events such as activate/deactivate propagate correctly across workers and reach Redis subscribers.\r\nThe fix resolves silent event drops caused by missing initialize() calls on locally constructed services.\r\nLazy imports are used to avoid circular dependencies while preserving correct initialization order.\r\nCross-worker UI updates and subscriber notifications now behave as intended.\r\n\r\nTeating\r\n\r\npython - <<'PY'import asynciofrom mcpgateway.services.tool_service import tool_serviceasync def test():    async def sub():        async for ev in tool_service.subscribe_events():            print('RECEIVED_EVENT', ev)            return    async def pub():        await asyncio.sleep(0.2)        await tool_service._publish_event({'type': 'test_event', 'data': {'ok': True}})    await asyncio.gather(sub(), pub())asyncio.run(test())PY\r\n\r\npython - <<'PY'import mcpgateway.main as mainfrom mcpgateway.services.tool_service import tool_service as svcprint('tool_service is main.tool_service ->', svc is main.tool_service)PY",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3721793466",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-29T10:11:55+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8e964d26226cf58b0483b992898cde0657c0085f",
+      "message": "fix(services): use lazy singleton pattern for shared event propagation\n\nRefactors GatewayService, ExportService, ImportService, and A2AService to use\nglobally-initialized service singletons (ToolService, PromptService,\nResourceService, ServerService, RootService, GatewayService) instead of\ncreating private, uninitialized instances.\n\nUses lazy singleton pattern with __getattr__ to avoid import-time instantiation\nwhen only exception classes are imported. This ensures services are created\nafter logging/plugin setup is complete.\n\nBy importing the module-level services, all gateway operations now share the\nsame EventService/Redis client. This ensures events such as activate/deactivate\npropagate correctly across workers and reach Redis subscribers.\n\nChanges:\n- Add lazy singleton pattern using __getattr__ to service modules\n- Update main.py to import singletons instead of instantiating services\n- Update GatewayService.__init__ to use lazy imports of singletons\n- Update ExportService.__init__ to use lazy imports of singletons\n- Update ImportService.__init__ to use lazy imports of singletons\n- Update A2AService methods to use tool_service singleton\n- Update tests to patch singleton methods instead of class instantiation\n- Add pylint disables for no-name-in-module (due to __getattr__)\n\nThe fix resolves silent event drops caused by missing initialize() calls on\nlocally constructed services. Cross-worker UI updates and subscriber\nnotifications now behave as intended.\n\nCloses #2256\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-29T02:17:04+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 254,
+  "deletions": 57,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:26.814269",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:26.815246",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2514,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2514.json"
+  }
+}

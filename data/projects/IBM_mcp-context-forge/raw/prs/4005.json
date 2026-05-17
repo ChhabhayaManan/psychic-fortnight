@@ -1,0 +1,58 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4005,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4005"
+  },
+  "metadata": {
+    "title": "Fixes #3925: Implemented the `content_types` field functionality for `PluginCondition`",
+    "state": "closed",
+    "created_at": "2026-04-02T15:37:45+00:00",
+    "updated_at": "2026-04-07T15:28:57+00:00",
+    "closed_at": "2026-04-07T15:28:54+00:00",
+    "merged_at": "2026-04-07T15:28:54+00:00",
+    "author": "ja8zyjits",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nBefore opening this PR please:\r\n\r\n1. `make lint`            - passes `ruff`, `mypy`, `pylint` ✅\r\n2. `make test`            - all unit + integration tests green ✅\r\n3. `make coverage`        - ≥ 80 % ✅\r\n4. `make docker docker-run-ssl` or `make podman podman-run-ssl` ✅\r\n5. Update relevant documentation. ✅\r\n6. Tested with sqlite and postgres + redis. ⏳\r\n7. Manual regression no longer fails. Ensure the UI and /version work correctly. ✅\r\n\r\n---\r\n\r\n## 📌 Summary\r\n\r\nImplements the `content_types` field functionality for `PluginCondition` to enable plugins to execute conditionally based on HTTP Content-Type headers. This field was defined in the model but had no implementation, making it a non-functional configuration option that could lead to unexpected plugin behavior.\r\n\r\n**Fixes**: #3925 \r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Configure a plugin with `content_types` condition:\r\n   ```yaml\r\n   plugins:\r\n     - name: \"TestPlugin\"\r\n       conditions:\r\n         - content_types: [\"application/json\", \"text/plain\"]\r\n   ```\r\n\r\n2. Send requests with different Content-Type headers\r\n\r\n3. **Before fix**: Plugin executes regardless of content type (field silently ignored)\r\n\r\n4. **After fix**: Plugin only executes when Content-Type matches configured types\r\n\r\n## 🐞 Root Cause\r\n\r\nThe `PluginCondition.content_types` field was defined in `mcpgateway/plugins/framework/models.py` (line 212) but never implemented in the conditional matching logic:\r\n\r\n- `matches()` function in `utils.py` only checked `server_ids`, `tenant_ids`, `user_patterns`\r\n- `payload_matches()` function handled `tools`, `prompts`, `resources`, `agents` but not `content_types`\r\n- No mechanism existed to extract or pass Content-Type from HTTP requests to plugin context\r\n- No tests validated content type matching behavior\r\n\r\nThis was a silent failure - the field was accepted in configuration but had no effect.\r\n\r\n## 💡 Fix Description\r\n\r\n### Core Implementation\r\n\r\n1. **Added `content_type` field to `GlobalContext`** (`models.py`):\r\n   - Stores the normalized Content-Type from HTTP request headers\r\n   - Optional field with permissive default (None = execute plugin)\r\n\r\n2. **Implemented `normalize_content_type()` helper** (`utils.py`):\r\n   - Case-insensitive matching (`APPLICATION/JSON` → `application/json`)\r\n   - Strips charset and parameters (`application/json; charset=utf-8` → `application/json`)\r\n   - Handles edge cases (None, empty strings, whitespace)\r\n\r\n3. **Updated `matches()` function** (`utils.py`):\r\n   - Added content type checking logic\r\n   - Uses OR logic for multiple content types (match any)\r\n   - Integrates with existing AND logic for combined conditions\r\n\r\n4. **Extracted Content-Type at 7 instantiation sites**:\r\n   - `auth.py` (2 locations)\r\n   - `tool_service.py` (3 locations)\r\n   - `http_auth_middleware.py` (1 location)\r\n   - `rbac.py` (1 location)\r\n\r\n### Testing\r\n\r\nCreated comprehensive test suite (`test_content_type_matching.py`) with 21 tests covering:\r\n- Exact matching, case-insensitive matching, charset parameter stripping\r\n- Multiple content types (OR logic), combined conditions (AND logic)\r\n- Permissive defaults (None content_type, empty conditions)\r\n- Edge cases (empty strings, whitespace, malformed headers)\r\n\r\n### Documentation\r\n\r\n- **Architecture guide** (`docs/docs/architecture/plugins.md`): Added \"Content Type Filtering\" section with examples, security notes, and performance benefits\r\n- **User guide** (`docs/docs/using/plugins/index.md`): Enhanced \"Conditional Execution\" section with practical examples\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          | ✅ Pass |\r\n| Unit tests                            | `make test`          | ✅ Pass (21 new + 1076 existing) |\r\n| Coverage ≥ 80 %                       | `make coverage`      | ✅ Pass |\r\n| Manual regression no longer fails     | steps / screenshots  | ✅ Pass |\r\n\r\n**Test Results:**\r\n- All 21 new unit tests passing\r\n- All 1076 existing plugin framework tests passing\r\n- Doctests validated for models.py and utils.py\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec (no MCP protocol changes)\r\n- [x] No breaking change to MCP clients (backward compatible)\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] Comprehensive unit tests added\r\n- [x] Documentation updated (architecture + user guide)\r\n- [x] Backward compatible (existing configs without content_types continue to work)\r\n- [x] Permissive defaults (None content_type = execute plugin)\r\n\r\n## 🎯 Key Behaviors\r\n\r\n- **Case-insensitive**: `APPLICATION/JSON` matches `application/json`\r\n- **Parameter stripping**: `application/json; charset=utf-8` matches `application/json`\r\n- **Permissive default**: When `content_type` is None or `content_types` not specified, plugin executes\r\n- **Combined conditions**: Uses AND logic with other conditions (server_ids, tenant_ids, etc.)\r\n- **Multiple types**: Uses OR logic (plugin executes if any content type matches)\r\n\r\n## 📝 Example Configuration\r\n\r\n```yaml\r\nplugins:\r\n  - name: \"JsonValidator\"\r\n    kind: \"plugins.validation.json_validator.JsonValidator\"\r\n    hooks: [\"tool_pre_invoke\"]\r\n    mode: \"enforce\"\r\n    priority: 50\r\n    conditions:\r\n      - content_types: [\"application/json\"]\r\n        server_ids: [\"production-api\"]\r\n    config:\r\n      strict_schema: true\r\n```\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4069281777",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-07T15:25:02+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ad9c75dae461e56f78b5947b2ea4afb57578ccd5",
+      "message": "Fixes #3925\n\n## Summary\n\nImplemented the `content_types` field functionality for `PluginCondition` to enable plugins to execute conditionally based on HTTP Content-Type headers.\n\n## Changes\n\n### Core Implementation\n- **models.py**: Added `content_type: Optional[str]` field to `GlobalContext`\n- **utils.py**:\n  - Added `normalize_content_type()` helper for case-insensitive matching with charset/parameter stripping\n  - Updated `matches()` function to check `content_types` conditions\n- **auth.py**: Extract Content-Type from request headers (2 locations)\n- **tool_service.py**: Extract Content-Type from request headers (3 locations)\n- **http_auth_middleware.py**: Extract Content-Type from request headers (1 location)\n- **rbac.py**: Extract Content-Type from request headers (1 location)\n\n### Testing\n- **test_content_type_matching.py**: Added 21 comprehensive unit tests covering:\n  - Exact matching, case-insensitive matching, charset parameter stripping\n  - Multiple content types (OR logic), combined conditions (AND logic)\n  - Permissive defaults (None content_type, empty conditions)\n  - Edge cases (empty strings, whitespace, malformed headers)\n\n### Documentation\n- **plugins.md**: Added \"Content Type Filtering\" section with examples, security notes, and performance benefits\n- **index.md**: Enhanced \"Conditional Execution\" section with practical content_types examples\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-02T15:29:08+00:00"
+    },
+    {
+      "sha": "dd443131aa2ea99b1b8d0c9087f99f1002f45420",
+      "message": "Fixed the concerns raised in PR review https://github.com/IBM/mcp-context-forge/pull/4005\\#issuecomment-4198300827\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-07T13:09:29+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 471,
+  "deletions": 10,
+  "merged": true,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:07:10.675953",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:10.676876",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4005,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4005.json"
+  }
+}

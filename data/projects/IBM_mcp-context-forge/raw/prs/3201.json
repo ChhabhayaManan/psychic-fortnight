@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3201,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3201"
+  },
+  "metadata": {
+    "title": "fix(ui): admin UI \"Show\" toggle for gateway tokens, passwords, and header values",
+    "state": "closed",
+    "created_at": "2026-02-24T10:09:45+00:00",
+    "updated_at": "2026-03-31T12:20:01+00:00",
+    "closed_at": "2026-03-31T12:20:01+00:00",
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "security",
+      "MUST",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #2980 due to repository maintenance. Your code and branch are intact. @omorros please verify everything looks good.\n\n  ## Related Issue\r\n  Closes #2968\r\n\r\n  ---\r\n\r\n  ## Summary\r\n  The `masked()` method in `GatewayRead` was unconditionally setting all `_unmasked`      \r\n  fields to `None`, which broke the admin UI \"Show\" toggle for gateway tokens, passwords, \r\n  and header values. This adds an opt-in `preserve_unmasked` parameter so the\r\n  permission-gated admin endpoint can receive the real values while all other callers     \r\n  remain unaffected.\r\n\r\n  ---\r\n\r\n  ## Type of Change\r\n  - [x] Bug fix\r\n\r\n  ---\r\n\r\n  ## Verification\r\n\r\n  | Check                     | Command         | Status |\r\n  |---------------------------|-----------------|--------|\r\n  | Unit tests (admin)        | `pytest tests/unit/mcpgateway/test_admin.py` | 775/775    \r\n  passed |\r\n  | Unit tests (schemas)      | `pytest tests/unit/mcpgateway/test_schemas.py` | 65/65    \r\n  passed |\r\n  | Doctests (gateway service)| `pytest --doctest-modules\r\n  mcpgateway/services/gateway_service.py` | 25/25 passed |\r\n  | Manual test               | Admin UI \"Show\" toggle | Working |\r\n\r\n  ---\r\n\r\n  ## Checklist\r\n  - [x] Code formatted (`make black isort pre-commit`)\r\n  - [ ] Tests added/updated for changes\r\n  - [x] Documentation updated (if applicable)\r\n  - [x] No secrets or credentials committed\r\n\r\n  ---\r\n\r\n  ### Manual verification\r\n<img width=\"992\" height=\"1086\" alt=\"Screenshot 2026-02-16 193227\" src=\"https://github.com/user-attachments/assets/aee40b46-9e45-47c8-8c0f-77bc2e7f6a10\" />\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3854526158",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-25T14:12:42+00:00",
+      "body": "Approving, as it was already approved by me on https://github.com/IBM/mcp-context-forge/pull/3100. The changes in this PR are the same.\n\nLGTM 🚀"
+    },
+    {
+      "id": "3870875663",
+      "author": "jonpspri",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-28T22:50:03+00:00",
+      "body": "## Review Summary\n\nClean, minimal fix that correctly restores the admin UI \"Show\" toggle for gateway credentials while maintaining security for all other callers.\n\n### Security\n\n- `masked()` defaults to `preserve_unmasked=False` — safe by default.\n- The only caller opting in is `admin_get_gateway`, which is protected by `AdminAuthMiddleware` (admin-only at middleware layer) and `@require_permission(\"gateways.read\", allow_admin_bypass=False)`.\n- Non-admin `get_gateway` in `main.py` and the vault plugin caller do not pass the flag — credentials remain fully masked.\n- `preserve_unmasked` is keyword-only (`*`), preventing accidental positional misuse.\n\n### Correctness\n\nThe `include_unmasked` flag threads cleanly from the admin route through the service layer to `masked()`. All existing call sites are unaffected.\n\n### Test Coverage\n\nThree new tests cover the critical paths:\n- **Admin allow-path**: verifies `include_unmasked=True` is passed\n- **Non-admin deny-path**: verifies the flag is NOT passed from the public route\n- **Schema-level**: verifies `preserve_unmasked=True` preserves basic, bearer, and authheaders credentials\n\nExisting `test_masked_auth_bearer_token_credentials` already covers the default (flag absent → `_unmasked` fields are `None`).\n\n### Linting\n\nAll ruff warnings in changed files are pre-existing — no new issues introduced.\n\n### Note\n\n`admin_list_gateways` does not pass the flag, so the \"Show\" toggle in the list view may still not work. This is consistent with the scoped approach and the follow-up in #3346.\n\nLGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "3761a42a980740a5be5e9f89fa452fb153b9fc73",
+      "message": "fix: admin UI can no longer reveal gateway tokens (#2968)\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>",
+      "author": "Oriol Morros Vilaseca",
+      "date": "2026-02-16T19:36:44+00:00"
+    },
+    {
+      "sha": "872eca43c9b1427192a9d48fa4db18f6d5d13b51",
+      "message": "fix: add test coverage for preserve_unmasked credential reveal (#3201)\n\nCloses the differential coverage gap for the preserve_unmasked parameter\nintroduced in PR #3201. Adds tests verifying that masked(preserve_unmasked=True)\nretains _unmasked fields for basic, bearer, and authheaders auth types, and that\nadmin_get_gateway passes include_unmasked=True to the gateway service.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-28T21:54:36+00:00"
+    },
+    {
+      "sha": "92b26b285735280a9c301573cfcb04dd13627d4b",
+      "message": "fix(test): add deny-path test for non-admin gateway credential masking (#3201)\n\nAssert that the non-admin GET /gateways/{id} route does not pass\ninclude_unmasked, ensuring credentials stay masked outside the admin UI.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-28T22:25:06+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 82,
+  "deletions": 10,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:13:19.628087",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:19.629833",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3201,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3201.json"
+  }
+}

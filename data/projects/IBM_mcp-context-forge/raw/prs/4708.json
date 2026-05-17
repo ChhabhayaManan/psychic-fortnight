@@ -1,0 +1,145 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4708,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4708"
+  },
+  "metadata": {
+    "title": "Basic logging for sql sanitizer",
+    "state": "open",
+    "created_at": "2026-05-11T15:58:01+00:00",
+    "updated_at": "2026-05-14T16:32:46+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "dima-zakharov",
+    "labels": [
+      "bug",
+      "wxo"
+    ],
+    "milestone": null,
+    "assignees": [
+      "ja8zyjits",
+      "dima-zakharov"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #4707\r\n\r\n---\r\n\r\n## 📝 Summary\r\nAdded debug only logging for sql sanitizer\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [ ] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [
+    {
+      "id": "3242804860",
+      "author": "Copilot",
+      "created_at": "2026-05-14T16:32:44+00:00",
+      "body": "Creating `LoggingService()` at import time introduces global side effects (and potential startup cost) even when the plugin/module isn’t used. Prefer deferring logger/service initialization to the plugin instance (e.g., inside `__init__`) or use a standard module logger that doesn’t require constructing a service during import."
+    },
+    {
+      "id": "3242804922",
+      "author": "Copilot",
+      "created_at": "2026-05-14T16:32:44+00:00",
+      "body": "Logging the full `config` object can leak secrets (tokens, credentials, connection strings) into logs. Consider logging a redacted/safe subset (e.g., only relevant boolean flags, or a sanitized dict) and explicitly exclude known-sensitive keys."
+    },
+    {
+      "id": "3242804960",
+      "author": "Copilot",
+      "created_at": "2026-05-14T16:32:45+00:00",
+      "body": "Logging `payload.args` is likely to include user-provided content and may contain PII/secrets; this is especially risky in a security-related component. Recommend logging only structural info (e.g., arg keys, counts) and/or redacting values before logging; if detailed debugging is needed, gate it behind an explicit opt-in setting for safe environments."
+    },
+    {
+      "id": "3242804994",
+      "author": "Copilot",
+      "created_at": "2026-05-14T16:32:45+00:00",
+      "body": "These debug statements use f-strings, which eagerly stringify potentially large objects even when DEBUG logging is disabled. Prefer lazy formatting (e.g., `logger.debug(\\\"... %s\\\", value)`) or guard with `if logger.isEnabledFor(DEBUG): ...` to avoid unnecessary work on hot paths."
+    },
+    {
+      "id": "3242805016",
+      "author": "Copilot",
+      "created_at": "2026-05-14T16:32:45+00:00",
+      "body": "These debug statements use f-strings, which eagerly stringify potentially large objects even when DEBUG logging is disabled. Prefer lazy formatting (e.g., `logger.debug(\\\"... %s\\\", value)`) or guard with `if logger.isEnabledFor(DEBUG): ...` to avoid unnecessary work on hot paths."
+    },
+    {
+      "id": "3242805045",
+      "author": "Copilot",
+      "created_at": "2026-05-14T16:32:45+00:00",
+      "body": "These debug statements use f-strings, which eagerly stringify potentially large objects even when DEBUG logging is disabled. Prefer lazy formatting (e.g., `logger.debug(\\\"... %s\\\", value)`) or guard with `if logger.isEnabledFor(DEBUG): ...` to avoid unnecessary work on hot paths."
+    },
+    {
+      "id": "3242805075",
+      "author": "Copilot",
+      "created_at": "2026-05-14T16:32:46+00:00",
+      "body": "Setting `LOG_LEVEL: DEBUG` for the server process in CI can significantly increase log volume and may expose sensitive data if any request/arg logging exists (including the newly added logs). Consider scoping DEBUG more narrowly (e.g., logger-specific level for `plugins.sql_sanitizer`) or ensuring the sanitizer logs are redacted before enabling DEBUG globally.\n"
+    },
+    {
+      "id": "3242805109",
+      "author": "Copilot",
+      "created_at": "2026-05-14T16:32:46+00:00",
+      "body": "The `cat ... | grep ...` check is fragile: it depends on log formatting including the substring `sql_sanitizer`, and it will fail the job if grep finds nothing (even if behavior is correct). Prefer grepping for a stable marker you control (e.g., the literal `SQL-SANITIZER`) using `grep -F`, and avoid the UUOC by calling grep directly; if the goal is informational, make the grep non-fatal or emit a clearer assertion/error message when missing.\n"
+    },
+    {
+      "id": "3242805145",
+      "author": "Copilot",
+      "created_at": "2026-05-14T16:32:46+00:00",
+      "body": "The `cat ... | grep ...` check is fragile: it depends on log formatting including the substring `sql_sanitizer`, and it will fail the job if grep finds nothing (even if behavior is correct). Prefer grepping for a stable marker you control (e.g., the literal `SQL-SANITIZER`) using `grep -F`, and avoid the UUOC by calling grep directly; if the goal is informational, make the grep non-fatal or emit a clearer assertion/error message when missing.\n"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4270776710",
+      "author": "ja8zyjits",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-12T09:01:59+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "4272452094",
+      "author": "ja8zyjits",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-12T12:59:07+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "4291629895",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-14T16:32:46+00:00",
+      "body": "## Pull request overview\n\n> [!NOTE]\n> Copilot was unable to run its full agentic suite in this review.\n\nAdds debug-level logging around the SQL sanitizer plugin and updates CI workflow steps to capture and inspect server logs for sanitizer-related output.\n\n**Changes:**\n- Initialize a logger for `sql_sanitizer` and emit debug logs for plugin config and incoming payload args.\n- Update GitHub Actions workflow to run the server with log redirection and grep for sanitizer-related logs.\n- Minor import/comment cleanup and formatting change for the `@field_validator` decorator.\n\n### Reviewed changes\n\nCopilot reviewed 2 out of 2 changed files in this pull request and generated 9 comments.\n\n| File | Description |\n| ---- | ----------- |\n| plugins/sql_sanitizer/sql_sanitizer.py | Adds module-level logger initialization and debug logs for config/payload. |\n| .github/workflows/sql-sanitizer.yml | Enables DEBUG logging in CI, captures gunicorn output to a file, and greps for sanitizer logs. |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c8f008c520c2d284a6129ef6296cdbdbd510c9fe",
+      "message": "basic logging for sql sanitizer\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-05-11T15:54:02+00:00"
+    },
+    {
+      "sha": "6148c555bca196f4e3a640e0a46d305b9e3c76bc",
+      "message": "workflow\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-05-12T10:04:22+00:00"
+    },
+    {
+      "sha": "38316e48cbfc597b0960f74a5d2f7006bdb19724",
+      "message": "workflow\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-05-12T10:13:18+00:00"
+    },
+    {
+      "sha": "300bfc2f28358284200c4dcd8a046dc3a8f7d484",
+      "message": "add config log with payload\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-05-12T12:13:24+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 15,
+  "deletions": 3,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:28.269425",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:28.270165",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4708,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4708.json"
+  }
+}

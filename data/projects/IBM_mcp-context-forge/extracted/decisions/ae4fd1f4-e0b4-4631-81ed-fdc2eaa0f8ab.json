@@ -1,0 +1,35 @@
+{
+  "id": "ae4fd1f4-e0b4-4631-81ed-fdc2eaa0f8ab",
+  "title": "toon token savings",
+  "summary": "## 📝 Summary\r\n\r\n**TOON Encoder Plugin** - Converts JSON tool results to TOON (Token-Oriented Object Notation) format for reduced token consumption when sending responses to LLM agents/GPUs.\r\n\r\n### Problem\r\nWhen using MCP Gateway as a proxy for multiple MCP servers (e.g., 10+ servers), the JSON responses from tool invocations consume significant tokens. For users running local inference or paying per-token for API calls, this represents both a performance bottleneck and cost concern.\r\n\r\n### Solution\r\nA `tool_post_invoke` plugin that converts JSON tool results to TOON format before returning to the agent, achieving **30-70% token reduction**.\r\n\r\n### Expected Token Savings\r\n\r\n| Data Type | JSON Size | TOON Size | Savings |\r\n|-----------|-----------|-----------|---------|\r\n| Simple object | 150 bytes | 80 bytes | **~47%** |\r\n| Array of 10 objects | 2 KB | 600 bytes | **~70%** |\r\n| Nested data | 5 KB | 2 KB | **~60%** |\r\n\r\n### Verified Example\r\n\r\n```\r\nJSON (231 chars):\r\n{\"users\": [{\"id\": 0, \"name\": \"user0\", \"active\": true}, ...]}\r\n\r\nTOON (109 chars):\r\nusers:\r\n  [5]{active,id,name}:\r\n   true,0,user0\r\n   true,1,user1\r\n   ...\r\n\r\nActual Savings: 52.8% (122 bytes saved)\r\n```\r\n\r\n### Files Added\r\n\r\n```\r\nplugins/toon_encoder/\r\n├── __init__.py              # Package exports\r\n├── toon.py                  # Pure Python TOON encoder/decoder (~400 LOC)\r\n├── toon_encoder.py          # Plugin implementation (~250 LOC)\r\n├── README.md                # User documentation\r\n└── review.md                # PR review notes\r\n\r\ntests/unit/plugins/toon_encoder/\r\n├── __init__.py\r\n├── test_toon.py             # TOON encoder/decoder tests (~300 LOC)\r\n└── test_toon_encoder.py     # Plugin integration tests (~350 LOC)\r\n\r\nspecs/toon-encoder/          # Design specification\r\n├── README.md\r\n├── design.md\r\n├── implementation.md\r\n├── testing.md\r\n└── pr-template.md\r\n```\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅     |\r\n| Coverage ≥ 90%            | `make coverage` | ✅     |\r\n\r\n**Plugin-specific tests:**\r\n```bash\r\npytest tests/unit/plugins/toon_encoder/ -v\r\n```\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Design Decisions\r\n\r\n**Why a Plugin (vs. Core Gateway Change)?**\r\n1. Non-breaking - Existing deployments unaffected; opt-in behavior\r\n2. Configurable - Per-tool filtering, size thresholds, format markers\r\n3. Reversible - Can disable without code changes\r\n4. Follows patterns - Uses established `tool_post_invoke` hook like `json_repair`, `output_length_guard`\r\n\r\n**Why Pure Python (vs. Rust FFI)?**\r\n1. No external dependencies - Works in any deployment environment\r\n2. Maintainable - Team can debug/extend without Rust toolchain\r\n3. Sufficient performance - Encoding is O(n) string manipulation; benchmarked at <1ms\r\n\r\n**Safety Features:**\r\n- Only converts if TOON is actually smaller than JSON\r\n- Graceful error handling with `skip_on_error: true` fallback\r\n- Format marker (`annotations.format: \"toon\"`) for downstream parsing\r\n- Configurable size thresholds to prevent edge cases\r\n\r\n### Usage\r\n\r\nAdd to `plugins/config.yaml`:\r\n```yaml\r\nplugins:\r\n  - name: \"ToonEncoder\"\r\n    kind: \"plugins.toon_encoder.toon_encoder.ToonEncoderPlugin\"\r\n    hooks: [\"tool_post_invoke\"]\r\n    mode: \"enforce\"\r\n    priority: 900\r\n    config:\r\n      min_size_bytes: 100\r\n```\r\n\r\n### Agent Integration Required\r\n\r\nWhen enabling TOON encoding, agents must update their system prompts to understand TOON format. See `plugins/toon_encoder/README.md` for complete system prompt examples.\r\n\r\n### TOON Format Reference\r\n\r\n| JSON | TOON |\r\n|------|------|\r\n| `{\"name\": \"alice\", \"age\": 30}` | `name: alice`<br>`age: 30` |\r\n| `[{\"id\":1},{\"id\":2}]` | `[2]{id}:`<br>` 1`<br>` 2` |\r\n| `[\"a\",\"b\",\"c\"]` | `[3]: a,b,c` |\r\n\r\n### Design Specification\r\n\r\nFull design documentation available at: `specs/toon-encoder/`\r\n\r\n### Test Coverage\r\n\r\n- 60+ unit tests for TOON encoder/decoder\r\n- 30+ plugin integration tests\r\n- Round-trip verification (encode→decode = original)\r\n- Edge case coverage (unicode, large numbers, special characters)",
+  "reasoning": "## 📝 Summary\r\n\r\n**TOON Encoder Plugin** - Converts JSON tool results to TOON (Token-Oriented Object Notation) format for reduced token consumption when sending responses to LLM agents/GPUs.\r\n\r\n### Problem\r\nWhen using MCP Gateway as a proxy for multiple MCP servers (e.g., 10+ servers), the JSON responses from tool invocations consume significant tokens. For users running local inference or paying per-token for API calls, this represents both a performance bottleneck and cost concern.\r\n\r\n### Solution\r\nA `tool_post_invoke` plugin that converts JSON tool results to TOON format before returning to the agent, achieving **30-70% token reduction**.\r\n\r\n### Expected Token Savings\r\n\r\n| Data Type | JSON Size | TOON Size | Savings |\r\n|-----------|-----------|-----------|---------|\r\n| Simple object | 150 bytes | 80 bytes | **~47%** |\r\n| Array of 10 objects | 2 KB | 600 bytes | **~70%** |\r\n| Nested data | 5 KB | 2 KB | **~60%** |\r\n\r\n### Verified Example\r\n\r\n```\r\nJSON (231 chars):\r\n{\"users\": [{\"id\": 0,",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "crivetimihai",
+    "joestein-ssc"
+  ],
+  "tags": [
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "ae478de0-dbb9-454f-b75a-9c72f5ecb4ed",
+      "source_type": "pr",
+      "source_id": "2574",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/2574",
+      "contributor": "joestein-ssc",
+      "timestamp": "2026-01-29T19:05:07Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2574.json"
+    }
+  ],
+  "timestamp": "2026-01-29T19:05:07Z",
+  "created_at": "2026-05-17T17:23:58.782647",
+  "updated_at": "2026-05-17T17:23:58.782650",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:58.783015",
+    "artifact_type": "decisions",
+    "artifact_id": "ae4fd1f4-e0b4-4631-81ed-fdc2eaa0f8ab"
+  }
+}

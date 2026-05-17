@@ -1,0 +1,67 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4320,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4320"
+  },
+  "metadata": {
+    "title": "fix(auth): resolve proxy auth database lookup for team/admin context",
+    "state": "closed",
+    "created_at": "2026-04-20T08:19:18+00:00",
+    "updated_at": "2026-04-25T08:42:25+00:00",
+    "closed_at": "2026-04-25T08:42:23+00:00",
+    "merged_at": "2026-04-25T08:42:23+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "rbac",
+      "MUST",
+      "api",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4262\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes a bug in proxy-based authentication where users authenticated via trusted proxy headers were only granted public-only access, regardless of their actual database permissions. The system was not resolving team memberships or admin privileges from the database for proxy-authenticated users.\r\n\r\n**Problem**: When `TRUST_PROXY_AUTH=true`, the authentication flow extracted user identity from the proxy header but stopped there - no database lookup occurred to determine the user's teams or admin status. This resulted in:\r\n- Platform admin users unable to access admin endpoints\r\n- All users (including admins) only seeing public tools\r\n- Private tools remaining inaccessible even for authorized users\r\n- Missing RBAC context for proxy-authenticated requests\r\n\r\n**Solution**: Enhanced the proxy authentication path to perform database lookups and resolve team memberships using the same pattern as session token authentication.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🔧 Technical Changes\r\n\r\n### Core Implementation (`mcpgateway/utils/verify_credentials.py`)\r\n\r\n1. **Database Lookup Integration**\r\n   - Added `EmailAuthService.get_user_by_email()` call in proxy auth path\r\n   - Queries database to retrieve user record with teams and admin status\r\n   - Follows same pattern as session token authentication\r\n\r\n2. **Team Resolution**\r\n   - Uses `_resolve_teams_from_db()` helper function\r\n   - Returns `None` for admin users (admin bypass - sees all teams)\r\n   - Returns `[]` for users with no team memberships (public-only)\r\n   - Returns list of team IDs for regular users\r\n\r\n3. **Platform Admin Bootstrap**\r\n   - Special handling when `REQUIRE_USER_IN_DB=false`\r\n   - Allows platform admin email to authenticate even if not in database\r\n   - Creates admin-level payload with `is_admin=true` and `teams=None`\r\n\r\n4. **Request State Caching**\r\n   - Enriched payload stored in `request.state._jwt_verified_payload`\r\n   - Downstream handlers can access team/admin context\r\n   - Consistent with session token behavior\r\n\r\n5. **Error Handling**\r\n   - Returns 401 if user not found in database (when `REQUIRE_USER_IN_DB=true`)\r\n   - Proper error messages for debugging\r\n\r\n### Test Coverage (`tests/unit/mcpgateway/utils/test_proxy_auth.py`)\r\n\r\n**Updated Existing Tests** (3):\r\n- `test_proxy_auth_with_header` - Added database mocking for normal user\r\n- `test_custom_proxy_header` - Added database mocking for custom header\r\n- `test_mixed_auth_scenario` - Added database mocking for mixed auth\r\n\r\n**New Tests** (2):\r\n- `test_proxy_auth_platform_admin_bootstrap` - Verifies admin bootstrap when user not in DB\r\n- `test_proxy_auth_user_not_found_raises_401` - Verifies 401 when user not found and bootstrap disabled\r\n\r\nAll tests mock:\r\n- `get_db()` for database session\r\n- `EmailAuthService.get_user_by_email()` for user lookup\r\n- `_resolve_teams_from_db()` for team resolution\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Security Considerations\r\n- Maintains two-layer security model (token scoping + RBAC)\r\n- Database is now the authority for proxy-authenticated users\r\n- Admin bypass properly implemented (`teams=None`)\r\n- Fail-closed behavior when user not found\r\n\r\n### Behavior Changes\r\n**Before**: Proxy-authenticated users → public-only access\r\n**After**: Proxy-authenticated users → database-resolved teams/admin status\r\n\r\n### Configuration Requirements\r\nNo new configuration required. Works with existing settings:\r\n- `TRUST_PROXY_AUTH=true` - Enable proxy authentication\r\n- `PROXY_USER_HEADER` - Header name (default: `X-Authenticated-User`)\r\n- `REQUIRE_USER_IN_DB` - Whether to require DB user record (default: `true`)\r\n- `PLATFORM_ADMIN_EMAIL` - Platform admin email for bootstrap",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "d1445782404ffc32baa18b39d49476afd768cb5c",
+      "message": "fix: resolve proxy auth database lookup for team/admin context\n\n- Add database lookup in proxy authentication to resolve user teams and admin status\n- Proxy auth now queries DB via EmailAuthService.get_user_by_email()\n- Resolves teams using _resolve_teams_from_db() (same pattern as session tokens)\n- Admin users get teams=None (admin bypass), regular users get team list\n- Platform admin bootstrap supported when REQUIRE_USER_IN_DB=false\n- Cache enriched payload in request.state._jwt_verified_payload for downstream use\n- Add comprehensive test coverage for proxy auth scenarios\n- Tests cover: normal users, admin users, platform admin bootstrap, user not found\n\nFixes proxy authentication bug where users only had public-only access\nregardless of their actual database permissions.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-20T08:14:38+00:00"
+    },
+    {
+      "sha": "9ab37cc7fcfad9f374b76acd702352be579ed9ce",
+      "message": "fix(auth): extend proxy auth enrichment to MCP transport path\n\nThe original PR #4320 added DB-backed team/admin resolution to require_auth,\nbut left require_auth_header_first returning the old minimal payload\n(sub/source/token only). require_auth_header_first is the authentication\nentry point used by the MCP streamable HTTP transport, so proxy-authenticated\nMCP clients continued to receive public-only access via _normalize_jwt_payload\n-> normalize_token_teams([]) - the exact symptom #4262 reports.\n\nChanges:\n- Extract _authenticate_proxy_user(request, proxy_user) helper owning DB\n  lookup, team resolution, payload construction, platform-admin bootstrap,\n  and request.state caching.\n- Reuse the helper from both require_auth and require_auth_header_first so\n  REST admin paths and the MCP transport path return the same enriched\n  payload (sub, source, token, is_admin, teams, email).\n- Fix the now-inaccurate comment on require_auth_header_first's proxy branch\n  that claimed it was 'identical to require_auth'.\n- Update the existing test_require_auth_header_first_proxy_auth_returns_proxy_user\n  to assert the enriched payload shape.\n- Add regression tests covering admin-user DB bypass (is_admin=True, teams=None),\n  multi-team membership, and require_auth_header_first parity (enriched payload\n  and platform-admin bootstrap).\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T12:10:34+00:00"
+    },
+    {
+      "sha": "43a217b043e81b9158acfd3af073975c471fae2b",
+      "message": "fix(auth): enforce is_active check + extend DB-backed proxy auth to primary MCP path\n\nSecond follow-up addressing findings from a deeper security + design review:\n\nSECURITY FIX (critical):\n- _authenticate_proxy_user() now enforces user_info.is_active, matching the\n  JWT path's check in _enforce_revocation_and_active_user (:398-399).\n  Without this, a disabled user - including a disabled admin - could still\n  authenticate via trusted-proxy mode and keep their pre-disable\n  authorizations. Raises 401 'Account disabled' for inactive users.\n\nPRIMARY MCP TRANSPORT GAP (critical):\n- streamablehttp_transport._set_proxy_user_context() previously hardcoded\n  teams=[] and is_admin=False, so on the primary MCP entry point\n  (_StreamableHttpAuthHandler.authenticate) proxy-authenticated users\n  still received public-only access. Only the stateful-session fallback\n  path at :1953 went through the enriched helper.\n- Rewritten as an async function that performs the same DB lookup,\n  team/admin resolution, is_active enforcement, and platform-admin\n  bootstrap as the REST helper. Returns None on success or\n  {detail, headers} on failure so the caller can send a 401 via\n  self._send_error().\n- Call site at _StreamableHttpAuthHandler.authenticate awaits the helper\n  and sends 401 on rejection.\n\nDISPATCH-KEY FIX (S1/S2):\n- Proxy payload now includes token_use='session' so downstream dispatchers\n  (main.py:2870, streamablehttp_transport.py:1998) route through\n  resolve_session_teams() - the canonical 'single policy point' per\n  AGENTS.md - rather than treating the proxy payload as an API-token\n  payload with embedded teams.\n\nDOCS + TEST HYGIENE (S3/S4a):\n- require_auth docstring updated to describe the DB-enriched proxy path,\n  bootstrap flow, and request.state caching.\n- Misleading test test_jwt_auth_with_proxy_enabled renamed to\n  test_mcp_client_auth_mode_skips_proxy_path with accurate docstring\n  and comment explaining why 'anonymous' is the expected outcome.\n- Stale comment 'Proxy auth path - identical to require_auth' updated\n  to accurately describe the shared-helper relationship.\n\nDENY-PATH REGRESSION TESTS (AGENTS.md security invariant):\n- test_proxy_auth_disabled_user_raises_401: non-admin disabled user -> 401\n- test_proxy_auth_disabled_admin_raises_401: disabled admin -> 401 (no\n  elevation via is_admin=True on a deactivated record)\n- test_proxy_auth_payload_has_token_use_session: dispatch-key contract\n- 4 pre-existing tests updated to supply DB mocks instead of relying on\n  the old unvalidated proxy shape.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T12:49:31+00:00"
+    },
+    {
+      "sha": "d6224d4901171b187262af869a5adadf0b229f0d",
+      "message": "fix(auth): use module-local async get_db() in _set_proxy_user_context\n\nResolves pylint W0621 (redefined-outer-name): the function shadowed the\nmodule-local async get_db() at :721 with a local import of\nmcpgateway.db.get_db. Switched to the existing async context manager,\nwhich also provides proper cancellation handling for MCP long-lived\nconnections and removes the explicit try/finally/db.close() boilerplate\n(addresses review note M4).\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T13:09:39+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 742,
+  "deletions": 51,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:33.869053",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:33.869530",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4320,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4320.json"
+  }
+}

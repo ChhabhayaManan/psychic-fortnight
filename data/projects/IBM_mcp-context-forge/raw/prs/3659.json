@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3659,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3659"
+  },
+  "metadata": {
+    "title": "fix: use compute_passthrough_headers_cached in direct proxy paths to …",
+    "state": "open",
+    "created_at": "2026-03-13T00:39:08+00:00",
+    "updated_at": "2026-04-28T10:46:49+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "omorros",
+    "labels": [
+      "bug",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue                                                                                                   \r\n  Closes #3643\r\n                                                                                                                        \r\n  ## 📝 Summary\r\n  Replaced manual header forwarding loops in the three direct proxy functions (`_proxy_list_tools_to_gateway`,\r\n  `_proxy_list_resources_to_gateway`, `_proxy_read_resource_to_gateway`) with calls to                                    `compute_passthrough_headers_cached()`, fixing the silently dropped `X-Upstream-Authorization → Authorization` rename\r\n  and restoring global passthrough header config support on all direct proxy operations.                                \r\n  \r\n  ---\r\n\r\n  ## 🏷️ Type of Change\r\n  - [x] Bug fix\r\n  - [ ] Feature / Enhancement\r\n  - [ ] Documentation\r\n  - [ ] Refactor\r\n  - [ ] Chore (deps, CI, tooling)\r\n  - [ ] Other (describe below)\r\n                                                                                                                      \r\n                                                                                                                        \r\n  ## 🧪 Verification\r\n\r\n  | Check                     | Command         | Status |\r\n  |---------------------------|-----------------|--------|\r\n  | Lint suite                | `make lint`     | ✅     |\r\n  | Unit tests                | `make test`     | ✅     |\r\n  | Coverage ≥ 80%            | `make coverage` | ✅     |                                                                 \r\n  ---                                                                                                                   \r\n  \r\n  ## ✅ Checklist\r\n  - [x] Code formatted (`make black isort pre-commit`)\r\n  - [x] Tests added/updated for changes\r\n  - [x] Documentation updated (if applicable)                                                                             \r\n  - [x] No secrets or credentials committed\r\n                                                                                                                        \r\n  ---\r\n\r\n  ## 📓 Notes (optional)\r\n  The `db` parameter was added as optional (`None` default) to the three proxy functions to avoid breaking any other\r\n  callers. All three call sites already operate inside `async with get_db() as db:` blocks, so passing `db` required no   structural changes. 350 transport tests and 75 passthrough header utility tests pass.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3943594286",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-13T12:12:58+00:00",
+      "body": "@omorros - thanks for the PR!\n\n### Overall Assessment: Positive — fixes a real security gap\n\nThe PR correctly replaces ad-hoc manual header forwarding with the shared `compute_passthrough_headers_cached()` utility, which provides proper sanitization and the `X-Upstream-Authorization → Authorization` rename. This is a clear improvement.\n\nThis is a security improvement:\n\nThe new code passes `gateway_auth_type` which enables the check that blocks client `Authorization` passthrough when the gateway itself uses basic or bearer auth. The old code had no such protection — a client could potentially override gateway auth credentials via passthrough headers if Authorization was in `gateway.passthrough_headers`.\n\n### Security improvements\n\nSilent fallback when `db` is `None` — headers silently dropped (Medium)\n\nAll three functions use this guard:\n```bash\n  if request_headers and db is not None:\n      # ... compute passthrough headers\n```\n\nIf `db` is None, no passthrough headers are forwarded at all — including `X-Upstream-Authorization`. The old code at least forwarded explicitly configured `gateway.passthrough_headers` without needing a DB session.\n\nWhile all three current call sites pass `db=db`, the parameter is `Optional[None]` by design \"to avoid breaking other callers.\" If a future caller omits db, header forwarding silently degrades. Consider either:\n  - Logging a warning when `db` is `None` and headers would have been forwarded\n  - Or making `db` required since all current callers have it available\n\n### Test Coverage Assessment\n\nThe tests mock `compute_passthrough_headers_cached` indirectly (by mocking `global_config_cache` and settings), but they don't verify that `X-Upstream-Authorization` actually gets renamed. Consider adding a test that:\n  - Sets `X-Upstream-Authorization: Bearer token` in request headers\n  - Uses a real (non-mocked) `compute_passthrough_headers_cached`\n  - Asserts the outbound headers contain `Authorization: Bearer token`\n\n\nMinor suggestion to add a warning log when `db` is `None` causes passthrough headers to be skipped, and consider one test using the real `compute_passthrough_headers_cached` to verify the rename end-to-end."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b6960a3aad1d9af1b16477acedc285086ab38f04",
+      "message": "fix: use compute_passthrough_headers_cached in direct proxy paths to handle X-Upstream-Authorization rename (#3643)\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>",
+      "author": "Oriol Morros Vilaseca",
+      "date": "2026-03-13T00:32:45+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 74,
+  "deletions": 30,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:20.951412",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:20.953032",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3659,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3659.json"
+  }
+}

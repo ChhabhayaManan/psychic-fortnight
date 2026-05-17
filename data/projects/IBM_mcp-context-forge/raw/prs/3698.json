@@ -1,0 +1,88 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3698,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3698"
+  },
+  "metadata": {
+    "title": "fix(ui): clean z-index structure",
+    "state": "closed",
+    "created_at": "2026-03-16T15:42:05+00:00",
+    "updated_at": "2026-03-22T17:45:05+00:00",
+    "closed_at": "2026-03-22T17:45:02+00:00",
+    "merged_at": "2026-03-22T17:45:02+00:00",
+    "author": "gcgoncalves",
+    "labels": [
+      "bug",
+      "ui",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nToast notifications and error messages are not visible when a modal dialog is open. Users miss critical feedback because toasts render below or at the same stacking level as modals.\r\n\r\nCloses #3646\r\n\r\n## 🔁 Reproduction Steps\r\n1. Start the admin UI (`make dev`)\r\n2. Open any page and trigger a modal (e.g. click \"Add Server\", \"Create Token\", or \"Invite User\")\r\n3. While the modal is open, trigger a toast notification:\r\n   - For an error toast: submit the modal form with an invalid/missing field\r\n   - For a success toast: force one via the browser console: `showToast(\"Test\", \"success\")`\r\n\r\n## 🐞 Root Cause\r\n1 - Z-index collision between toasts and modals\r\n- Toasts are assigned `z-50` (Tailwind → `z-index: 50`)\r\n- Most modals also use `z-50` → same stacking level, browser renders whichever is later in the DOM on top (toasts lose)\r\n- The bulk-import modal uses `z-[60]` → toasts at `z-50` are explicitly below it\r\n\r\n2 - CSS hack on some modals overriding z-10 to `z-index: 9999`\r\n\r\nIn `admin.css` (lines 173–176):\r\n```css\r\n/* Modal z-index to prevent sticky header overlap */\r\n.fixed.z-10 {\r\n    z-index: 9999 !important;\r\n}\r\n```\r\nAny element with **both** the Tailwind utility classes `fixed` and `z-10` gets forced to `z-index: 9999` regardless of what the Tailwind class implies. Roughly 18 modals in `admin.html` use `fixed z-10`, all silently elevated to 9999 — well above toasts at 50.\r\n\r\n3 - Custom `.tooltip` CSS class with z-index side effects\r\n`admin.css` defines a `.tooltip` class with `z-index: 9999`. Although this is effectively overridden by inline styles on the only element using it, it adds to the z-index chaos and the class needs a full Tailwind migration.\r\n\r\n\r\n## 💡 Fix Description\r\nReplaced custom classes and hacks with proper tailwind utility classes, and re-organise the z-index hierarchy.\r\n\r\n| Layer                                       | Value       |\r\n|-----------------------------|----------|\r\n| Sticky header / LLM toolbar |  z-10 (10) |\r\n| Sidebar                                   | z-20 (20) |\r\n| Dropdowns / tooltips             | z-30 (30) |\r\n| Modals                                    | z-40 (40) |\r\n| Toast notifications                 | z-50 (50) |\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3968662503",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-18T15:17:17+00:00",
+      "body": "Thanks @gcgoncalves!\n\nIt looks like this change fixes the toast/modal stacking problem, but it also introduces a mobile sidebar regression.\n\nOn small screens, the sidebar backdrop is still rendered at z-40, while the sidebar itself is now at z-20 in [admin.html][424] and [admin.html][437]. The previous mobile-specific CSS in [admin.css][L59] kept .sidebar-nav above the overlay with z-index: 60, and that override is removed here.\n\nAs a result, in a mobile viewport the backdrop can sit above the sidebar and intercept interaction, making the menu unusable. You can reproduce it by shrinking the browser below 1024px, opening the sidebar, and trying to click any sidebar item.\n\nI think the z-index cleanup direction makes sense overall; this just needs the mobile sidebar layering adjusted so the menu stays above its backdrop while toasts still remain above modals.\n\nhttps://github.com/user-attachments/assets/7c932f23-5cea-43b9-87a9-c61a93267228"
+    },
+    {
+      "id": "3981572512",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-20T13:33:37+00:00",
+      "body": "Looks good now. Thanks @gcgoncalves \n\nTested locally and ran tests as well.\n\nLGTM 🚀 "
+    },
+    {
+      "id": "3988261591",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-22T15:44:36+00:00",
+      "body": "Reviewed and approved. The z-index hierarchy is now fully consistent across all admin UI files. All 947 JS tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "461e5148c5c3c300bfdd1c3bb3191fb7f932a6b7",
+      "message": "fix(ui): clean z-index structure\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-03-16T14:57:57+00:00"
+    },
+    {
+      "sha": "1da4fe89b091b172f8eceef1ec2af858ee3e95bd",
+      "message": "test(ui): add z-index hierarchy regression tests\n\nCloses #3646\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T15:21:35+00:00"
+    },
+    {
+      "sha": "fbf4f918dc386f356c38fadbf84378e91779af03",
+      "message": "fix(ui): normalize remaining tooltip z-index to z-30\n\nAddresses review feedback: status badge tooltips in admin.html,\nadmin.js, tools_partial.html, and tools_with_pagination.html\nwere still using z-10 instead of z-30, inconsistent with the\nestablished hierarchy. Also replaces the non-asserting Alpine\ntooltip test with proper generateStatusBadgeHtml tests.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T15:40:09+00:00"
+    },
+    {
+      "sha": "4e423b9a532d794d861594e759923ea379a2ce9b",
+      "message": "fix(build): exclude Rust build artifacts from sdist manifest\n\nThe blanket *.lock include in MANIFEST.in was pulling in Rust\nincremental compilation .lock files from target/ dirs, and per-crate\ntarget/ dirs were not pruned. Replace with explicit Cargo.lock\nincludes and recursive-exclude for per-crate target/ directories.\nAlso add *.json to pick up bench_config.json.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T17:43:18+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 184,
+  "deletions": 126,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:39.485916",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:39.487339",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3698,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3698.json"
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4137,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4137"
+  },
+  "metadata": {
+    "title": "fix: Return proper JSON-RPC format for plugin exceptions in Rust internal endpoints",
+    "state": "closed",
+    "created_at": "2026-04-13T07:49:57+00:00",
+    "updated_at": "2026-05-09T21:56:05+00:00",
+    "closed_at": "2026-05-09T21:56:03+00:00",
+    "merged_at": "2026-05-09T21:56:03+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "bug",
+      "release-fix",
+      "ready"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\r\n\r\nFixes plugin-based access control in Rust MCP runtime execution path by returning properly formatted JSON-RPC errors instead of re-raising plugin exceptions.\r\n\r\n## Problem\r\n\r\nWhen `tool_pre_invoke` plugins block tool execution (return `continue_processing=False`), the tool still executes via Rust fallback path instead of being properly blocked.\r\n\r\n**Root Cause:** The `handle_internal_mcp_tools_call_resolve` endpoint re-raises `PluginError` and `PluginViolationError` exceptions, which get caught by the global exception handler. The global handler returns an incomplete JSON-RPC error format (missing \"jsonrpc\" and \"id\" fields), causing Rust to misinterpret the response as a fallback condition rather than a proper JSON-RPC error.\r\n\r\n## Solution\r\n\r\nChanged both internal endpoints (`/_internal/mcp/tools/call` and `/_internal/mcp/tools/call/resolve`) to:\r\n- Catch `PluginError` and `PluginViolationError` inline\r\n- Return complete JSON-RPC 2.0 format: `{\"jsonrpc\": \"2.0\", \"error\": {...}, \"id\": ...}`\r\n- Extract error codes from plugin exceptions with defensive type checking\r\n- Match the existing pattern used for `ToolError` and `JSONRPCError`\r\n\r\n## Changes\r\n\r\n### Production Code\r\n- **mcpgateway/main.py**: Updated exception handlers in both internal MCP endpoints\r\n  - Lines 9197-9208: `handle_internal_mcp_tools_call` \r\n  - Lines 9338-9368: `handle_internal_mcp_tools_call_resolve`\r\n  - Added defensive `isinstance()` checks to safely extract error codes from plugin exceptions\r\n\r\n### Tests\r\n- **tests/unit/mcpgateway/test_main_error_handlers.py**: Added 5 new tests\r\n  - Test both endpoints with `PluginError` and `PluginViolationError`\r\n  - Verify JSON-RPC format compliance (presence of \"jsonrpc\", \"error\", \"id\" fields)\r\n  - Test error code extraction and ID preservation\r\n  \r\n- **tests/unit/mcpgateway/test_main_extended.py**: Updated 2 existing tests\r\n  - Changed from expecting re-raised exceptions to expecting JSON-RPC format responses\r\n  - Tests now validate the correct behavior (returning structured errors)\r\n\r\n## Testing\r\n\r\n✅ **All 7 tests related to our changes pass:**\r\n- 5 new tests for plugin exception handling\r\n- 2 updated tests for close failure scenarios\r\n- No regressions in existing functionality\r\n\r\n## Impact\r\n\r\n- **Severity**: High - Fixes broken plugin-based access control\r\n- **Scope**: Only affects Rust MCP runtime execution path (`MCP_RUST_MODE=edge` or `full`)\r\n- **Backwards Compatibility**: No breaking changes - internal Rust↔Python interface only\r\n\r\n## Verification\r\n\r\nBefore this fix:\r\n```\r\n1. Rust calls resolve endpoint\r\n2. Plugin blocks → PluginViolationError raised\r\n3. Global handler returns incomplete error (missing \"jsonrpc\" field)\r\n4. Rust validation fails → treats as fallback\r\n5. Tool executes anyway ❌\r\n```\r\n\r\nAfter this fix:\r\n```\r\n1. Rust calls resolve endpoint  \r\n2. Plugin blocks → PluginViolationError caught inline\r\n3. Returns proper JSON-RPC: {\"jsonrpc\": \"2.0\", \"error\": {...}, \"id\": ...}\r\n4. Rust validation succeeds → returns error to client\r\n5. Tool properly blocked ✅\r\n```\r\n\r\nCloses #4103",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "610832e754c6695fb2758b6b082aec5cd8389456",
+      "message": "fix: return proper JSON-RPC format for plugin exceptions in internal endpoints\n\nPlugin exceptions (PluginError, PluginViolationError) were being re-raised\nin handle_internal_mcp_tools_call and handle_internal_mcp_tools_call_resolve,\ncausing them to be caught by global exception handlers that return incomplete\nJSON-RPC format (missing 'jsonrpc' and 'id' fields). This caused Rust runtime\nto misinterpret the response as a fallback condition and execute tools via\nPython path despite plugins blocking them.\n\nChanges:\n- Replace re-raise with inline JSON-RPC error handling in both endpoints\n- Extract error codes from violation/error objects (mcp_error_code, http_status_code)\n- Return proper JSON-RPC format: {'jsonrpc': '2.0', 'error': {...}, 'id': ...}\n- Update docstring to reflect correct behavior (not re-raising)\n- Add tests verifying JSON-RPC format compliance\n\nCloses #4103\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-13T07:20:09+00:00"
+    },
+    {
+      "sha": "b14013a7cbcf5fb7591b79321db6575e35c0d9d9",
+      "message": "test: add PluginError coverage for handle_internal_mcp_tools_call\n\nAdded test_call_plugin_error_returns_jsonrpc_format to ensure 100%\ncoverage of both PluginError and PluginViolationError paths in the\nhandle_internal_mcp_tools_call endpoint.\n\nThis achieves full coverage of all code paths modified in the fix for\nIssue #4103.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-13T07:25:20+00:00"
+    },
+    {
+      "sha": "e476777007c8f45c13b2212f568ccb7d1248e2b2",
+      "message": "fix: Update old tests to expect JSON-RPC format instead of re-raised plugin exceptions\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-13T07:38:58+00:00"
+    },
+    {
+      "sha": "8988e4d54b89f75a9db07695f103aa2329cd6fcd",
+      "message": "fix: apply PR review fixes for plugin exception JSON-RPC handling (#4103)\n\nApply code review fixes identified by council review:\n\n- Fix test imports: use cpex.framework.* instead of non-existent\n  mcpgateway.plugins.framework.* paths\n- Fix test patch targets: remove incorrect leading underscores from\n  get_internal_mcp_auth_context and get_rpc_filter_context\n- Update handle_internal_mcp_tools_call docstring to reflect that\n  plugin errors are returned as JSON-RPC, not re-raised\n- Validate plugin violation HTTP status codes against VALID_HTTP_STATUS_CODES\n  in resolve handler (mirrors global handler behavior)\n- Forward validated HTTP headers from plugin violations in resolve handler\n- Rename misleading test names to use returns_jsonrpc wording\n\nCloses #4103\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T20:43:22+00:00"
+    },
+    {
+      "sha": "976c8bed277754a7fa278f64a4b9fa066d59b51a",
+      "message": "test: add edge case tests for plugin exception JSON-RPC handling (#4103)\n\nAdd comprehensive edge case tests identified by council review:\n\n- test_resolve_defaults_when_violation_has_no_codes: verify default\n  JSON-RPC code (-32602) and HTTP status (422) when violation lacks\n  explicit mcp_error_code/http_status_code\n- test_resolve_rejects_invalid_http_status_code: verify fallback to\n  422 when plugin provides invalid status (999), using VALID_HTTP_STATUS_CODES\n- test_call_defaults_when_plugin_error_has_no_code: verify default\n  JSON-RPC code (-32603) when PluginError lacks mcp_error_code\n- test_resolve_forwards_validated_violation_headers: verify forwarded\n  headers (Retry-After, X-RateLimit-Limit) from plugin violations\n- test_resolve_drops_invalid_violation_headers: verify malformed\n  headers (null bytes in name) are dropped while valid ones kept\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T21:06:21+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 399,
+  "deletions": 17,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:52.667455",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:52.668272",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4137,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4137.json"
+  }
+}

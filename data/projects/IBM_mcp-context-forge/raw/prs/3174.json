@@ -1,0 +1,80 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3174,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3174"
+  },
+  "metadata": {
+    "title": "fix(security): reject control characters in name validation and fix pagination schema consistency",
+    "state": "closed",
+    "created_at": "2026-02-24T09:30:33+00:00",
+    "updated_at": "2026-03-09T01:49:30+00:00",
+    "closed_at": "2026-03-09T00:06:49+00:00",
+    "merged_at": "2026-03-09T00:06:49+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "security",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3078 due to repository maintenance. Your code and branch are intact. @shoummu1 please verify everything looks good.\n\n# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nFixes two edge-case validation issues across 8 files: (1) control character bypass in name validation allowing newlines/tabs (6 files), and (2) pagination schema mismatch returning raw dicts instead of declared Pydantic models (1 file, 6 endpoints).\r\n\r\n## 🔗 Related Issue\r\n\r\nCloses #3028\r\n\r\n## 🐞 Root Cause\r\n\r\n1. **EDGE-03 (6 locations):** `validation_name_pattern` used `\\s` which matches ALL whitespace including `\\n`, `\\t`, `\\r`, allowing control characters to bypass validation\r\n   - `mcpgateway/config.py:2098`\r\n   - `charts/mcp-stack/values.yaml:630`\r\n   - `tests/unit/mcpgateway/validation/test_validators_advanced.py:58`\r\n   - `docs/config.schema.json` (stale default)\r\n   - `docs/docs/config.schema.json` (stale default)\r\n   - `charts/mcp-stack/README.md` (stale generated docs table)\r\n\r\n2. **EDGE-01 (main.py:2506, 3176, 3639, 4163, 4646, 5134):** List endpoints with `include_pagination=True` constructed raw dicts manually instead of instantiating declared `CursorPaginated*Response` schemas, violating `response_model` contract\r\n\r\n## 💡 Fix Description\r\n\r\n### 1. EDGE-03: Control Character Bypass Fix\r\n\r\nChanged `validation_name_pattern` from `r\"^[a-zA-Z0-9_.\\-\\s]+$\"` to `r\"^[a-zA-Z0-9_.\\- ]+$\"` (literal space) to reject control characters while preserving space support. Updated in 6 locations for full consistency:\r\n\r\n- `mcpgateway/config.py` (line 2098): Application default\r\n- `charts/mcp-stack/values.yaml` (line 630): Kubernetes deployment config\r\n- `tests/unit/mcpgateway/validation/test_validators_advanced.py` (line 58): Test settings\r\n- `docs/config.schema.json`: JSON Schema default value\r\n- `docs/docs/config.schema.json`: JSON Schema default value\r\n- `charts/mcp-stack/README.md`: Helm chart docs table\r\n\r\nAlso added `test_validate_name_rejects_control_characters()` to explicitly cover `\\n`, `\\t`, `\\r`, `\\x0b`, `\\x0c` rejection — the exact EDGE-03 regression scenario.\r\n\r\n### 2. EDGE-01: Pagination Schema Fix\r\n\r\nReplaced manual dict construction in 6 list endpoints (gateways, servers, tools, resources, prompts, a2a_agents) with proper Pydantic schema serialization:\r\n\r\n**Before:**\r\n```python\r\npayload = {\"gateways\": [gateway.model_dump(by_alias=True) for gateway in data]}\r\nif next_cursor:\r\n    payload[\"nextCursor\"] = next_cursor\r\nreturn payload\r\n```\r\n\r\n**After:**\r\n```python\r\nserialized_data = [gateway.model_dump(by_alias=True) for gateway in data]\r\nreturn CursorPaginatedGatewaysResponse.model_construct(gateways=serialized_data, next_cursor=next_cursor).model_dump(by_alias=True)\r\n```\r\n\r\nThis ensures:\r\n- Response matches declared `response_model` type\r\n- Field aliases work correctly (`next_cursor` → `nextCursor`)\r\n- `nextCursor: null` always present when no more pages (correct per MCP cursor spec)\r\n- OpenAPI docs reflect actual response structure\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Result |\r\n|---|---|---|\r\n| Lint suite | `make lint` | Pass |\r\n| Unit tests | `make test` | Pass |\r\n| Coverage ≥ 90% | `make coverage` | Pass |\r\n| EDGE-03 regression | `\\n`/`\\t` in name → 422 | Pass |\r\n| EDGE-01 regression | `include_pagination=True` → proper schema object | Pass |\r\n\r\n## 📐 MCP Compliance\r\n\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "2a5e7e896fce402b9247856c78971e440d0fc682",
+      "message": "resolve validation bypass and pagination schema mismatch\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-19T13:21:45+00:00"
+    },
+    {
+      "sha": "fd05719cae74966922c022c3b48f334ba32fa5ae",
+      "message": "sync Helm chart validation pattern with control char fix\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-20T06:33:24+00:00"
+    },
+    {
+      "sha": "678a824925570695f68dec4028539bc5c76eadb5",
+      "message": "test fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-20T13:12:35+00:00"
+    },
+    {
+      "sha": "68a44dc6e27f1b4454b17787a8d3da57b5698ac8",
+      "message": "docs update\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-20T14:24:30+00:00"
+    },
+    {
+      "sha": "e20cee4940ba76f34cb82f472d8bd2c6b4149cea",
+      "message": "fix: update stale comment and add null cursor pagination test\n\n- Fix stale comment in validators.py that still referenced old \\s pattern\n- Add test_list_resources_pagination_null_cursor to verify nextCursor is\n  present as null when no more pages exist (EDGE-01 regression coverage)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T23:16:33+00:00"
+    },
+    {
+      "sha": "f67319751f780ea587cf123f752cfc33dc93e221",
+      "message": "fix: remove README duplicates, pass model instances in pagination handlers\n\n- Remove 24 duplicate config rows from Helm README that duplicated\n  existing entries and left a stale \\s pattern\n- Fix VALIDATION_NAME_PATTERN at its original README location to use\n  literal space instead of \\s\n- Simplify pagination handlers: pass model instances directly to\n  model_construct() instead of pre-serializing to dicts, eliminating\n  PydanticSerializationUnexpectedValue warnings\n- Update test assertions to use model attribute access matching the\n  new return type\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T23:54:07+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 66,
+  "deletions": 46,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:01.690799",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:01.692331",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3174,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3174.json"
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4427,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4427"
+  },
+  "metadata": {
+    "title": "fix(security): prevent internal exception details from leaking in HTTP responses",
+    "state": "closed",
+    "created_at": "2026-04-24T09:55:39+00:00",
+    "updated_at": "2026-05-10T08:15:04+00:00",
+    "closed_at": "2026-05-10T08:15:02+00:00",
+    "merged_at": "2026-05-10T08:15:02+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "security",
+      "ica",
+      "pentesting"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\r\n\r\nAddresses ICACF-20 (Penetration Testing finding): verbose error messages in HTTP responses can expose internal system details — stack traces, library names, database error text, filesystem paths, upstream API responses — that aid an attacker in identifying vulnerabilities or crafting targeted attacks. All changes follow the same pattern: exception text is kept in server-side logs (`logger.error`/`logger.debug`) for operator visibility, while the HTTP response `detail` field returns only a static, generic string.\r\n\r\n## Related Issue\r\n\r\nCloses #4319\r\n\r\n## Changes\r\n\r\n### New Global Safety Net (`mcpgateway/main.py`)\r\n\r\nAdded `@app.exception_handler(Exception)` — a catch-all handler that intercepts any unhandled exception that reaches the ASGI layer and returns a generic 500 response, preventing any accidental exception propagation from unknown paths.\r\n\r\n### Files Modified (13 files, ~75 individual fixes)\r\n\r\n**`mcpgateway/main.py`**\r\n- JSONPath expression errors: removed `{str(e)}` from 4 detail strings; added `logger.debug` for each; key name `'{new_key}'` retained (caller's own input)\r\n- Tags, entities, export, import 500-level catch-alls: static strings\r\n- MCP auth context 400: removed JWT decode internals from detail\r\n\r\n**`mcpgateway/admin.py`**\r\n- Root export, tags retrieval, export (×2), import preview, import: static strings\r\n- `ImportValidationError` detail simplified from `f\"Invalid import data: {str(e)}\"` to `str(e)` (domain exception — developer-authored message retained)\r\n- `ValueError` on JSON parse: static string (orjson parse errors expose byte positions)\r\n- `GrpcServiceError` (×3): static string — this exception wraps TLS certificate paths and filesystem errors from the gRPC reflection client\r\n- `PassthroughHeadersError`: added missing `logger.error`, static detail\r\n- Plugin marketplace list/stats/details (×3): static strings\r\n- System metrics, support bundle, performance metrics: static strings\r\n- Analytics endpoints (×14): latency percentiles, timeseries, slow/volume/error endpoints, latency heatmap, tool/prompt/resource usage and performance — all static\r\n\r\n**`mcpgateway/routers/oauth_router.py`**\r\n- `DcrError`: removed OAuth server response text; kept RFC 7591 configuration hint\r\n- `GatewayConnectionError`: static (wraps upstream HTTP response bodies)\r\n- 6× `except Exception` catch-alls: static strings\r\n\r\n**`mcpgateway/routers/llm_proxy_router.py`**\r\n- `LLMProxyAuthError` → 401: `\"Authentication failed\"` (was `str(e)` — upstream API auth errors can contain account/model details)\r\n- `LLMProxyRequestError` → 502: `\"Upstream request failed\"` (was `str(e)` — upstream API full HTTP error body)\r\n- `except Exception` → 500: static string\r\n\r\n**`mcpgateway/routers/llmchat_router.py`**\r\n- `ValueError` from `build_config` (×2): static strings\r\n- `ConnectionError` on MCP server connect: removed `{str(ce)}`; kept user-facing hint \"Please verify the server URL and authentication\"\r\n- `ValueError` on LLM config init: static string\r\n- `except Exception` (×3): static strings\r\n- `RuntimeError` in chat: `\"Chat service error\"`\r\n- `ConnectionError` in chat: `\"Lost connection to MCP server. Please reconnect.\"`\r\n\r\n**`mcpgateway/routers/log_search.py`**\r\n- Correlation trace, security events, audit trails (×3): all `except Exception` catch-alls on sensitive security/audit endpoints — static strings\r\n\r\n**`mcpgateway/routers/llm_config_router.py`**\r\n- `except Exception` → 500: `\"Failed to create provider\"`\r\n\r\n**`mcpgateway/routers/sso.py`**\r\n- `initiate_sso_login` `ValueError`: static (original message echoed user-supplied scope strings back in the response); added `logger.warning`\r\n- `create_provider`/`update_provider` `ValueError`: **kept as `str(exc)`** — these are admin-only endpoints; messages are developer-authored config validation strings (`\"Provider has no configured scopes\"`, `\"Issuer is not allowed\"`); useful to admins\r\n\r\n**`mcpgateway/routers/observability.py`**\r\n- Invalid request body 400: static; added `logger.debug`\r\n- Export failed 400: static; added `logger.exception`\r\n\r\n**`mcpgateway/routers/reverse_proxy.py`**\r\n- `except Exception` → 500: static; added `logger.debug`\r\n\r\n**`mcpgateway/routers/runtime_admin_router.py`**\r\n- `DcrError` equivalent: static; added `logger.debug`\r\n\r\n**`mcpgateway/utils/time_restrictions.py`**\r\n- Invalid time format 400: static; added missing `logger.debug`\r\n\r\n## What Was NOT Changed (intentional)\r\n\r\nAll `detail=str(e)` on **typed domain exceptions** with developer-authored messages\r\nwere left as-is — these are safe and useful:\r\n\r\n- `ToolNotFoundError`, `ResourceNotFoundError`, `PromptNotFoundError` → 404\r\n- `PermissionError` → 403 (always `\"Only the owner can...\"`)\r\n- `TeamMemberAddError` → 500 (single hardcoded message `\"Failed to add member to team\"`)\r\n- `TeamMemberLimitExceededError`, `TeamManagementError` → 400/409\r\n- `AuthenticationError` → 401 in `email_auth.py` (intentional auth error message)\r\n- `ImportValidationError`, `ImportServiceError`, `ExportError` → 400 (domain layer)\r\n- `GrpcServiceNameConflictError`, `GrpcServiceNotFoundError` → 409/404\r\n- `LLMModelNotFoundError`, `LLMProviderNotFoundError` → 404\r\n- `ValidationError`, `ConflictError` → 422/409 in main.py",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "088b8f9f4a7bfd1e1f2b34a896b1afec36ee1497",
+      "message": "fix(security): prevent internal exception details from leaking in HTTP responses\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Shoumi",
+      "date": "2026-04-23T11:45:18+00:00"
+    },
+    {
+      "sha": "06c0f34730d59efa99db5f674a4917a7ebd0bb7d",
+      "message": "fix(security): remove exception detail leaks from gRPC, analytics, plugin, SSO, LLM and OAuth endpoints\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Shoumi",
+      "date": "2026-04-24T07:53:34+00:00"
+    },
+    {
+      "sha": "3776d023b1c2ae7c306dffc28f40f23f2ddac492",
+      "message": "fix(lint): remove unused exception variables, add missing logger, update test assertions\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Shoumi",
+      "date": "2026-04-24T10:20:31+00:00"
+    },
+    {
+      "sha": "b5606ef86447b3963d1f3844597b48cbf407c912",
+      "message": "fix(test): update export_traces assertion to match new static error string\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Shoumi",
+      "date": "2026-04-24T11:34:15+00:00"
+    },
+    {
+      "sha": "77dfd21aaede43091f5f06cc4ec11be6026b62b7",
+      "message": "chore: update .secrets.baseline line numbers after rebase\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Shoumi",
+      "date": "2026-04-27T09:18:57+00:00"
+    },
+    {
+      "sha": "dec3a0fd4d0f442830e1750e93a6642d74705471",
+      "message": "fix: resolve remaining conflict markers in .secrets.baseline after rebase\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T06:12:58+00:00"
+    },
+    {
+      "sha": "2488f785993feb1345500958fa137e13f73184c5",
+      "message": "fix(security): address council review findings - generic error messages for import/SSO, fix observability status codes, improve logging levels\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T06:26:02+00:00"
+    },
+    {
+      "sha": "158e541a793a7247b6b1d6354eb4c768d5e7a4de",
+      "message": "fix(security): address council round 2 findings - fix missed admin import leak, restore llmchat logging, remove unused variable, fix tests\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T06:35:42+00:00"
+    },
+    {
+      "sha": "483c333943c71b7850603a1fc8004cf8da5309cf",
+      "message": "fix(security): add missing server-side logging for llmchat runtime and connection errors\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T06:45:40+00:00"
+    },
+    {
+      "sha": "5a7e1bafbc812935e853f6357a6495603e9bb6b4",
+      "message": "fix(test): update observability test for 500 status, remove unused AsyncMock import\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T06:55:20+00:00"
+    }
+  ],
+  "files_changed": 18,
+  "additions": 163,
+  "deletions": 111,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:08.051323",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:08.052460",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4427,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4427.json"
+  }
+}

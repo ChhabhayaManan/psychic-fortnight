@@ -1,0 +1,76 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4550,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4550"
+  },
+  "metadata": {
+    "title": "perf(cache): store full team objects in AuthCache to eliminate secondary DB query",
+    "state": "open",
+    "created_at": "2026-04-30T15:25:27+00:00",
+    "updated_at": "2026-05-07T09:20:54+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "msureshkumar88",
+    "labels": [
+      "enhancement",
+      "python",
+      "performance",
+      "COULD"
+    ],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88",
+      "ja8zyjits"
+    ]
+  },
+  "description": "## What and Why\n\nThe existing `get_user_teams()` cache stored only team IDs. Any downstream code needing full team objects (name, slug, visibility, membership state, etc.) had to fire a second DB query even on a cache hit — increasing latency and DB load under concurrency. This is the fix described in issue #3005.\n\n## Changes\n\n### `mcpgateway/cache/auth_cache.py`\n- Adds a dedicated `team_objs` L1/L2 cache bucket alongside the existing `teams_list` bucket.\n- New public methods: `team_to_dict()`, `get_user_team_objects()`, `set_user_team_objects()`.\n- `invalidate_user_teams()` and `invalidate_all()` now also evict `_team_objects_cache`.\n- `stats()` reports `team_objects_cache_size`.\n\n### `mcpgateway/services/team_management_service.py`\n- `get_user_teams()` now checks the full-object cache first; on a hit it reconstructs `EmailTeam` objects in-process via `_team_from_dict()` with zero DB queries.\n- On a cache miss the DB result is serialised and stored via `set_user_team_objects()` for subsequent requests.\n\n### Tests (`tests/unit/mcpgateway/cache/test_auth_cache_l1_l2.py`)\n- `TestUserTeamObjectsL1L2` class: L1 round-trip, empty-list caching, L2 Redis hit with write-through, invalidation, `invalidate_all`, `stats`, disabled-cache guard.\n- Branch-coverage additions: Redis miss (`data=None`), Redis `get()` exception, disabled early-return in `set_user_team_objects`, Redis `setex()` happy path, Redis `setex()` exception.\n- Overall coverage for the new methods: 99 %.\n\n## Behaviour Before / After\n\n| Scenario | Before | After |\n|---|---|---|\n| Cache hit | 1 cache lookup + 1 DB query | 1 cache lookup, 0 DB queries |\n| Cache miss | 1 DB query, IDs stored | 1 DB query, full objects stored |\n| Redis hit | IDs fetched + 1 extra DB query | Full objects returned directly |\n\n## Reproduction Steps (issue #3005)\n\n1. Start the gateway with a user that belongs to at least one team:\n   ```bash\n   cp .env.example .env && make install-dev\n   make dev\n   ```\n2. Generate a token and call an endpoint that resolves team membership (e.g. `GET /servers` with a team-scoped token):\n   ```bash\n   export TOKEN=$(python -m mcpgateway.utils.create_jwt_token \\\n     --username user@example.com --exp 60 --secret \"$JWT_SECRET_KEY\")\n   curl -s -H \"Authorization: Bearer $TOKEN\" http://localhost:8000/servers | jq .\n   ```\n3. Enable SQLAlchemy query logging (`LOG_LEVEL=DEBUG` in `.env`) and repeat the request.\n4. **Before this fix:** observe two SELECT statements per request — one for team IDs, one to hydrate each team object.\n5. **After this fix:** only one SELECT on the first request; subsequent requests show no SELECT at all (served from cache).\n\n## Manual Testing Steps\n\n### 1. Unit tests\n```bash\n.venv/bin/python -m pytest tests/unit/mcpgateway/cache/test_auth_cache_l1_l2.py \\\n  tests/unit/mcpgateway/services/test_team_management_service.py \\\n  tests/unit/mcpgateway/services/test_team_management_service_coverage.py -v\n```\nAll tests should pass with no failures or errors.\n\n### 2. Coverage check\n```bash\n.venv/bin/python -m pytest tests/unit/mcpgateway/cache/test_auth_cache_l1_l2.py \\\n  --cov=mcpgateway.cache.auth_cache --cov-report=term-missing\n```\nExpected: ≥ 99 % coverage for `auth_cache.py`; lines 859-861, 879, 884, 886, 888-891 reported as covered.\n\n### 3. Cache hit — no secondary DB query\n```bash\nmake dev  # start server\n# First request: populates cache (one DB query expected)\ncurl -s -H \"Authorization: Bearer $TOKEN\" http://localhost:8000/servers\n# Second request: served from cache (zero DB queries)\ncurl -s -H \"Authorization: Bearer $TOKEN\" http://localhost:8000/servers\n```\nWith `LOG_LEVEL=DEBUG`, the second request should show no `SELECT` for the `teams` table.\n\n### 4. Cache invalidation\nAdd or remove a user from a team via `POST /teams/{id}/members` or `DELETE /teams/{id}/members/{email}` and confirm that the next `GET /servers` call re-queries the DB (one SELECT), then subsequent calls are cached again.\n\n### 5. Redis path (optional)\nSet `REDIS_URL=redis://localhost:6379/0` in `.env`, start Redis, and repeat steps 3-4. Confirm that `team_objs:*` keys appear in Redis (`redis-cli keys 'team_objs:*'`) and are evicted on invalidation.\n\nCloses #3005",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "8e8508f67466f84679120923619f483b4ed7d70a",
+      "message": "perf(cache): store full team objects in cache to eliminate secondary DB query\n\nget_user_teams() previously hit the DB on every cache hit to hydrate\nEmailTeam objects from cached IDs. Add get/set_user_team_objects() to\nAuthCache using a new 'team_objs' Redis bucket and _team_objects_cache\nL1 dict. Update get_user_teams() to use the full-object path so cache\nhits are entirely DB-free. auth.py's ID-only cache bucket is unchanged.\n\nCloses #3005\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-30T12:07:50+00:00"
+    },
+    {
+      "sha": "0e5223090be7fe1aafccd2f72dad5fb6f46d7411",
+      "message": "test(cache): fix TestGetUserTeamsCachePaths to use full-object cache API\n\nUpdate mocks from get_user_teams/set_user_teams (old ID-based) to\nget_user_team_objects/set_user_team_objects (new dict-based) to match\nthe get_user_teams() implementation added in the previous commit.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-30T12:24:03+00:00"
+    },
+    {
+      "sha": "f1966d578a327be887fb40eefa89612d847bef62",
+      "message": "refactor(cache): make team_to_dict a public method to fix protected-access lint\n\nRename AuthCache._team_to_dict -> team_to_dict so callers outside the\nclass (team_management_service) are not accessing a protected member.\nUpdate all call sites and test mocks accordingly.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-30T14:14:24+00:00"
+    },
+    {
+      "sha": "89d6c4ff3b376b3dd31f7a3f698bdd531b438c46",
+      "message": "test(cache): cover missing branches in get/set_user_team_objects\n\nAdd 5 tests for lines 859-861, 879, 884, 886, 888-891 in auth_cache.py:\nRedis miss and Redis exception paths for get_user_team_objects; disabled\nearly-return, Redis happy-path, and Redis write exception for\nset_user_team_objects. Coverage for the new methods reaches 99%.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-30T15:13:30+00:00"
+    },
+    {
+      "sha": "ad5d1c288e48a389f780111a452575d68048d457",
+      "message": "add security baseline\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-30T15:20:18+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 427,
+  "deletions": 68,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T17:17:15.627979",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:15.628983",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4550,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4550.json"
+  }
+}

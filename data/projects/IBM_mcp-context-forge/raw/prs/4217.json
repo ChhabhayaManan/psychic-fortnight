@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4217,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4217"
+  },
+  "metadata": {
+    "title": "fix: handle root_path in MCPPathRewriteMiddleware for reverse proxy deployments",
+    "state": "closed",
+    "created_at": "2026-04-15T09:04:09+00:00",
+    "updated_at": "2026-04-15T15:19:45+00:00",
+    "closed_at": "2026-04-15T15:18:59+00:00",
+    "merged_at": "2026-04-15T15:18:59+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "ica",
+      "MUST",
+      "release-fix",
+      "ready"
+    ],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## Summary\n\nFixes #4215\n\nThe documented canonical MCP path pattern `/servers/{id}/mcp` was returning 404 in reverse proxy deployments with path prefixes (e.g., `/dev/mcp-gateway/service/gateway`). This occurred because `MCPPathRewriteMiddleware` was checking `original_path` without stripping the `root_path` prefix before pattern matching.\n\n## Root Cause\n\nPR #3892 added security validations that check `if original_path.startswith(\"/servers/\")` to prevent arbitrary path rewrites. However, in reverse proxy deployments where the ASGI scope contains a `root_path` prefix, the full incoming path is `/prefix/servers/{id}/mcp` which doesn't match the `/servers/` check, causing the middleware to skip the rewrite and return 404.\n\n## Solution\n\nFollowing established patterns in `streamablehttp_transport.py:831` and `token_scoping.py:354`, the fix:\n\n1. **Extracts root_path** from `scope[\"root_path\"]` or falls back to `settings.app_root_path`\n2. **Strips the prefix** to get the application-relative path for pattern matching\n3. **Preserves the prefix** when rewriting to `/mcp/` so downstream handlers receive the correct path\n4. **Maintains all security checks** from PR #3892 (empty server ID rejection, arbitrary path prevention)\n\n## Changes\n\n### `mcpgateway/main.py`\n- Added root_path extraction and stripping logic (~15 lines)\n- Changed all pattern matching to use `app_path` instead of `original_path`\n- Preserved root_path prefix when rewriting to `/mcp/`\n\n### `tests/unit/mcpgateway/test_main_extended.py`\n- Added 8 comprehensive unit tests covering:\n  - Single-level and multi-level root_path prefixes\n  - `APP_ROOT_PATH` fallback scenario\n  - Workaround pattern (`/mcp/servers/{id}`) with and without prefixes\n  - Security checks (arbitrary prefix rejection, empty server ID rejection) with prefixes\n\n## Test Results\n\n✅ All 1,532 relevant tests passing:\n- `test_main.py`: 275 tests\n- `test_main_extended.py`: 573 tests (including 8 new tests)\n- `test_streamablehttp_transport.py`: 440 tests\n- `test_token_scoping.py`: 244 tests\n\n## Backward Compatibility\n\nBoth URL patterns continue working:\n- ✅ `/servers/{id}/mcp` (documented canonical pattern) - **NOW FIXED**\n- ✅ `/mcp/servers/{id}` (undocumented workaround) - continues working\n\n## Security\n\nAll security validations from PR #3892 are preserved:\n- Empty server ID rejection (e.g., `/servers//mcp` → 404)\n- Arbitrary path prevention (e.g., `/foo/mcp` → not rewritten)\n- Pattern follows established codebase conventions",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4112579820",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-15T09:58:10+00:00",
+      "body": "Replaced the inline root_path stripping with the existing `_normalize_scope_path()` helper (`main.py:2548`) as part of the review. This gets us the `len(root_path) > 1` guard for `root_path=\"/\"` and the full path-segment boundary check (won't incorrectly strip `/app` from `/application/admin`) without duplicating logic.\n\nLGTM."
+    },
+    {
+      "id": "4114578220",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-15T14:52:55+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "62789dad1d8a87161cac3971945cf246500ab24b",
+      "message": "fix: handle root_path in MCPPathRewriteMiddleware for reverse proxy deployments\n\nFixes #4215\n\nThe /servers/{id}/mcp endpoint was returning 404 in reverse proxy\ndeployments with path prefixes because MCPPathRewriteMiddleware\nchecked original_path without stripping the root_path prefix.\n\n- Extract root_path from scope or settings before pattern matching\n- Strip root_path to get app-relative path for /servers/ detection\n- Preserve root_path when rewriting to /mcp/\n- Add 8 unit tests covering prefix scenarios and security checks\n\nPattern follows streamablehttp_transport.py:831 and token_scoping.py:354\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-15T09:02:25+00:00"
+    },
+    {
+      "sha": "7b03c10e1e639433f561c25f2ddc39d7121f9400",
+      "message": "refactor: use _normalize_scope_path in MCPPathRewriteMiddleware\n\nReplace inline root_path stripping with existing _normalize_scope_path()\nwhich provides full-segment boundary checks and root_path=\"/\" safety.\n\nCloses #4215\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-15T09:45:52+00:00"
+    },
+    {
+      "sha": "a265d6143b67a03c2bedaffdf188058c0edf3e7a",
+      "message": "Update .secrets.baseline\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-04-15T14:39:52+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 171,
+  "deletions": 9,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:09.871441",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:09.872165",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4217,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4217.json"
+  }
+}

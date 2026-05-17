@@ -1,0 +1,70 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3602,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3602"
+  },
+  "metadata": {
+    "title": "fix(ui): show federated prompt arguments in Admin UI instead of empty list",
+    "state": "closed",
+    "created_at": "2026-03-11T06:04:48+00:00",
+    "updated_at": "2026-03-12T13:22:18+00:00",
+    "closed_at": "2026-03-12T13:22:16+00:00",
+    "merged_at": "2026-03-12T13:22:16+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "ui",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## :pushpin: Summary\r\n\r\nPrompts registered via federated MCP servers always showed an empty argument list in the Admin UI. The arguments panel displayed `{}` instead of the actual argument names, descriptions, and required flags defined in the upstream MCP server.\r\n\r\n## :link: Related Issue\r\nCloses: #3447\r\n\r\n## :repeat: Reproduction Steps\r\n\r\nSee [#3447](https://github.com/IBM/mcp-context-forge/issues/3447). Briefly:\r\n1. Register an MCP server that exposes a prompt with arguments (e.g. `greet_user(name, style)`).\r\n2. Open the Admin UI → Prompts → click the registered prompt.\r\n3. The **Arguments** panel shows `{}` and the **Test Prompt** form shows no input fields.\r\n\r\n## 🐞 Root Cause\r\n\r\nIn `gateway_service.py`, every code path that creates or updates a federated `DbPrompt` hardcoded `argument_schema={}`, discarding the argument metadata returned by the upstream server in the `prompts/list` MCP response.\r\n\r\nAs a result, `convert_prompt_to_read()` in `prompt_service.py` (which reconstructs the `arguments` list by iterating over `argument_schema[\"properties\"]`) always returned an empty list, so the UI had nothing to render.\r\n\r\nAdditionally, in `admin.js` the fallback for missing arguments used `|| {}` (an object) instead of `|| []` (an array), and there was no human-readable \"No arguments\" message for prompts that genuinely have none.\r\n\r\n## :bulb: Fix Description\r\n\r\n**Backend (`gateway_service.py`):**\r\n- Added static helper `_build_prompt_argument_schema(prompt)` that converts the MCP `arguments` list (items with `name`, `description`, `required`) into the internal `{\"type\": \"object\", \"properties\": {...}, \"required\": [...]}` JSON schema — consistent with what `prompt_service.py` already does for user-created prompts.\r\n- Applied this helper in all 4 locations where `argument_schema={}` was hardcoded: federation create, federation orphan-reassign, `_update_or_create_prompts` create branch, and `_update_or_create_prompts` update branch.\r\n- Added `argument_schema` to the change-detection condition so that an upstream argument change triggers a DB update.\r\n\r\n**Frontend (`admin.js`):**\r\n- Fixed `|| {}` → `|| []` fallback in the edit modal (correct type for `validateJson`).\r\n- Replaced the raw `JSON.stringify(prompt.arguments || {})` in the view details panel with a conditional that renders `\"No arguments\"` when the list is empty and a formatted JSON array otherwise.\r\n\r\n## :test_tube: Verification\r\n\r\n| Check | Command | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite | `make lint` | Passed |\r\n| Unit tests | `make test` | Passed |\r\n| Coverage ≥ 90 % | `make coverage` | Passed |\r\n| Manual regression no longer fails | Register MCP server with prompt arguments → Admin UI now shows argument list and test form fields | Passed |\r\n\r\n## :triangular_ruler: MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec (`prompts/list` argument metadata: `name`, `description`, `required`)\r\n- [x] No breaking change to MCP clients\r\n\r\n## :white_check_mark: Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3929011309",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-11T11:43:15+00:00",
+      "body": " Summary\n   This PR addresses prompt argument display issues in the Admin UI and reverts a previous database schema change for A2A agents.\n\n   ✅ Positive Changes\n\n    1. Prompt Argument Schema Population (gateway_service.py)\n       - Added _build_prompt_argument_schema() static method to properly convert MCP prompt arguments into JSON schema format\n       - Method correctly handles: empty arguments, missing attributes, descriptions, and required fields\n       - Integrated into both _sync_gateway_metadata() and _update_or_create_prompts()\n       - Excellent test coverage with 3 comprehensive unit tests\n\n    2. UI Fix (admin.js)\n       - Fixed empty arguments display to show \"No arguments\" instead of empty JSON object\n       - Improved user experience when viewing prompts without arguments\n\n    3. Test Quality\n       - Well-structured tests for _build_prompt_argument_schema()\n       - Tests cover edge cases (empty, missing attributes, None descriptions)\n       - Updated existing tests to expect proper schema structure\n\n Code Quality:\n    - ✅ Follows coding standards (type hints, docstrings)\n    - ✅ Good test coverage for new functionality\n    - ✅ Proper error handling in _build_prompt_argument_schema()\n\nIt was also manually tested, and I can confirm that arguments in prompts display as expected. \n\nLGTM"
+    },
+    {
+      "id": "3936330062",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T12:49:41+00:00",
+      "body": "Rebased onto main (clean, no conflicts) and added 4 tests for full differential coverage of the new code paths.\n\n**Backend review** — All 4 locations where `argument_schema={}` was hardcoded are now correctly using `_build_prompt_argument_schema()`. The helper is consistent with the existing inline pattern in `prompt_service.py`, with the intentional difference that `required` is derived from MCP metadata rather than template placeholders — correct for federated prompts. Change detection at line 4322 properly handles `None` from old DB rows via `or {}`.\n\n**Frontend review** — The `|| {}` → `|| []` fix is correct (`prompt.arguments` is an array). The \"No arguments\" fallback is a good UX improvement. Compatible with `buildPromptTestForm()` which already expects array items with `name`/`description`/`required`.\n\n**Security** — No new endpoints, no auth changes, no unsanitized user input. No issues.\n\n**Tests added** (commit `729d68c`):\n- `test_build_prompt_argument_schema_arguments_none` — handles `arguments=None`\n- `test_update_or_create_prompts_new_prompt_with_arguments` — real arguments flow through to `argument_schema`\n- `test_update_or_create_prompts_argument_schema_change_triggers_update` — schema-only change triggers update\n- `test_update_or_create_prompts_no_update_when_schema_unchanged` — no spurious update when schema is identical\n\nAll 49 tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c747f4c81185986122aa0c6b8623dceaca5e4330",
+      "message": "populate prompt argument_schema from MCP metadata and fix empty arguments display in Admin UI\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-09T06:27:22+00:00"
+    },
+    {
+      "sha": "729d68c6cca7fe10a5e220c14f228d2750a57535",
+      "message": "test: add differential coverage for argument_schema change detection and real arguments\n\nCover the new argument_schema integration in _update_or_create_prompts:\n- arguments=None handling in _build_prompt_argument_schema\n- new prompts with real arguments populate argument_schema correctly\n- argument_schema change alone triggers prompt update\n- no update when argument_schema is unchanged\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T12:47:27+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 211,
+  "deletions": 10,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:08.551338",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:08.552428",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3602,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3602.json"
+  }
+}

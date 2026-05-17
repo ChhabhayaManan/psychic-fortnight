@@ -1,0 +1,36 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4617,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4617"
+  },
+  "metadata": {
+    "title": "[CHORE][LOGGING]: Migrate logger.<level>(f\"...\") calls to lazy %-style across mcpgateway/services/",
+    "state": "open",
+    "created_at": "2026-05-06T09:19:55+00:00",
+    "updated_at": "2026-05-07T09:46:05+00:00",
+    "closed_at": null,
+    "author": "jonpspri",
+    "labels": [
+      "python",
+      "chore",
+      "COULD",
+      "logging"
+    ],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88"
+    ]
+  },
+  "description": "### 🔧 Chore Summary\n\n`AGENTS.md` says \"Lazy logging style preferred\", and `#1837` (closed completed Jan 2026) addressed two specific hot paths (`sse_transport.py`, `resource_service.py`). However, the broader `mcpgateway/services/` tree still contains **~1000+ `logger.<level>(f\"…\")` calls** that #1837 didn't reach.\n\nPR #3202's deep review identified this as project-wide cleanup, with concrete numbers: 133 f-string log calls in `gateway_service.py`, 59 in `tool_service.py`, plus dozens more across the other ~50 service modules.\n\nThis isn't strictly a bug (most logs are at INFO/DEBUG and aren't on the request hot path), but:\n- Eager `f\"\"` formatting allocates and interpolates even when the log level is disabled.\n- It's inconsistent with the documented project convention.\n- Ruff G004 / Pylint W1203 catch it automatically; today neither is enabled in the project lint config.\n\n### 📐 Proposed approach\n\n1. Enable `ruff` rule `G004` (logging-f-string) repo-wide, but in `--select` mode rather than auto-fix initially.\n2. Run a one-shot codemod via [`flynt --transform-fstrings logging.warning`](https://github.com/ikamensh/flynt) or a custom `libcst` codemod over `mcpgateway/services/` to convert the dominant pattern. Examples:\n   - `logger.info(f\"Created tool {tool.id}\")` → `logger.info(\"Created tool %s\", tool.id)`\n   - `logger.error(f\"failed: {e}\")` → `logger.error(\"failed: %s\", e)`\n3. Manually review hot-path / multi-arg cases the codemod didn't catch.\n4. Add `G004` to the pre-commit ruff config so new f-string log calls are blocked at commit time.\n\n### 📋 Acceptance Criteria\n\n- `ruff check mcpgateway/services/ --select G004` returns 0 errors.\n- `.pre-commit-config.yaml` enables `G004` so regressions are caught.\n- No behavioral change in log output (the percent-format placeholders evaluate to the same strings).\n- A spot-benchmark on a debug-disabled hot path shows the expected nanosecond-level reduction (or just confirms no regression — this is mostly a hygiene change).\n\n### 🔗 Context\n\n- Precursor: #1837 (closed completed) — narrower scope (`sse_transport.py`, `resource_service.py` only).\n- Source: deep-review of PR #3202, item #18 in [PR comment](https://github.com/IBM/mcp-context-forge/pull/3202#issuecomment-4386420357).\n- AGENTS.md \"Coding Standards\" section mentions lazy logging as preferred.\n\n### 📓 Notes\n\nThis is intentionally split out from the PR #3202 work because the surface area (~1000 call sites across ~50 files) makes it a separate review and code-mod exercise, not something to fold into a feature PR.\n",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:43.707077",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:43.707438",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4617,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4617.json"
+  }
+}

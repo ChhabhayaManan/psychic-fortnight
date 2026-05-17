@@ -1,0 +1,96 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2194,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2194"
+  },
+  "metadata": {
+    "title": "Key auth support for MCP Servers - closes #1580",
+    "state": "closed",
+    "created_at": "2026-01-19T20:07:03+00:00",
+    "updated_at": "2026-01-19T22:06:26+00:00",
+    "closed_at": "2026-01-19T22:06:24+00:00",
+    "merged_at": "2026-01-19T22:06:24+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "wxo"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\nAdd support for API key authentication via URL query parameters for upstream MCP servers that require this method (e.g., Tavily MCP).\r\n\r\nThis feature is disabled by default and requires explicit opt-in due to the inherent security risks of exposing API keys in URLs (CWE-598).\r\n\r\n## Motivation\r\n\r\nSome MCP servers (such as Tavily) require API key authentication via URL query parameters rather than HTTP headers. The existing authentication mechanisms (Basic, Bearer, OAuth, Custom Headers) all work through HTTP headers, making it impossible to connect to these services without this feature.\r\n\r\nCloses #1580\r\n\r\n## Changes\r\n\r\n### Database & Schema\r\n- Add `auth_query_params` JSON column to `gateways` table (Alembic migration)\r\n- Add `auth_query_param_key` and `auth_query_param_value` fields to GatewayCreate/Update schemas\r\n- Add `auth_query_param_key` and `auth_query_param_value_masked` fields to GatewayRead schema\r\n- Add Pydantic validators for feature flag and host allowlist enforcement\r\n\r\n### Configuration\r\n- Add `INSECURE_ALLOW_QUERYPARAM_AUTH` feature flag (default: `false`)\r\n- Add `INSECURE_QUERYPARAM_AUTH_ALLOWED_HOSTS` allowlist (default: `[]`)\r\n- Update `.env.example` with documentation\r\n- Update Helm chart `values.yaml`\r\n\r\n### Services\r\n- **GatewayService**: Handle query_param auth in register/update, apply to SSE/StreamableHTTP connections\r\n- **ToolService**: Decrypt and apply query params to URL during tool invocation\r\n- **ResourceService**: Apply query params to URL during resource fetch\r\n- **ExportService**: Include `auth_query_params` in gateway exports\r\n- **ImportService**: Handle `auth_query_params` in gateway imports\r\n\r\n### Utilities\r\n- Create `mcpgateway/utils/url_auth.py` with:\r\n  - `apply_query_param_auth()`: Append decrypted auth params to URLs\r\n  - `sanitize_url_for_logging()`: Redact sensitive params before logging\r\n  - `STATIC_SENSITIVE_PARAMS`: FrozenSet of known sensitive parameter names\r\n\r\n### Admin UI\r\n- Add \"Query Parameter (INSECURE)\" option to auth type dropdown\r\n- Add security warning banner when selected\r\n- Add input fields for parameter name and API key value\r\n- Handle display of masked values when editing existing gateways\r\n\r\n### Documentation\r\n- Add ADR-035: Query Parameter Authentication for Gateway Peers\r\n- Add usage guide: `docs/docs/using/query-param-auth.md`\r\n- Update README.md with new environment variables\r\n- Update CLAUDE.md with Alembic migration guidance\r\n\r\n## Security Architecture\r\n\r\n```\r\n┌─────────────────────────────────────────────────────────────────┐\r\n│                     Security Controls                           │\r\n├─────────────────────────────────────────────────────────────────┤\r\n│  Layer 1: Feature Flag (INSECURE_ALLOW_QUERYPARAM_AUTH)         │\r\n│           └─ Disabled by default, requires explicit opt-in      │\r\n├─────────────────────────────────────────────────────────────────┤\r\n│  Layer 2: Host Allowlist (INSECURE_QUERYPARAM_AUTH_ALLOWED_HOSTS)│\r\n│           └─ Empty = any host, Non-empty = strict allowlist     │\r\n├─────────────────────────────────────────────────────────────────┤\r\n│  Layer 3: Encrypted Storage (AUTH_ENCRYPTION_SECRET)            │\r\n│           └─ API keys encrypted at rest in database             │\r\n├─────────────────────────────────────────────────────────────────┤\r\n│  Layer 4: Log Sanitization (sanitize_url_for_logging)           │\r\n│           └─ Sensitive params redacted before any logging       │\r\n├─────────────────────────────────────────────────────────────────┤\r\n│  Layer 5: UI Warning                                            │\r\n│           └─ Explicit security warning in Admin UI              │\r\n└─────────────────────────────────────────────────────────────────┘\r\n```\r\n\r\n## Example Usage\r\n\r\n### Enable the Feature\r\n```bash\r\nINSECURE_ALLOW_QUERYPARAM_AUTH=true\r\nINSECURE_QUERYPARAM_AUTH_ALLOWED_HOSTS=[\"mcp.tavily.com\"]\r\n```\r\n\r\n### Register Tavily MCP\r\n```bash\r\ncurl -X POST http://localhost:4444/admin/gateways \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -d '{\r\n    \"name\": \"Tavily Search\",\r\n    \"url\": \"https://mcp.tavily.com\",\r\n    \"transport\": \"sse\",\r\n    \"auth_type\": \"query_param\",\r\n    \"auth_query_param_key\": \"tavilyApiKey\",\r\n    \"auth_query_param_value\": \"tvly-your-api-key\"\r\n  }'\r\n```\r\n\r\n## Testing\r\n\r\n- [x] Unit tests for `url_auth.py` (19 tests)\r\n- [x] All existing tests pass (5182 passed)\r\n- [x] `make pylint` passes (10.00/10)\r\n- [x] `make flake8` passes\r\n- [x] `make bandit` passes\r\n- [x] Alembic migration verified (single head)\r\n\r\n## Checklist\r\n\r\n- [x] Code follows project conventions\r\n- [x] Tests added for new functionality\r\n- [x] Documentation updated (README, ADR, usage guide)\r\n- [x] Environment variables documented in `.env.example`\r\n- [x] Helm chart updated\r\n- [x] Security implications documented\r\n- [x] Commits signed (DCO)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "84bc6270dfed48188a91aa9ca839d5b2ba4d3be6",
+      "message": "feat: Add query parameter authentication for gateway peers (#1580)\n\nAdd support for API key authentication via URL query parameters for\nupstream MCP servers that require this method (e.g., Tavily MCP).\n\nSecurity controls:\n- Feature disabled by default (INSECURE_ALLOW_QUERYPARAM_AUTH=false)\n- Host allowlist restricts which servers can use this auth method\n- API keys encrypted at rest using AUTH_ENCRYPTION_SECRET\n- URLs sanitized before logging to redact sensitive parameters\n- Explicit security warnings in Admin UI\n\nChanges:\n- Add auth_query_params column to gateways table with Alembic migration\n- Add query_param auth type to GatewayCreate/Update/Read schemas\n- Create mcpgateway/utils/url_auth.py with helper functions\n- Update gateway, tool, resource services to handle query param auth\n- Update export/import services for backup/restore support\n- Add Query Parameter (INSECURE) option to Admin UI\n- Add feature flags to config.py, .env.example, Helm values.yaml\n- Add ADR-035 and usage documentation\n- Add unit tests for url_auth module\n- Update AGENTS.md with Alembic migration guidance\n\nCloses #1580\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T19:41:57+00:00"
+    },
+    {
+      "sha": "d1c6cde56f8da7b8ce04f6a4ca928be76482d90b",
+      "message": "fix: resolve pylint implicit string concatenation warnings\n\nUse explicit + concatenation for multi-line error messages in\nValueError raises to satisfy pylint W1404 checks.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T19:58:26+00:00"
+    },
+    {
+      "sha": "fc6a3963e795d28deebff34cb10aa1658b9188e5",
+      "message": "Fix eslint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T20:16:07+00:00"
+    },
+    {
+      "sha": "9c79df8cd6f955b17af515751667103a122ce309",
+      "message": "Fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T20:34:06+00:00"
+    },
+    {
+      "sha": "dd9897eea6047a89022de8beb9a6a04a2e564fd5",
+      "message": "fix: Address remaining query-param auth review findings\n\n- Fix auth_type overwrite bug: Only update auth_type when explicitly\n  provided in update (not when None)\n- Apply query-param auth to activation/refresh/health-check paths\n- Sanitize server_url in structured tool logs to prevent key leakage\n- Update test assertions to use settings.masked_auth_value consistently\n\nFixes URL allowlist bypass, structured log exposure, and initialization\npaths for query_param gateways.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T20:44:46+00:00"
+    },
+    {
+      "sha": "a863a86a9d736ac67dc2d82422d42e48c44a22ea",
+      "message": "docs: Add docstring for default_handler_factory in mcp_session_pool\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T20:54:26+00:00"
+    },
+    {
+      "sha": "a0c7b8d6ea035e9a9e53b15b890e4bfe1c068612",
+      "message": "Fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T21:23:14+00:00"
+    },
+    {
+      "sha": "77dae31649e41d88373709f5b6af59f59c15cae1",
+      "message": "Lint fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T21:40:33+00:00"
+    },
+    {
+      "sha": "cdd4c40ba406398f6a481b6b8539094258b0cf4d",
+      "message": "Lint fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T21:45:45+00:00"
+    }
+  ],
+  "files_changed": 25,
+  "additions": 2081,
+  "deletions": 84,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:50.248381",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:50.250282",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2194,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2194.json"
+  }
+}

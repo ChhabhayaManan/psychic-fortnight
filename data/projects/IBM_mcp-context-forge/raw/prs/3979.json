@@ -1,0 +1,97 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3979,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3979"
+  },
+  "metadata": {
+    "title": "feat(plugins): add multi-tenancy support with per-server plugin managers",
+    "state": "closed",
+    "created_at": "2026-04-01T16:44:43+00:00",
+    "updated_at": "2026-04-08T08:19:37+00:00",
+    "closed_at": "2026-04-07T14:14:43+00:00",
+    "merged_at": null,
+    "author": "cafalchio",
+    "labels": [
+      "wxo"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "\r\n## 🔗 Related Issue\r\nCloses #3801\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nPreviously the gateway had a single global `PluginManager` singleton initialized at startup.\r\nThis PR replaces it with a `TenantPluginManagerFactory` that creates and caches isolated\r\n`TenantPluginManager` instances per virtual server, enabling each tenant to have independent\r\nplugin configurations, priorities, and modes.\r\n\r\n### Architecture\r\n\r\n```\r\nBefore\r\n──────\r\nstartup\r\n  └─ TenantPluginManager (singleton, Borg shared state)\r\n       └─ all requests share one config\r\n\r\nAfter\r\n─────\r\nget_plugin_manager(context_id)              # async, called per-request\r\n  └─ TenantPluginManagerFactory (global singleton)\r\n       ├─ _managers[\"__global__\"]          # global / fallback \r\n       ├─ _managers[\"server-abc\"]          # per-tenant \r\n       └─ _managers[\"server-xyz\"]\r\n             └─ merged config = base YAML ⊕ tenant overrides\r\n```\r\n\r\n\r\n**Key flows:**\r\n\r\n- `get_plugin_manager(context_id)` — lazy-creates and caches a manager for `context_id`.\r\n  Uses a double-checked lock pattern: fast path is a plain dict read; slow path holds\r\n  the `asyncio.Lock` only during the final cache insert, so concurrent lookups for\r\n  different servers never block each other.\r\n- `shutdown_plugin_manager_factory()` — called from lifespan teardown; shuts down all\r\n  cached managers and clears the factory reference.\r\n- `TenantPluginManager._merge_tenant_config(context_id)` — overlays per-server plugin\r\n  overrides (config, mode, priority) from `_tenant_configs` onto the base YAML config.\r\n- `BaseService._get_plugin_manager(context_id)` — single entry point for all services\r\n  (tool, resource, prompt); falls back to an injected `_plugin_manager` mock in tests.\r\n\r\n### Changed components\r\n\r\n| File | Change |\r\n|------|--------|\r\n| `plugins/framework/manager.py` | Add `TenantPluginManager`, `TenantPluginManagerFactory`; `_DEFAULT_CONTEXT_ID` sentinel; fix Borg init ordering bug |\r\n| `plugins/framework/__init__.py` | Replace `_plugin_manager` singleton + `set_plugin_manager` with async `get_plugin_manager(context_id)` and `shutdown_plugin_manager_factory` |\r\n| `mcpgateway/main.py` | Remove startup-time singleton init; resolve manager lazily at request time; call `shutdown_plugin_manager_factory()` on teardown |\r\n| `mcpgateway/services/base_service.py` | Add `_get_plugin_manager(context_id)` shared helper |\r\n| `mcpgateway/services/{tool,resource,prompt}_service.py` | Use `_get_plugin_manager` instead of module-level import |\r\n| `mcpgateway/middleware/rbac.py` | Minor import cleanup |\r\n| `plugins/config.yaml` | Updated plugin config |\r\n| `tests/` | Updated to inject `_plugin_manager` mock via instance attribute |\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\nBackward compatibility:\r\n    The global ``__global__`` context uses ``PluginManager`` with ``singleton=True``\r\n    (Borg shared state) to preserve backward-compatible behaviour for deployments that\r\n    do not use virtual-server tenancy.  Per-server managers created by\r\n    ``TenantPluginManagerFactory`` use ``TenantPluginManager`` (Borg disabled) so each\r\n    has fully independent state.\r\n\r\nConcurrency safety:\r\n    ``TenantPluginManagerFactory.get_manager`` uses a task-based double-checked pattern.\r\n    The fast path (dict read inside the lock) is safe in asyncio's single-threaded model.\r\n    The slow path creates a single ``asyncio.Task`` per ``context_id`` and stores it in\r\n    ``_inflight`` while the lock is held, so only one build task is ever started for a\r\n    given context.  Concurrent callers waiting on the same ``context_id`` all await the\r\n    same task.  Once the task completes, ``_build_manager`` stores the result in\r\n    ``_managers`` under the lock, and ``get_manager`` re-checks the cache before\r\n    returning so that any replacement triggered by ``reload_tenant`` is honoured.\r\n\r\n",
+  "comments": [
+    {
+      "id": "3028189184",
+      "author": "araujof",
+      "created_at": "2026-04-02T13:52:05+00:00",
+      "body": "Suggestion: rename it as `TenantPluginManager` or similar to better reflect the intent/semantics/use. "
+    },
+    {
+      "id": "3028202575",
+      "author": "araujof",
+      "created_at": "2026-04-02T13:54:20+00:00",
+      "body": "I think we should guard concurrent writes to the borg state to protect against race conditions. Check the constructor of `PluginManager` to see how we did it there."
+    },
+    {
+      "id": "3028207248",
+      "author": "araujof",
+      "created_at": "2026-04-02T13:55:10+00:00",
+      "body": "If you change the name of `DBPluginManagerFactory`, change it here too for consistency."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4050817771",
+      "author": "araujof",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-02T13:58:57+00:00",
+      "body": "@cafalchio I made some initial comments inlined in the code. Overall, I like the direction: \n- reuse `get_plugin_manager` as a factory for tenant plugin managers\n- the new tenant plugin managers subclasses the original plugin manager, preserving contracts"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "15e2a6d6df7421d405d164bee8e28e65c4633d48",
+      "message": "add per-context plugin manager with TenantPluginManagerFactory\n\nIntroduce context-scoped plugin isolation via a new TenantPluginManagerFactory\nsingleton. Each virtual server/tenant receives its own TenantPluginManager with\nan independently merged plugin config, while the __global__ manager continues to\nserve non-context-aware call sites.\n\n- Add TenantPluginManager (disables Borg state sharing) and\n  TenantPluginManagerFactory (async-safe, deduplicating cache/factory)\n- Update framework __init__ accessors: init_plugin_manager_factory(),\n  get_plugin_manager(server_id), shutdown/reset helpers\n- Wire services (tool, prompt, resource, classification) to pass server_id\n  when resolving plugin managers\n- Update main.py lifespan to initialize factory eagerly at startup\n- Add PluginConfigOverride model and shallow config merge logic\n- Add architecture doc and 756-line test suite for tenant-scoped plugin execution\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-06T22:23:15+00:00"
+    },
+    {
+      "sha": "8c0a033d8d4f7171fc6d8e5bc0d12ea55cc204d1",
+      "message": "ran pre-commit to update secrets\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T08:01:37+00:00"
+    },
+    {
+      "sha": "2a7073acffe8bb1c0bb3f7eda875d46560f77661",
+      "message": "Update architecture, linted and secrets\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T08:31:22+00:00"
+    },
+    {
+      "sha": "dccccda3a034a5ed7f51cf5c2d507dae42ccf977",
+      "message": "updated secrets\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T08:49:33+00:00"
+    },
+    {
+      "sha": "06147b9628c67777b56d4d1ad6231fe938302366",
+      "message": "audited and scan secrets\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-04-07T09:07:12+00:00"
+    }
+  ],
+  "files_changed": 39,
+  "additions": 2459,
+  "deletions": 764,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:07:01.279366",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:01.279945",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3979,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3979.json"
+  }
+}

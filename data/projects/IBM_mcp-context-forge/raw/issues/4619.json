@@ -1,0 +1,29 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4619,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4619"
+  },
+  "metadata": {
+    "title": "[BUG][UI]: 'Add LLM Provider' and 'Add LLM Model' modals silently fail — onsubmit references undefined globals",
+    "state": "open",
+    "created_at": "2026-05-06T09:28:11+00:00",
+    "updated_at": "2026-05-06T09:34:31+00:00",
+    "closed_at": null,
+    "author": "meltforce",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nTwo modals on `/admin/#llm-settings` silently fail when clicking the Save button: **Add LLM Provider** (Providers tab) and **Add LLM Model** (Models tab). In both cases the modal closes, no provider/model is added, no error toast, no log line — nothing observable.\n\n## Root cause\n\n`mcpgateway/templates/admin.html` has two `<form>` elements whose inline `onsubmit` references a bare global, but the bundled admin JS only exposes those handlers under the `Admin` namespace:\n\n| Line | Current                                                        | Should be                                                            |\n|------|----------------------------------------------------------------|-----------------------------------------------------------------------|\n| 2081 | `<form id=\"llm-provider-form\" onsubmit=\"saveLLMProvider(event)\">` | `<form id=\"llm-provider-form\" onsubmit=\"Admin.saveLLMProvider(event)\">` |\n| 2179 | `<form id=\"llm-model-form\" onsubmit=\"saveLLMModel(event)\">`      | `<form id=\"llm-model-form\" onsubmit=\"Admin.saveLLMModel(event)\">`       |\n\n`admin.js` registers both as `Admin.saveLLMProvider = saveLLMProvider` / `Admin.saveLLMModel = saveLLMModel`, but neither is exposed as a `window` global. The bare reference therefore raises `ReferenceError`. With no return value preventing default, the form falls back to a normal browser submit → `GET .` → page silently re-renders → modal disappears, nothing is POSTed.\n\nThe same template uses `onchange=\"Admin.onLLMProviderTypeChange()\"` / `onchange=\"Admin.onModelProviderChange()\"` on the lines right next to these forms, which is consistent with how the bundle actually exposes these functions. Only the `onsubmit` calls were missed.\n\nA quick scan of the rest of `admin.html` confirms these are the only two cases: every other inline handler (`toggleBulkImportDropdown`, `submitUserInvitation`, `closeCreateTeamModal`, …) refers to a function that *is* a real `window` global. Only `saveLLMProvider` / `saveLLMModel` are namespace-mismatched.\n\n## Reproduction\n\n1. Run `ghcr.io/ibm/mcp-context-forge:1.0.0` (or `latest` / `main`).\n2. Sign in as the platform admin.\n3. Navigate to `/admin/#llm-settings`.\n\n**Provider:**\n4. Click **Add Provider**, fill `Name` + select `Anthropic` + paste any API key.\n5. Click **Save Provider**.\n\n**Model** (after a provider exists):\n6. Switch to **Models** tab, click **Add Model**, pick the provider, fill `Model ID` + `Display Name`.\n7. Click **Save Model**.\n\n**Expected:** `POST /llm/providers` (or `/llm/models`) → `201 Created`; entity appears in the list.\n\n**Actual:** Modal closes, no network request fires, \"0 Total\" remains.\n\nDevTools confirmation:\n\n```js\n> typeof window.saveLLMProvider          // \"undefined\"\n> typeof window.Admin.saveLLMProvider    // \"function\"\n> typeof window.saveLLMModel             // \"undefined\"\n> typeof window.Admin.saveLLMModel       // \"function\"\n> new Function('event','saveLLMProvider(event)')(new Event('submit'))\n   Uncaught ReferenceError: saveLLMProvider is not defined\n```\n\n## Fix\n\nTwo-line template change (PR follows): namespace both `onsubmit` calls.\n\n```diff\n-              <form id=\"llm-provider-form\" onsubmit=\"saveLLMProvider(event)\">\n+              <form id=\"llm-provider-form\" onsubmit=\"Admin.saveLLMProvider(event)\">\n...\n-              <form id=\"llm-model-form\" onsubmit=\"saveLLMModel(event)\">\n+              <form id=\"llm-model-form\" onsubmit=\"Admin.saveLLMModel(event)\">\n```\n\n## Workaround (verified locally)\n\nBind-mount a patched `admin.html` with the two lines above. After that, both **Save Provider** and **Save Model** correctly fire `POST /llm/providers` / `POST /llm/models → 201`.\n\n## Affected versions\n\n- `v1.0.0` (GA, 2026-05-01) — confirmed\n- `main` HEAD — same lines, same bug\n\n## Environment\n\n- Container: `ghcr.io/ibm/mcp-context-forge:latest` (currently == v1.0.0)\n- Browser: Chrome (any), but the bug is a server-side template issue, not browser-specific.\n- Auth: `PLATFORM_ADMIN` user, all RBAC routers loaded normally.",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:43.678223",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:43.678849",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4619,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4619.json"
+  }
+}

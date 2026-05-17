@@ -1,0 +1,77 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4707,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4707"
+  },
+  "metadata": {
+    "title": "[BUG]: No logging in SQL Sanitizer plugin",
+    "state": "open",
+    "created_at": "2026-05-11T15:42:18+00:00",
+    "updated_at": "2026-05-12T16:24:10+00:00",
+    "closed_at": null,
+    "author": "sco3",
+    "labels": [
+      "bug",
+      "wxo"
+    ],
+    "milestone": null,
+    "assignees": [
+      "dima-zakharov"
+    ]
+  },
+  "description": "### 🐞 Bug Summary\nThe other plugins in our /plugins directory include some logging:\n```\nfrom mcpgateway.services.logging_service import LoggingService\n\n# Initialize logging service first\nlogging_service = LoggingService()\nlogger = logging_service.get_logger(__name__)\n\n...\nlogger.info(\"Deny list plugin shutting down\")\n```\nThe SQL Sanitizer is not implemented this way. No logging at all.\n---\n\n### 🧩 Affected Component\nSelect the area of the project impacted:\n\n- [x] `mcpgateway` - API\n- [ ] `mcpgateway` - UI (admin panel)\n- [ ] `mcpgateway.wrapper` - stdio wrapper\n- [ ] Federation or Transports\n- [ ] CLI, Makefiles, or shell scripts\n- [ ] Container setup (Docker/Podman/Compose)\n- [ ] Other (explain below)\n\n---\n\n### 🔁 Steps to Reproduce\n\n1. Run server 'make serve'\n2. Enable SQL Sanitizer\n3. Test SQL Sanitizer\n\n---\n\n### 🤔 Expected Behavior\nOne need to check if plugin was initalized, was executed, was shutdown, at least DEBUG level messages should be logged in module.\n\n---\n\n### 📓 Logs / Error Output\nNone\n---\n\n### 🧠 Environment Info\nYou can retrieve most of this from the `/version` endpoint.\n\n| Key | Value |\n|-----|-------|\n| Version or commit |  FROM ghcr.io/ibm/mcp-context-forge:c3251f61698c88112f94aee399a32ee341f0746c  git: 72b6680510a0efd34250feba356d1f129ed2ebc4  |\n| Runtime | Python 3.12, Gunicorn |\n| Platform / OS | Fedora, macOS |\n| Container | Docker |\n\n---\n\n### 🧩 Additional Context (optional)\nAdd any configuration details, flags, or related issues.\n",
+  "comments": [
+    {
+      "id": "4422281104",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-11T15:45:54+00:00",
+      "body": "Sorry created under wrong account. "
+    },
+    {
+      "id": "4428693377",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-12T08:28:58+00:00",
+      "body": "Tested with DEBUG_LEVEL and \npayload was logged:\n\n```\n{\"asctime\": \"2026-05-12T08:20:18\", \"name\": \"plugins.sql_sanitizer.sql_sanitizer\", \"levelname\": \"DEBUG\", \"message\": \"SQL-SANITIZER payload: CopyOnWriteDict({'message': 'DROP table asdf'})\", \"@timestamp\": \"2026-05-12T08:20:18.783513Z\", \"hostname\": \"dzgb\", \"process_id\": 1077, \"request_id\": \"d693425846e546e3a0e888ea3ac46ee0\"}\n\n```\nconfig was logged:\n```\n{\"asctime\": \"2026-05-12T08:20:18\", \"name\": \"plugins.sql_sanitizer.sql_sanitizer\", \"levelname\": \"DEBUG\", \"message\": \"SQL-SANITIZER config: name='SQLSanitizer' description='Detects risky SQL and optionally strips comments or blocks' author='ContextForge' kind='plugins.sql_sanitizer.sql_sanitizer.SQLSanitizerPlugin' namespace=None version='0.1.0' hooks=['prompt_pre_fetch', 'tool_pre_invoke'] tags=['security', 'sql', 'validation'] mode=<PluginMode.SEQUENTIAL: 'sequential'> on_error=<OnError.FAIL: 'fail'> priority=45 max_content_size=10000000 conditions=[] applied_to=None capabilities=frozenset() config={'fields': ['sql', 'query', 'statement', 'message'], 'blocked_statements': ['\\\\\\\\bDROP\\\\\\\\b', '\\\\\\\\bTRUNCATE\\\\\\\\b', '\\\\\\\\bALTER\\\\\\\\b', '\\\\\\\\bGRANT\\\\\\\\b', '\\\\\\\\bREVOKE\\\\\\\\b'], 'block_delete_without_where': True, 'block_update_without_where': True, 'strip_comments': True, 'require_parameterization': False, 'block_on_violation': True} mcp=None grpc=None unix_socket=None\", \"@timestamp\": \"2026-05-12T08:20:18.778822Z\", \"hostname\": \"dzgb\", \"process_id\": 1077, \"request_id\": \"d693425846e546e3a0e888ea3ac46ee0\"}\n```"
+    },
+    {
+      "id": "4428695561",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-12T08:29:18+00:00",
+      "body": "I am going to update workflow in order to see these log messages in workflow"
+    },
+    {
+      "id": "4429780148",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-12T10:54:17+00:00",
+      "body": "The payload to test (may be a reason for failures):\n```\n{\n  \"path\": \"sql.txt\",\n  \"edits\": [\n    {\n      \"new\": \"DROP table tab1;\",\n      \"old\": \"DROP table tab1;\"\n    }\n  ],\n  \"dry_run\": false\n}\n```"
+    },
+    {
+      "id": "4429992998",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-12T11:22:08+00:00",
+      "body": "The payload which may not work:\n```\n{\"asctime\": \"2026-05-12T10:36:37\", \"name\": \"plugins.sql_sanitizer.sql_sanitizer\", \"levelname\": \"DEBUG\", \"message\": \"SQL-SANITIZER payload: CopyOnWriteDict({'path': 'sql.txt', 'edits': [{'new': 'DROP table tab1;', 'old': 'DROP table tab1;'}], 'dry_run': False})\", \"@timestamp\": \"2026-05-12T10:36:37.843221Z\", \"hostname\": \"d00f0b4f6f16\", \"process_id\": 1, \"request_id\": \"f3c97eb1c25a4351b8b50f7b40f1fe6f\"}\n```"
+    },
+    {
+      "id": "4430484983",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-12T12:27:57+00:00",
+      "body": "The payload is not blocked and this is bug, most likely, the plugin check only top level string in payload, and given payload includes nested strings in list of dicts. \nThe test:\n```\nimport asyncio\nfrom cpex.framework import GlobalContext, PluginConfig, PluginContext, ToolHookType, ToolPreInvokePayload\nfrom cpex.framework.memory import CopyOnWriteDict\nfrom sql_sanitizer import SQLSanitizerPlugin\n\nasync def main():\n    plugin = SQLSanitizerPlugin(PluginConfig(\n        name=\"SQLSanitizer\",\n        description=\"Detects risky SQL and optionally strips comments or blocks\",\n        author=\"ContextForge\",\n        kind=\"plugins.sql_sanitizer.sql_sanitizer.SQLSanitizerPlugin\",\n        version=\"1.0.0\",\n        hooks=[\"prompt_pre_fetch\", ToolHookType.TOOL_PRE_INVOKE],\n        tags=[\"security\", \"sql\", \"validation\"],\n        priority=45,\n        config={\n            \"fields\": None,\n            \"blocked_statements\": [r\"\\bDROP\\b\", r\"\\bTRUNCATE\\b\", r\"\\bALTER\\b\", r\"\\bGRANT\\b\", r\"\\bREVOKE\\b\"],\n            \"block_delete_without_where\": True,\n            \"block_update_without_where\": True,\n            \"strip_comments\": True,\n            \"require_parameterization\": False,\n            \"block_on_violation\": True,\n        },\n    ))\n    payload = CopyOnWriteDict({\"path\": \"sql.txt\", \"edits\": [{\"new\": \"DROP table tab1;\", \"old\": \"DROP table tab1;\"}], \"dry_run\": False})\n    result = await plugin.tool_pre_invoke(ToolPreInvokePayload(name=\"edit_file\", args=payload), PluginContext(global_context=GlobalContext(request_id=\"1\")))\n    print(\"violation:\" ,result.violation)\n\nasyncio.run(main())\n```"
+    },
+    {
+      "id": "4431559583",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-12T14:32:40+00:00",
+      "body": "Updated version of logging includes config in order to troubleshoot easier \n```\n{\n\"asctime\": \"2026-05-12T12:15:19\", \"name\": \"plugins.sql_sanitizer.sql_sanitizer\", \"levelname\": \"DEBUG\", \n\n\"message\": \"SQL-SANITIZER \n\npayload: CopyOnWriteDict({'message': 'DROP table asdf'}) \n\nconfig: fields=['sql', 'query', 'statement', 'message'] blocked_statements=[re.compile('\\\\\\\\bDROP\\\\\\\\b', re.IGNORECASE), re.compile('\\\\\\\\bTRUNCATE\\\\\\\\b', re.IGNORECASE), re.compile('\\\\\\\\bALTER\\\\\\\\b', re.IGNORECASE), re.compile('\\\\\\\\bGRANT\\\\\\\\b', re.IGNORECASE), re.compile('\\\\\\\\bREVOKE\\\\\\\\b', re.IGNORECASE)] block_delete_without_where=True block_update_without_where=True strip_comments=True require_parameterization=False block_on_violation=True\", \"@timestamp\": \"2026-05-12T12:15:19.301836Z\", \"hostname\": \"runnervmeorf1\", \"process_id\": 3207, \"request_id\": \"b9805cc9a7684474a833e7efbd5868b4\"\n}\n```"
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:28.846249",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:28.846882",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4707,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4707.json"
+  }
+}

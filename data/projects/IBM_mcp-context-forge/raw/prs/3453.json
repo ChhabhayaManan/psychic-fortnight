@@ -1,0 +1,82 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3453,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3453"
+  },
+  "metadata": {
+    "title": "fix(auth): resolve aware vs naive datetime comparison for SQLite lockout",
+    "state": "closed",
+    "created_at": "2026-03-03T19:14:00+00:00",
+    "updated_at": "2026-03-08T08:58:59+00:00",
+    "closed_at": "2026-03-08T08:58:57+00:00",
+    "merged_at": "2026-03-08T08:58:57+00:00",
+    "author": "cafalchio",
+    "labels": [
+      "bug",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #3401\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nSQLite stores `datetime` values without timezone info (naive datetimes), while PostgreSQL preserves timezone-aware datetimes. This caused a `TypeError` when comparing a naive `locked_until` value against the timezone-aware result of `utc_now()`, which silently broke the Admin UI users list whenever any user had a non-null `locked_until` — showing zero users instead of the full list.\r\n\r\n**Root cause:** `is_account_locked()` in `db.py` was comparing `utc_now()` (timezone-aware) directly against `self.locked_until` (naive on SQLite), raising a `TypeError` that propagated up and caused the user list to render empty.\r\n\r\n**Fix:**\r\n- `EmailUser.is_account_locked()` now normalises a naive `locked_until` to UTC before comparison, making it safe on both SQLite and PostgreSQL.\r\n- `admin.py` and `schemas.py` now delegate lock status to `user.is_account_locked()` instead of duplicating the comparison inline — eliminating the two divergent call sites that had the same bug.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [X] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [✅] Code formatted (`make black isort pre-commit`)\r\n- [✅] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [✅] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Affected files:**\r\n- `mcpgateway/db.py` — `is_account_locked()` normalises naive datetimes from SQLite before comparison\r\n- `mcpgateway/admin.py` — `_render_user_card_html` uses `user.is_account_locked()` instead of inline comparison\r\n- `mcpgateway/schemas.py` — `EmailUserResponse.from_email_user()` uses `user.is_account_locked()` instead of inline comparison\r\n- `tests/unit/mcpgateway/test_db.py` — new tests for naive and aware datetime paths in `is_account_locked()`\r\n- `tests/unit/mcpgateway/test_admin.py` — mock objects updated with `is_account_locked` method\r\n\r\n<img width=\"1859\" height=\"331\" alt=\"Admin UI users list previously rendered empty when any user had a lockout record in SQLite\" src=\"https://github.com/user-attachments/assets/84519df0-06e2-428d-a258-a707dbbf2cf8\" />\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3911216039",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-08T08:57:16+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7352ee382f96b4962557f4032d0218d0b52507a5",
+      "message": "Updated UserEmail is_account_lock to work in sqlite\n    - refactored to use is_account_lock from user\n    - added tests\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-03-06T17:03:40+00:00"
+    },
+    {
+      "sha": "678ce999850f60d81cd6f00d54df830af8fd533e",
+      "message": "fix(auth): use is_account_locked() in template data path to fix remaining naive datetime bug\n\nThe admin_users_partial_html template data builder at admin.py:6863 still\nhad the old inline `locked_until > utc_now()` comparison that raises\nTypeError on SQLite (naive vs aware datetime). Replace with\nuser_obj.is_account_locked() to match the fix already applied to\n_render_user_card_html and schemas.py.\n\nUpdate SimpleNamespace mocks in admin_users_partial_html tests to include\nthe is_account_locked method now required by both rendering paths.\n\nCloses #3401\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T17:12:30+00:00"
+    },
+    {
+      "sha": "753d61b38138d79fde417021e17622fa4dac858f",
+      "message": "fix(auth): remove write-on-read mutation from is_account_locked()\n\nStop assigning the normalized UTC-aware value back to self.locked_until\nin is_account_locked(). This method is called from GET/list/serialization\npaths (admin_users_partial_html, EmailUserResponse.from_email_user) that\ncommit their sessions, so mutating the ORM field turned read-only\nendpoints into writes.\n\nUse a local variable for the comparison instead, matching the pattern in\nTeamInvitation.is_expired() at db.py:1969.\n\nAlso fix test naive datetimes to use UTC-based values\n(datetime.now(timezone.utc).replace(tzinfo=None)) instead of\ndatetime.now(), which is timezone-dependent and could fail on non-UTC\nrunners.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T07:24:05+00:00"
+    },
+    {
+      "sha": "727d21455cec80a9cf001e8372b3b7fbecbccdbf",
+      "message": "fix(auth): snapshot locked_until after is_account_locked() and add regression tests\n\nReorder field captures in _render_user_card_html, admin_users_partial_html,\nand EmailUserResponse.from_email_user to call is_account_locked() before\nsnapshotting locked_until and failed_login_attempts. This ensures that\nwhen a lock has expired and the method clears those fields, the rendered\noutput reflects the cleared state rather than showing stale values.\n\nAdd three regression tests that exercise the real _render_user_card_html\nand EmailUserResponse.from_email_user with actual EmailUser objects\ncarrying naive locked_until datetimes (simulating SQLite), covering\nactive lock, expired lock, and field-clearing scenarios.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T07:47:53+00:00"
+    },
+    {
+      "sha": "24c8ebeacd50cf4cb17cabd7236e7add9b3353c5",
+      "message": "Merge branch 'main' into fix/User_not_show_when_one_user_is_locked_out_#3401",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T08:22:50+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 408,
+  "deletions": 251,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:20.273976",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:20.275219",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3453,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3453.json"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4284,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4284"
+  },
+  "metadata": {
+    "title": "fix(transport): return 405 on session-less GET /mcp (#4205)",
+    "state": "closed",
+    "created_at": "2026-04-17T15:21:48+00:00",
+    "updated_at": "2026-04-17T21:05:32+00:00",
+    "closed_at": "2026-04-17T21:05:30+00:00",
+    "merged_at": "2026-04-17T21:05:30+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nFixes the downstream symptom of #4205: strict MCP clients (e.g. FastMCP's `streamable_http` client) open a passive GET SSE stream right after `initialize` to listen for server-initiated messages, and time out on `Failed to initialize server session` when the gateway neither rejects the GET nor emits any events.\n\nBoth the Python gateway and the Rust MCP runtime now return **405 Method Not Allowed** on GET `/mcp` when a passive SSE stream cannot be served — either because stateful sessions / session-core are disabled, or because no `Mcp-Session-Id` was presented. This is spec-sanctioned per MCP Streamable HTTP (2025-03-26 and 2025-11-25) and lets strict clients skip the passive stream without the timeout cascade.\n\n## Changes\n\n**Python** (`mcpgateway/transports/streamablehttp_transport.py`)\n- 405 returned for GET when `use_stateful_sessions=False` or no session id is presented.\n- Placed after `_validate_server_id()` and the RBAC gate — bogus server IDs still 404, unauthorized callers still 403.\n- Branch-specific detail (`\"Stateful sessions disabled…\"` vs `\"Passive SSE stream requires an Mcp-Session-Id…\"`) so clients don't retry in a loop.\n- `logger.info` on rejection with path + flags for ops visibility.\n\n**Rust** (`crates/mcp_runtime/src/lib.rs`)\n- 405 returned in `forward_transport_request` for GET when `session_core_enabled` is false or no session id is in header / `session_id` query param. Critically, this runs before the live-stream relay commits to a `text/event-stream` response that would otherwise emit nothing.\n- Capability headers and a new `RuntimeStats.transport.get_rejected_no_session` counter keep parity with other terminal responses in the function.\n- `tracing::info!` on rejection.\n\n**Tests**\n- Python: 3 new parametrized tests (stateless / no-session-id / pass-through × `mcp-session-id` + `x-mcp-session-id`) plus a server-scoped 405 test and a regression guard that server-id validation still 404s before 405. Also un-hollows two pre-existing header-parsing tests (`test_handle_streamable_http_non_tuple_header_skipped`, `..._non_bytes_header_skipped`) that would otherwise have been silently short-circuited by the new 405 path.\n- Rust: 3 new tests — 405 without session id, 405 when session_core disabled even if a header is present (bypass regression guard), and live-stream branch still reached when session id is validated.\n- One pre-existing Rust test (`server_scoped_transport_wrappers_inject_server_header`) updated to provide a session id + record so it still exercises the server-id header injection path.\n\n**Drive-by** (`a2a-agents/go/a2a-echo-agent/Dockerfile`)\n- Added `wget` to the runtime-stage `apt-get install` so the compose healthcheck (`wget -qO- http://localhost:9100/health`) can actually run. The container was reporting unhealthy despite the agent listening correctly.\n\n## Out of scope\n\nThe original #4205 reproducer (stateful counter leaking state between downstream clients because ContextForge shares one pooled upstream session across them) is an **upstream** per-client session-isolation problem. This PR only fixes the **downstream** GET-SSE cascade from the comment thread. The upstream work — replacing the user-identity-keyed session pool with a per-downstream-session `UpstreamSessionRegistry` — will land on a follow-up branch referencing the same issue.\n\nCloses: none yet; #4205 stays open pending the upstream-isolation follow-up.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "c0a7bca0ec7d5cf0b651184527779032632ea19c",
+      "message": "fix(docker): install wget in a2a-echo-agent image for healthcheck\n\nThe compose healthcheck for a2a_echo_agent runs `wget -qO- http://localhost:9100/health`,\nbut the debian:bookworm-slim runtime stage only installed ca-certificates and tzdata —\nso every probe failed with \"exec: wget: executable file not found in $PATH\" and the\ncontainer stayed perpetually unhealthy despite the agent itself listening correctly.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-17T15:19:49+00:00"
+    },
+    {
+      "sha": "8e20004bcf19b3cbfce10c949b66b4ebe51318ca",
+      "message": "fix(transport): return 405 on session-less GET /mcp (#4205)\n\nA strict MCP client opens a passive SSE stream via GET right after initialize\nto receive server-initiated messages. When ContextForge cannot anchor that\nstream to a session (stateful sessions disabled, session-core disabled in\nRust, or no Mcp-Session-Id presented), it previously either committed to an\nempty event stream (Rust live-stream relay) or handed off to the SDK which\nheld the GET open without emitting events. Strict clients then timed out on\nthe empty stream and reported \"Failed to initialize server session\".\n\nThe MCP Streamable HTTP spec allows the server to return 405 for such GETs;\nthis change takes that route in both gateways.\n\nPython (mcpgateway/transports/streamablehttp_transport.py):\n  - SessionManagerWrapper.handle_streamable_http now returns 405 with\n    Allow: POST, DELETE for GET when either settings.use_stateful_sessions\n    is false or no Mcp-Session-Id was presented.\n  - The check runs after _validate_server_id() and the RBAC gate so bogus\n    server IDs still 404 and unauthorized callers still 403, preserving the\n    \"RBAC before processing\" invariant.\n  - Branch-specific detail messages distinguish \"stateful sessions disabled\"\n    from \"no session id presented\" so clients don't retry in a loop.\n  - logger.info on rejection with path + flags for ops visibility.\n\nRust (crates/mcp_runtime/src/lib.rs):\n  - forward_transport_request returns 405 for GET when either\n    session_core_enabled is false or no session id is presented in header\n    or session_id query parameter. Without session_core, Rust cannot anchor\n    an SSE stream; without a session id, there is nothing to anchor to.\n  - The 405 response carries the same capability headers as every other\n    terminal response in the function.\n  - tracing::info! on rejection and a RuntimeStats.transport.get_rejected_no_session\n    counter so ops can distinguish \"no traffic\" from \"every client rejected\".\n  - One pre-existing test (server_scoped_transport_wrappers_inject_server_header)\n    updated to provide a session id + record so it still exercises the\n    server-id header injection path.\n\nTests:\n  - Python: 3 new parametrized tests covering stateless/no-session/pass-through\n    and both Mcp-Session-Id header aliases; server-scoped variant confirms\n    405 fires only after server-id validation (and that 404 still wins for\n    nonexistent servers).\n  - Rust: 3 new tests covering 405 without session id, 405 when session_core\n    disabled even with header, and live-stream branch still reached when a\n    valid session id is presented.\n  - Also un-hollows two pre-existing header-parsing tests\n    (test_handle_streamable_http_non_tuple_header_skipped,\n    test_handle_streamable_http_non_bytes_header_skipped) that would have\n    been silently short-circuited by the new 405 path.\n\nNote: This fixes the downstream GET-SSE cascade described in the comment\non #4205. The upstream per-client session-isolation problem from the\noriginal reproducer (shared pooled upstream session leaking state between\ndownstream clients) is a separate architectural change and will be\naddressed in a follow-up.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-17T15:21:03+00:00"
+    },
+    {
+      "sha": "64c59c114bfc062191ec88614ad7dc21ba6cd3db",
+      "message": "fix(transport): address review feedback on GET /mcp 405 path (#4205)\n\nFollow-up to 252e8c228. Addresses review feedback surfaced by the\nPR-review agents:\n\n- Rust `runtime_session_id_from_request` now also accepts\n  `x-mcp-session-id`, restoring parity with the Python gateway so a\n  client isn't accepted by one runtime and 405'd by the other.\n- Split the Rust 405 counter: `get_rejected_no_session` stays as the\n  total and a new `get_rejected_session_core_disabled` subcounter\n  isolates the deployment-config branch, so ops can distinguish client\n  misuse from session-core being off.\n- Added a Python Prometheus counter (`transport_get_rejected_total`)\n  with matching `no_session_id` / `stateful_disabled` outcomes to close\n  the observability gap between runtimes.\n- Split log levels on both sides: `warn` for the operator-facing\n  disabled-session / stateful-disabled branch, `debug` for the\n  no-session-id branch (routine strict-client probing).\n- Added a regression guard test that GET with RBAC denial returns 403\n  (not 405) and emits no `Allow` header.\n- Session-affinity `except Exception` in the Python gateway now warns\n  instead of silently rendering infrastructure failures as 405s.\n- 404 on unknown server no longer allowed to leak an `Allow` header.\n- GET OAuth-enabled server test asserts 401 before the 405 path.\n- Rust happy-path tests snapshot counters to assert no 405 tick.\n- \"Why 405 (not 404/400)\" rationale added to both comment blocks.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-17T15:43:34+00:00"
+    },
+    {
+      "sha": "a4447835a625c7357eca9ba67203cd2e8e8754f9",
+      "message": "fix(transport): gate Rust 405 inside live-stream branch (#4205)\n\nIntegration tests `get_and_delete_mcp_routes_forward_to_internal_transport_bridge`\nand `live_stream_core_disabled_falls_back_to_python_transport_get` were\nfailing in CI: the standalone 405 block in `forward_transport_request`\npre-empted the Python transport-bridge fallback path, even for GETs the\nruntime could have cleanly proxied.\n\nThe empty-stream cascade the 405 was defending against only arises when\nthe live-stream relay is entered without a session anchor. Move the 405\nguard inside that branch so GETs that don't request SSE (or where\nlive_stream_core is disabled) fall through to the existing Python-proxy\nfallback, which has its own 405 logic. Update the matching unit test to\nset `Accept: text/event-stream` so it still reaches the gate.\n\nNo change to the counter semantics or Python-side behaviour. Full\nworkspace test suite (Rust + Python) passes.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-17T18:46:04+00:00"
+    },
+    {
+      "sha": "a0e810ea3c7e5e55aeb2bd0af74bbfb884596a71",
+      "message": "chore(rust): apply clippy 1.95.0 lint fixes in non-PR crates\n\nRustc stable moved from 1.94.1 to 1.95.0 between the last main Rust CI\nrun (#3704, 2026-04-16) and PR #4284, enabling two additional lints at\nworkspace `-D warnings` level. The new lints flag pre-existing code in\ncrates outside this PR's surface area, blocking Rust clippy CI for every\nbranch that touches any Rust file.\n\nApply clippy's exact suggestions:\n\n- `crates/wrapper/src/json_rpc_id_fast.rs`: collapse a `FieldName`\n  match arm's nested `if` into a match guard (`collapsible_match`).\n- `crates/a2a_runtime/src/event_store.rs`: drop a redundant\n  `.into_iter()` in a `.zip()` argument (`useless_conversion`).\n- `crates/a2a_runtime/src/server.rs`: collapse two match-arm nested\n  `if`s (`get`|`cancel` and `list`) into match guards.\n\nVerified with `cargo clippy --workspace --all-targets -- -D warnings`\nand `cargo test --workspace` on rustc 1.95.0. No behaviour change.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-17T18:46:19+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 819,
+  "deletions": 60,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:28.178149",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:28.178810",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4284,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4284.json"
+  }
+}

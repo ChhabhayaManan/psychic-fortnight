@@ -1,0 +1,46 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4630,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4630"
+  },
+  "metadata": {
+    "title": "[BUG]: Redis maxclients limit exceeded when scaling to 10 replicas — connection formula unguarded",
+    "state": "open",
+    "created_at": "2026-05-06T15:04:57+00:00",
+    "updated_at": "2026-05-11T10:53:47+00:00",
+    "closed_at": null,
+    "author": "Lang-Akshay",
+    "labels": [
+      "bug"
+    ],
+    "milestone": null,
+    "assignees": [
+      "claudia-gray"
+    ]
+  },
+  "description": "## 🐞 Bug Summary\n\nThe Redis server-side `maxclients` cap (currently hard-coded to `10 000` in `docker-compose.yml`) is silently exceeded once the gateway is scaled to 10 replicas with default worker and connection-pool settings. The rate-limiter and session-registry begin returning `Too many connections` errors with no pre-flight warning.\n\n**Related:** #4570 (per-worker `MaxConnectionsError`), which exposes the same symptom from the python-redis-client side. This issue focuses on the server-side `maxclients` ceiling and the missing cross-layer capacity formula.\n\n---\n\n## 📐 Connection Formula\n\n```\ntotal_connections = replicas × workers × REDIS_MAX_CONNECTIONS\n```\n\n| Configuration | Replicas | Workers | Pool/worker | Total | Within 10 K limit? |\n|---|---|---|---|---|---|\n| docker-compose default | 3 | 24 | 100 | **7,200** | ✅ |\n| docker-compose @ 10 replicas | 10 | 24 | 100 | **24,000** | ❌ |\n| Helm chart default | 10 (maxReplicas) | 2 | 50 | **1,000** | ✅ (but `GUNICORN_WORKERS` not the production default) |\n| Helm chart + 24 workers | 10 | 24 | 50 | **12,000** | ❌ |\n\nThe docker-compose file documents the formula only for 3 replicas:\n```yaml\n# Redis connection pool tuning for load testing (3 replicas × 24 workers × 100 = 7200 < 10000 maxclients)\n```\nOnce `GATEWAY_REPLICAS` is bumped to 10 the guard is no longer valid and there is no runtime check.\n\n---\n\n## 🔁 Steps to Reproduce\n\n1. `GATEWAY_REPLICAS=10 GUNICORN_WORKERS=24 REDIS_MAX_CONNECTIONS=100 make testing-up`\n2. Send any load (e.g. `make benchmark-mcp-tools`)\n3. Observe `redis.exceptions.MaxConnectionsError: Too many connections` in gateway logs\n\n---\n\n## 🤔 Expected Behaviour\n\nEither:\n- **(a)** Gateway emits a WARNING or hard-fails at startup when `replicas × workers × REDIS_MAX_CONNECTIONS > maxclients`, or\n- **(b)** Redis `maxclients` is set high enough by default to support the advertised `maxReplicas`.\n\nNo silent connection-storm failures at scale.\n\n---\n\n## ✅ Proposed Fix\n\n### Immediate risk mitigation\nScale replicas to ≤ 4 until configuration is corrected:\n```\n4 × 24 × 100 = 9,600  <  10,000 ✅\n```\n\n### Option A — Raise Redis `maxclients` to match the intended scale\n\nFor 10 replicas with 20 % headroom:\n```\nceil(10 × 24 × 100 × 1.2) = 28,800  →  30,000\n```\n\n**docker-compose.yml** (line ~1104):\n```yaml\n- \"--maxclients\"\n- \"30000\"   # was 10000; supports 10 replicas × 24 workers × 100 pool = 24000 + 20% headroom\n```\n\n**charts/mcp-stack/templates/configmap-redis.yaml** — add to `redis.conf`:\n```\nmaxclients {{ .Values.redis.maxclients | default 30000 }}\n```\n\n**charts/mcp-stack/values.yaml** — expose as a tuneable:\n```yaml\nredis:\n  maxclients: 30000   # formula: replicas × workers × REDIS_MAX_CONNECTIONS × 1.2\n```\n\n### Option B — Reduce per-worker pool to stay within current 10 K limit\n\n```\nfloor(10000 / (10 × 24) × 0.9) = 37\n```\nSet `REDIS_MAX_CONNECTIONS=37` when running 10 replicas with 24 workers.\n\n### Option C (longer term) — Startup validation\n\nIn `mcpgateway/config.py` or startup lifecycle, compare\n`REDIS_MAX_CONNECTIONS × GUNICORN_WORKERS` against Redis `CONFIG GET maxclients` and emit a `WARNING`\n(or hard-fail when `REDIS_STRICT_CAPACITY_CHECK=true`).\n\n---\n\n## 📋 Required Changes\n\n| File | Change |\n|---|---|\n| `docker-compose.yml` | Raise `--maxclients 10000` → `30000`; update capacity comment |\n| `docker-compose-performance.yml` | Same |\n| `docker-compose-debug.yml` | Same |\n| `charts/mcp-stack/templates/configmap-redis.yaml` | Add `maxclients` directive via values |\n| `charts/mcp-stack/values.yaml` | Add `redis.maxclients: 30000` + formula comment |\n| `charts/mcp-stack/values.schema.json` | Add `redis.maxclients` integer field |\n| `docs/docs/manage/scale.md` | Add capacity table + formula callout |\n| `docs/docs/manage/tuning.md` | Update `REDIS_MAX_CONNECTIONS` formula to include replica count |\n| `docs/docs/manage/configuration.md` | Add note about server-side `maxclients` coupling |\n\n---\n\n## 🧩 Affected Component\n\n- [x] `mcpgateway` — API (rate limiter, session registry)\n- [x] Container setup (Docker/Podman/Compose)\n- [x] Helm chart (`charts/mcp-stack`)\n- [x] Documentation\n\n---\n\n## 🧠 Key Numbers\n\n| Parameter | Current default | Required for 10 replicas |\n|---|---|---|\n| Redis `maxclients` | 10,000 | ≥ 28,800 (recommend 30,000) |\n| `GATEWAY_REPLICAS` (docker-compose) | 3 | 10 |\n| `GUNICORN_WORKERS` | 24 | 24 |\n| `REDIS_MAX_CONNECTIONS` | 100 | 100 (or reduce to ≤ 37 as mitigation) |\n| Safe break-even replicas @ 24 workers, pool=100 | — | **≤ 4** |\n\n---",
+  "comments": [
+    {
+      "id": "4395325378",
+      "author": "sco3",
+      "created_at": "2026-05-07T08:08:57+00:00",
+      "body": "One can check the connected clients with redis-cli\n```\ndocker exec ibm-mcp-context-forge-redis-1 redis-cli info | grep  connected                                    \n\nconnected_clients:2358\nconnected_slaves:0\n```"
+    },
+    {
+      "id": "4419212653",
+      "author": "dima-zakharov",
+      "created_at": "2026-05-11T09:20:54+00:00",
+      "body": "To verify the idea that one recent fix #4661 is relevant to the issue I would deploy pre-fix version and check the number of connections:\n```\ndocker exec ibm-mcp-context-forge-redis-1 redis-cli info | grep  connected\n```\nThen one can deploy current or the commit right after the #4661 with the same check. \nIf number of connections from the check above is significantly lower than pre-fix commit thant we can address the issue to the found connection leak. \nI think the formula is valid: `MAX_REDIS_CONNECTIONS* number of gunicorn workers  = total connections`\n\nThe siutation after fix on my environment noticeably improved. \nI was not able to deploy with MAX_REDIS_CONNECTIONS=100, \nafter fix I was able to deploy with MAX_REDIS_CONNECTIONS=20. \n\nThe number of redis connections stays high after benchmark run (~400 in total with 24 gunicorn workers) and slowly increases, which suggests we still may have less significant connection leak. \nBut also it may be the case that redis client keeps connection at watermark.  I would continuously run benchmark in order to see if we hit the limit of (20*24 = 480). I will try this later.  "
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:45.129919",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:45.130353",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4630,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4630.json"
+  }
+}

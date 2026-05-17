@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4634,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4634"
+  },
+  "metadata": {
+    "title": "ci: unify Buildx cache scope and enforce single-head Alembic chain",
+    "state": "closed",
+    "created_at": "2026-05-06T20:19:02+00:00",
+    "updated_at": "2026-05-06T20:34:09+00:00",
+    "closed_at": "2026-05-06T20:34:07+00:00",
+    "merged_at": "2026-05-06T20:34:07+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nTwo related CI-hygiene changes that came out of an audit of duplicated Docker work and migration-chain integrity.\n\n### 1. Shared Buildx cache scope for `Containerfile.lite` amd64 builds\n\n- Aligns the GHA Buildx cache scope used for the identical `Containerfile.lite` `linux/amd64` build across `docker-multiplatform.yml`, `docker-scan.yml`, and `alembic-upgrade-validation.yml` so they share one cache scope (`containerfile-lite-amd64`) instead of populating three separate scopes.\n- Non-amd64 publish builds keep per-platform scopes via `containerfile-lite-\\${{ matrix.suffix }}`.\n- Distinct builds (Rust-enabled, `a2a-echo-agent`, `python-sandbox`) are intentionally left on their own scopes because their build inputs differ.\n\nThe same `Containerfile.lite` `linux/amd64` image is currently rebuilt in three workflows on PRs that touch shared paths, each with its own GHA cache scope. Sharing one scope lets the second and third build hit warm layers populated by the first.\n\n### 2. Pre-commit: enforce single-head Alembic chain\n\n- Extends `scripts/pre-commit/check_migration_patterns.py` with an AST-based head-count check so a commit that introduces a stranded second head fails fast with a remediation hint pointing to `alembic merge`.\n- Folds into the existing `check-migration-patterns` hook to keep all chain-integrity checks in one place.\n- Logic mirrors `get_expected_head` in `scripts/ci/run_upgrade_validation.sh`, so PR-time and CI-time enforcement agree.\n- Linear-history enforcement is intentionally out of scope: the chain currently contains six legitimate merge revisions used to converge parallel feature branches.\n\n## Notes\n\n- These changes do not modify which images are pushed, signed, or attested; they only affect cache reuse and chain validation.\n- A registry-by-digest reuse pattern (build once on trusted refs, consume by digest in scan/migration jobs) is a separate, larger follow-up.\n- Out of scope but worth noting: `pre-commit run --all-files` flags three pre-existing legacy migration filenames (`add_a2a_agents_and_metrics.py`, `add_toolops_test_cases_table.py`, `add_oauth_tokens_table.py`) that don't match the naming regex; the existing hook only enforces naming on changed files, so this only surfaces during full sweeps.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "2f226affa649c69ff81c74ca427228c83591e8e4",
+      "message": "ci(docker): unify Buildx cache scope for Containerfile.lite builds\n\nAligns the GHA Buildx cache scope used for the identical Containerfile.lite amd64 build across docker-multiplatform.yml, docker-scan.yml, and alembic-upgrade-validation.yml so they share layer cache instead of populating three separate scopes.\n\nNon-amd64 publish builds keep per-platform scopes, and distinct builds (Rust-enabled, a2a-echo-agent, python-sandbox) are intentionally left on their own scopes.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-06T20:18:33+00:00"
+    },
+    {
+      "sha": "932b74212a48f15086b869dd0bebd3047d096d34",
+      "message": "ci(alembic): enforce single-head revision chain in pre-commit\n\nAdds an AST-based head-count check to scripts/pre-commit/check_migration_patterns.py so commits that introduce a stranded second head fail fast with a remediation hint pointing to alembic merge.\n\nLogic mirrors get_expected_head in scripts/ci/run_upgrade_validation.sh and folds into the existing check-migration-patterns hook to keep all chain-integrity checks in one place. Linear-history enforcement is intentionally out of scope: the chain currently contains six legitimate merge revisions used to converge parallel feature branches.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-06T20:25:34+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 95,
+  "deletions": 11,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:59.150824",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:59.151303",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4634,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4634.json"
+  }
+}

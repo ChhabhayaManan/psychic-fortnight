@@ -1,0 +1,80 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4423,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4423"
+  },
+  "metadata": {
+    "title": "feat(middleware): add Redis-backed rate limiting with tier-based limits",
+    "state": "closed",
+    "created_at": "2026-04-24T05:16:45+00:00",
+    "updated_at": "2026-05-11T10:58:31+00:00",
+    "closed_at": "2026-05-10T06:59:58+00:00",
+    "merged_at": "2026-05-10T06:59:58+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "ica",
+      "release-fix",
+      "pentesting"
+    ],
+    "milestone": null,
+    "assignees": [
+      "ja8zyjits"
+    ]
+  },
+  "description": "## Summary\r\n\r\nImplements comprehensive Redis-backed rate limiting with tier-based endpoint protection.\r\n\r\n### Problem Statement\r\n\r\nAPI endpoints currently accept unlimited requests in rapid succession. This PR adds configurable rate limiting to prevent abuse and ensure system stability.\r\n\r\n### Solution Overview\r\n\r\nThis PR implements **production-grade rate limiting** with:\r\n\r\n✅ **Redis-backed sliding window algorithm** (graceful in-memory fallback)  \r\n✅ **Endpoint-specific tiers** with appropriate protection levels  \r\n✅ **Multi-dimensional limiting** (per-IP, per-user, per-team)  \r\n✅ **SecurityLogger integration** (complete audit trail)  \r\n✅ **Lockout mechanism** (temporary lockout after repeated violations)  \r\n✅ **RFC-compliant response headers** (X-RateLimit-*, Retry-After)\r\n\r\n---\r\n\r\n## Implementation Details\r\n\r\n### 1. Endpoint Tiers (Criticality-Based Protection)\r\n\r\n| Tier | Endpoints | Limit | Burst | Rationale |\r\n|------|-----------|-------|-------|-----------|\r\n| **CRITICAL** | `/auth/email/*`, `/auth/sso/*` | 10/min | 0 | Auth endpoints - stricter limits |\r\n| **HIGH** | `/tokens/*`, `/oauth/*`, `/rbac/*` | 30/min | 0 | Admin/token management - deliberate actions |\r\n| **MEDIUM** | `/mcp`, `/tools/*`, `/llmchat/*` | 100/min | 20 | API endpoints - allow client bursts |\r\n| **LOW** | `/health`, `/metrics`, `/docs` | 500/min | 100 | Health checks - load balancer retries |\r\n\r\n**Design decision:** No burst allowance for auth/admin endpoints to prevent rapid repeated attempts. Burst allowed for API endpoints to support legitimate client spikes.\r\n\r\n### 2. Multi-Dimensional Rate Limiting\r\n\r\nChecks limits across **three dimensions independently**:\r\n\r\n1. **Per-IP** (always) - Tracks request volume by source\r\n2. **Per-User** (if authenticated) - Limits authenticated usage\r\n3. **Per-Team** (if team context) - Enables per-tenant quotas\r\n\r\n**Example:**\r\n```\r\nClient: 192.168.1.100, User: alice@example.com, Team: acme-corp\r\n\r\nRate limit keys checked:\r\n- ratelimit:ip:192.168.1.100:CRITICAL\r\n- ratelimit:user:alice@example.com:CRITICAL  \r\n- ratelimit:team:acme-corp:CRITICAL\r\n\r\nBlock if ANY dimension exceeds limit (fail-secure)\r\n```\r\n\r\n### 3. Redis Sliding Window Algorithm\r\n\r\nUses **sorted sets** for precise sliding window rate limiting:\r\n\r\n```python\r\nZREMRANGEBYSCORE key 0 window_start  # Remove expired entries\r\nZCARD key                             # Count requests in window\r\nZADD key {uuid:timestamp}             # Add current request\r\nEXPIRE key ttl                        # Auto-cleanup\r\n```\r\n\r\n**Fallback:** Graceful degradation to in-memory dict if Redis unavailable (single-instance dev environments).\r\n\r\n### 4. SecurityLogger Integration\r\n\r\nAll rate limit violations persist to `SecurityEvent` table with full context:\r\n\r\n- **Event Type:** `rate_limit_exceeded` → `brute_force_attempt` (on lockout)\r\n- **Severity:** MEDIUM → HIGH (escalates on repeated violations)\r\n- **Context:** user_id, user_email, team_id, client_ip, endpoint, tier, limit\r\n- **Threat Score:** 0.5 → 0.8 (lockout detection)\r\n\r\n**Benefit:** Complete audit trail for compliance, SIEM integration, pattern analysis.\r\n\r\n### 5. Lockout Mechanism\r\n\r\nAfter **5 rate limit violations** in 5-minute window:\r\n- ❌ **15-minute lockout** (configurable)\r\n- 📝 **SecurityEvent:** `brute_force_attempt` (HIGH severity)\r\n- 📨 **User notification:** \"Account locked for 15 minutes. This may indicate suspicious activity.\"\r\n\r\n**Design decision:** Lockout instead of progressive delays to avoid blocking event loop (no `asyncio.sleep()` in production middleware).\r\n\r\n### 6. Response Headers (RFC 6585)\r\n\r\nAll responses include rate limit headers:\r\n\r\n```http\r\nX-RateLimit-Limit: 10\r\nX-RateLimit-Remaining: 7\r\nX-RateLimit-Reset: 1714089660\r\n```\r\n\r\nOn 429 (rate limit exceeded):\r\n```http\r\nRetry-After: 60\r\nX-Lockout-Remaining: 900  (if locked out)\r\n```\r\n\r\n**Benefit:** Clients can implement proactive rate limiting, reducing 429 errors.\r\n\r\n---\r\n\r\n## Technical Implementation\r\n\r\n### Architecture\r\n\r\n**Middleware Position:** After `HttpAuthMiddleware` (Starlette LIFO execution)\r\n- Can access `request.state.user_email` and `request.state.team_id`\r\n- Early enough to block rate-limited requests before expensive operations\r\n\r\n**Async/Sync Bridge:** `ThreadPoolExecutor` for sync Redis calls in async middleware\r\n```python\r\nloop.run_in_executor(\r\n    executor,\r\n    _check_rate_limit_sync,  # Sync Redis operations\r\n    key, limit, window\r\n)\r\n```\r\n\r\n**Pattern Reuse:** Uses existing `auth._get_sync_redis_client()` (consistent with project patterns).\r\n\r\n### Configuration (Environment Variables)\r\n\r\n```bash\r\n# Enable/disable\r\nRATE_LIMITING_ENABLED=true\r\nRATE_LIMITING_REDIS_ENABLED=true\r\n\r\n# Tier limits (requests per minute)\r\nRATE_LIMIT_CRITICAL_RPM=10\r\nRATE_LIMIT_HIGH_RPM=30\r\nRATE_LIMIT_MEDIUM_RPM=100\r\nRATE_LIMIT_LOW_RPM=500\r\n\r\n# Burst allowances\r\nRATE_LIMIT_CRITICAL_BURST=0\r\nRATE_LIMIT_HIGH_BURST=0\r\nRATE_LIMIT_MEDIUM_BURST=20\r\nRATE_LIMIT_LOW_BURST=100\r\n\r\n# Lockout configuration\r\nRATE_LIMIT_LOCKOUT_ENABLED=true\r\nRATE_LIMIT_LOCKOUT_THRESHOLD=5\r\nRATE_LIMIT_LOCKOUT_DURATION_MINUTES=15\r\n```\r\n\r\n### Files Changed\r\n\r\n- `mcpgateway/config.py` (+25 lines) - Configuration settings\r\n- `mcpgateway/main.py` (+12 lines) - Middleware registration\r\n- `mcpgateway/middleware/rate_limit_middleware.py` (+407 lines) - Implementation\r\n- `tests/unit/.../test_rate_limit_middleware.py` (+1051 lines) - 100+ test cases\r\n\r\n**Total:** +1495 lines, 0 breaking changes\r\n\r\n---\r\n\r\n## Testing\r\n\r\n### Coverage\r\n\r\n✅ **100+ unit tests** covering:\r\n- Endpoint tier matching (CRITICAL/HIGH/MEDIUM/LOW)\r\n- IP extraction (X-Forwarded-For, X-Real-IP, fallback)\r\n- Multi-dimensional limiting (IP, User, Team)\r\n- Redis operations + in-memory fallback\r\n- Lockout mechanism\r\n- SecurityLogger integration\r\n- Response headers (success + 429)\r\n- Configuration edge cases\r\n\r\n### Test Execution\r\n\r\n```bash\r\npytest tests/unit/mcpgateway/middleware/test_rate_limit_middleware.py -v\r\n```\r\n\r\n**Expected:** All tests pass (100+ tests)\r\n\r\n---\r\n\r\n## Operational Considerations\r\n\r\n### Performance Impact\r\n\r\n**Redis Path:**\r\n- Latency: ~1-2ms per request (network RTT + Redis operations)\r\n- Acceptable overhead for added protection\r\n\r\n**In-Memory Fallback:**\r\n- Latency: ~0.1ms per request (dict lookup)\r\n- Single-instance only (dev/test environments)\r\n\r\n---\r\n\r\n## Backward Compatibility\r\n\r\n✅ **No breaking changes**  \r\n✅ **Feature flag:** `RATE_LIMITING_ENABLED=true` (can disable if needed)  \r\n✅ **Graceful degradation:** In-memory fallback if Redis unavailable  \r\n✅ **Existing config preserved:** `validation_max_requests_per_minute` retained for tests\r\n\r\n---\r\n\r\n## References\r\n\r\n- **RFC 6585:** Additional HTTP Status Codes (429 Too Many Requests)\r\n- **Industry Standards:** Auth0, GitHub, Stripe rate limiting patterns\r\n\r\n---\r\n\r\n## Checklist\r\n\r\n- [x] Redis-backed with in-memory fallback\r\n- [x] SecurityLogger integration (audit trail)\r\n- [x] Endpoint-specific tiers (CRITICAL/HIGH/MEDIUM/LOW)\r\n- [x] Multi-dimensional limiting (IP + User + Team)\r\n- [x] Lockout mechanism (5 violations → 15 min)\r\n- [x] RFC-compliant response headers\r\n- [x] 100+ unit tests (comprehensive coverage)\r\n- [x] No breaking changes\r\n- [x] Production-ready code quality\r\n- [x] Documentation updated (inline comments)\r\n\r\n---\r\n\r\n## Closes #4327 ",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "7b220233785b2960ac135e9625f9048e52b229f4",
+      "message": "feat(middleware): add Redis-backed rate limiting with tier-based limits\n\n- Add RateLimitMiddleware with Redis-backed sliding window algorithm\n- Implement tier-based rate limits (CRITICAL/HIGH/MEDIUM/LOW) per endpoint\n- Add lockout mechanism after excessive violations (5 violations = 15 min lockout)\n- Add multi-dimensional limiting (IP → User → Team)\n- Include security event logging for audit trail\n- Add 107 unit tests with 95% coverage\n\nImplements X-Force Red security findings for API rate limiting.\n\nCloses #4168\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-24T05:05:35+00:00"
+    },
+    {
+      "sha": "4017840b28260fa85974ccb8c3f48e746a8a360c",
+      "message": "chore: fix end of file newline\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-24T05:14:53+00:00"
+    },
+    {
+      "sha": "5b622b233144691d07677e907babe611f4c9a7f1",
+      "message": "test: disable rate limiting in test suite\n\nRate limiting middleware was causing 38 test failures with 429 responses.\nTests make rapid sequential requests that exceed rate limits.\n\nFollow existing pattern in conftest.py to disable optional middleware\nduring tests (admin API, UI, llmchat are similarly disabled).\n\nTests specifically for rate limiting (test_rate_limit_middleware.py)\nexplicitly enable the middleware via settings override.\n\nFixes test suite CI failures after rate limiting feature merge.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-24T06:11:35+00:00"
+    },
+    {
+      "sha": "f1f2a00da754eb6410f08d173592180c05eaed04",
+      "message": "fix(middleware): rate limiting council review fixes\n\n- Prevent infinite lockout loop by skipping violation increment during lockout\n- Add timestamp-based expiry to memory violation counts\n- Harden IP extraction against proxy spoofing via request.scope\n- Use atomic Lua script for Redis sliding window check+add\n- Reuse pre-check results to avoid double-counting on success\n- Update tests to properly exercise Redis Lua script path\n- Add regression tests for lockout expiry and no-increment behavior\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T21:58:35+00:00"
+    },
+    {
+      "sha": "11b89e9257c54436b01fdacc6c26e00af81c09d4",
+      "message": "chore: update .secrets.baseline timestamp\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T23:37:06+00:00"
+    },
+    {
+      "sha": "f8641feb69eb723414d18cf51786c3c4ff8ded27",
+      "message": "test(middleware): improve rate limiting diff coverage to 100%\n\nAdd tests for previously uncovered code paths:\n- Redis init success and exception handling\n- User object email extraction from request.state.user\n- Redis Lua script blocked (0) response\n- Lockout async executor exception fallback\n- Redis lockout count below threshold\n- Memory violation expiry cleanup and initialization\n- Violation increment async exception fallback\n- Redis violation increment exception fallback\n- Main app middleware registration when rate limiting enabled\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T06:42:02+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 1868,
+  "deletions": 5,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:05.294849",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:05.296803",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4423,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4423.json"
+  }
+}

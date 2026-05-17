@@ -1,0 +1,67 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2879,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2879"
+  },
+  "metadata": {
+    "title": "fix: resolve AttributeError on app_domain breaking SSO authentication",
+    "state": "closed",
+    "created_at": "2026-02-12T12:25:32+00:00",
+    "updated_at": "2026-02-12T14:50:08+00:00",
+    "closed_at": "2026-02-12T14:50:06+00:00",
+    "merged_at": "2026-02-12T14:50:06+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- **Fix `AttributeError` crash** in `_validate_redirect_uri()` where `settings.app_domain` (a Pydantic `HttpUrl` object) was incorrectly treated as a plain string — `.lower()` on `HttpUrl` raises `AttributeError: 'Url' object has no attribute 'lower'`, completely blocking all SSO providers (Azure Entra ID, Google, GitHub, etc.)\n- **Fix hostname-vs-URL comparison** that would never match even without the crash — `redirect_host` (e.g. `myapp.com`) was compared against a full URL object, not a hostname\n- **Fix malformed production CORS origins** in `config.py` where `f\"https://{self.app_domain}\"` produced double-scheme URLs like `https://https://example.com/`\n\nAll three issues stem from the same root cause: `app_domain` is typed as `HttpUrl` but code assumed it was a plain string.\n\n### Files Changed\n\n| File | Change |\n|------|--------|\n| `mcpgateway/routers/sso.py` | Extract hostname from `HttpUrl` via `urlparse(str(...)).hostname` before comparison |\n| `mcpgateway/config.py` | Extract hostname before constructing production CORS origins |\n| `tests/unit/mcpgateway/routers/test_sso_router.py` | Use `HttpUrl` objects in test mocks to match actual runtime type |\n| `CHANGELOG.md` | Add #2873 to 1.0.0-RC1 bug fixes (68→69 bugs, 125→126 total) |\n| `docs/docs/architecture/roadmap.md` | Add #2873 to RC1 completed bugs |\n\nCloses #2873\n\n## Test plan\n\n- [x] All 33 SSO router unit tests pass\n- [x] All 174 affected tests pass (SSO router, config, settings fields, security headers)\n- [x] Verified Azure Entra ID end-to-end scenario: `APP_DOMAIN=https://myapp.azurewebsites.net` correctly validates callback `https://myapp.azurewebsites.net/auth/sso/callback/entra`\n- [x] Verified production CORS origins: `https://myapp.com`, `https://app.myapp.com`, `https://admin.myapp.com` (no double-scheme)\n- [x] Verified edge cases: localhost HTTP allowed, evil domains rejected, HTTP rejected for production, `None` app_domain handled, relative paths always allowed",
+  "comments": [
+    {
+      "id": "2798670396",
+      "author": "suciu-daniel",
+      "created_at": "2026-02-12T12:38:47+00:00",
+      "body": "this could be done without nesting if statements\n```\nif redirect_host != app_domain_host:\n    return false\n```\n\nAlso second part of the second if could be extracted in a variable `isLocalhost` to make it easier to read"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3790784517",
+      "author": "suciu-daniel",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-12T12:40:51+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "92b47140e14f680a5c82a2f421ffcb597a32fc53",
+      "message": "fix: resolve AttributeError on app_domain breaking SSO authentication\n\nThe `_validate_redirect_uri()` function in the SSO router called\n`.lower()` on `settings.app_domain`, which is a Pydantic `HttpUrl`\nobject, not a string. This caused an `AttributeError` crash that\nblocked all SSO providers including Azure Entra ID.\n\nThree related issues fixed:\n- sso.py: Extract hostname from HttpUrl via `urlparse(str(...))` before\n  string comparison, fixing both the crash and the hostname-vs-URL\n  mismatch that would never match\n- config.py: Production CORS origins used `f\"https://{self.app_domain}\"`\n  which produced malformed double-scheme URLs like\n  `https://https://example.com/`\n- Tests updated to use HttpUrl objects matching the actual runtime type\n\nCloses #2873\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-12T12:25:12+00:00"
+    },
+    {
+      "sha": "c43cd6799a19cc4df0ce2e896a093822a4594266",
+      "message": "test: add redirect policy edge case assertions for app_domain\n\nPin down the intended redirect validation policy with explicit tests:\n- HTTP rejected for non-localhost production domains\n- app_domain is a domain-level (hostname-only) match by design\n- localhost allows HTTP on any port for development convenience\n\nCloses #2873\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-12T14:21:02+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 39,
+  "deletions": 11,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:03.716356",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:03.718223",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2879,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2879.json"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4654,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4654"
+  },
+  "metadata": {
+    "title": "fix(chore): centralize Layer-1 visibility filter across REST endpoints",
+    "state": "open",
+    "created_at": "2026-05-07T13:42:03+00:00",
+    "updated_at": "2026-05-07T13:42:04+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "chore",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4451\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nCentralized Layer-1 visibility filtering across mcpgateway/main.py REST endpoints by replacing 22 inline derivations with calls to `get_scoped_resource_access_context(request, user)`.\r\n\r\n**Problem**: The codebase contained 22 near-identical copies of the Layer-1 admin-bypass + public-only-secure-default derivation pattern. These copies drifted independently (different comments, missing assignments, mixed audit-context patterns), creating maintenance burden and regression risk.\r\n\r\n**Solution**: Replace inline derivations with centralized helper from `mcpgateway/auth_context.py`, preserving 4 exceptions that require custom handling for federation, audit capture, or custom return contracts.\r\n\r\n**Bug Fix**: The centralized helper correctly enables Layer-1 admin bypass for basic-auth/dev-mode admins (non-JWT contexts). The inline pattern missed this case because it only checked `is_admin` from the JWT payload. This is a latent bug-fix documented in regression tests.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [x] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Changes Made\r\n\r\n**1. mcpgateway/main.py (22 refactorings)**\r\n\r\nReplaced inline pattern:\r\n```python\r\nuser_email, token_teams, is_admin = get_rpc_filter_context(request, user)\r\nif is_admin and token_teams is None:\r\n    user_email = None\r\n    token_teams = None  # Admin unrestricted\r\nelif token_teams is None:\r\n    token_teams = []  # Non-admin without teams = public-only\r\n```\r\n\r\nWith centralized helper:\r\n```python\r\nuser_email, token_teams = get_scoped_resource_access_context(request, user)\r\n```\r\n\r\n**Endpoints refactored:**\r\n- REST: `handle_completion`, `get_server`, `update_server`, `sse_endpoint`, `server_get_tools`, `server_get_resources`, `server_get_prompts`, `list_a2a_agents`, `list_tools`, `list_resources`, `list_resource_templates`, `list_prompts`, `read_resource`, `get_resource`, `subscribe_resource`, `get_prompt_no_args`, `get_prompt`, `get_prompt_with_args`, `get_gateway`, `update_gateway`, `delete_gateway`\r\n- JSON-RPC: `tools/list`, `gateways/list`, `resources/list`, `resources/subscribe`, `prompts/list`, `prompts/get`, `completion/complete`\r\n\r\n**2. Preserved 4 Exceptions**\r\n\r\nThese endpoints retain the 3-tuple pattern for specific reasons:\r\n\r\n| Line | Endpoint | Reason |\r\n|------|----------|--------|\r\n| 4434 | `get_a2a_agent` | Preserves `user_email` for federation visibility |\r\n| 4735 | `invoke_a2a_agent` | Preserves `user_email` for federation `user_id` construction |\r\n| 8704 | `_get_internal_a2a_scope_context` | Custom return contract `(user_email, teams)` |\r\n| 9933 | JSON-RPC `tools/list` | Captures `_req_email`, `_req_is_admin` for audit before applying rule |\r\n\r\n**3. Test Updates (13 methods)**\r\n\r\nUpdated mocks from 3-tuple to 2-tuple pattern:\r\n\r\n**test_main.py (9 methods):**\r\n- Completion endpoints: `test_handle_completion_endpoint`, `test_handle_completion_endpoint_admin_bypass`, `test_handle_completion_endpoint_defaults_to_public_scope_when_token_teams_none`\r\n- Tag endpoints: `test_list_tags_passes_token_scope`, `test_get_entities_by_tag_passes_public_only_scope`, `test_list_tags_admin_bypass_passes_unrestricted_scope`, `test_list_tags_defaults_to_public_scope_when_token_teams_none`, `test_get_entities_by_tag_admin_bypass_passes_unrestricted_scope`, `test_get_entities_by_tag_defaults_to_public_scope_when_token_teams_none`\r\n- RPC completion: `test_rpc_completion_complete`, `test_rpc_completion_complete_admin_bypass`, `test_rpc_completion_complete_defaults_to_public_scope_when_token_teams_none`\r\n\r\n**test_main_extended.py (4 methods):**\r\n- `test_server_get_tools_admin_bypass`, `test_server_get_resources_public_scope`, `test_server_get_prompts_public_scope`, `test_list_tools_admin_bypass_and_public_only_default`\r\n\r\n**4. Regression Tests Added (2 new tests)**\r\n\r\nAdded comprehensive tests documenting the basic-auth admin behavior change:\r\n\r\n- `test_get_scoped_resource_access_context_basic_auth_admin_bypass`: Verifies basic-auth admins get `(None, None)` for unrestricted access (bug-fix)\r\n- `test_get_scoped_resource_access_context_basic_auth_non_admin_public_only`: Verifies non-admin basic-auth users maintain secure default `(email, [])`\r\n\r\n### Impact\r\n\r\n**Code Quality:**\r\n- Removed ~126 lines of repetitive inline logic\r\n- Reduced maintenance surface from 22 locations to 1 centralized function\r\n- Eliminated drift risk between endpoint implementations\r\n\r\n**Bug Fix:**\r\n- Basic-auth/dev-mode admins now correctly receive admin bypass `(None, None)`\r\n- Previously got public-only scope `(email, [])` due to inline pattern only checking JWT `is_admin`\r\n\r\n**Consistency:**\r\n- All endpoints use identical admin-bypass + public-only-secure-default semantics\r\n- Aligns with `routers/teams.py` migration pattern from PR #4070\r\n\r\n### Design Decisions\r\n\r\n1. **Preserved 4 exceptions**: These endpoints have legitimate reasons to use the 3-tuple pattern (federation, audit, custom contracts). Documented inline with comments.\r\n\r\n2. **Regression tests over inline comments**: Added comprehensive tests documenting the basic-auth admin behavior change rather than just inline comments, ensuring the fix is verified.\r\n\r\n3. **Minimal scope**: Only refactored main.py REST endpoints. Excluded `streamablehttp_transport.py` (companion issue) and `routers/teams.py` (already migrated).\r\n\r\n### Related Work\r\n\r\n- Issue #4070: Parent SSO platform_admin bug\r\n- PR #4080: Where this refactor was first attempted (reverted due to scope creep)\r\n- This PR: Clean refactor separated from SSO bug fix",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "aca0691fcdebc014b6156dbd9fcf963d56955aeb",
+      "message": "refactor: centralize Layer-1 visibility filter across REST endpoints\n\nReplace 22 inline Layer-1 derivations with centralized\nget_scoped_resource_access_context() calls for consistency and\nmaintainability.\n\nChanges:\n- Refactor 18 endpoints to use centralized helper\n- Preserve 4 exceptions (A2A federation, custom contracts, audit capture)\n- Update 13 test mocks from 3-tuple to 2-tuple pattern\n- Add regression tests for basic-auth admin behavior\n\nBug fix: Basic-auth/dev-mode admins now correctly receive admin bypass\n(None, None) instead of public-only scope. The inline pattern missed\nnon-JWT admin contexts; the centralized helper handles them correctly.\n\nCloses #4451\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-07T13:38:24+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 108,
+  "deletions": 174,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:04.655279",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:04.656098",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4654,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4654.json"
+  }
+}

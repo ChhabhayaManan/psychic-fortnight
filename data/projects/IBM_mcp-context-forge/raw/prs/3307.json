@@ -1,0 +1,84 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3307,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3307"
+  },
+  "metadata": {
+    "title": "feat(rbac): enforce server_id scoping in /rpc endpoint for server-scoped tokens",
+    "state": "closed",
+    "created_at": "2026-02-27T05:09:45+00:00",
+    "updated_at": "2026-03-09T01:51:20+00:00",
+    "closed_at": "2026-02-27T17:40:19+00:00",
+    "merged_at": "2026-02-27T17:40:19+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "security",
+      "MUST",
+      "api"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\nWires up the existing (but previously unused) `validate_server_access()` utility into the `/rpc` JSON-RPC handler so that server-scoped tokens can only operate on the server they are scoped to.\r\n\r\n\r\n## Related Issue\r\nCloses #2743\r\n\r\n## Problem\r\n\r\nThe `TokenScopingMiddleware` enforces `scopes.server_id` for REST endpoints by matching URL paths (e.g. `/servers/{id}/tools`). However, `/rpc` is a multiplexed JSON-RPC handler where `server_id` is supplied in the **request body** (`params.server_id`), not the URL. This meant a token scoped to `server_id: \"abc\"` could POST to `/rpc` with `params.server_id: \"xyz\"` and be allowed through.\r\n\r\n## Changes\r\n\r\n### `mcpgateway/main.py`\r\n- Imports `validate_server_access` from `mcpgateway/utils/token_scoping`.\r\n- In `handle_rpc()`, after extracting `server_id` from params, extracts the JWT payload from `request.state._jwt_verified_payload` (stored as a `(token, payload)` tuple) and calls `validate_server_access(token_scopes, server_id)`.\r\n- Returns a `403` HTTP response with a JSON-RPC `{\"code\": -32600}` error body when the token is scoped to a different server.\r\n- The check is skipped when no `server_id` is present in params, preserving existing behaviour for global/unscoped calls.\r\n\r\n### `tests/unit/mcpgateway/test_rpc_tool_invocation.py`\r\nAdds `TestRPCServerIdScoping` with 5 tests:\r\n- HTTP-level `403` returned when `validate_server_access` returns `False`.\r\n- `validate_server_access` is **not** called when `server_id` is absent from params.\r\n- Correct unpacking of `_jwt_verified_payload` tuple.\r\n- Graceful handling of `None` payload (basic auth / no JWT → empty scopes → full access).\r\n- Graceful handling of a JWT payload missing the `scopes` key → no restriction.\r\n\r\n## Acceptance Criteria\r\n\r\n| Criterion | Status |\r\n|---|---|\r\n| Server-scoped token (`server_id: \"abc\"`) rejected for `params.server_id: \"xyz\"` | ✅ |\r\n| Server-scoped token (`server_id: \"abc\"`) allowed for `params.server_id: \"abc\"` | ✅ |\r\n| Global tokens (no `scopes.server_id`) work for all servers | ✅ |\r\n| Unit tests cover the new validation path | ✅ |\r\n| Existing token scoping tests pass | ✅ |",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3865082884",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-27T06:03:46+00:00",
+      "body": "LGTM. The new server-scope check in /rpc is consistent with the existing token-scoping utility behavior and is covered by focused unit tests for the added enforcement path."
+    },
+    {
+      "id": "3868209119",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-27T17:40:11+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "401ee0458c81faa1893d0a99039bd42e1947e6b7",
+      "message": "enforce server_id scoping in /rpc endpoint for server-scoped tokens\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-26T06:39:19+00:00"
+    },
+    {
+      "sha": "9386eafac8ad9cfabe19e905e352cc15fca1f7f7",
+      "message": "test(rbac): add allowed-path test and strengthen assertions for RPC server_id scoping\n\n- Add test_rpc_proceeds_when_server_access_is_allowed covering the\n  HTTP-level happy path when validate_server_access returns True\n- Strengthen assert_called_once to assert_called_once_with to verify\n  correct arguments are passed to validate_server_access\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T16:35:14+00:00"
+    },
+    {
+      "sha": "adb58801c464bfe2a0e7afaa04c70260664729c1",
+      "message": "fix(rbac): close server-scope bypass, fix error code, harden payload extraction\n\nAddress review findings for RPC server_id scoping:\n\n1. Close bypass: server-scoped tokens omitting server_id could see\n   resources from all servers (10 vs 2 tools in live test). Auto-inject\n   the token's server_id when the request omits it, achieving parity\n   with the REST middleware which denies /tools for server-scoped tokens.\n\n2. Error code: change -32600 (Invalid Request) to -32003, consistent\n   with all other authorization errors in handle_rpc().\n\n3. Robustness: add isinstance(dict) guard on the JWT payload element\n   so non-dict values (e.g. corrupted cache) are treated as missing\n   rather than raising AttributeError.\n\n4. Tests: add 4 new tests (auto-injection logic, non-dict payload),\n   update existing assertions for new error code.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T17:07:50+00:00"
+    },
+    {
+      "sha": "41c80d841edfe083a489181ee52f8e200478da24",
+      "message": "test(rbac): cover auto-injection line via direct handle_rpc call\n\nCall handle_rpc() directly with a mock request carrying a server-scoped\n_jwt_verified_payload to exercise the auto-injection assignment (line\n5959) that the HTTP-level tests cannot reach without a live database.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T17:28:51+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 232,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:47.924096",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:47.925610",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3307,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3307.json"
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3677,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3677"
+  },
+  "metadata": {
+    "title": "fix(mcp): Direct proxy paths use shared passthrough header utility",
+    "state": "closed",
+    "created_at": "2026-03-14T10:01:59+00:00",
+    "updated_at": "2026-03-26T22:43:26+00:00",
+    "closed_at": "2026-03-26T22:43:24+00:00",
+    "merged_at": "2026-03-26T22:43:24+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "MUST",
+      "client-green",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "jonpspri",
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n- Replace manual header forwarding loops in `_proxy_list_tools_to_gateway`, `_proxy_list_resources_to_gateway`, and `_proxy_read_resource_to_gateway` with calls to `compute_passthrough_headers_cached()`\n- This ensures `X-Upstream-Authorization` → `Authorization` rename, global passthrough config, and header sanitization are applied consistently across all direct proxy operations in Streamable HTTP transport\n- Add 5 regression tests verifying upstream auth rename on all three proxy paths, negative case, and feature-flag-disabled behavior\n\nCloses #3643\n\n## Test plan\n- [x] All 355 existing `test_streamablehttp_transport.py` tests pass\n- [x] All 75 passthrough header unit tests pass\n- [x] 3 updated passthrough header tests verify gateway-specific headers via `compute_passthrough_headers_cached`\n- [x] 5 new `TestProxyUpstreamAuthorizationRename` tests cover tools/list, resources/list, resources/read, negative case, and feature-flag-disabled scenario\n- [x] `isort` and `black` clean",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3948989294",
+      "author": "cafalchio",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-14T16:09:47+00:00",
+      "body": "It is cleaner to use compute_passthrough_headers_cached.\nGood test coverage. LGTM"
+    },
+    {
+      "id": "3980779927",
+      "author": "bogdanmariusc10",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-20T10:47:42+00:00",
+      "body": "## ✅ Verified - Bug Fixed\n\nTested this PR against the reproduction steps from the bug report.\n\n**Setup:**\n- mcpgateway running from `green-3643-direct-proxy` branch via `uv run`\n- Gateway configured in `direct_proxy` mode with `STREAMABLEHTTP` transport\n- Mock upstream server logging all incoming headers\n\n**Test:** Sent a `tools/list` request with `X-Upstream-Authorization: Bearer upstream-secret-token` and `X-Context-Forge-Gateway-Id` pointing to the direct proxy gateway.\n\n**Result before this PR (on `main`):**\n```\n[UPSTREAM] Authorization: None\n```\n\n**Result with this PR:**\n```\n[UPSTREAM] Authorization: Bearer upstream-secret-token\n```\n\nThe `X-Upstream-Authorization` header is now correctly renamed to `Authorization` and forwarded to the upstream server on `tools/list`. The fix replaces the manual header loop in `_proxy_list_tools_to_gateway`, `_proxy_list_resources_to_gateway` and the resource read proxy with a call to `compute_passthrough_headers_cached()`, consistent with the `tools/call` path."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "786b7af8cd49a794ee5069717dc5d693c81d77a5",
+      "message": "fix(mcp): Use compute_passthrough_headers_cached in Streamable HTTP direct proxy paths\n\nReplace manual header loops in _proxy_list_tools_to_gateway,\n_proxy_list_resources_to_gateway, and _proxy_read_resource_to_gateway\nwith calls to compute_passthrough_headers_cached so that\nX-Upstream-Authorization → Authorization rename, global passthrough\nconfig, and header sanitization are applied consistently.\n\nCloses #3643\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T10:00:53+00:00"
+    },
+    {
+      "sha": "fdaa844a9e3af64bd33ae2a5a9657bdf0889adf1",
+      "message": "fix(test): Widen `app` fixture scope from function to module\n\nThe function-scoped `app` fixture was causing ~25s setup per test due to\nrepeated mcpgateway.main imports. Module scope matches the existing\n`app_with_temp_db` fixture and pays the import cost once per module.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-26T20:08:33+00:00"
+    },
+    {
+      "sha": "b2ea286f885acc74c0524a71e1b7dd3017133259",
+      "message": "fix(mcp): Skip DB lookup for passthrough headers when gateway config is explicit\n\nWhen a gateway has explicit passthrough_headers (including empty []),\nuse them directly instead of querying the global config cache. This\navoids an unnecessary DB round-trip and ensures an explicit empty list\ndoes not fall through to the global allowlist.\n\nCloses #3643\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-26T20:10:25+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 391,
+  "deletions": 40,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:29.330067",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:29.333328",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3677,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3677.json"
+  }
+}

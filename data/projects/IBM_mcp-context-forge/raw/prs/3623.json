@@ -1,0 +1,104 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3623,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3623"
+  },
+  "metadata": {
+    "title": "fix: team join validation and error handling",
+    "state": "closed",
+    "created_at": "2026-03-11T15:29:24+00:00",
+    "updated_at": "2026-03-20T23:17:28+00:00",
+    "closed_at": "2026-03-20T23:17:26+00:00",
+    "merged_at": "2026-03-20T23:17:26+00:00",
+    "author": "gcgoncalves",
+    "labels": [
+      "bug",
+      "wxo",
+      "rbac",
+      "MUST",
+      "release-fix",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n- Add max teams validation in create_join_request() before DB operation\r\n- Return 400 Bad Request (not 500) for validation errors in API endpoints\r\n- Handle ValueError exceptions in request_to_join_team() and approve_join_request()\r\n- Improve admin UI error handling with inline HTML error display\r\n- Disable join button when allow_team_join_requests feature flag is false\r\n- Add toast notification for network errors in requestToJoinTeamSafe()\r\n- Ensure proper HTTP status codes for all validation failures\r\n\r\nChanges:\r\n- mcpgateway/services/team_management_service.py: Add max teams check\r\n- mcpgateway/routers/teams.py: Add ValueError handling for 400 responses\r\n- mcpgateway/admin.py: Add feature flag checks and error handling\r\n- mcpgateway/templates/admin.html: Improve JS error handling\r\n\r\nFixes #3513\r\n\r\n## 🔁 Reproduction Steps\r\nSee #3513 \r\n\r\n## 🐞 Root Cause\r\nUser team validation was not being handled properly on the backed, and the `allow_team_join_requests` was not handled on the UI.\r\n\r\n## 💡 Fix Description\r\nAdded the proper HTTP responses for the cases above and disabled the UI button when `allow_team_join_requests` is set to false.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3936632369",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-12T13:33:42+00:00",
+      "body": "PR looks good, just we need to extend the cover for pytest https://github.com/IBM/mcp-context-forge/actions/runs/23003615300/job/66795548967?pr=3623"
+    },
+    {
+      "id": "3967143360",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-18T11:43:41+00:00",
+      "body": "Thanks @gcgoncalves! The current change improves the UI behavior for admins, but the MAX_MEMBERS_PER_TEAM restriction still appears to be enforced only on the client side. Non-admin users can likely bypass the HTML max attribute by submitting a direct request with a larger max_members value, and the backend seems to accept that value without rejecting it. Because of that, the PR does not fully enforce the intended rule of “admins may exceed the cap, non-admins may not” at the server boundary.\n\nI think it would be good to move this validation to the backend as well, ideally in the shared service layer so the rule is enforced consistently for both UI and API paths?\n\nIt would also help to add a few negative tests to make sure the deny paths and edge cases are covered. Suggested tests:\n\n  - Non-admin create team with max_members > settings.max_members_per_team should be rejected.\n  - Non-admin update team with max_members > settings.max_members_per_team should be rejected.\n  - Admin create team with max_members > settings.max_members_per_team should be allowed.\n  - Admin update team with max_members > settings.max_members_per_team should be allowed.\n  - Non-admin create team with max_members == settings.max_members_per_team should succeed.\n  - Non-admin update team with max_members == settings.max_members_per_team should succeed.\n  - Create/update with empty max_members should continue to use the default or preserve the existing value, as intended.\n  - Create/update with non-numeric max_members should continue to fail or normalize as intended, with explicit coverage for that behavior.\n\n  Adding these would make the behavior much clearer and help prevent regressions around the role-specific limit handling."
+    },
+    {
+      "id": "3976065263",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-19T15:44:03+00:00",
+      "body": "Thanks @gcgoncalves for addressing the comment. \n\nTested out locally for both admin path and non path. Now validation message is not hardcoded anymore. It is being served from the config file. \n\nLGTM 🚀 "
+    },
+    {
+      "id": "3984464386",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-20T22:55:54+00:00",
+      "body": "Approved after rebase, code review, integration testing (23/23 curl + Playwright tests), and fixes for admin skip_limits, approve max_members capacity check, and partial commit prevention."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f0b1a63e43eb820dff37d4e5805e2e80ac5a2132",
+      "message": "fix: team join validation and error handling\n\nFixes #3513\n\n- Add max teams validation in create_join_request() before DB operation\n- Return 400 Bad Request (not 500) for validation errors in API endpoints\n- Handle ValueError exceptions in request_to_join_team() and approve_join_request()\n- Improve admin UI error handling with inline HTML error display\n- Disable join button when allow_team_join_requests feature flag is false\n- Add toast notification for network errors in requestToJoinTeamSafe()\n- Ensure proper HTTP status codes for all validation failures\n\nChanges:\n- mcpgateway/services/team_management_service.py: Add max teams check\n- mcpgateway/routers/teams.py: Add ValueError handling for 400 responses\n- mcpgateway/admin.py: Add feature flag checks and error handling\n- mcpgateway/templates/admin.html: Improve JS error handling\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-03-11T15:19:04+00:00"
+    },
+    {
+      "sha": "d1f41b592b6f7136eef6e7beddb9897f3925a84e",
+      "message": "Add tests and address reviews\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-03-19T12:00:31+00:00"
+    },
+    {
+      "sha": "700b774cf4b94a81ab4a0c69a491a97ea425f343",
+      "message": "test: add service-level test for approve_join_request max teams limit\n\nCover the max_teams_per_user check in approve_join_request at the\nservice layer to ensure 100% differential test coverage for PR #3623.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T21:57:18+00:00"
+    },
+    {
+      "sha": "4242adc843d2c1fffb1c9885a088c3015454ecab",
+      "message": "fix: address codex review — admin skip_limits, approve max_members, partial commit\n\n- admin_update_team: pass skip_limits=bool(is_admin) to match API router,\n  add explicit ValueError handler with db.rollback() to prevent partial\n  commits when max_members validation fails after name/description mutation\n- approve_join_request: enforce team.max_members capacity check before\n  adding member, consistent with add_member_to_team\n- create_join_request/approve_join_request: separate ValueError from\n  generic except Exception to avoid logging validation errors as ERROR\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T22:52:11+00:00"
+    },
+    {
+      "sha": "bd5e336c2b8c05dfe05789657863f2784cfa3319",
+      "message": "test: fix approve_join_request tests for max_members capacity check\n\nMock get_team_by_id and count() in existing approve_join_request tests\nto support the new team.max_members capacity check added in the\nprevious commit.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T23:02:58+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 654,
+  "deletions": 16,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:08.256968",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:08.258169",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3623,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3623.json"
+  }
+}

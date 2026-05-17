@@ -1,0 +1,79 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4107,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4107"
+  },
+  "metadata": {
+    "title": "fix(rbac): add database-backed admin bypass for visibility filtering",
+    "state": "closed",
+    "created_at": "2026-04-09T14:10:16+00:00",
+    "updated_at": "2026-04-24T21:33:54+00:00",
+    "closed_at": "2026-04-24T21:33:52+00:00",
+    "merged_at": "2026-04-24T21:33:52+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "rbac",
+      "MUST",
+      "api",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #4106\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixed RBAC visibility inconsistency where non-platform admin users with `is_admin=True` and `platform_admin` role could not see private tools/gateways, despite having admin privileges. Only the bootstrap admin (`PLATFORM_ADMIN_EMAIL`) had full visibility.\r\n\r\n**Root Cause**: The admin bypass logic required both `user_email=None` AND `token_teams=None`, but logged-in admin users always have their email set, so the bypass never triggered for them.\r\n\r\n**Solution**: Added database-backed admin checks to all visibility filtering locations with fail-closed error handling. Now any user with `is_admin=True` in the database gets unrestricted visibility, consistent with the platform admin.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests updated for changes (test expectations adjusted for 2 db calls)\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Changes Made\r\n\r\n**Core Logic** (`mcpgateway/services/base_service.py`):\r\n- Added `_is_user_admin()` method with fail-closed error handling\r\n- Checks platform admin email first (performance), then queries database\r\n- Uses explicit boolean check (`user.is_admin is True`) to handle MagicMock in tests\r\n\r\n**Updated Services**:\r\n- `tool_service.py`: Admin check in `_check_tool_access`\r\n- `prompt_service.py`: Admin check in `_check_prompt_access`\r\n- `resource_service.py`: Admin checks in `_check_resource_access` and `subscribe_events`\r\n- `a2a_service.py`: Admin check in `_check_agent_access`\r\n- `tag_service.py`: Admin check in `_apply_visibility_scope`\r\n- `completion_service.py`: Admin check in `_apply_visibility_scope` (also fixed missing `db` parameter)\r\n- `gateway_access.py`: Admin check in `check_gateway_access`\r\n\r\n**Test Updates**:\r\n- Updated test expectations for 2 db.execute calls (admin check + actual query)\r\n- Fixed async test patterns in A2A service tests\r\n\r\n### Security Properties\r\n- **Fail-closed**: Returns False on any exception rather than granting access\r\n- **Platform admin priority**: Checks `PLATFORM_ADMIN_EMAIL` first for performance\r\n- **Explicit boolean check**: Handles MagicMock truthy behavior in tests\r\n- **Consistent behavior**: All admin users now get unrestricted visibility\r\n\r\n### Files Modified (11)\r\n- `mcpgateway/services/base_service.py`\r\n- `mcpgateway/services/tool_service.py`\r\n- `mcpgateway/services/prompt_service.py`\r\n- `mcpgateway/services/resource_service.py`\r\n- `mcpgateway/services/a2a_service.py`\r\n- `mcpgateway/services/tag_service.py`\r\n- `mcpgateway/services/completion_service.py`\r\n- `mcpgateway/utils/gateway_access.py`\r\n- `tests/unit/mcpgateway/services/test_tool_service.py`\r\n- `tests/unit/mcpgateway/services/test_gateway_service.py`\r\n- `tests/unit/mcpgateway/services/test_a2a_service.py`\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "2c22a75b855e6b281e4a66ce474722ece816cb38",
+      "message": "fix: add database-backed admin bypass for visibility filtering\n\nFixes #4106\n\nProblem:\n- Non-platform admin users with is_admin=True could not see private tools/gateways\n- Only bootstrap admin (PLATFORM_ADMIN_EMAIL) had full visibility\n- Admin bypass logic required both user_email=None AND token_teams=None\n- Logged-in admin users always have email set, so bypass never triggered\n\nSolution:\n- Added _is_user_admin() method to BaseService with fail-closed error handling\n- Checks platform admin email first, then queries database for is_admin status\n- Uses explicit boolean check (user.is_admin is True) to handle MagicMock in tests\n- Updated all visibility filtering locations:\n  - tool_service.py: _check_tool_access\n  - prompt_service.py: _check_prompt_access\n  - resource_service.py: _check_resource_access, subscribe_events\n  - a2a_service.py: _check_agent_access\n  - tag_service.py: _apply_visibility_scope\n  - completion_service.py: _apply_visibility_scope (also fixed missing db parameter)\n  - gateway_access.py: check_gateway_access\n\nTest Updates:\n- Updated test expectations for 2 db.execute calls (admin check + actual query)\n- Fixed async test patterns in A2A service tests\n\nSecurity Properties:\n- Fail-closed: Returns False on any exception\n- Platform admin priority: Checks PLATFORM_ADMIN_EMAIL first\n- Explicit boolean check: Handles MagicMock truthy behavior\n- Consistent behavior: All admin users get unrestricted visibility\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-09T14:06:01+00:00"
+    },
+    {
+      "sha": "26da65001f37cefcbf66b18c8d9210670070ff0b",
+      "message": "fix: implement database admin bypass for non-platform admin users\n\n- Add _is_user_admin() method to BaseService with fail-closed error handling\n- Check database is_admin flag for admin bypass in visibility filtering\n- Fix code duplication by delegating to BaseService._apply_visibility_scope\n- Add comprehensive test coverage for database admin bypass path\n- Remove unused imports (and_, or_) from tag_service and completion_service\n- Fix trailing whitespace in gateway_access.py\n\nCloses #4106\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-09T14:45:25+00:00"
+    },
+    {
+      "sha": "cc13a64a0dd062f7c118252ebbd7fda6e5a662f1",
+      "message": "test: add coverage for admin bypass paths\n\n- Add test_list_gateways_platform_admin_bypass for platform admin email bypass\n- Add test_list_gateways_database_exception_handling for exception handling\n- Add test_platform_admin_bypass for gateway_access platform admin bypass\n- Add test_database_exception_handling for gateway_access exception handling\n- Remove trailing whitespace from test_tool_service.py\n- Auto-fix formatting issues (blank lines, etc.)\n\nImproves coverage for base_service.py lines 226, 233-234, 236 and gateway_access.py lines 96, 104, 106\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-09T15:05:47+00:00"
+    },
+    {
+      "sha": "8bd0cca365bcf50ac29de1709c059874f77da105",
+      "message": "style: apply black/isort formatting\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T10:22:17+00:00"
+    },
+    {
+      "sha": "b47e7b221e2b6a5c3559ffe19ad4554f481cf21e",
+      "message": "fix(rbac): guard admin bypass with token_teams, extract shared helper\n\nAddresses in-depth review findings on PR #4107.\n\nBlocking fixes:\n\n1. Admin bypass + narrowed token (token_teams=[] or [\"t1\"]) previously\n   granted full Layer-1 visibility because the DB admin check fired\n   before the public-only / team-scope guard.  This broke the contract\n   in normalize_token_teams() (auth.py) that narrowed tokens must\n   constrain even admins — see AGENTS.md token-scoping tables.  Every\n   admin-bypass site now requires ``token_teams is None`` before\n   consulting DB admin status.\n\n2. tag_service.get_entities_by_tag() did not pass ``db=db`` to\n   _apply_visibility_scope(), silently hiding private-tagged entities\n   from DB admins (partial reintroduction of #4106).  ``db`` is now\n   required on the helper so this cannot happen again.\n\nDesign/maintainability fixes:\n\n- Extracted the admin-check policy to mcpgateway/utils/admin_check.py.\n  Previously duplicated in BaseService._is_user_admin,\n  BaseService._apply_visibility_scope inline, and\n  gateway_access.check_gateway_access inline.  All three now delegate\n  to one implementation.\n- BaseService._apply_visibility_scope is now a @staticmethod with\n  required ``db``, removing the BaseService.__new__(BaseService) hack\n  in completion_service and tag_service.\n- Added request-scoped memoization on ``Session.info``, avoiding N+1\n  admin lookups inside loops such as flush_events iterating over\n  per-agent visibility checks.\n- Added explicit type hints (Select, Type[Any]) on the helper.\n\nTest coverage:\n\n- Deny-path regressions for \"DB admin + token_teams=[]\" (public-only)\n  and \"DB admin + token_teams=['x']\" (narrowed) across tool, prompt,\n  resource, a2a, and gateway services.\n- Regression test for tag_service.get_entities_by_tag admin bypass.\n- Updated existing admin-bypass tests to use token_teams=None (the\n  only scope in which DB admin bypass is permitted).\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T10:46:59+00:00"
+    },
+    {
+      "sha": "291dc92cdb495abb8fbab81f8d0e5f11d311dcf6",
+      "message": "fix(test): init session affinity in GET replay test to prevent flaky 503\n\nThe test_handle_streamable_http_get_replays_from_last_event_id test was missing init_session_affinity(), causing a 503 when the SessionAffinity singleton wasn't pre-initialized by a sibling test on the same xdist worker.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T21:03:29+00:00"
+    }
+  ],
+  "files_changed": 29,
+  "additions": 939,
+  "deletions": 468,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:42.353667",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:42.355619",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4107,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4107.json"
+  }
+}

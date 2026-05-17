@@ -1,0 +1,154 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4424,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4424"
+  },
+  "metadata": {
+    "title": "feat(security): implement nonce-based CSP to remove unsafe-inline and unsafe-eval from current policy",
+    "state": "closed",
+    "created_at": "2026-04-24T08:25:43+00:00",
+    "updated_at": "2026-05-09T14:55:37+00:00",
+    "closed_at": "2026-05-09T14:55:36+00:00",
+    "merged_at": "2026-05-09T14:55:36+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "enhancement",
+      "security",
+      "ica",
+      "SHOULD",
+      "pentesting"
+    ],
+    "milestone": null,
+    "assignees": [
+      "marekdano"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4330\r\n**Jira Issue:** https://jsw.ibm.com/browse/ICACF-26\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR implements a comprehensive Content Security Policy (CSP) solution that removes `unsafe-inline` and `unsafe-eval` directives, addressing security vulnerabilities identified in the pentesting report.\r\n\r\n**What changed:**\r\n- Removed `unsafe-inline` from `script-src` directive (prevents XSS attacks)\r\n- Removed `unsafe-eval` entirely from CSP (blocks dynamic code execution)\r\n- Implemented cryptographically secure nonce-based CSP using `secrets.token_urlsafe(16)` (128 bits of entropy per request)\r\n- Added `'unsafe-hashes'` to `script-src` for inline event handlers (onclick, onload, etc.)\r\n- Configured HTMX 2.0.3 to use CSP nonces via `htmx.config.inlineScriptNonce`\r\n- Kept `'unsafe-inline'` for `style-src` only (required for Alpine.js dynamic inline styles)\r\n\r\n**Why this matters:**\r\n- **Prevents XSS attacks** - Only scripts with matching nonces can execute, blocking malicious inline script injection\r\n- **Blocks dynamic code execution** - eval(), Function constructor, and similar dangerous functions are now blocked\r\n- **Follows OWASP best practices** - Modern nonce-based CSP is the recommended approach for securing web applications\r\n- **HTMX 2.0.3 compatibility** - No longer uses eval(), making it CSP-compliant\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Feature / Enhancement\r\n- [ ] Bug fix\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Formatting                | `make black isort autoflake` | ✅ PASS |\r\n| Linting                   | `make ruff`     | ✅ PASS |\r\n| Admin UI                  | Manual testing  | ✅ PASS |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Security Impact\r\n\r\n**Before:**\r\n```\r\nContent-Security-Policy: script-src 'self' 'unsafe-inline' 'unsafe-eval' ...\r\n```\r\n- ❌ Any inline script could execute (XSS vulnerability)\r\n- ❌ eval() and similar functions allowed (code injection risk)\r\n\r\n**After:**\r\n```\r\nContent-Security-Policy: script-src 'self' 'nonce-ABC123...' 'unsafe-hashes' https://cdnjs.cloudflare.com ...\r\n                         style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com ...\r\n```\r\n- ✅ Only scripts with matching nonce can execute\r\n- ✅ eval() and similar functions blocked\r\n- ✅ Unique nonce per request (128 bits of entropy)\r\n- ✅ Inline event handlers allowed via `'unsafe-hashes'`\r\n- ✅ Alpine.js dynamic styles work via `style-src 'unsafe-inline'`\r\n\r\n### Implementation Details\r\n\r\n**Core CSP Implementation** ([`mcpgateway/middleware/security_headers.py:295-311`](mcpgateway/middleware/security_headers.py:295-311)):\r\n- Generates cryptographically secure nonce per request using `secrets.token_urlsafe(16)`\r\n- Stores nonce in `request.state.csp_nonce` for template access\r\n- Configures CSP directives with nonce-based script-src\r\n- Separates style-src to allow `'unsafe-inline'` (Alpine.js requirement)\r\n\r\n**HTMX Configuration** ([`mcpgateway/templates/admin.html:321-327`](mcpgateway/templates/admin.html:321-327)):\r\n- Sets `window.htmxConfig.inlineScriptNonce` before HTMX bundle loads\r\n- Allows HTMX inline event handlers (hx-on:*) to work with strict CSP\r\n\r\n**HTMX Nonce Application** ([`mcpgateway/admin_ui/admin.js:15-19`](mcpgateway/admin_ui/admin.js:15-19)):\r\n- Reads nonce from `window.htmxConfig` and applies to `htmx.config.inlineScriptNonce`\r\n- Ensures all HTMX-generated inline scripts include the nonce\r\n\r\n**Files Modified:**\r\n- `mcpgateway/middleware/security_headers.py` - Core CSP with nonce generation\r\n- `mcpgateway/templates/admin.html` - HTMX nonce configuration\r\n- `mcpgateway/admin_ui/admin.js` - Applied nonce to htmx.config\r\n- `.secrets.baseline` - Updated baseline\r\n\r\n### Technical Notes\r\n\r\n**HTMX 2.0.3 Compatibility:**\r\n- HTMX 2.0 removed eval() usage, making it CSP-compliant\r\n- Inline event handlers (hx-on:*) require either nonces or `'unsafe-hashes'`\r\n- We use both: nonces for explicit scripts, `'unsafe-hashes'` for inline handlers\r\n\r\n**Alpine.js Requirement:**\r\n- Alpine.js generates dynamic inline styles at runtime\r\n- Requires `'unsafe-inline'` in `style-src` (cannot use nonces for styles)\r\n- This is an acceptable security trade-off for UI framework functionality\r\n\r\n**Security Trade-offs:**\r\n- `'unsafe-hashes'` allows inline event handlers (onclick, etc.) - acceptable for trusted admin UI\r\n- `'unsafe-inline'` for styles only - lower risk than scripts\r\n- No `'unsafe-eval'` - highest priority security improvement\r\n\r\n### PenTest Findings Addressed\r\n\r\n✅ **unsafe-inline removed from script-src** - Replaced with nonce-based whitelisting  \r\n✅ **unsafe-eval removed entirely** - No dynamic code execution allowed  \r\n✅ **Modern CSP implementation** - Follows OWASP best practices",
+  "comments": [
+    {
+      "id": "3190306085",
+      "author": "marekdano",
+      "created_at": "2026-05-05T17:21:13+00:00",
+      "body": "I think this line should be removed"
+    },
+    {
+      "id": "3190321534",
+      "author": "marekdano",
+      "created_at": "2026-05-05T17:23:59+00:00",
+      "body": "This duplicates `main.py:get_csp_nonce_from_request`. If the logic ever changes (e.g. fallback behavior, logging), one copy will drift. Extract to a utility or `import from main.py`."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4230220369",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-05T17:30:10+00:00",
+      "body": "### Blocking Issues\n\n  1. `events.js` not updated — functional regression\n\n  `events.js:597–603` detects tab switches by matching `[onclick*=\"Admin.showTab\"]`:\n```bash\n  document.addEventListener(\"click\", function (event) {\n    if (\n      event.target.matches('[onclick*=\"Admin.showTab\"]') ||\n      event.target.closest('[onclick*=\"Admin.showTab\"]')\n    ) {\n      resetSearchInputsState();\n      initializeSearchInputsDebounced();\n    }\n  });\n```\n\n  The PR removes all `onclick=\"Admin.showTab('...')\"` attributes from nav links, so this handler never fires. Search state will no longer reset on tab switch. This file was not modified in the PR and needs to be updated — e.g. match on `.sidebar-link` instead.\n\n  2. Stale guard and comment in `initialization.js:258–262`\n\n```bash\n  // The sidebar anchors already have inline onclick handlers in admin.html.\n  // Avoid adding a second click handler that would call showTab twice.\n  if (tabElement.hasAttribute(\"onclick\")) {\n    return;\n  }\n```\n\n  Since onclick attributes are gone, this guard is now dead code. All tabs now fall through to `tabElement.addEventListener(\"click\", () => showTab(tabName))` — which is correct for navigation, but the stale comment and dead guard should be removed.\n\n3. No integration test for `nonce` header ↔ template consistency\n\n  The tests verify that the helper function returns the right value, and the CSP header structure looks correct. The most important invariant — that the nonce embedded in `<script nonce=\"...\">` tags in rendered HTML matches the nonce in the `Content-Security-Policy` header — is not tested. A Playwright or integration test hitting an admin page and comparing both would catch any future regression.\n"
+    },
+    {
+      "id": "4235381731",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-06T10:45:55+00:00",
+      "body": "@bogdanmariusc10 - thanks for addressing the issues \n\nI found out:\n\n#### Blocking Issues\n\n  1. `'unsafe-hashes'` without accompanying hash values is a no-op\n\n  The CSP keyword `'unsafe-hashes'` does not relax any policy on its own. It acts as a flag that enables hash-source tokens (`'sha256-...', 'sha384-...'`) to apply to inline event handlers rather than only to `<script>` elements. Without at least one accompanying hash in the directive, `'unsafe-hashes'` does nothing.\n```bash\n  script-src 'self' 'nonce-{csp_nonce}' 'unsafe-hashes'\n```\n\n  Either:\n  - Compute and include the `SHA-256` hashes of each whitelisted inline event handler, or\n  - Remove `'unsafe-hashes'` entirely — if all inline handlers have already been removed (as the diff claims), it is not needed.\n\n  Leaving it in creates a misleading impression that event handlers are protected-by-hash when they are not.\n\n  2. Stale `onclick` selector in `events.js` (line 499, current main branch)\n```bash\n  const gatewaysTab = document.querySelector('[onclick*=\"gateways\"]');\n  if (gatewaysTab) {\n    gatewaysTab.addEventListener(\"click\", function () {\n      setTimeout(initializeCACertUpload, 100);\n    });\n  }\n```\n\n  The PR removes `onclick` attributes from sidebar links in `admin.html`, and it updates the tab-switch detection at line 597 to use `.sidebar-link`. But line 499 still queries by `onclick` attribute content. If the gateways sidebar link no longer has an `onclick` attribute, this silently returns `null`, and `initializeCACertUpload` is never re-triggered when the gateways tab is selected. This is a behavioral regression. It should be updated to the same class-based selector approach used for the tab-switch detection fix.\n\n  3. Docstring examples in `security_headers.py` show the old unsafe CSP\n\n  The doctest block (lines ~204–213 in the current file) includes:\n```bash\n  \"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com\",\n```\n\n  If these doctests are run (they appear to be valid, executable doctests), they now document the pre-PR CSP, not the new nonce-based one. They should be updated to reflect the new directive or removed from the docstring.\n\n  ---\n  Significant Concerns\n\n  4. `window.htmxConfig` bootstrapping is a load-order dependency\n\n  `admin.js` reads `window.htmxConfig.inlineScriptNonce` to configure `HTMX`. For this to work, a template must emit:\n```bash\n  <script nonce=\"{{ csp_nonce(request) }}\">\n    window.htmxConfig = { inlineScriptNonce: \"{{ csp_nonce(request) }}\" };\n  </script>\n```\n\n  before the bundled `admin.js` loads. This is an invisible load-order contract. If a template reorders script tags, HTMX silently loses the nonce and all HTMX-generated inline scripts will be blocked by the CSP. A comment in the template (or a console warning in `admin.js` when the config is missing) would make this dependency explicit.\n\n  5. `'unsafe-inline'` retained in `style-src` is undocumented in the CSP string itself\n\n  The PR is explicit in its commit messages that `unsafe-inline` is intentionally kept for Alpine.js dynamic styles. However, the CSP string in code has no comment explaining this exception. Given that the PR's headline is \"remove unsafe-inline\", a reviewer or future developer scanning the CSP header output will see 'unsafe-inline' and may not know it was a deliberate, reviewed compromise. A short inline comment would preserve intent.\n\n  6. CDN sources in script-src without Subresource Integrity (SRI)\n\n  The PR retains:\n  `https://cdnjs.cloudflare.com https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com`\n  in `script-src`. These are explicit allowances for any script served from those CDNs. Nonces protect against injected inline scripts; they do not protect against CDN compromise. For external scripts loaded via `<script src=\"...\">`, SRI\n  (`integrity=\"sha384-...\"`) is the appropriate countermeasure. This is not a regression introduced by this PR, but it is the natural next step given the security focus here.\n\n  ---\n  Minor Notes\n\n  7. `csp_nonce` registered as a Jinja2 global taking request explicitly\n\n  `jinja_env.globals[\"csp_nonce\"] = get_csp_nonce_from_request`\n\n  Templates call it as `{{ csp_nonce(request) }}`. This works but requires every template author to remember to pass request. A filter (`{{ request | csp_nonce }}`) or a context processor that injects the nonce string directly (so templates use` {{csp_nonce }}`, not a function call) would be harder to misuse. Not blocking, but worth considering if there are many templates to maintain.\n\n---\n#### Test Coverage Assessment\n\n  - Integration test for header-template nonce consistency — critical. This test must verify that the nonce value in the Content-Security-Policy response header and the nonce attribute in <script nonce=\"...\"> tags in the response body are\n  identical. If it only checks that both exist (without comparing values), a mismatch could go undetected.\n"
+    },
+    {
+      "id": "4237016810",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-06T14:35:23+00:00",
+      "body": "@bogdanmariusc10 - thanks for fixing the issue\n\nThere are minor issues that can be fixed in this PR, but are not blocking merging\nI'm approving the PR.\n\n 1. Class-level docstring uses nonce for style-src (`security_headers.py:66-71`)\n\n  The class-level docstring example shows:\n  `f\"style-src 'self' 'nonce-{csp_nonce}'\"`\n  But the actual implementation (line 387) uses:\n  `\"style-src 'self' 'unsafe-inline' https://...\"`\n  This is a documentation inconsistency — the class-level doctest incorrectly implies `style-src` also uses nonces.\n   The `dispatch()` method docstring at line 218 does this correctly. The class-level example should either match the real policy or be updated to match the dispatch docstring.\n\n2.  Weak doctest assertion (`security_headers.py:231`)\n```\n  >>> \"'unsafe-inline'\" not in csp_header or \"style-src\" in csp_header\n  True\n```\n\n  This assertion is always `True` because `\"style-src\"` is always in the header (short-circuit OR makes it vacuous).\n  It does not actually verify that `'unsafe-inline'` is absent from `script-src`. The dispatch docstring could instead assert:\n```\n  >>> script_src = [d for d in csp_directives if \"script-src\" in d][0]\n  >>> \"'unsafe-inline'\" not in script_src\n  True \n```\n\nLGTM 🚀 \n"
+    },
+    {
+      "id": "4251458881",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-08T10:12:19+00:00",
+      "body": "Good progress!!! — all blocking items from the earlier rounds have been addressed. Test coverage looks solid.\n\n####  Deferred (non-blocking):\n  - Alpine.js `unsafe-eval` concern is tracked in #4653\n  - CDN SRI for cdnjs.cloudflare.com and cdn.tailwindcss.com is fixed in https://github.com/IBM/mcp-context-forge/pull/3181\n  - The 165 inline event handlers are tracked in #https://github.com/IBM/mcp-context-forge/issues/4655\n\nLGTM 🚀 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2b024eb0089a297effd3885d1aa3ec06065577bc",
+      "message": "security: implement nonce-based CSP to remove unsafe-inline and unsafe-eval\n\n- Remove 'unsafe-inline' and 'unsafe-eval' from Content-Security-Policy\n- Implement cryptographically secure nonce generation per request (secrets.token_urlsafe(16))\n- Add csp_nonce Jinja2 global function for template access\n- Update 19 inline scripts across 13 templates with nonce attributes\n- Fix CSP consistency test to validate structure instead of exact match\n- Add type annotations to new helper functions\n\nAddresses pen testing findings:\n- Prevents XSS attacks via inline script injection\n- Blocks dynamic code execution (eval, Function constructor)\n- Follows OWASP CSP best practices\n\nFiles modified:\n- mcpgateway/middleware/security_headers.py (CSP implementation)\n- mcpgateway/main.py (Jinja2 global registration)\n- mcpgateway/version.py (fallback template support)\n- tests/security/test_security_headers.py (updated CSP test)\n- 13 HTML templates (added nonce attributes)\n\nAll tests passing, code formatted and linted.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-24T08:18:52+00:00"
+    },
+    {
+      "sha": "20df0fd15fa825bacf812041a359956dabda96fc",
+      "message": "fix failing playwright tests\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-24T09:32:19+00:00"
+    },
+    {
+      "sha": "7457086e2960cad3b07c6e6610ec857f017c4171",
+      "message": "fix: implement nonce-based CSP to address pentesting findings\n\n- Remove unsafe-inline from script-src (prevents XSS attacks)\n- Remove unsafe-eval entirely (blocks dynamic code execution)\n- Implement cryptographically secure nonce generation (128-bit entropy)\n- Configure HTMX 2.0.3 with htmx.config.inlineScriptNonce\n- Add 'unsafe-hashes' to script-src for inline event handlers\n- Keep 'unsafe-inline' for style-src only (Alpine.js requirement)\n\nAddresses pentesting report findings on CSP misconfiguration.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-24T13:12:15+00:00"
+    },
+    {
+      "sha": "df1478aaf65363a0eee0d9a64e70d1fca9a66dfe",
+      "message": "fix failing playwright tests\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-24T13:34:13+00:00"
+    },
+    {
+      "sha": "4f436c10d0510804deccbfe7d077b62e964ef70a",
+      "message": "improve testing coverage\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-24T14:18:42+00:00"
+    },
+    {
+      "sha": "0dddd3e93ceb9d563778778719225de76024fbc2",
+      "message": "fix review findings\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-06T09:25:17+00:00"
+    },
+    {
+      "sha": "7a02a9dea239afc2483e4eb0653f0d0c883d436a",
+      "message": "fix failing tests\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-06T09:38:07+00:00"
+    },
+    {
+      "sha": "4a644d26ff538ec8c6fbeeb8ff7708c83c74a4f2",
+      "message": "remove CSP unsafe-hashes, improve testing and documentation\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-06T13:53:17+00:00"
+    },
+    {
+      "sha": "d04b6c8201c5b54d3748603a7ef445854e946320",
+      "message": "fix: address CSP nonce review findings\n\n- Update security_headers.py docstring to accurately describe layered CSP Level 3 architecture (script-src-elem, script-src-attr, script-src)\n- Update fuzz test to validate script-src-elem and script-src-attr as required CSP Level 3 directives\n- Fix observability partial to inherit CSP nonce from htmxConfig for dynamically injected scripts\n- Add logging in get_csp_nonce_from_request when nonce is missing from request state\n- Update security tests to validate all three layered script directives\n\nCloses review findings from PR #4424\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T12:09:40+00:00"
+    },
+    {
+      "sha": "335fd39c5dff03476a5b96d1ebd3c52df0c154ff",
+      "message": "fix: resolve cyclic imports by extracting get_csp_nonce_from_request to utils\n\nMove get_csp_nonce_from_request from mcpgateway.main to mcpgateway.utils.csp_nonce\nto break the import cycle: mcpgateway.main -> ... -> mcpgateway.version -> mcpgateway.main\n\n- Create mcpgateway/utils/csp_nonce.py with the extracted function\n- Update mcpgateway/main.py to import from new location\n- Update mcpgateway/version.py to import from new location\n- Update tests/unit/mcpgateway/test_main.py to import from new location\n- Update .secrets.baseline (line number shifts from new file)\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T13:55:37+00:00"
+    },
+    {
+      "sha": "85e7b13d89e99abae5806e15c3491405ef2493c1",
+      "message": "style: fix ruff findings\n\n- Move get_csp_nonce_from_request import to top of main.py (fixes E402)\n- Remove invalid DAR101/DAR201/DAR401 rule codes from flake8 noqa comment\n  in siem_export_service.py (not valid ruff rule codes)\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T14:43:20+00:00"
+    }
+  ],
+  "files_changed": 26,
+  "additions": 463,
+  "deletions": 85,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:05.892867",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:05.893424",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4424,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4424.json"
+  }
+}

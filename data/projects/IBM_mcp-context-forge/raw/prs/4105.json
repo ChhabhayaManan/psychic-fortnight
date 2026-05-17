@@ -1,0 +1,142 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4105,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4105"
+  },
+  "metadata": {
+    "title": "Scaffold i18n",
+    "state": "closed",
+    "created_at": "2026-04-09T12:59:59+00:00",
+    "updated_at": "2026-04-10T14:51:22+00:00",
+    "closed_at": "2026-04-10T14:51:20+00:00",
+    "merged_at": "2026-04-10T14:51:20+00:00",
+    "author": "gcgoncalves",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Introduce i18n using FormatJS",
+  "comments": [
+    {
+      "id": "3064796102",
+      "author": "marekdano",
+      "created_at": "2026-04-10T14:12:02+00:00",
+      "body": "Will we move the strings \"Invalid credentials.\" and \"Login failed\" to the i18n files?"
+    },
+    {
+      "id": "3064798840",
+      "author": "marekdano",
+      "created_at": "2026-04-10T14:12:32+00:00",
+      "body": "Will we move the string \"An unexpected error occurred.\" to i18n files."
+    },
+    {
+      "id": "3064823116",
+      "author": "marekdano",
+      "created_at": "2026-04-10T14:16:58+00:00",
+      "body": "no `tailwind-merge`, conflicting classes not **deduplicated**\n\n  The `cn` implementation joins class names but does not deduplicate conflicting Tailwind utilities. In `button.tsx:44`, a caller passing className=\"px-2\" alongside the base px-4 py-2 will produce \"… px-4 py-2 px-2\" — Tailwind applies the last declaration, which is browser-order-dependent, not predictable. \nWill we think about adding `tailwind-merge`?"
+    },
+    {
+      "id": "3064846855",
+      "author": "marekdano",
+      "created_at": "2026-04-10T14:21:14+00:00",
+      "body": "`DEFAULT_PUBLIC_PATHS` is the declared allowlist, but `AuthGuard` contains a separate hardcoded `path.startsWith(\"/app/reset-password/\")` check. Adding future public paths now requires editing both the constant and the inline condition. Either add `\"/app/reset-password/\"` to `DEFAULT_PUBLIC_PATHS` with prefix-match support, or handle it via a `publicPrefixes` prop alongside `publicPaths`."
+    },
+    {
+      "id": "3064863741",
+      "author": "marekdano",
+      "created_at": "2026-04-10T14:24:32+00:00",
+      "body": "Do we need to update pytest to cover the changes?"
+    },
+    {
+      "id": "3064866041",
+      "author": "marekdano",
+      "created_at": "2026-04-10T14:24:57+00:00",
+      "body": "Do we need to update pytest to cover this change?"
+    },
+    {
+      "id": "3064933733",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-10T14:35:55+00:00",
+      "body": "Let's address at another PR."
+    },
+    {
+      "id": "3064933825",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-10T14:35:56+00:00",
+      "body": "Same as above."
+    },
+    {
+      "id": "3064940631",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-10T14:37:07+00:00",
+      "body": "Made a set out of the classes, so that they're unique"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4088418866",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-10T08:42:14+00:00",
+      "body": "  Summary\r\n\r\n  Introduces a React + TypeScript SPA scaffold under client/, wired up with FormatJS (react-intl) for i18n with three locales (en-US, es-ES, pt-BR), a custom client-side router, and a FastAPI catch-all handler at /app/*. The structural\r\n  decisions are solid, but the PR has a blocking build failure and the Login page — the one actually-functional page — skips the i18n system entirely.\r\n\r\n  ---\r\n  Findings\r\n\r\n  Blocking\r\n\r\n  `client/src/components/ui/button.tsx:6, sidebar.tsx:7` — Missing lib/utils module\r\n  Both files `import cn from ../../lib/utils`, which does not exist. TypeScript compilation fails with error TS2307 (confirmed via tsc --noEmit). Add `client/src/lib/utils.ts` exporting `cn`. The standard shadcn implementation uses clsx +\r\n  tailwind-merge; a zero-dependency alternative is (...classes: (string | false | undefined)[]) => classes.filter(Boolean).join(\" \") if those libs aren't wanted.\r\n\r\n  `client/src/pages/Login.tsx` — i18n not used on the only functional page\r\n  Login is the only fully-implemented page and has zero i18n usage — every string is hardcoded in English (\"Sign in to ContextForge\", \"Email\", \"Password\", \"Forgot password?\", \"Signing in…\"). The auth.json locale files define exactly these\r\n  keys (auth.login.title, auth.login.email, etc.) but they are never consumed. Import useIntl and call intl.formatMessage({ id: \"auth.login.title\" }) etc. — this is what the PR is supposed to demonstrate.\r\n\r\n  `tests/` — No tests for new backend behaviour\r\n  No tests added for app_spa_router (404 when SPA not built, 200 when it is) or for the CSP path-branching logic in security_headers.py (the /app/* vs legacy branch is new and untested). Add at minimum: one test that GET /app/login returns\r\n   404 when index.html is absent, and one verifying the strict CSP is applied on /app/ paths vs the legacy CSP on /admin/.\r\n\r\n  ---\r\n  High\r\n\r\n  `mcpgateway/main.py:11216–11219` — Static file gate mismatch\r\n  app_spa_router is mounted under `ADMIN_API_ENABLED`, but static files (/static/app/assets/…) are only mounted under `UI_ENABLED`. Both flags default to false but can be set independently. With `ADMIN_API_ENABLED=true`, `UI_ENABLED=false`, the SPA's index.html is served but all JS/CSS assets return 404 — a silent partial failure. Either mount app_spa_router inside the `if UI_ENABLED: block`, or add an explicit startup guard.\r\n\r\n  `client/src/components/ui/LanguageSwitcher.tsx:22` — as any on untrusted input\r\n  `setLocale(e.target.value as any)` silences the type system on a value coming from a DOM event. Cast to SupportedLocale instead: setLocale(e.target.value as SupportedLocale). The `<select>` options are already constrained to `SUPPORTED_LOCALES`, so this is safe and explicit.\r\n\r\n  ---\r\n  Medium\r\n\r\n  `client/src/i18n/IntlProvider.tsx:64–73` — Redundant lang attribute update\r\n  document.documentElement.lang is set twice: once inside setLocale() (line 67) and again inside a useEffect that fires on every locale change (line 72). Remove the useEffect block. The initial lang attribute can be set as a one-time\r\n  side-effect in detectUserLocale() since the locale is synchronously determined before first render.\r\n\r\n  `client/src/auth/AuthContext.tsx:44–47` — Stale user: null on page reload\r\n  On reload, isAuthenticated: true (token found in sessionStorage) but user: null. Header.tsx guards user && so there's no crash, but any component that needs user.is_admin or user.email will silently skip rendering until the first\r\n  authenticated API call repopulates user. On mount, fire a GET /auth/me (or equivalent) to rehydrate user, and set isAuthenticated: false on 401.\r\n\r\n  `client/src/i18n/IntlProvider.tsx:176` — setLocale not memoised\r\n  setLocale is defined as a plain function inside the component body — it's recreated on every render and passed via context, triggering unnecessary re-renders in consumers. Wrap in useCallback with [] deps.\r\n\r\n  ---\r\n\r\n  Lint auto-fix applied\r\n\r\n  Ran `make autoflake isort black` on the three changed Python files. One change was applied and staged:\r\n\r\n  - mcpgateway/main.py: extra space before inline comment removed by black (admin_router)   # → admin_router)  #)."
+    },
+    {
+      "id": "4090234710",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-10T14:25:16+00:00",
+      "body": "Left some comments"
+    },
+    {
+      "id": "4090392323",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-10T14:35:55+00:00",
+      "body": ""
+    },
+    {
+      "id": "4090392430",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-10T14:35:56+00:00",
+      "body": ""
+    },
+    {
+      "id": "4090399669",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-10T14:37:07+00:00",
+      "body": ""
+    },
+    {
+      "id": "4090464005",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-10T14:48:13+00:00",
+      "body": "LGTM 🚀 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "212534928b803fdffadc9a552072fe4b83be7972",
+      "message": "Scaffold i18n\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-09T11:12:18+00:00"
+    }
+  ],
+  "files_changed": 32,
+  "additions": 660,
+  "deletions": 45,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:42.710055",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:42.713049",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4105,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4105.json"
+  }
+}

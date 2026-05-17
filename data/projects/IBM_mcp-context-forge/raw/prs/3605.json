@@ -1,0 +1,70 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3605,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3605"
+  },
+  "metadata": {
+    "title": "fix(session-pool): prevent broken session recycling in MCPSessionPool",
+    "state": "closed",
+    "created_at": "2026-03-11T08:38:45+00:00",
+    "updated_at": "2026-03-19T14:06:00+00:00",
+    "closed_at": "2026-03-19T14:05:23+00:00",
+    "merged_at": null,
+    "author": "gandhipratik203",
+    "labels": [
+      "bug",
+      "performance",
+      "MUST",
+      "release-fix",
+      "ready"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "gandhipratik203"
+    ]
+  },
+  "description": "## Related Issue\n\nCloses #3520\n\n## Summary\n\nFixes remaining root causes of broken session detection in `MCPSessionPool` and aligns the verbose-logging compose health check default with the recommended production setting.\n\n<details>\n<summary>Change details</summary>\n\n**Part 1 — Transport-aware `is_closed`**\n\n`PooledSession.is_closed` only checked the internal `_closed` flag, missing cases where the underlying transport stream had silently broken. Sessions with a closed write stream or zero open receive channels were incorrectly considered healthy and handed to callers.\n\n- Extended `is_closed` to inspect `session._write_stream._closed` and `_state.open_receive_channels`\n- Uses strict `is True` and `isinstance(open_rx, int)` checks to avoid false positives with mock objects in tests\n- All `getattr` lookups include safe fallbacks so the property degrades gracefully if MCP internals change\n\n**Part 2 — Health check default (`docker-compose-verbose-logging.yml`)**\n\n`MCP_SESSION_POOL_HEALTH_CHECK_METHODS` was set to `[\"skip\"]` in `docker-compose-verbose-logging.yml`, contradicting the `[\"ping\", \"skip\"]` default already set in `config.py` and `docker-compose.yml`. Updated to `[\"ping\", \"skip\"]` so that a ping is attempted on session acquisition (with graceful fallback to skip for servers that do not support it).\n\n**Part 3 — Tests**\n\nAdded unit tests covering all `is_closed` transport-inspection paths, `release(discard=True)` behaviour, and context manager discard on both `Exception` and `BaseException`. Fixed `DummyResponse` stubs in `test_mcp_session_pool_coverage.py` to include `is_success = True`.\n\n</details>\n\n---\n\n## Scope\n\n| Requirement | Status |\n|---|---|\n| `is_closed` inspects actual transport stream state | ✅ |\n| `docker-compose-verbose-logging.yml` health check default aligned to `[\"ping\", \"skip\"]` | ✅ |\n| Unit tests cover all `is_closed` transport-inspection paths | ✅ |\n| Unit tests confirm `release(discard=True)` closes instead of recycling | ✅ |\n| Unit tests confirm context manager discards on `Exception` and `BaseException` | ✅ |\n\n---\n\n## 🔬 Steps to Test\n\n1. Run the session pool unit tests: `python3 -m pytest tests/unit/mcpgateway/services/test_mcp_session_pool.py tests/unit/mcpgateway/services/test_mcp_session_pool_coverage.py -v`\n2. Verify the health check default: start with `docker-compose -f docker-compose-verbose-logging.yml up` and confirm `MCP_SESSION_POOL_HEALTH_CHECK_METHODS` resolves to `[\"ping\", \"skip\"]`.\n3. Optionally reproduce with the echo-delay load test from PR #3353 (requires the `locustfile_echo_delay.py` locustfile and `fast_test_server` delay support introduced in that PR). Start the stack with `LOCUST_LOCUSTFILE=locustfile_echo_delay.py make testing-up`, run 10 users at spawn rate 2 in the Locust UI at `http://localhost:8089`, and confirm no `ClosedResourceError` or empty `\"Tool invocation failed: \"` errors appear in the gateway logs.\n\n<details>\n<summary>Manual test — idle session with dead backend</summary>\n\n### Manual test results\n\nTested against a live gateway (`make dev`) with an SSE translator wrapping `mcp-server-git` on port 9000.\n\n**Prerequisites**\n\n- A gateway registered in the UI pointing to `http://localhost:9000/sse` (SSE transport) — this federates the `git_log` tool into the gateway\n- `uvx` available (`pip install uv` if not)\n\n---\n\n**Setup — start services, create virtual server, associate tool**\n\n```bash\n# Terminal 1 — start the gateway\nmake dev\n\n# Terminal 2 — start the SSE translator (wraps mcp-server-git on port 9000)\npython3 -m mcpgateway.translate --stdio \"uvx mcp-server-git\" --port 9000\n\n# Terminal 3 — set up auth and test resources\nexport TOKEN=$(python3 -m mcpgateway.utils.create_jwt_token \\\n  --username admin@example.com --exp 10080 2>/dev/null | tail -1)\n\n# Create a virtual server\nexport SERVER_ID=$(curl -s -X POST http://localhost:8000/servers \\\n  -H \"Authorization: Bearer $TOKEN\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"server\": {\"name\": \"test-server\", \"description\": \"Session pool fix test\"}}' \\\n  | python3 -c \"import sys,json; print(json.load(sys.stdin)['id'])\")\n\n# Get the git_log tool ID and name (federated from the registered gateway)\nread TOOL_ID TOOL_NAME < <(curl -s http://localhost:8000/tools \\\n  -H \"Authorization: Bearer $TOKEN\" | python3 -c \\\n  \"import sys,json; ts=json.load(sys.stdin); \\\n  t=next(t for t in ts if t['originalName']=='git_log'); \\\n  print(t['id'], t['name'])\")\nexport TOOL_ID TOOL_NAME\necho \"Tool: $TOOL_NAME (id: $TOOL_ID)\"\n\n# Associate the tool with the virtual server\ncurl -s -X PUT \"http://localhost:8000/servers/${SERVER_ID}\" \\\n  -H \"Authorization: Bearer $TOKEN\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"server\\\": {\\\"name\\\": \\\"test-server\\\"}, \\\"associated_tools\\\": [\\\"${TOOL_ID}\\\"]}\" \\\n  | python3 -c \"import sys,json; d=json.load(sys.stdin); print('Tools:', d['associatedTools'])\"\n```\n\n---\n\n**Test — health check on idle session (backend killed after 10s idle)**\n\n> This test lowers `MCP_SESSION_POOL_HEALTH_CHECK_INTERVAL` to 5s for the duration of the test only.\n> Restart `make dev` normally afterwards to restore the 60s default.\n\n```bash\n# B1. Restart the gateway with a reduced health check interval\n# (Ctrl+C the existing make dev first, then:)\nMCP_SESSION_POOL_HEALTH_CHECK_INTERVAL=5 make dev\n\n# B2. Happy path — establishes a pooled session\ncurl -s -X POST \"http://localhost:8000/servers/${SERVER_ID}/mcp\" \\\n  -H \"Authorization: Bearer $TOKEN\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Accept: application/json, text/event-stream\" \\\n  -d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":4,\\\"method\\\":\\\"tools/call\\\",\\\"params\\\":{\\\"name\\\":\\\"${TOOL_NAME}\\\",\\\"arguments\\\":{\\\"repo_path\\\":\\\"/tmp\\\"}}}\" \\\n  | python3 -m json.tool\n# Expected: \"isError\": false, \"text\": \"/tmp\"\n\n# B3. Wait 10s idle, then kill the translator (no calls during idle)\nsleep 10 && pkill -f \"mcpgateway.translate\" && echo \"Translator killed\"\n\n# B4. Call immediately — ping health check should detect dead session before the call\ncurl -s -X POST \"http://localhost:8000/servers/${SERVER_ID}/mcp\" \\\n  -H \"Authorization: Bearer $TOKEN\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Accept: application/json, text/event-stream\" \\\n  -d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":2,\\\"method\\\":\\\"tools/call\\\",\\\"params\\\":{\\\"name\\\":\\\"${TOOL_NAME}\\\",\\\"arguments\\\":{\\\"repo_path\\\":\\\"/tmp\\\"}}}\" \\\n  | python3 -m json.tool\n# Expected: \"isError\": true, \"text\": \"Tool invocation failed: Connection closed\"\n# (pre-fix: idle session handed out unchecked, silent ClosedResourceError)\n\n# B5. Restore the gateway with the default 60s interval\n# (Ctrl+C make dev, then:)\nmake dev\n```\n\n---\n\n**Results summary**\n\n| Test | Scenario | Before fix | After fix |\n|---|---|---|---|\n| B2 | Tool call — backend running | `isError: false` | `isError: false` ✅ |\n| B4 | 10s idle, backend killed silently, call | Silent `ClosedResourceError` handed out | `\"Tool invocation failed: Connection closed\"` ✅ |\n\n`is_closed` transport stream inspection is covered by unit tests only — a silently dead transport with no exception is not reliably triggerable via curl.\n\n</details>\n\n---\n\n## 🏷️ Type of Change\n\n- [x] Bug fix\n- [ ] Feature / Enhancement\n- [ ] Documentation\n- [ ] Refactor\n- [ ] Chore (deps, CI, tooling)\n- [ ] Other (describe below)\n\n---\n\n## 🧪 Verification\n\n| Check | Command | Status |\n|---|---|---|\n| Lint suite | `make lint` | ✅ |\n| Unit tests | `make test` | ✅ |\n| Session pool tests | `python3 -m pytest tests/unit/mcpgateway/services/test_mcp_session_pool.py tests/unit/mcpgateway/services/test_mcp_session_pool_coverage.py` | ✅ |\n\n---\n\n## ✅ Checklist\n\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] Tests added/updated for changes\n- [ ] Documentation updated (if applicable)\n- [x] No secrets or credentials committed\n\n---\n\n## 📓 Notes\n\nThe `[\"ping\", \"skip\"]` health check chain adds a ping on every session acquisition. Servers that do not support the `ping` method will fall through to `skip` automatically, so there is no regression for environments using non-standard MCP servers.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "ca9ba650141c18e73a4492b915e671a4fb1440fe",
+      "message": "fix(session-pool): discard broken sessions on exception instead of recycling\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-09T14:26:00+00:00"
+    },
+    {
+      "sha": "ca3c384f4603380276279cca6e7e845e636690f3",
+      "message": "fix(session-pool): detect broken transport streams via is_closed\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-09T15:27:30+00:00"
+    },
+    {
+      "sha": "02e5d11108954ae3b521f0404037fd3e58fe0537",
+      "message": "fix(tests): update session pool coverage tests for discard and is_success changes\n\nUpdate test_session_context_manager_releases_on_exception to expect\nrelease(discard=True) on exception, matching the new discard behaviour\nadded to the session() context manager.\n\nAdd is_success = True to DummyResponse stubs in\ntest_execute_forwarded_request_success_result and\ntest_execute_forwarded_request_error_result to match the\nresponse.is_success guard introduced in mcp_session_pool.py.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-11T08:17:37+00:00"
+    },
+    {
+      "sha": "7168d44280bf39f30d0ac3007d38c6cadd9ec2be",
+      "message": "fix(config): set MCP_SESSION_POOL_HEALTH_CHECK_METHODS default to [\"ping\", \"skip\"]\n\nUpdates docker-compose.yml and docker-compose-verbose-logging.yml to use\n[\"ping\", \"skip\"] instead of [\"skip\"], aligning with the config.py default.\n\nThis enables ping-based health checks on session acquisition so broken\nsessions are detected before being handed to callers, with graceful fallback\nto skip for servers that do not support the ping method.\n\nCloses #3520\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-11T08:53:38+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 178,
+  "deletions": 5,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:11.475926",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:11.478155",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3605,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3605.json"
+  }
+}

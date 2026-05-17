@@ -1,0 +1,94 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4521,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4521"
+  },
+  "metadata": {
+    "title": "docs: fix release PII tool invocation steps",
+    "state": "closed",
+    "created_at": "2026-04-29T13:18:37+00:00",
+    "updated_at": "2026-04-29T16:43:25+00:00",
+    "closed_at": "2026-04-29T16:43:23+00:00",
+    "merged_at": "2026-04-29T16:43:23+00:00",
+    "author": "lucarlig",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nUpdates release-management chapter 12 so the PII plugin verification flow is correct end to end for the current API, plugin config, REST invocation path, MCP transport path, and plugin status endpoint.\n\n## Chapter 12 updates\n\n- Scopes the PII plugin hooks to the tool invocation path: `tool_pre_invoke` and `tool_post_invoke`.\n- Keeps the PII plugin in `mode: \"enforce\"` with partial masking and non-blocking detection.\n- Documents the required top-level `tool` wrapper for `POST /tools`.\n- Uses the canonical returned tool name, for example `echo-tool`, with JSON-RPC `tools/call` through `/rpc`.\n- Removes the AWS access key example because that is secret detection, not PII detection.\n- Adds a phone-number PII example instead.\n- Expands section 12.3 with concrete Streamable HTTP MCP commands: create virtual server, initialize MCP session, pass `mcp-session-id`, and call `tools/call`.\n- Fixes the plugin status endpoint to `/admin/plugins/PIIFilterPlugin` and adds explicit platform-admin token generation for the `admin.plugins` permission.\n- Removes the stale `.secrets.baseline` AWS-key false-positive entry after the AWS sample was removed.\n\n## Chapter 12 verification results\n\nExecuted against the local compose stack on this branch:\n\n- `make compose-restart`: passed; gateway replicas came up healthy behind nginx.\n- Created REST echo tool with the documented `POST /tools` payload shape.\n- `/rpc` JSON-RPC `tools/call` results:\n  - SSN input `123-45-6789` returned masked as `***-**-6789`.\n  - Credit card input `4111-1111-1111-1111` returned masked as `****-****-****-1111`.\n  - Email input `john.doe@example.com` returned masked as `j******@example.com`.\n  - Phone input `212-555-0199` returned masked as `***-***-0199`.\n- AWS access key input was intentionally removed from the PII docs because the PII plugin does not treat it as PII; AWS credentials are the responsibility of secret-detection controls.\n- MCP Streamable HTTP path passed:\n  - Created a virtual server for the echo tool.\n  - Initialized `/servers/{server_id}/mcp/` with `MCP-Protocol-Version: 2025-11-25`.\n  - Called `tools/call` with the returned `mcp-session-id`.\n  - SSN input was masked in the upstream httpbin payload.\n- Plugin status API passed:\n  - A non-admin token returned `403` with `Admin privileges required`, confirming 12.4 needs an admin token.\n  - A generated platform-admin token let `/admin/plugins/PIIFilterPlugin` return `status: enabled` and `mode: enforce`.\n  - Hooks included `tool_pre_invoke` and `tool_post_invoke`.\n- `make compose-logs | grep -i plugin` showed plugin startup/router messages and no plugin error lines.\n\n## Docs verification\n\n- Installed docs dependencies in `docs/.venv` using PyPI because the default `uv` index could not resolve `certifi>=2026.4.22`.\n- `cd docs && . .venv/bin/activate && mkdocs build`: passed.\n- `cd docs && . .venv/bin/activate && mkdocs build --strict`: not claimed for this PR; unrelated strict-link warnings were split into #4523.\n- Opened the built page locally at `http://127.0.0.1:8017/development/release-management/#122-test-pii-detection-on-tool-invocation` and confirmed the rendered chapter 12 shows the corrected tool payload, phone example, MCP commands, and plugin status endpoint.\n\n\n\n\n\n\n\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4197800888",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-29T14:19:37+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "86a850cffa36612ca3738024965103fc96777c75",
+      "message": "docs: fix release PII tool invocation steps\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-29T13:17:58+00:00"
+    },
+    {
+      "sha": "e95783cb6885adeb27f4e1289e2626880a7d59fc",
+      "message": "docs: align release PII verification steps\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-29T13:31:53+00:00"
+    },
+    {
+      "sha": "88c4b7b3d1c4e462d1e06e329ab4aff8e13eec42",
+      "message": "docs: fix release docs build links\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-29T13:45:24+00:00"
+    },
+    {
+      "sha": "2860b653b7aefa59afe52e5c4e414b6b54fbce97",
+      "message": "docs: scope PII release check to tool hooks\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-29T13:49:53+00:00"
+    },
+    {
+      "sha": "1509e1965f65ad81e3f6fd8421d4092af8ccca22",
+      "message": "Revert \"docs: fix release docs build links\"\n\nThis reverts commit 88c4b7b3d1c4e462d1e06e329ab4aff8e13eec42.\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-29T13:53:20+00:00"
+    },
+    {
+      "sha": "18a6139028a76e6d779968934d419bda4bb4b716",
+      "message": "docs: use admin token for plugin status check\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-29T14:46:29+00:00"
+    },
+    {
+      "sha": "aa358987f07be95634b64daef92955152e32949f",
+      "message": "docs: run discovered PII filter tests\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-29T14:56:26+00:00"
+    },
+    {
+      "sha": "72f1717f3f26893d7e7f46c2990a99f4a20e21f5",
+      "message": "docs: remove PII unit test step\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-29T15:01:02+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 107,
+  "deletions": 54,
+  "merged": true,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T17:17:07.277372",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:07.278831",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4521,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4521.json"
+  }
+}

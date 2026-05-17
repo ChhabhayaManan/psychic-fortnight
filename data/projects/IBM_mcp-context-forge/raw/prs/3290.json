@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3290,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3290"
+  },
+  "metadata": {
+    "title": "Fixed the embedded cookie path iisue",
+    "state": "closed",
+    "created_at": "2026-02-26T11:52:53+00:00",
+    "updated_at": "2026-03-07T11:03:44+00:00",
+    "closed_at": "2026-02-26T13:58:51+00:00",
+    "merged_at": "2026-02-26T13:58:50+00:00",
+    "author": "priyajithc",
+    "labels": [
+      "bug",
+      "ica",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# Fix embedded Admin UI 403 on create actions (CSRF cookie path mismatch)\r\n\r\n## Summary\r\nThis change fixes `403` errors seen in embedded Admin UI mode when creating MCP servers/gateways (and similar admin POST actions).\r\n\r\nThe issue occurred when Admin UI was served behind a proxy prefix (for example `APP_ROOT_PATH=/api/proxy/mcp`) but `request.scope[\"root_path\"]` was empty. In that case, the CSRF cookie was scoped to `/admin` instead of the embedded path, so the browser could not expose `mcpgateway_csrf_token` to the embedded page and the frontend could not send `X-CSRF-Token`.\r\n\r\n## Root cause\r\n- CSRF cookie path is derived in `_admin_cookie_path(...)`.\r\n- Path resolution used only `request.scope[\"root_path\"]`.\r\n- In some embedded/proxy deployments, `scope.root_path` is not populated consistently.\r\n- Result: `Set-Cookie: mcpgateway_csrf_token; Path=/admin` while UI runs at `/api/proxy/mcp/admin`, causing CSRF header injection to fail and POSTs to return `403`.\r\n\r\n## What changed\r\n### `mcpgateway/admin.py`\r\n- Updated `_admin_cookie_path(request)` to:\r\n  - Use `request.scope[\"root_path\"]` when present.\r\n  - Fall back to `settings.app_root_path` when `scope.root_path` is empty.\r\n  - Normalize the root path (ensure leading `/`, remove trailing `/`).\r\n  - Return `<root_path>/admin` or `/admin` when no root path exists.\r\n\r\n### `tests/unit/mcpgateway/test_admin.py`\r\n- Added regression tests for `_admin_cookie_path(...)`:\r\n  - Uses scope root path when present.\r\n  - Falls back to `settings.app_root_path` when scope root path is empty.\r\n  - Normalizes `settings.app_root_path` formatting.\r\n\r\n## Expected impact\r\n- In embedded mode with proxy prefixes, CSRF cookie path now correctly aligns with Admin UI path.\r\n- `mcpgateway_csrf_token` becomes available to embedded Admin UI JavaScript.\r\n- Admin POST actions (for example `POST /admin/gateways`) can include CSRF token correctly and stop failing with CSRF-related `403`.\r\n\r\n## Risk\r\n- Low risk: change is isolated to CSRF cookie path derivation and covered by focused unit tests.\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3860555095",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-26T12:16:20+00:00",
+      "body": "## Review\n\nThe fix is correct and well-scoped. CSRF cookie path derivation now properly falls back to `settings.app_root_path` when `scope[\"root_path\"]` is empty in embedded/proxy deployments, resolving the 403s on admin POST actions.\n\n**Minor gaps in test coverage:**\n- No test for the base case where both `scope[\"root_path\"]` and `settings.app_root_path` are empty (expected: `/admin`)\n- No test for `scope[\"root_path\"]` with a trailing slash — normalization handles it but it's unexercised\n\nThese are non-blocking; the primary scenarios are covered. Low risk change, approved."
+    },
+    {
+      "id": "3861161269",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-26T13:57:28+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "24268b56a5e22ff3a994f20da98a4a6668e3a45c",
+      "message": "fix(admin): fall back to settings.app_root_path for CSRF cookie path\n\nWhen the Admin UI is served behind a proxy prefix, request.scope[\"root_path\"]\nmay be empty while settings.app_root_path is correctly configured. This\ncaused the CSRF cookie to be scoped to /admin instead of\n/api/proxy/mcp/admin, making the token invisible to the embedded UI and\nresulting in 403 errors on POST actions.\n\nCloses #3290",
+      "author": "Priyajith Chembakassery",
+      "date": "2026-02-26T11:50:56+00:00"
+    },
+    {
+      "sha": "f25cbea8de10a575d8f3a5ae10fe2493f5f693d4",
+      "message": "test(admin): add edge-case tests for _admin_cookie_path\n\nCover two uncovered branches:\n- Both scope root_path and settings.app_root_path empty → returns \"/admin\"\n- Scope root_path with trailing slash → normalization strips it\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T13:27:15+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 58,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:41.191927",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:41.193253",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3290,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3290.json"
+  }
+}

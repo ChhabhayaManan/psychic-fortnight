@@ -1,0 +1,80 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4487,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4487"
+  },
+  "metadata": {
+    "title": "feat(tokens): add admin-delegated token creation with user_email parameter",
+    "state": "closed",
+    "created_at": "2026-04-28T08:16:51+00:00",
+    "updated_at": "2026-05-10T22:36:17+00:00",
+    "closed_at": "2026-05-10T22:36:16+00:00",
+    "merged_at": "2026-05-10T22:36:16+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "enhancement",
+      "SHOULD",
+      "client-green"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4389\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR adds admin-delegated token creation capability to the `POST /tokens` endpoint by introducing an optional `user_email` parameter. This enables platform admins to create API tokens on behalf of other users, resolving a critical portal architecture blocker where admin portals need to create tokens for logged-in users.\r\n\r\n**Key Changes:**\r\n- Added `user_email` (Optional[EmailStr]) parameter to `TokenCreateRequest` schema\r\n- Implemented admin authorization requiring un-narrowed platform admin access\r\n- Added audit logging for all admin-delegated token creation operations\r\n- Maintained all existing security invariants (Management Plane isolation, interactive session requirement)\r\n\r\n**Security Model:**\r\n- Requires `is_admin=True` AND `token_teams=None` (un-narrowed admin)\r\n- Narrowed admin sessions cannot delegate token creation\r\n- API tokens still blocked from token management (Management Plane isolation)\r\n- Email validation via Pydantic `EmailStr` type\r\n- Comprehensive audit trail via structured logging\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Feature / Enhancement\r\n- [ ] Bug fix\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (inline docstrings)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Implementation Details\r\n\r\n**Files Modified:**\r\n1. `mcpgateway/schemas.py` - Added `user_email` parameter\r\n2. `mcpgateway/routers/tokens.py` - Admin authorization logic\r\n3. `tests/unit/mcpgateway/routers/test_tokens.py` - Updated 2 tests for compatibility\r\n4. `tests/unit/mcpgateway/routers/test_tokens_admin_delegation.py` - New test file with 7 test cases\r\n\r\n### Security Invariants Verified\r\n\r\n✅ **Management Plane Isolation**: `_require_authenticated_session()` called before any logic\r\n- Blocks `auth_method == \"api_token\"` with 403 Forbidden\r\n- Enforces interactive session requirement\r\n\r\n✅ **Un-narrowed Admin Requirement**: Lines 144-151\r\n- Checks `token_teams is not None` and rejects with 403\r\n- Prevents narrowed admin sessions from delegation\r\n\r\n✅ **Audit Trail**: Lines 153-157\r\n- Structured logging via `logger.info()` for all delegated operations\r\n- Includes admin email and target user email\r\n\r\n✅ **Email Validation**: Schema line 6783\r\n- Pydantic `EmailStr` type enforces valid email format\r\n\r\n### Usage Example\r\n\r\n```python\r\n# Admin creates token for another user\r\nPOST /tokens\r\nAuthorization: Bearer <admin_session_token>\r\nContent-Type: application/json\r\n\r\n{\r\n  \"name\": \"Portal User Token\",\r\n  \"user_email\": \"user@example.com\",  # NEW: Admin-only parameter\r\n  \"description\": \"Token for portal user\",\r\n  \"expires_in_days\": 30,\r\n  \"tags\": [\"portal\", \"delegated\"]\r\n}\r\n```\r\n\r\n### Backward Compatibility\r\n\r\n✅ Fully backward compatible - `user_email` is optional and defaults to `None`\r\n✅ Existing API calls work unchanged\r\n✅ No breaking changes to existing functionality",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4252686499",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-08T13:46:12+00:00",
+      "body": "Thanks for the PR @bogdanmariusc10 \nPR looks good just need to add missing test so tomorrow we can refactor with confidence 💪.\n\n## Test Quality — 🟡\n\n| # | Test File                                                                                                                      | Test/Line | Issue                                                                  | Recommendation                                                                                               |\n| - | ------------------------------------------------------------------------------------------------------------------------------ | --------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |\n| 1 | [tests/unit/mcpgateway/routers/test_tokens_admin_delegation.py](tests/unit/mcpgateway/routers/test_tokens_admin_delegation.py#L1) | N/A       | Missing explicit unauthenticated deny-path test for delegated creation | Add a test that asserts 403 when unauthenticated (e.g.,`auth_method=None`) and `user_email` is provided. |"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ad08ef4e27a72270bbd7bb4b0220476e657a7cb2",
+      "message": "feat: add admin-delegated token creation with user_email parameter\n\nAdd optional user_email parameter to POST /tokens endpoint to enable\nplatform admins to create tokens on behalf of other users. This resolves\nthe portal architecture blocker where admin portals need to create tokens\nfor logged-in users.\n\nChanges:\n- Add user_email (Optional[EmailStr]) to TokenCreateRequest schema\n- Implement admin authorization check requiring un-narrowed platform admin\n- Add audit logging for admin-delegated token creation operations\n- Maintain all security invariants (Management Plane isolation, interactive\n  session requirement, un-narrowed admin access)\n\nSecurity:\n- API tokens still blocked from token management (Management Plane isolation)\n- Requires is_admin=True AND token_teams=None (un-narrowed admin)\n- Narrowed admin sessions cannot delegate token creation\n- Email validation via Pydantic EmailStr type\n- Audit trail via structured logging\n\nTests:\n- Add 7 comprehensive tests for admin delegation scenarios\n- Update 2 existing tests for backward compatibility\n- All 84 tests passing (77 existing + 7 new)\n\nCloses #4389\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-28T08:13:23+00:00"
+    },
+    {
+      "sha": "85e0e963500f4c11a7507c9b89e748e4b4ea78b3",
+      "message": "test: add unauthenticated deny-path test for delegated token creation\n\nAdd test_unauthenticated_cannot_create_delegated_token to verify that\nunauthenticated requests (auth_method=None) with user_email parameter\nare properly rejected with 403 Forbidden.\n\nThis addresses the security test gap identified in the test quality\nreview for admin-delegated token creation.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-08T14:36:45+00:00"
+    },
+    {
+      "sha": "fcf5f2a52cba3f1343bd0e6e6335160068f963d0",
+      "message": "feat: add admin-delegated token creation with user_email parameter\n\nAdds support for platform admins with un-narrowed access to create API\ntokens on behalf of other users via the new user_email parameter on\nPOST /tokens and POST /tokens/teams/{team_id}.\n\nSecurity:\n- Requires platform admin privilege (is_admin=True)\n- Requires un-narrowed admin access (token_teams=None)\n- Enforces team membership for delegated team-scoped tokens even for\n  unrestricted admins, preventing privilege escalation\n- Uses canonical get_user_email() with case-insensitive comparison\n\nTests:\n- Router-level deny-path tests for regular users, narrowed admins,\n  unauthenticated users, case-insensitive self-reference, and\n  non-existent target users\n- Service-level tests for delegation membership enforcement\n- Team token delegation coverage\n\nRefs: #4389\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T18:48:03+00:00"
+    },
+    {
+      "sha": "0c1ffae06c8a32334680900a3c17ab71b0d771c7",
+      "message": "fix: allow underscores in internal hostnames for gateway URLs\n\nDocker-compose service names like fast_time_server and fast_test_server\nuse underscores, which are valid hostnames for internal Docker networking\nbut were being rejected by two layers of validation:\n\n1. Pydantic v2's AnyHttpUrl rejected underscores in hostnames\n2. SecurityValidator._normalize_hostname called idna.encode() which\n   rejects underscores as invalid IDN codepoints\n\nChanges:\n- GatewayCreate.url and GatewayUpdate.url: changed from Union[str, AnyHttpUrl]\n  to plain str, removing Pydantic URL validation for request bodies\n- SecurityValidator._normalize_hostname: replaced underscore-detection kludge\n  with principled approach — try IDN encoding first, then fall back to\n  RFC 1123 validation for ASCII hostnames that fail IDN. This preserves\n  homograph protection for non-ASCII/IDN domains while allowing internal\n  service names with underscores.\n- docker-compose.yml: add set -e to register_fast_test for proper error\n  propagation (register_fast_time already had it)\n\nRefs: #4389\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T19:29:24+00:00"
+    },
+    {
+      "sha": "f667d05fa20f037e7c7da45b4bc4c0dbbe30e7e4",
+      "message": "fix(auth): resolve admin bypass, CSRF, and password policy issues\n\nAdmin bypass fixes (council-reviewed):\n- get_scoped_visibility_from_user_context() now returns (user_email, None)\n  for admin bypass to preserve identity for downstream RBAC\n- list_server_tools() skips visibility filtering on admin bypass\n- _check_server_access() and _check_gateway_access() use\n  is_admin_bypass_granted() instead of hand-rolled (None, None) checks\n- Structured logging admin_bypass fields use is_admin_bypass_granted()\n\nCSRF / protocol compliance:\n- Add /mcp/, /sse, /message to default csrf_exempt_paths\n- Add RATE_LIMITING_ENABLED=false to docker-compose\n\nPassword policy:\n- Update TEST_PASSWORD to SecureTest!Xy9#Qw2@Kp5 (22+ chars, no sequential)\n  for live gateway tests\n\nMakefile:\n- Fail testing-up early if port 8080 is already bound\n\nPylint:\n- Remove redundant 'import re' in validators.py\n- Rename _RFC1123_LABEL_RE to _rfc1123_label_re (snake_case)\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T22:12:16+00:00"
+    }
+  ],
+  "files_changed": 20,
+  "additions": 696,
+  "deletions": 68,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:25.891516",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:25.893831",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4487,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4487.json"
+  }
+}

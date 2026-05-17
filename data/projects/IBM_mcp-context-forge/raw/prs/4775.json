@@ -1,0 +1,112 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4775,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4775"
+  },
+  "metadata": {
+    "title": "feat: integrate A2A agents into plugin framework for header handling and RBAC (ICACF-43)",
+    "state": "open",
+    "created_at": "2026-05-15T09:05:42+00:00",
+    "updated_at": "2026-05-15T09:41:41+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "MohanLaksh",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "ja8zyjits"
+    ]
+  },
+  "description": "## Summary\n\nA2A (Agent-to-Agent) agents previously bypassed the plugin pipeline entirely, preventing plugins like VaultPlugin from functioning with A2A tools. This PR integrates A2A agents into the plugin framework for full feature parity with MCP tools.\n\n**Before:** MCP tools → fire pre/post-invoke hooks → VaultPlugin works; A2A agents → no hooks → VaultPlugin unusable  \n**After:** A2A agents fire `AGENT_PRE_INVOKE` and `AGENT_POST_INVOKE` hooks, enabling header injection, RBAC validation, and response transformation via plugins.\n\n## What Changed\n\n### Core Plugin Integration\n- Added `AGENT_PRE_INVOKE` and `AGENT_POST_INVOKE` hooks to `A2AAgentService.invoke_agent()` (`a2a_service.py`)\n- Created `PydanticA2AAgent` schema exposing agent metadata (`tags`, `oauth_config`, `passthrough_headers`, `auth_type`, `auth_value`, `content_type`) to plugins via `GlobalContext.metadata[A2A_AGENT_METADATA]`\n- Added `content_type` and `request_headers` parameters to `invoke_agent()` for plugin context\n- Both A2A endpoint handlers (`invoke_a2a_agent`, `invoke_a2a_agent_by_id`) in `main.py` now extract and forward inbound headers\n\n### Database & Schema\n- Created `A2AAgentPluginBinding` ORM model mirroring `ToolPluginBinding` structure (`db.py`)\n- Idempotent Alembic migration `b29af8761e97` with inspector-based guards\n- Pydantic schemas: `A2AAgentPluginBindingRequest`, `A2AAgentPluginBindingResponse`, `A2AAgentPluginBindingListResponse`\n\n### Admin API & UI\n- REST router (`routers/a2a_agent_plugin_bindings.py`): POST upsert, GET list, GET by team, DELETE by ID, DELETE by reference\n- Binding service (`services/a2a_agent_plugin_binding_service.py`): full CRUD with specificity-wins wildcard semantics\n- Admin UI: sidebar tab, HTMX partial with team filter, create/delete forms\n\n### Testing\n- 4 new test files (2,152 lines): binding service, invoke hooks, API router, admin endpoints\n- All 17971 existing tests pass — no regressions\n- Total coverage: 97% | Diff coverage: 97% (threshold: 93%)\n\n### All 5 Gaps from ICACF-43 Addressed\n\n| Gap | Issue | Status |\n|-----|-------|--------|\n| 1 | A2A bypasses plugin pipeline | ✅ AGENT_PRE/POST_INVOKE hooks added |\n| 2 | No agent identification in GlobalContext | ✅ server_id = make_context_id(team_id, agent_name) |\n| 3 | Agent config not exposed to plugins | ✅ PydanticA2AAgent in metadata |\n| 4 | No per-agent binding mechanism | ✅ A2AAgentPluginBinding table + CRUD |\n| 5 | Headers not forwarded to plugins | ✅ content_type/request_headers threaded through |\n\n## Related\n- Closes ICACF-43\n- Relates to #4211 (silent success-metric traps)\n- Works alongside PR #4238 (observability fixes)\n- Complements #4207 (E2E coverage for non-MCP paths)\n\n## Breaking Changes\nNone — all changes are additive and backward compatible.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "a05c56ff4a3463eb7b5c1b55787f279dc1095f1d",
+      "message": "feat: add A2AAgentPluginBinding ORM model and schemas for ICACF-43\n\n- Add A2AAgentPluginBinding model to mcpgateway/db.py with team_id, agent_name, plugin_id, mode, priority, config, binding_reference_id, and on_error fields\n- Create unique constraint on (team_id, agent_name, plugin_id) to enforce one-binding-per-plugin-per-agent rule\n- Add Alembic migration b29af8761e97 to create a2a_agent_plugin_bindings table with proper indexes and constraints\n- Add Pydantic schemas for A2A agent plugin binding request/response (A2AAgentPluginBindingRequest, A2AAgentPluginBindingResponse, A2AAgentPluginBindingListResponse)\n- Add PydanticA2AAgent helper schema for plugin context metadata\n\nThis mirrors ToolPluginBinding but for A2A agents, enabling per-agent plugin policies.\nCloses ICACF-43\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T06:30:28+00:00"
+    },
+    {
+      "sha": "c11b2ee91be0386f7d48349d56d384683995614b",
+      "message": "feat: integrate A2A agents into plugin framework (ICACF-43)\n\n- Add A2AAgentPluginBindingService with CRUD operations (upsert, list, delete)\n- Add A2A agent plugin bindings router (POST/GET/DELETE endpoints)\n- Register router in main.py\n- Add plugin hooks (PRE_INVOKE, POST_INVOKE) to a2a_service.invoke_agent()\n- Extract A2A agent metadata (team_id, visibility, tags, oauth, passthrough) before DB release\n- Create GlobalContext with A2A_AGENT_METADATA for plugin context\n- Handle pre-invoke modifications to parameters and headers\n- Handle post-invoke with non-blocking error mode\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T06:43:06+00:00"
+    },
+    {
+      "sha": "20ee5dd536290bb68cb9fa748fd2d7d012798059",
+      "message": "fix: rewrite migration with idempotent checks and add tests (ICACF-43)\n\nThe auto-generated migration tried to recreate 19 pre-existing tables\n(global_config, gateways, servers, tools, etc.) alongside the new\na2a_agent_plugin_bindings table. This would fail on any real database.\n\n- Rewrite migration to only create a2a_agent_plugin_bindings table\n- Add inspector-based idempotency guards (per AGENTS.md pattern)\n- Add 4 test files (1971 lines): binding service, invoke hooks,\n  API router, and admin endpoints\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T07:59:22+00:00"
+    },
+    {
+      "sha": "57ffdd9896527258a676f5d74347c9b3eb1aa33d",
+      "message": "feat: add admin UI, handler wiring, and schema refinements for A2A plugin bindings (ICACF-43)\n\n- Add admin.py endpoints: HTMX partial, create, delete for A2A plugin bindings\n- Add sidebar tab + panel in admin.html for A2A Plugin Bindings\n- Add content_type/request_headers extraction in main.py handlers (invoke_a2a_agent,\n  invoke_a2a_agent_by_id)\n- Add content_type field to PydanticA2AAgent schema\n- Add content_type/request_headers params to a2a_service.invoke_agent()\n- Fix: safe agent.oauth_config access via getattr\n- Fix: correlation_id None handling in GlobalContext\n- Fix: tenant_id type guard for non-string team_ids\n- Fix: use request_headers (not prepared.headers) in pre-invoke hook payload\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T08:00:34+00:00"
+    },
+    {
+      "sha": "bf97aeeeb00fc86e628bd4afc7dd04ed5bba2e3a",
+      "message": "fix: use getattr for passthrough_headers to avoid SimpleNamespace AttributeError in existing tests (ICACF-43)\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T08:06:58+00:00"
+    },
+    {
+      "sha": "aa43359148a7951a2c5e455f9c58c4d9b7a6528c",
+      "message": "fix: add back _user param required by require_permission decorator, prefix with _ to suppress pylint W0613\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T08:15:49+00:00"
+    },
+    {
+      "sha": "a1f86341b62895bf29226a7610614b865691b16c",
+      "message": "test: add coverage for error handlers, metadata exception, and ownership transfer (ICACF-43)\n\nAdd 8 new tests to push diff coverage from 92% to 97% (above 93% CI threshold):\n\n- admin: partial render error, create service error, delete forbidden and generic error\n- a2a_service: metadata build exception swallowed\n- router: ValueError converted to HTTP 400\n- binding service: binding_reference_id ownership transfer warning\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T09:03:20+00:00"
+    },
+    {
+      "sha": "a83bf098eb95ed48fb9bf8d6a8db3612b92adc1d",
+      "message": "fix: restore user param name for require_permission decorator compat (ICACF-43)\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T09:05:13+00:00"
+    },
+    {
+      "sha": "1cdb4dd64f8bef9a91411c12025c7df8ad879d76",
+      "message": "fix: restructure Jinja2 conditional in template to fix htmlhint attr-value-double-quotes error\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T09:09:11+00:00"
+    },
+    {
+      "sha": "b1b7511df243fd88fe77624479a07b5bcbc18469",
+      "message": "fix: move A2A_AGENT_METADATA constant locally to avoid cpex version dependency\n\nCI has cpex v0.1.0 which predates the A2A_AGENT_METADATA constant.\nDefined the constant in mcpgateway.schemas and redirected imports from\nthe production code and tests to use it, removing the cpex dependency.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T09:23:03+00:00"
+    },
+    {
+      "sha": "7870f2992770f7b1446d006a2eeb3a1e44085447",
+      "message": "fix: replace triple-quoted string with comment to avoid pylint multiple module docstrings warning\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T09:27:10+00:00"
+    },
+    {
+      "sha": "60c3c8f6357dd6a62d63defed882cd724f52e886",
+      "message": "fix: add pragma allowlist secret to migration revision IDs and replace triple-quoted string with comment\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-05-15T09:41:36+00:00"
+    }
+  ],
+  "files_changed": 15,
+  "additions": 3698,
+  "deletions": 7,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:47.102156",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:47.102783",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4775,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4775.json"
+  }
+}

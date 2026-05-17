@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2124,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2124"
+  },
+  "metadata": {
+    "title": "2121 - prevent recurring initializeSearchInputs() calls in admin UI",
+    "state": "closed",
+    "created_at": "2026-01-16T12:07:29+00:00",
+    "updated_at": "2026-01-20T02:53:17+00:00",
+    "closed_at": "2026-01-20T02:53:15+00:00",
+    "merged_at": "2026-01-20T02:53:15+00:00",
+    "author": "gcgoncalves",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nThis PR fixes issue 2121, where the `initializeSearchInputs()` function was being called repeatedly every few seconds on table view tabs in the Admin UI, causing performance degradation and console log spam. The fix implements a generic memoization pattern with debouncing to prevent duplicate initialisation while maintaining proper search functionality across all tabs.\r\n\r\nCloses #2121\r\n\r\n## 🔁 Reproduction Steps\r\n1. Access the Admin UI\r\n2. Click on any tab that displays a table (MCP Servers, Virtual Servers, Tools, Resources, Prompts, A2A Agents)\r\n3. Open browser console and monitor the logs\r\n4. Observe the initialisation sequence repeating continuously every few seconds:\r\n   ```\r\n   🔍 Initializing search inputs...\r\n   ✅ Virtual Servers search initialized\r\n   ✅ Found MCP Servers search input\r\n   ✅ MCP Servers search events attached\r\n   ✅ Tools search initialized\r\n   ✅ Resources search initialized\r\n   ✅ Prompts search initialized\r\n   ✅ A2A Agents search initialized\r\n   ```\r\n\r\n## 🐞 Root Cause\r\n\r\nThe root cause was in the `DOMContentLoaded` event handler in `mcpgateway/static/admin.js`:\r\n\r\n1. **Multiple HTMX event listeners** (`htmx:afterSwap`, `htmx:load`) fired on every content update, not just tab switches\r\n2. **No debouncing mechanism** to prevent rapid successive calls when events fired in quick succession\r\n3. **Event listener accumulation** - the listeners that called `initializeSearchInputs()` were never removed and kept accumulating\r\n4. **Cascading effect** - Each HTMX content update triggered both events, causing multiple delayed calls that created a feedback loop\r\n\r\nThe `initializeSearchInputs()` function itself tried to prevent duplicate event listeners by cloning input elements, but this didn't address the root cause of the function being called repeatedly.\r\n\r\n## 💡 Fix Description\r\n\r\nImplemented a **generic memoization pattern** with the following key features:\r\n\r\n### 1. Created `createMemoizedInit()` Utility Function\r\n- Generic, reusable pattern for any initialisation function\r\n- Uses closure-based state management (no global variables)\r\n- Returns object with `{ init, debouncedInit, reset }` functions\r\n- Built-in guards prevent concurrent and duplicate initialisation\r\n- Integrated debouncing support\r\n\r\n### 2. Applied Memoization to `initializeSearchInputs()`\r\n- Created memoized versions: `initializeSearchInputsMemoized`, `initializeSearchInputsDebounced`\r\n- Added `resetSearchInputsState()` for explicit state cleanup\r\n- Exported reset function to `window` object for manual cleanup scenarios\r\n\r\n### 3. Updated Event Listeners\r\n- Use `initializeSearchInputsMemoized()` for immediate initialisation on page load\r\n- Use `initializeSearchInputsDebounced()` for HTMX and tab switch events\r\n- Added selective HTMX event handling (only triggers on relevant panel swaps)\r\n- Removed redundant `htmx:load` listener\r\n- Added `resetSearchInputsState()` calls before re-initialisation\r\n\r\n### 4. Simplified `initializeSearchInputs()`\r\n- Removed input cloning logic (no longer needed with memoization)\r\n- Kept core initialisation logic intact\r\n\r\n### Key Design Points:\r\n- **No global variables** - all state encapsulated in closures\r\n- **Reusable pattern** - can be applied to other initialisation functions (metrics, modals, etc.)\r\n- **Explicit reset mechanism** - proper cleanup when elements are destroyed\r\n- **Performance improvement** - prevents unnecessary event listener creation/destruction\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |     ✅     |\r\n| Unit tests                            | `make test`          |     ✅     |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        ✅        |\r\n| Manual regression no longer fails     | See below            |       ✅      |\r\n\r\n## 📝 Additional Notes\r\n\r\n### Future Reusability\r\nThis memoization pattern can be applied to other initialisation functions:\r\n\r\n```javascript\r\n// Example: Memoize metrics loading\r\nconst {\r\n    init: loadMetricsMemoized,\r\n    debouncedInit: loadMetricsDebounced,\r\n    reset: resetMetricsState\r\n} = createMemoizedInit(loadAggregatedMetrics, 500, 'Metrics');\r\n\r\n// Example: Memoize modal initialisation\r\nconst {\r\n    init: initModalsMemoized,\r\n    reset: resetModalsState\r\n} = createMemoizedInit(initializeModals, 200, 'Modals');\r\n```\r\n\r\n### Performance Impact\r\n- Eliminates unnecessary event listener creation/destruction\r\n- Reduces console log spam\r\n- Improves overall UI responsiveness\r\n- No memory leaks from accumulated event listeners",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3680114139",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-20T02:48:48+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a9498fbdaa23073f2bf5ddf83547737a53d3bde4",
+      "message": "2121 - prevent recurring initializeSearchInputs() calls in admin UI\n\nThe initializeSearchInputs() function was being called repeatedly every\nfew seconds on table view tabs, causing performance issues and console\nlog spam. This occurred due to multiple HTMX event listeners firing\nfrequently without proper debouncing or initialization guards.\n\nChanges:\n- Added createMemoizedInit() utility function for generic initialization\n  memoization with closure-based state management (no global variables)\n- Created memoized versions of initializeSearchInputs with debouncing\n- Updated DOMContentLoaded event listeners to use memoized versions\n- Added selective HTMX event handling (only relevant panel swaps)\n- Removed redundant htmx:load listener\n- Removed input cloning logic (no longer needed with memoization)\n- Added resetSearchInputsState() for explicit state cleanup\n\nThe memoization pattern is reusable for other initialization functions\nand prevents duplicate initialization while providing explicit reset\ncapability for cleanup scenarios.\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-01-16T12:00:02+00:00"
+    },
+    {
+      "sha": "6ac89d0bb1f09217b0ab0324d1f2a554c4acab22",
+      "message": "fix: restore input cloning to prevent duplicate event listeners\n\nThe memoization pattern allows re-initialization via reset calls on tab\nswitches and HTMX swaps. Since search inputs persist (they're outside\nHTMX swap targets), this caused duplicate event listeners. Restore the\ninput cloning logic to remove existing listeners before re-adding.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T02:15:23+00:00"
+    },
+    {
+      "sha": "21f576fe12563410e5b6d8ba4e2838e294449e8b",
+      "message": "fix: correct panel ID for Virtual Servers (catalog-panel not servers-panel)\n\nThe htmx:afterSwap handler was checking for 'servers-panel' but the\nactual panel ID in admin.html is 'catalog-panel'. This prevented search\nre-initialization after pagination or toggle changes in Virtual Servers.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T02:41:01+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 161,
+  "deletions": 20,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:44.145255",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:44.147203",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2124,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2124.json"
+  }
+}

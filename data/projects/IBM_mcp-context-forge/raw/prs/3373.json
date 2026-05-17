@@ -1,0 +1,209 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3373,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3373"
+  },
+  "metadata": {
+    "title": "fix(ui): convert inline event handlers to addEventListener for innerHTML guard compatibility (#3372)",
+    "state": "closed",
+    "created_at": "2026-03-02T04:11:11+00:00",
+    "updated_at": "2026-03-02T13:24:31+00:00",
+    "closed_at": "2026-03-02T13:24:29+00:00",
+    "merged_at": "2026-03-02T13:24:29+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "ui",
+      "ica",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\nCloses #3372\r\n\r\n---\r\n\r\n## 📌 Summary\r\n`installInnerHtmlGuard()` (PR #3129) strips all inline `on*` event attributes from HTML set via `innerHTML` for XSS protection. This breaks every dynamically loaded UI element that relied on inline `onclick`/`onchange` handlers.\r\n\r\nMost visible symptom: team selector dropdown items in the admin header are unclickable.\r\n\r\n## 🔁 Reproduction Steps\r\n1. Log in to admin UI\r\n2. Click the team selector dropdown in the header\r\n3. Click any team in the list\r\n4. Nothing happens — no navigation, no console errors, no network request\r\n\r\n## 🐞 Root Cause\r\n`installInnerHtmlGuard()` in `admin.js` (PR #3129) overrides `Element.prototype.innerHTML` to strip all `on*` attributes for XSS protection. When `loadTeams()` sets `container.innerHTML = html`, the `onclick=\"selectTeamFromSelector(this)\"` on each `.team-selector-item` button is removed.\r\n\r\n## 💡 Fix Description\r\nConverted all affected inline `onclick`/`onchange` attributes to `data-action` attributes, then attached event listeners via `addEventListener` after each innerHTML assignment. Uses event delegation where appropriate (tables, lists).\r\n\r\n### Affected locations (all fixed):\r\n1. **Team selector dropdown** — event delegation on `#team-selector-items`\r\n2. **Team selector search error retry** — addEventListener after innerHTML\r\n3. **Team selector loadTeams error retry** (admin.html) — addEventListener after innerHTML\r\n4. **Metrics error/retry buttons** — data-action + addEventListener\r\n5. **Metrics empty state retry** — data-action + addEventListener\r\n6. **Tag filter clear button** — data-action + addEventListener\r\n7. **Auth header toggle/remove buttons** — data-action + addEventListener\r\n8. **Import file chooser reset** — data-action + addEventListener\r\n9. **Token list error retry** — data-action + addEventListener\r\n10. **Token usage stats modal close** — data-action + addEventListener\r\n11. **Bulk import selection controls** — data-action + addEventListener (select all/none/custom, reset, preview, import, checkbox onchange)\r\n12. **Tool table action buttons** — event delegation on `#toolBody` (enrich, generate tests, validate, view, edit)\r\n13. **Global search results** — addEventListener after innerHTML\r\n14. **Public team join buttons** — addEventListener after innerHTML\r\n15. **Chat server selection** — addEventListener after innerHTML\r\n16. **Log viewer rows + correlation trace** — event delegation on tbody\r\n17. **Security events correlation trace** — addEventListener after innerHTML\r\n18. **Audit trail correlation trace** — addEventListener after innerHTML\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Playwright regression test            | `pytest ...::TestTeamSelectorDropdown` | ✅ |\r\n| URL contains `?team_id=` after click  | manual + Playwright  | ✅ |\r\n| Existing team/org tests               | `pytest test_organization.py` | ✅ |\r\n| No remaining inline onclick in innerHTML strings | Verified via grep | ✅ |\r\n\r\n## ✅ Checklist\r\n- [x] Root cause identified and verified with Playwright\r\n- [x] All innerHTML+onclick paths converted to data-action + addEventListener\r\n- [x] Regression test added\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [
+    {
+      "id": "2871907879",
+      "author": "VladMRusu1",
+      "created_at": "2026-03-02T11:27:32+00:00",
+      "body": "Maybe you could add here an early return in order to not have the whole code wrapped into a if"
+    },
+    {
+      "id": "2871911624",
+      "author": "VladMRusu1",
+      "created_at": "2026-03-02T11:28:20+00:00",
+      "body": "do we want a default case if a wrong btn.dataset.action was generated?"
+    },
+    {
+      "id": "2871918124",
+      "author": "VladMRusu1",
+      "created_at": "2026-03-02T11:29:47+00:00",
+      "body": "are we sure that we will have always a container available? maybe an extra check if container exists"
+    },
+    {
+      "id": "2871933114",
+      "author": "VladMRusu1",
+      "created_at": "2026-03-02T11:32:59+00:00",
+      "body": "I think here is possible to have an actionMap with using of event delegation\n\n```\nconst actionMap = {\n    \"select-all\": () => selectAllItems(),\n    \"select-none\": () => selectNoneItems(),\n    \"select-custom\": () => selectOnlyCustom(),\n    \"reset-selection\": () => resetImportSelection(),\n    \"preview-selected\": () => handleSelectiveImport(true),\n    \"import-selected\": () => handleSelectiveImport(false),\n};\n\npreviewContainer.addEventListener(\"click\", (e) => {\n    const actionEl = e.target.closest(\"[data-action]\");\n    if (!actionEl) return;\n\n    const action = actionEl.dataset.action;\n    actionMap[action]?.();\n});\n```\n\nand the change event will be handle separately \n\n```\npreviewContainer.addEventListener(\"change\", (e) => {\n    if (e.target.matches('[data-action=\"update-count\"]')) {\n        updateSelectionCount();\n    }\n});\n```\n"
+    },
+    {
+      "id": "2872385414",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-02T13:15:45+00:00",
+      "body": "I'm not sure that would be the best approach, any guesses might be wrong. The only acceptable default, IMHO, would be a void function to act as a \"disabler\"."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3874562032",
+      "author": "kevalmahajan",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-02T07:47:07+00:00",
+      "body": "Changes work as expected. Teams selector switches to teams UI now.\r\n\r\n**Minor Suggested change (dead code):** mcpgateway/templates/teams_selector_items.html:10 still contains onclick=\"selectTeamFromSelector(this)\" which gets stripped by the guard.                                               \r\nThe functionality works via event delegation in admin.js, but this is dead code.       \r\n\r\n\r\nOther Bug found while testing (not related to this PR, but related to the same functionality): #3376                                                                                                                      \r\n                              "
+    },
+    {
+      "id": "3874741037",
+      "author": "VladMRusu1",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-02T08:31:45+00:00",
+      "body": ""
+    },
+    {
+      "id": "3875078866",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-02T09:45:40+00:00",
+      "body": "## Review: Approve\n\nThoroughly reviewed, rebased, tested, and augmented this PR. The core approach — converting inline `onclick`/`onchange` handlers to `data-action` + `addEventListener`/event delegation — is correct and well-executed.\n\n### Bugs found and fixed during review\n\n1. **`selectServerForChat()` used `item.onclick.toString()`** — With inline onclick removed, `item.onclick` is `null` and this throws `TypeError`. Fixed: replaced with `item.dataset.serverId === serverId`.\n\n2. **`enrichTool()`/`generateToolTestCases()` unguarded null-deref** — The PR converted `loadTools()` markup from `onclick` to `data-action`, but the button-state selectors (`[onclick*=\"enrichTool(...)\"]`) in these functions still used the old pattern, returning `null`. Lines 12244/12552 then crashed with `TypeError`. Fixed: updated selectors to `[data-action=\"enrich-tool\"][data-tool-id=\"...\"]` and added null guards.\n\n3. **`toolops_partial.html` still had inline `onclick`** — This server-rendered HTMX partial's buttons were stripped by the innerHTML guard during swap. Fixed: converted to `data-action` + `data-tool-id`.\n\n4. **Tool delegation bound to `#toolBody` (HTMX-injected)** — `#toolBody` doesn't exist at `DOMContentLoaded` since it's loaded via HTMX. Fixed: bound to `#tool-ops-main-content-wrapper` (stable parent in admin.html) with fallback.\n\n5. **RBAC mutation scrubber narrowed too aggressively** — Defense-in-depth selector was changed from broad `onclick*=` to narrow `data-action` only, losing coverage for other entity tables (servers, resources, prompts, etc.). Fixed: union of both selector patterns.\n\n6. **`teams_selector_items.html` dead `onclick`** — Template still emitted `onclick` that was always stripped by the guard. Removed.\n\n### Test coverage added\n\n- **18 Playwright tests** covering all 18 affected locations from the PR\n- Tests exercise real production functions (not just pattern simulation) with route interception for network-dependent paths\n- Integration test for `selectServerForChat` verifies no runtime error and correct CSS class toggling\n- Iframe guard test uses synthetic innerHTML injection to genuinely prove guard activity (not tautological)\n\n### Verification\n\nAll tests pass against live deployment:\n- **18 passed, 2 skipped** (tool table + global search skip due to no data in test env)\n- Team selector E2E: dropdown opens, onclick stripped, click navigates with `?team_id=`\n- innerHTML guard: onclick stripped, data-action + data-id survive\n- All data-action → addEventListener wiring verified for: metrics retry, auth headers, import controls, public team join, log viewer delegation, security/audit correlation, chat server selection, token retry, team search retry\n\n### Security\n\n- No new XSS vectors — `data-*` attributes are inert, user data still escapes via `escapeHtml()`\n- innerHTML guard not weakened or bypassed\n- RBAC client-side defense-in-depth coverage restored for all entity tables\n\n### Files changed (review additions)\n\n| File | Change |\n|------|--------|\n| `mcpgateway/static/admin.js` | Chat server dataset fix, tool selector fixes, null guards, RBAC union selector, delegation on stable wrapper |\n| `mcpgateway/templates/toolops_partial.html` | Convert 5 buttons from onclick to data-action |\n| `mcpgateway/templates/teams_selector_items.html` | Remove dead onclick |\n| `tests/playwright/test_innerhtml_guard.py` | 18 regression tests for all data-action paths |\n| `tests/playwright/test_organization.py` | Team selector dropdown E2E test |\n| `tests/playwright/test_admin_url_context.py` | Iframe guard proof with synthetic injection |"
+    },
+    {
+      "id": "3875411547",
+      "author": "suciu-daniel",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-02T10:48:40+00:00",
+      "body": "Code seems ok, I do not see any glaring issues in it. I will take the branch on my local machine and test it manually as well, in order to ensure the buttons do their job"
+    },
+    {
+      "id": "3875593412",
+      "author": "VladMRusu1",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-02T11:33:33+00:00",
+      "body": "Some small improvements but not breaking changes"
+    },
+    {
+      "id": "3876142730",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-02T13:15:52+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a752d6fb4508c599273efc56c494e4b5bfc91499",
+      "message": "fix team selection bug\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-02T04:02:00+00:00"
+    },
+    {
+      "sha": "c37cc29d7fb49a18e5cee380a40e3bea67140ed9",
+      "message": "fixes in more locations\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-02T04:44:39+00:00"
+    },
+    {
+      "sha": "e7a5046934e001fb53cb0adbb44aa13c018dedc9",
+      "message": "Signed-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-02T04:44:42+00:00"
+    },
+    {
+      "sha": "d8d2330400d9856aeaa1470a00ff021d3d673636",
+      "message": "remove pr.md\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-02T04:45:07+00:00"
+    },
+    {
+      "sha": "f3db6ab58e712e284734de1e69731f16874d845b",
+      "message": "eslint fix\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-02T04:47:36+00:00"
+    },
+    {
+      "sha": "30feb2356f709e840df4b27dd8f67c4bbd14d353",
+      "message": "Add tests for iframe team selection on load\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-02T05:37:01+00:00"
+    },
+    {
+      "sha": "a88cab89a78ad56f56a5b20d223312a5970ae4b0",
+      "message": "Remove duplicate test file\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-02T05:50:17+00:00"
+    },
+    {
+      "sha": "5db67d5cba01a86d41ff935e313dacae674de957",
+      "message": "incoporate feedback\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-02T05:54:05+00:00"
+    },
+    {
+      "sha": "5826b9c5f77461f50d7a4779f87671a43bfe2466",
+      "message": "fix: remove dead onclick from template, add differential test coverage\n\nRemove the inline onclick from teams_selector_items.html that was\nalways stripped by the innerHTML guard — the event delegation handler\non #team-selector-items already handles clicks.\n\nAdd comprehensive tests for all data-action + addEventListener paths:\nmetrics retry, auth header toggle/remove, import dropzone reset, tag\nfilter clear, import preview controls, public team join, log viewer\ndelegation, security/audit trail correlation, chat server selection,\ntoken retry, and team search retry.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T08:11:01+00:00"
+    },
+    {
+      "sha": "c3ffbc00adfd3cf45ce2a6097b467995e002e5a1",
+      "message": "fix(tests): exercise real production code in 3 integration tests\n\nRewrite TestChatServerSelection, TestTokenListRetryButton, and\nTestTeamSearchRetryButton to call actual production functions instead\nof simulating the data-action pattern:\n\n- ChatServerSelection: intercept /admin/servers fetch, call real\n  loadVirtualServersForChat(), verify listener wiring\n- TokenListRetryButton: call real setupCreateTokenForm(), dispatch\n  synthetic htmx:responseError, verify retry button wiring\n- TeamSearchRetryButton: intercept /admin/teams/partial to return 500,\n  call real performTeamSelectorSearch(), verify retry button wiring\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T08:27:09+00:00"
+    },
+    {
+      "sha": "cc1d10a9698839fd81028704eee63f003114f310",
+      "message": "fix(tests): correct mock data and team selector test flow\n\n- MetricsEmptyState: create aggregated-metrics-section parent, pass {}\n  to trigger the empty-data path\n- TagFilterClear: use #${entity}-panel .overflow-x-auto selector with\n  unique entity name to avoid DOM collisions\n- ImportPreview: add summary.by_type, bundle.items, and\n  standalone_items to mock data\n- LogViewer: use data.total (not data.count), add component field\n- ChatServer: use llm-chat-servers-list ID, set isActive/enabled fields\n- TeamSelector: click the personal team (always in USER_TEAMS_DATA so\n  Alpine init won't strip team_id), reset __teamSwitchingInProgress\n  guard, remove test-created team dependency\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T08:54:14+00:00"
+    },
+    {
+      "sha": "2361f15c48f966d6d0103b9eba53eaa3c2938574",
+      "message": "fix: use dataset lookup instead of onclick.toString() in chat server selection\n\nselectServerForChat() used item.onclick.toString().includes(serverId)\nto highlight the selected server. With inline onclick removed by the\ninnerHTML guard, item.onclick is null and this throws TypeError.\n\nReplace with item.dataset.serverId === serverId which uses the\ndata-server-id attribute set during rendering.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T09:12:02+00:00"
+    },
+    {
+      "sha": "b9e5599936e98f236b999dbee609095ce4f5cf48",
+      "message": "fix: convert tool-ops template to data-action, fix selectors and null-derefs\n\nThe PR converted loadTools() JS markup to data-action but left:\n- toolops_partial.html server-rendered buttons with inline onclick\n  (stripped by innerHTML guard during HTMX swap)\n- enrichTool/generateToolTestCases/validateTool button-state selectors\n  using [onclick*=...] which return null after the conversion\n- Unguarded enrichButton/tcgButton access causing TypeError\n- RBAC button-removal selector using [onclick*=...] patterns\n- Delegation handler bound to #toolBody (HTMX-injected, may not\n  exist at DOMContentLoaded)\n\nFixes:\n- Convert toolops_partial.html buttons to data-action + data-tool-id\n- Replace all [onclick*=...] tool selectors with [data-action=...]\n- Guard enrichButton and tcgButton before property access\n- Update RBAC selector to match data-action attributes\n- Bind delegation to #tool-ops-main-content-wrapper (stable parent\n  present at DOMContentLoaded) with fallback to #toolBody\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T09:16:36+00:00"
+    },
+    {
+      "sha": "a991d432adb7601af03c24f2cfeb6006fbe17712",
+      "message": "fix: restore broad RBAC scrubber coverage, strengthen test proofs\n\nAddress Codex review round 2 findings:\n\n1. RBAC mutation scrubber (defense-in-depth): restore inline onclick\n   selectors alongside new data-action selectors so the client-side\n   fallback covers all entity tables, not just tool-ops.\n\n2. Iframe guard test: replace tautological hasOnclick check (template\n   no longer emits onclick) with a synthetic innerHTML injection that\n   genuinely proves the guard strips on* attributes inside iframes.\n\n3. Chat server test: add integration test that runs the real\n   selectServerForChat function (no stub) and verifies no runtime\n   error, correct highlight class toggling, and state update.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T09:28:22+00:00"
+    },
+    {
+      "sha": "4b92cc7494b59cb502781d6284d6302758df1fca",
+      "message": "fix(tests): await async selectServerForChat in integration test\n\nselectServerForChat is async — call it directly with await rather than\nvia click() so the highlight class assertions run after completion.\nDrop internal state assertion (implementation detail); the test\nverifies no runtime error and correct CSS class toggling.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T09:37:07+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 1522,
+  "deletions": 57,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:08.091553",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:08.096109",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3373,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3373.json"
+  }
+}

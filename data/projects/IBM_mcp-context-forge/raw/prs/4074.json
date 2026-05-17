@@ -1,0 +1,141 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4074,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4074"
+  },
+  "metadata": {
+    "title": "bug/cache api hang redis failure no fallback",
+    "state": "closed",
+    "created_at": "2026-04-07T20:05:10+00:00",
+    "updated_at": "2026-04-24T19:40:35+00:00",
+    "closed_at": "2026-04-24T19:40:33+00:00",
+    "merged_at": "2026-04-24T19:40:33+00:00",
+    "author": "msureshkumar88",
+    "labels": [
+      "bug",
+      "performance",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n## 🔗 Related Issue\r\nCloses #3587\r\n\r\n---\r\n\r\n## 📝 Summary\r\nImplements Redis operation timeout and circuit breaker pattern to prevent API hangs during Redis connectivity failures.\r\n\r\n**Problem**: When Redis becomes unavailable, API requests hang indefinitely waiting for Redis operations to complete, causing poor user experience and potential service disruption.\r\n\r\n**Solution**: \r\n- Added configurable 500ms timeout on all Redis operations\r\n- Implemented circuit breaker pattern (opens after 3 failures, 30s cooldown)\r\n- Graceful fallback to in-memory cache during Redis outage\r\n- Automatic reconnection when Redis becomes available\r\n- Circuit breaker state monitoring via stats endpoint\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ PASS |\r\n| Unit tests                | `make test`     | ✅ PASS (84 tests) |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ PASS (100.0%))  |\r\n| Pylint                    | `make pylint`   | ✅ PASS (10.00/10) |\r\n| Interrogate               | `make interrogate` | ✅ PASS (100.0%) |\r\n| Doctests                  | `make doctest`  | ✅ PASS (26/26) |\r\n\r\n**Integration Test Results:**\r\n```\r\n✓ STEP 1: Populate Cache - HTTP 200 in 0.014s\r\n✓ STEP 2: Kill Redis (Test Timeout) - HTTP 200 in 0.011s (NO HANG!)\r\n✓ STEP 3: Restart Redis (Test Recovery) - HTTP 200 in 0.012s\r\n✓ ALL TESTS PASSED\r\n```\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes (22 new tests in test_registry_cache_timeout.py)\r\n- [x] Documentation updated (added REDIS_OPERATION_TIMEOUT to .env.example)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Files Changed\r\n1. **mcpgateway/config.py** - Added `redis_operation_timeout: float = 0.5`\r\n2. **mcpgateway/cache/registry_cache.py** - Circuit breaker implementation\r\n3. **tests/unit/mcpgateway/cache/test_registry_cache_timeout.py** - 22 comprehensive tests\r\n4. **.env.example** - Configuration documentation\r\n5. **tests/unit/mcpgateway/cache/test_registry_cache.py** - Fixed Redis ping mock\r\n6. **tests/unit/mcpgateway/cache/test_auth_cache_l1_l2.py** - Fixed Redis unavailability mock\r\n7. **test_redis_recovery.sh** - Updated paths\r\n\r\n### Key Features\r\n- **Configurable timeout**: `REDIS_OPERATION_TIMEOUT=0.5` (default 500ms)\r\n- **Circuit breaker**: Opens after 3 consecutive failures\r\n- **Automatic recovery**: 30s cooldown before retry\r\n- **Monitoring**: Circuit state exposed in stats endpoint\r\n- **Zero downtime**: In-memory cache continues serving during outage\r\n\r\n### Behavior Change\r\n**Before**: API hangs indefinitely when Redis fails  \r\n**After**: API responds within 1 second, falls back to in-memory cache\r\n\r\n### Testing Coverage\r\n- Operation timeouts\r\n- Circuit breaker open/close/half-open states\r\n- Failure counting and threshold\r\n- Automatic recovery\r\n- Exception handling (timeout and non-timeout)\r\n- Fallback to in-memory cache\r\n\r\n### ⚠️ Testing Warning\r\n**DO NOT use `lsof -ti:6379 | xargs kill -9`** - This command kills ALL processes using port 6379, including both Redis AND the application if it's connected to Redis on that port.\r\n\r\n**Safe alternatives for testing:**\r\n```bash\r\n# Option 1: Use docker-compose to stop Redis cleanly\r\ndocker-compose stop redis\r\n\r\n# Option 2: Find and kill only the Redis process\r\nps aux | grep redis-server | grep -v grep | awk '{print $2}' | xargs kill\r\n\r\n```",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4098127856",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-13T10:52:24+00:00",
+      "body": "Please implement above mentioned changes"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "11e784b0903096d000d5ba6c1e3b4b0716596dbf",
+      "message": "implement circuit breaker pattern to gracefully recover from redif failure\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-07T16:28:19+00:00"
+    },
+    {
+      "sha": "cbed2528af105db4f727ef6bbd5e0e378ae9346f",
+      "message": "Add testcases\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-07T16:55:34+00:00"
+    },
+    {
+      "sha": "4c656e22a861dc7733d07a2af63b8daa9879a5f1",
+      "message": "fix test coverage and add redis operation timeout to example env\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-07T17:51:45+00:00"
+    },
+    {
+      "sha": "e5928ea73702b285978444b574b34c78596444b0",
+      "message": "fix precommit issues\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-07T18:05:16+00:00"
+    },
+    {
+      "sha": "163ec5ed21618de241f7912ab8d2723837fea173",
+      "message": "add secyrity baseline and fis flake8\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-07T19:49:15+00:00"
+    },
+    {
+      "sha": "ce39eb90c3dfe53a43ce47d2c7a931d2e13467bd",
+      "message": "fix docstring\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-07T19:58:05+00:00"
+    },
+    {
+      "sha": "55f5e6f70148b82e5e43f1a7bad1c44bb8d3872d",
+      "message": "fix: address PR #4074 security findings for Redis circuit breaker\n\n- Add asyncio.Lock to prevent TOCTOU race in circuit breaker state (Finding 1 - High)\n- Remove duplicated circuit breaker logic from _get_redis_client (Finding 2 - Medium)\n- Narrow exception handling to Redis-specific errors (ConnectionError, OSError) (Finding 3 - Medium)\n- Add gt=0.0 validation to redis_operation_timeout in config.py (Finding 4 - Medium)\n- Route ping operations through circuit breaker to increment failure count (Finding 5 - Medium)\n- Replace hardcoded 1.0s ping timeout with configurable value (Finding 6 - Medium)\n- Cache redis_operation_timeout at init to avoid hot-path imports (Finding 7 - Low)\n- Update tests to match narrowed exception handling\n\nAll circuit breaker state modifications now protected by async lock to prevent\nthundering herd on Redis recovery. Unexpected exceptions (programming bugs) are\nlogged but don't increment failure count or trip circuit breaker.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-14T15:03:21+00:00"
+    },
+    {
+      "sha": "83c1c8d253facbd8cb2647ee75a49a17ad0bed49",
+      "message": "Apply precommit fixes\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-14T15:56:29+00:00"
+    },
+    {
+      "sha": "05df8ff630d5f84f2f08c14166b266bc82601a07",
+      "message": "fix: add missing Returns docstring to scan_keys function\n\n- Add Returns section to scan_keys nested function docstring\n- Fix DAR201 flake8 error (Missing Returns in Docstring)\n- Remove trailing whitespace from docstring blank line\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-14T16:31:07+00:00"
+    },
+    {
+      "sha": "665d02c0e540bf0fa8e6a7c4c17bc3f67725314b",
+      "message": "fix: remove unnecessary else after return statements\n\n- Remove two unnecessary else blocks after return statements\n- Fix pylint R1705 (no-else-return) warnings\n- Improves code readability and follows Python best practices\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-14T17:01:19+00:00"
+    },
+    {
+      "sha": "bd0ae76942e6f6bf3c53a397fc702f377350c0f1",
+      "message": "fix(cache): harden Redis circuit breaker against redis-py exceptions and thundering herd\n\nFollow-up to review findings on the circuit-breaker implementation:\n\n- Catch redis.exceptions.ConnectionError / TimeoutError / RedisError in the\n  breaker. These classes do NOT inherit from builtins.ConnectionError or\n  asyncio.TimeoutError, so the prior narrow 'except (ConnectionError, OSError)'\n  silently bypassed the breaker on real redis-py failures, leaving the\n  circuit permanently closed while Redis was misbehaving.\n\n- Implement true single-probe half-open via _half_open_probe_in_flight. Only\n  one coroutine holds the probe slot per cooldown cycle; others see the flag\n  and skip Redis until the probe resolves. Prevents thundering-herd on a\n  still-down Redis when the 30s cooldown elapses.\n\n- Apply an extended timeout (max(op_timeout*10, 5s)) to invalidate()'s\n  scan_iter traversal so large keysets no longer cause the subsequent\n  delete and publish steps to be silently dropped, which had been leaving\n  stale registry data on peer workers until TTL expiry.\n\n- Move logger.warning / logger.error calls outside the circuit-breaker\n  lock to avoid serializing Redis operations behind synchronous log I/O\n  during failure storms.\n\n- Lazy-init the asyncio.Lock on first async use to avoid binding it to\n  whichever event loop happens to exist at module-import time (singleton\n  is created at import).\n\n- Refresh .secrets.baseline line numbers post-rebase and apply black/isort\n  auto-fixes to the touched test files.\n\n- Add regression tests covering redis-py ConnectionError/TimeoutError/\n  ResponseError trip paths, the single-probe half-open invariant, probe\n  failure keeping the circuit open, and the scan_iter extended timeout.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T10:24:17+00:00"
+    },
+    {
+      "sha": "121f1617857e13eda7f4e5b2cee853b86531ad47",
+      "message": "fix(cache): address follow-up review findings for Redis circuit breaker\n\n- Expose REDIS_CIRCUIT_FAILURE_THRESHOLD and REDIS_CIRCUIT_OPEN_DURATION as\n  Pydantic settings so operators can tune the breaker without code changes.\n- Narrow _get_redis_client's broad except to (ImportError, AttributeError) +\n  _REDIS_CONNECTION_EXCEPTIONS so real redis-py factory failures increment\n  the breaker's failure count; keep a final defensive catch for truly\n  unexpected errors (matches the \"programming bugs\" branch semantics).\n- Expose scan timeout via self._scan_timeout so the test suite can exercise\n  the invalidate() timeout path without waiting for the 5s production floor.\n- Dedupe the double 'from mcpgateway.config import settings' import in\n  __init__ (read circuit-breaker settings alongside the TTLs).\n- Add admin-only security warning to stats() docstring so future refactors\n  don't surface redis_circuit_open / redis_failure_count via public\n  /health or /metrics endpoints.\n- Fix test_invalidate_operation_timeout: replace return_value=<coroutine>\n  mock with a proper async-generator side_effect and use the new\n  _scan_timeout attribute to avoid the \"coroutine was never awaited\"\n  RuntimeWarning.\n- Refresh .secrets.baseline line numbers (shifted by 2 additional .env.example\n  lines for the new circuit-breaker settings).\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T10:36:31+00:00"
+    },
+    {
+      "sha": "650351bd62a8b424382a4daa5e0101fa330ce382",
+      "message": "perf(cache): lock-free fast path, half-up Redis breaker, scan-publish split\n\nSecond-opinion review (Oracle, 9m deep pass) surfaced three Blocking\nbugs that the prior circuit-breaker implementation introduced, plus\nseveral performance and simplification opportunities. This commit lands\nall of them.\n\nBlocking correctness fixes\n--------------------------\n- B1: Drop the per-call ping from _get_redis_client. Wrapping ping in\n  the circuit breaker on every operation let a 'half-up' Redis (PING ok\n  but GET/SETEX timing out) oscillate failure_count between 0 and 1 so\n  the breaker never opened. The actual command's success/failure is now\n  the sole breaker signal; the factory still pings on initial client\n  creation.\n\n- B2: Release the half-open probe slot on asyncio.CancelledError.\n  CancelledError is a BaseException (not Exception), so the prior\n  'except Exception' left _half_open_probe_in_flight=True forever,\n  permanently disabling the breaker. A finally block now releases the\n  slot on cancellation and on any path that bypasses the record_* calls.\n\n- B3: Distinguish scan failure from 'scan found zero keys' in\n  invalidate(). Previously a scan_iter timeout returned None, was\n  coerced to [] via 'or []', then redis.publish fired the invalidation\n  anyway. Peer workers dropped L1 while stale L2 keys remained in this\n  worker's Redis. Now a failed scan aborts both delete and publish.\n\nHigh performance + correctness\n------------------------------\n- H1: Lock-free fast path in _acquire_probe_slot and _record_success.\n  The steady-state happy case (circuit closed, failure_count==0) no\n  longer acquires the asyncio.Lock at all. Lock acquisition is slow-path\n  only, for state transitions.\n\n- H2: Non-probe success must not zero the failure counter while the\n  circuit is open. A stale slow success (e.g. from a pre-open request)\n  could otherwise race against a just-opened circuit and reset\n  failure_count to 0, obscuring cooldown progress to observers.\n\n- H3: Batch invalidate()'s deletes into a single redis.delete(*keys)\n  call. Previously N keys meant N round trips + N lock+timeout wrappers;\n  now one variadic DEL regardless of keyset size.\n\n- H4: Validate SCAN output types. Malformed or malicious SCAN replies\n  used to be fed verbatim to redis.delete(); they now abort the\n  invalidation with a warning instead.\n\nMedium simplifications\n----------------------\n- S1: Remove unused 'timeout' parameter from _acquire_probe_slot (it\n  was 'del timeout' on entry).\n\n- S2: Remove dead 'elif is_probe and not self._redis_circuit_open'\n  branch in _record_failure (unreachable: the circuit is still True\n  while a probe is in flight).\n\n- S3: Replace the (allowed, is_probe) tuple threaded through three\n  helpers with a frozen _CircuitLease dataclass so the probe lifecycle\n  is a single named concept.\n\n- S4: Replace the tuple-of-tuples from _build_redis_exception_types()\n  with a frozen _RedisExceptionBuckets dataclass; callers reference\n  _REDIS_EXCEPTIONS.timeout and .connection directly.\n\nTest coverage\n-------------\nAdded regression tests for each Blocking/High finding:\n- test_half_up_redis_trips_circuit_breaker (B1)\n- test_cancelled_probe_releases_slot (B2)\n- test_scan_timeout_does_not_publish (B3)\n- test_invalid_scan_output_aborts_invalidation (H4)\n- test_batch_delete_single_roundtrip (H3)\n- test_stale_nonprobe_success_does_not_zero_open_circuit (H2)\n- test_get_redis_client_does_not_ping_per_call (B1 behavioral)\n- test_get_redis_client_factory_connection_error_records_failure (M1)\n\nReplaced three obsolete tests that asserted the pre-B1 per-call ping\nbehavior. Interrogate coverage is now 100% (was 97.3%); all touched\nfiles pass black/isort/ruff; pylint score improved to 8.29/10.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T12:14:22+00:00"
+    },
+    {
+      "sha": "85df4110dfb190dc44ba9f4d279bc4a0ca785a1d",
+      "message": "fix(cache): silence pylint E0712/R1705 without losing exception coverage\n\nThe earlier refactor to _REDIS_EXCEPTIONS.timeout / .connection (dataclass\nattribute access) tripped pylint E0712 catching-non-exception because\npylint cannot statically resolve the dataclass attributes as exception\ntypes in an except clause.\n\nA prior local fix attempt swapped the catches for\nredis.exceptions.TimeoutError / redis.exceptions.ConnectionError\ndirectly. That silenced E0712 but reintroduced a correctness regression\nby dropping coverage of:\n  - asyncio.TimeoutError (raised by asyncio.wait_for when a command hangs)\n  - stdlib ConnectionError / OSError\n  - redis.exceptions.RedisError (base; catches ResponseError etc.)\nSeven regression tests failed under that approach.\n\nThis commit restores full coverage by going back to module-level tuple\nliterals, which pylint DOES statically resolve as except-clause types:\n\n    _REDIS_TIMEOUT_EXCEPTIONS = (asyncio.TimeoutError, redis_exceptions.TimeoutError)\n    _REDIS_CONNECTION_EXCEPTIONS = (\n        ConnectionError, OSError,\n        redis_exceptions.ConnectionError,\n        redis_exceptions.RedisError,\n    )\n\nOther changes in this commit:\n- Flatten the 'else' after try/except where all except branches return\n  (R1705 no-else-return).\n- Drop the _RedisExceptionBuckets dataclass and _build_redis_exception_types\n  helper (no longer needed; module-level tuples are simpler and pylint-clean).\n- Remove unused Tuple / Type typing imports (W0611).\n- Import redis as 'redis_exceptions' alias to avoid shadowing the many\n  'redis = await self._get_redis_client()' locals (W0621 redefined-outer-name).\n- Place the redis import in a proper '# Third-Party' group (C0411\n  wrong-import-order).\n\nResults: pylint 8.47/10 (up from 8.26), all targeted findings at 10/10;\n134 tests pass; interrogate 100%; ruff / black / isort clean.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T12:47:45+00:00"
+    },
+    {
+      "sha": "768f3d4e3b225a578220cdec0bf723b378596371",
+      "message": "fix(cache): restore optional-import guard for redis (fixes Playwright CI)\n\nThe module-level 'from redis import exceptions' introduced in the\nprevious commit broke the playwright-ci-smoke job, whose environment\ndoes not install the optional 'redis' extra (see\n[project.optional-dependencies] redis in pyproject.toml). The worker\nfailed to boot with ModuleNotFoundError: No module named 'redis'.\n\nRestore the try/except guard around the import while keeping the\nproperties pylint cares about:\n\n- Module-level tuple literals on BOTH branches so pylint still resolves\n  the types in except clauses (E0712 stays at 10/10).\n- Aliased as redis_exceptions to avoid W0621 shadowing.\n- Fallback tuple contains stdlib-only types (asyncio.TimeoutError,\n  ConnectionError, OSError); the redis-specific code paths that need\n  redis-py exception matching are not reachable without redis installed\n  anyway (_get_redis_client returns None).\n\nVerified locally by stubbing sys.meta_path to simulate 'no redis\ninstalled' — the module imports cleanly and the fallback tuples are\nused.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T13:54:00+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 1227,
+  "deletions": 61,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:30.319877",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:30.320375",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4074,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4074.json"
+  }
+}

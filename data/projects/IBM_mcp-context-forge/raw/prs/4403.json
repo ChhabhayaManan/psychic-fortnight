@@ -1,0 +1,244 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4403,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4403"
+  },
+  "metadata": {
+    "title": "feat: API endpoint is served under the `/v1` prefix",
+    "state": "open",
+    "created_at": "2026-04-22T22:40:51+00:00",
+    "updated_at": "2026-05-14T16:14:56+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "Lang-Akshay",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "Lang-Akshay"
+    ]
+  },
+  "description": "Closes #4714\r\n## Summary\r\n\r\nThis PR introduces API versioning for ContextForge by serving all resource management and business-logic endpoints under a `/v1` URL prefix. A new `mcpgateway/api/v1/__init__.py` module centralizes router assembly through a `build_v1_router()` factory, keeping `main.py` clean and making future version additions (`/v2`, etc.) straightforward.\r\n\r\nProtocol-level routes (MCP transports, OAuth, well-known URIs, health probes) intentionally remain unversioned at the root — these follow external standards or must stay stable for infrastructure compatibility.\r\n\r\n## Changes\r\n\r\n- **`mcpgateway/api/v1/__init__.py`** — new `build_v1_router()` and `build_legacy_router()` factories; `_assemble_routers()` is the single source of truth for router assembly (feature-flag logic shared between both mounts)\r\n- **`mcpgateway/api/__init__.py`** — new namespace package\r\n- **`mcpgateway/main.py`** — router registration refactored; versioned routers delegated to `build_v1_router()`; legacy shim conditionally mounted via `build_legacy_router()` when `LEGACY_API_ENABLED=true`; unversioned routers mounted directly on `app`\r\n- **`mcpgateway/admin.py`** — admin redirect paths updated to `/v1/admin/*`\r\n- **`mcpgateway/middleware/deprecation.py`** — new `DeprecationHeadersMiddleware` that injects `Deprecation: true`, `Sunset`, and `Link` headers on all legacy (unversioned) route responses\r\n- **`mcpgateway/middleware/`** — path references updated (`path_filter.py`, `rbac.py`, `token_scoping.py`)\r\n- **Tests** — all e2e, integration, fuzz, and load tests updated to use `/v1` prefixed paths\r\n- **`scripts/update_test_paths.py`** — utility script for migrating test path references\r\n\r\n## Endpoint Classification\r\n\r\n### Versioned — served under `/v1`\r\n\r\n| Endpoint Group       | Path (new)                       | Feature Flag                             |\r\n| -------------------- | -------------------------------- | ---------------------------------------- |\r\n| MCP Protocol         | `/v1/protocol/**`              | always-on                                |\r\n| Tools                | `/v1/tools/**`                 | always-on                                |\r\n| Resources            | `/v1/resources/**`             | always-on                                |\r\n| Prompts              | `/v1/prompts/**`               | always-on                                |\r\n| Gateways             | `/v1/gateways/**`              | always-on                                |\r\n| Roots                | `/v1/roots/**`                 | always-on                                |\r\n| Servers              | `/v1/servers/**`               | always-on                                |\r\n| Metrics              | `/v1/metrics/**`               | always-on                                |\r\n| Tags                 | `/v1/tags/**`                  | always-on                                |\r\n| Export / Import      | `/v1/export`, `/v1/import`   | always-on                                |\r\n| Tool Plugin Bindings | `/v1/tools/plugin_bindings/**` | always-on                                |\r\n| Admin UI & API       | `/v1/admin/**`                 | `MCPGATEWAY_ADMIN_API_ENABLED`         |\r\n| Runtime Admin        | `/v1/admin/runtime/**`         | `MCPGATEWAY_ADMIN_API_ENABLED`         |\r\n| LLM Admin            | `/v1/admin/llm/**`             | `MCPGATEWAY_LLMCHAT_ENABLED`           |\r\n| A2A                  | `/v1/a2a/**`                   | `MCPGATEWAY_A2A_ENABLED`               |\r\n| Observability        | `/v1/observability/**`         | `OBSERVABILITY_ENABLED`                |\r\n| Reverse Proxy        | `/v1/reverse-proxy/**`         | `MCPGATEWAY_REVERSE_PROXY_ENABLED`     |\r\n| Tool Cancellation    | `/v1/cancellation/**`          | `MCPGATEWAY_TOOL_CANCELLATION_ENABLED` |\r\n| ToolOps              | `/v1/toolops/**`               | `TOOLOPS_ENABLED`                      |\r\n| Authentication       | `/v1/auth/**`                  | `EMAIL_AUTH_ENABLED`                   |\r\n| Email Authentication | `/v1/auth/email/**`            | `EMAIL_AUTH_ENABLED`                   |\r\n| SSO Authentication   | `/v1/auth/sso/**`              | `EMAIL_AUTH_ENABLED` + `SSO_ENABLED` |\r\n| Teams                | `/v1/teams/**`                 | `EMAIL_AUTH_ENABLED`                   |\r\n| JWT Token Catalog    | `/v1/tokens/**`                | `EMAIL_AUTH_ENABLED`                   |\r\n| RBAC                 | `/v1/rbac/**`                  | `EMAIL_AUTH_ENABLED`                   |\r\n| LLM Chat             | `/v1/llmchat/**`               | `MCPGATEWAY_LLMCHAT_ENABLED`           |\r\n| LLM Config           | `/v1/llm/**`                   | `MCPGATEWAY_LLMCHAT_ENABLED`           |\r\n\r\n### Not versioned — mounted at root\r\n\r\n| Endpoint Group                | Path                                          | Reason                                                                                                   |\r\n| ----------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |\r\n| Health probes                 | `/health`, `/ready`, `/health/security` | Infrastructure / liveness; must remain stable                                                            |\r\n| MCP Streamable HTTP transport | `/mcp`                                      | MCP protocol spec — path is fixed by the spec                                                           |\r\n| Internal MCP transport bridge | `/_internal/mcp/transport`                  | Internal trusted bridge; not a public API                                                                |\r\n| OAuth 2.0                     | `/oauth/**`                                 | Standard protocol location (RFC 6749)                                                                    |\r\n| Well-known URIs               | `/.well-known/**`                           | RFC 8615 / RFC 9116 / RFC 9728 — path is standardized                                                   |\r\n| Per-server well-known         | `/servers/{id}/.well-known/**`              | RFC standard path, must not be prefixed                                                                  |\r\n| Version / Diagnostics         | `/version`                                  | Diagnostic utility, not a resource API                                                                   |\r\n| Static assets                 | `/static/**`                                | UI asset serving                                                                                         |\r\n| Root redirect                 | `/`                                         | Entry point / UI redirect                                                                                |\r\n| Favicon                       | `/favicon.ico`                              | Browser convention                                                                                       |\r\n| Log Search                    | `/api/logs/**`                              | Internal structured-logging query interface                                                              |\r\n| LLM Proxy                     | `{llm_api_prefix}` (default `/v1`)        | Prefix is runtime-configurable via `LLM_API_PREFIX`; cannot be nested inside the gateway's own `/v1` |\r\n\r\n## Breaking Change\r\n\r\nAll previously unversioned API paths (`/tools`, `/resources`, `/prompts`, `/gateways`, `/servers`, `/roots`, `/metrics`, `/tags`, `/a2a`, `/admin`, `/auth`, `/teams`, `/tokens`, `/rbac`, `/observability`, `/cancellation`, `/toolops`, `/reverse-proxy`, `/export`, `/import`) are now canonically served under `/v1`. Clients should migrate base URLs to `/v1`.\r\n\r\n**Backward compatibility is on by default.** When `LEGACY_API_ENABLED=true` (the default), all old unversioned paths remain functional alongside `/v1` — responses include `Deprecation: true`, `Sunset`, and `Link` headers per RFC 8594 to signal the migration window. Set `LEGACY_API_ENABLED=false` to drop the shim routes entirely once all clients have migrated.\r\n\r\nThe MCP transports (`/mcp`), OAuth endpoints (`/oauth`), health probes, and well-known URIs are unchanged.\r\n\r\n### Legacy route configuration\r\n\r\n```\r\nLEGACY_API_ENABLED=true                        # default: true (set false to drop shim routes)\r\nLEGACY_API_SUNSET_DATE=Wed, 04 Aug 2026 00:00:00 GMT\r\n```",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4179943959",
+      "author": "msureshkumar88",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-27T10:03:41+00:00",
+      "body": "# Request Changes - PR #4403\n\n## Summary\nThis PR implements API versioning under `/v1` prefix with excellent architecture and comprehensive test coverage. However, there are **1 CRITICAL** and **2 MEDIUM** priority issues that must be addressed before merging.\n\n---\n\n## 🚨 CRITICAL Issues (Must Fix)\n\n### 1. Breaking Change Without Backward Compatibility\n**Location**: `mcpgateway/main.py:11544`\n\n**Problem**: This PR introduces an immediate breaking change for all external API consumers. Any client using unversioned endpoints (e.g., `/tools`, `/servers`, `/gateways`) will break immediately upon deployment.\n\n**Required Action**: Implement a backward compatibility layer with deprecation warnings:\n\n```python\n# In main.py after line 11544\n# Mount v1_router at both /v1 (new) and root (deprecated)\napp.include_router(v1_router)  # /v1/* (new canonical path)\n\n# Temporary compatibility layer - remove in v2.0.0\napp.include_router(v1_router, prefix=\"\")  # /* (deprecated, for backward compatibility)\n\n# Add deprecation warning middleware for unversioned paths\n# Log warnings when clients use deprecated unversioned endpoints\n```\n\n**Additional Requirements**:\n- Add `MIGRATION.md` documenting the breaking change and migration path\n- Update `CHANGELOG.md` with breaking change notice\n- Add deprecation timeline (e.g., \"unversioned endpoints deprecated, will be removed in v2.0.0\")\n- Ensure all security middleware applies to both `/v1/*` and `/*` paths\n\n---\n\n## ⚠️ MEDIUM Issues (Should Fix)\n\n### 2. Duplicated Path Normalization Logic\n**Location**: `mcpgateway/middleware/token_scoping.py:243-250` and `345-352`\n\n**Problem**: Path normalization logic for stripping `/v1` prefix is duplicated in two functions (`_normalize_llm_api_prefix()` and `_normalize_path_for_matching()`), creating maintenance burden and potential inconsistencies.\n\n**Required Action**: Consolidate into a single shared utility function:\n\n```python\ndef _normalize_api_path(path: str) -> str:\n    \"\"\"Strip /v1 prefix for consistent pattern matching across middleware.\"\"\"\n    if path.startswith(\"/v1/\"):\n        return path[3:]\n    if path == \"/v1\":\n        return \"/\"\n    return path\n\n# Then update both functions to use this shared utility\n```\n\n---\n\n### 3. Missing API Version Discovery Endpoint\n**Location**: `mcpgateway/api/v1/__init__.py:273`\n\n**Problem**: No endpoint exists for clients to programmatically discover the API version, making it difficult for clients to adapt to versioning changes.\n\n**Required Action**: Add version discovery endpoint:\n\n```python\n# In build_v1_router() after creating v1_router (line 73)\n@v1_router.get(\"/version\", tags=[\"Version\"])\nasync def get_api_version():\n    \"\"\"Return current API version information.\"\"\"\n    return {\n        \"version\": \"v1\",\n        \"deprecated\": False,\n        \"deprecation_date\": None,\n        \"sunset_date\": None\n    }\n```\n\n---\n\n## 📋 Additional Recommendations (Optional)\n\n### Test Coverage Gap\nAdd explicit test verifying unversioned routes remain unversioned:\n```python\ndef test_unversioned_routes_remain_unversioned():\n    \"\"\"Verify RFC well-known, OAuth, health remain at root.\"\"\"\n    assert client.get(\"/.well-known/openid-configuration\").status_code != 404\n    assert client.get(\"/oauth/authorize\").status_code != 404\n    assert client.get(\"/health\").status_code == 200\n```\n\n### Documentation\n- Update OpenAPI schema to reflect `/v1` prefix in all endpoint paths\n- Add API versioning policy to project documentation\n\n---\n\n## ✅ What's Working Well\n\n- Excellent centralized router architecture\n- Comprehensive test coverage (194 files updated)\n- Proper security middleware updates\n- Clean separation of versioned vs unversioned routes\n- No security regressions identified\n\n---\n\n## 🎯 Merge Criteria\n\n**Cannot merge until**:\n1. ✅ Backward compatibility layer implemented\n2. ✅ Migration documentation added (`MIGRATION.md`, `CHANGELOG.md`)\n3. ✅ Path normalization logic consolidated\n4. ✅ Version discovery endpoint added\n\n**Estimated effort**: 2-4 hours to address all issues\n\n---\n\n**Review Status**: 🔴 **REQUEST CHANGES**  \n**Risk Level**: 🟡 MEDIUM (Technical: LOW, Business: MEDIUM due to breaking change)"
+    },
+    {
+      "id": "4179956666",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-27T10:05:28+00:00",
+      "body": "As mentioned in the comments "
+    },
+    {
+      "id": "4189727968",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-28T14:32:30+00:00",
+      "body": "## Code Review — PR #4403: feat: API endpoint is served under the `/v1` prefix\n\n**Verdict: REQUEST CHANGES** — 4 HIGH + 7 MEDIUM issues require resolution before merge.\n\n---\n\n### What the PR Does\n\nCentralizes all resource-management routes under a `/v1` URL prefix via a new `build_v1_router()` factory in `mcpgateway/api/v1/__init__.py`. Protocol-level routes (MCP transport, OAuth, health, RFC well-known) correctly remain unversioned. The factory pattern is clean, documentation is thorough, and test coverage of the factory itself is good.\n\n---\n\n## HIGH Severity — Request Changes\n\n### H1 — LLM Proxy Routing Collision\n**Files:** `main.py`, `api/v1/__init__.py`\n\nWhen `LLM_API_PREFIX=\"/v1\"` (the **default**), the LLM proxy router is mounted on `app` at `/v1` — the same prefix as the gateway's own `v1_router`. FastAPI silently registers both. Catch-all proxy routes can shadow gateway API endpoints. No runtime warning exists for this conflict. The MIGRATION.md acknowledges the tension but provides no guardrail.\n\n**Fix required:** Add a startup `CRITICAL` log (or assertion) when `llm_api_prefix.rstrip(\"/\") == \"/v1\"`:\n\n```python\nif settings.llmchat_enabled and settings.llm_api_prefix.rstrip(\"/\") == \"/v1\":\n    logger.critical(\n        \"LLM_API_PREFIX='/v1' conflicts with the gateway API prefix. \"\n        \"Set LLM_API_PREFIX to a different value (e.g. '/llm/v1') to avoid routing collisions.\"\n    )\n```\n\n---\n\n### H2 — `metrics_maintenance_router` Double-Mounted\n**Files:** `main.py` (direct on `app`) + `api/v1/__init__.py` (inside `v1_router`)\n\nBoth mounts use the same flag and log the identical string `\"Metrics maintenance router included\"`. FastAPI silently registers duplicate routes, polluting OpenAPI docs and creating maintenance confusion.\n\n**Fix required:** Mount only once. MIGRATION.md says it should stay at `/api/metrics/**` — remove it from `v1_router`.\n\n---\n\n### H3 — Hard 404 Cutover With No Deprecation Path\nAll ~25 previously unversioned paths immediately return 404 post-upgrade. Zero-downtime upgrades are not possible. External clients, Kubernetes health scripts, and SDKs not in this repo will break silently.\n\n**Fix required:** Either add temporary 301/308 redirect aliases for one release cycle, or explicitly document in MIGRATION.md that a coordinated cutover (e.g., blue-green deployment) is required and that zero-downtime upgrades are not supported.\n\n---\n\n### H4 — Well-Known Router Double-Mounted, Violating RFC 8615\n**File:** `api/v1/__init__.py` Group F\n\n`well_known_router` is mounted at root (correct) **and** inside `v1_router` when `mcpgateway_admin_api_enabled=True`, creating routes at `/v1/.well-known/**`. RFC 8615 mandates well-known URIs are only served at `/.well-known/`. Serving them additionally under `/v1/` is a spec violation.\n\n**Fix required:** Extract only the admin status endpoint into a dedicated router rather than re-mounting the entire `well_known_router` inside v1.\n\n---\n\n## MEDIUM Severity — Request Changes\n\n### M1 — `_strip_v1` Closure Allocated on Every Admin Request (Performance)\n**File:** `main.py — AdminAuthMiddleware.dispatch()`\n\n```python\nasync def dispatch(self, request, call_next):\n    def _strip_v1(p: str) -> str:   # ← new closure object on EVERY request\n        return p[3:] if p.startswith(\"/v1\") else p\n```\n\nAlso, `_strip_v1(p)` is called for every item in `EXEMPT_PATHS` on every request, recomputing static values. Move to a class-level static method and pre-compute the stripped exempt paths as a class attribute.\n\n---\n\n### M2 — `EXEMPT_PATHS` Inconsistency: `/admin/static` Not Versioned\n**File:** `main.py — AdminAuthMiddleware`\n\n```python\nEXEMPT_PATHS = [\n    \"/v1/admin/login\",\n    \"/v1/admin/logout\",\n    \"/v1/admin/reset-password\",\n    \"/admin/static\",   # ← NOT versioned; all others have /v1/\n]\n```\n\nThe `_strip_v1` normalization makes this work at runtime, but intent is unclear and will confuse future maintainers. Add an explicit comment or make it consistent.\n\n---\n\n### M3 — Service Layer Hardcodes `/v1/` Path Segments (Separation of Concerns)\n**Files:** `email_auth_service.py`, `export_service.py`\n\nPassword-reset email links and exported server endpoint URLs now hardcode `/v1/`:\n```python\nreturn f\"{app_domain}{root_path}/v1/admin/forgot-password\"\n\"sse_endpoint\": f\"{root_path}/v1/servers/{server.id}/sse\"\n```\n\nThese URLs are sent externally (emails, config exports). A future version bump requires hunting through service-layer business logic. Use `settings.api_version_prefix` (a new config field, default `\"/v1\"`) to centralize this.\n\n---\n\n### M4 — Open Redirect Risk in `root_path`-Based Location Headers (Security Hardening)\n**Files:** `middleware/rbac.py`, `routers/sso.py`, `admin.py`\n\n```python\nheaders={\"Location\": f\"{settings.app_root_path}/v1/admin/login\"}\nRedirectResponse(url=f\"{root_path}/v1/admin/login?error={error_code}\")\n```\n\nIf `app_root_path` is derived from `X-Forwarded-Prefix` without strict validation, an attacker can craft a request causing a redirect to an attacker-controlled URL (CWE-601). Validate `app_root_path` at startup with a strict allow-list regex (path-only, no scheme/host).\n\n---\n\n### M5 — Plugin Server Prometheus Path Change Breaks External Scrapers (Observability)\n**File:** `plugins/framework/external/mcp/server/runtime.py`\n\n```python\n# Before\nRoute(\"/metrics/prometheus\", metrics_endpoint)\n# After  \nRoute(\"/v1/metrics/prometheus\", metrics_endpoint)\n```\n\nThe plugin server is a **standalone Starlette app**, entirely separate from the main gateway. Its internal routes should not inherit the gateway's API versioning prefix. Any Prometheus `scrape_configs` targeting `/metrics/prometheus` will immediately receive 404 post-upgrade. This looks like unintentional scope creep — the versioning prefix should not bleed into plugin server internals.\n\n**Fix required:** Revert this change in `runtime.py`.\n\n---\n\n### M6 — Legacy `/admin` Branch in `AdminAuthMiddleware` is Dead Code\n**File:** `main.py`\n\n```python\nis_admin_route = scope_path.startswith(\"/admin\") or scope_path.startswith(\"/v1/admin\")\n```\n\nAdmin routes are now only registered at `/v1/admin/*`. The `startswith(\"/admin\")` branch protects paths that no longer exist. Dead code in security middleware is a maintenance liability. Remove it or add a dated comment for an explicit transition period.\n\n---\n\n### M7 — `scripts/update_test_paths.py` is Dead After This PR\nComplex regex-based one-time migration script with no unit tests. It has already been executed — the test files are migrated. Either delete it in this PR or add tests in `tests/unit/scripts/` if it will be reused. Scripts like this have historically introduced silent bugs (over-matching paths).\n\n---\n\n## Testing Gaps\n\n| Gap | Severity |\n|---|---|\n| No integration tests: real `TestClient` requests against `/v1/*` routes | HIGH |\n| No test for LLM proxy collision when `llm_api_prefix=\"/v1\"` | HIGH |\n| No regression tests asserting old unversioned paths now return 404 | MEDIUM |\n| `_normalize_path_for_matching` edge cases untested: bare `/v1`, `/v1/v1/`, `/prefix/v1/tools` | MEDIUM |\n| Plugin server Prometheus path change not verified by any E2E test | LOW |\n\n---\n\n## Logging Gaps\n\n| Location | Gap |\n|---|---|\n| Metrics maintenance double-mount | Both log identical string — indistinguishable in output |\n| `api/v1/__init__.py` Group F | Admin router unavailable logged at `ERROR`; should be `CRITICAL` |\n| `main.py` LLM proxy | No warning when `llm_api_prefix` conflicts with `/v1` gateway prefix |\n| `api/v1/__init__.py` Group B | `tool_plugin_bindings` import failure logged at `ERROR` but silently skipped — inconsistent severity |\n\n---\n\n## Security Summary\n\n| ID | Severity | Issue | CWE |\n|---|---|---|---|\n| H4 | HIGH | Well-known router at `/v1/.well-known/**` violates RFC 8615 | CWE-706 |\n| H1 | HIGH | LLM proxy route collision at `/v1` default prefix | CWE-610 |\n| M4 | MEDIUM | Open redirect via unvalidated `root_path` in Location headers | CWE-601 |\n| M6 | MEDIUM | Dead admin middleware path match — operational confusion | CWE-670 |\n| M5 | MEDIUM | Plugin server Prometheus path breaks external monitoring | — |\n\n---\n\n## Alternative Implementations Worth Considering\n\n1. **Deprecation-period aliases** — Mount routes at both `/v1/*` (new) and `/*` (old, with `Deprecation: true` + `Sunset: <date>` response headers). Remove old aliases in the next release. Enables zero-downtime migration for existing clients.\n\n2. **Sub-application mounting** — `app.mount(\"/v1\", v1_app)` where `v1_app` is a separate FastAPI instance. Each version gets its own middleware stack and `/v1/docs`. Clean isolation; future `/v2` is another sub-app.\n\n3. **Settings-driven version prefix** — Replace all hardcoded `/v1` strings with `settings.api_version_prefix = \"/v1\"`. Service-layer URLs, factory prefix, cookie paths, and redirect URLs all read from one field. Future version bumps become a single config change, not a repo-wide grep-and-replace."
+    },
+    {
+      "id": "4244004193",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-07T12:35:38+00:00",
+      "body": "## Code Review — PR #4403: API v1 Prefix (Follow-up Review)\n\n**Verdict: REQUEST CHANGES** — 4 blocking security/correctness issues + 8 medium issues remain unresolved after the previous review round.\n\n---\n\n## Blocking — Must Fix Before Merge\n\n### B1 — RFC 8615 Violation: `well_known_router` Double-Mounted at `/v1/.well-known/**`\n**File:** `mcpgateway/api/v1/__init__.py` — Group F\n\n`well_known_router` is included inside `_assemble_routers()` when `mcpgateway_admin_api_enabled=True`, creating routes at `/v1/.well-known/**`. RFC 8615 §3 mandates well-known URIs are served exclusively at `/.well-known/`. Serving them at `/v1/.well-known/` is a spec violation and will break RFC-compliant clients that resolve well-known URIs at the root only.\n\n**Fix:** Extract only the admin-status endpoint into a dedicated `admin_status_router`; do not re-mount the full `well_known_router` inside v1.\n\n---\n\n### B2 — LLM Proxy Routing Collision: No Guard at Default Configuration\n**Files:** `mcpgateway/main.py`, `mcpgateway/api/v1/__init__.py`\n\n`LLM_API_PREFIX=\"/v1\"` is the default. When `llmchat_enabled=True`, the LLM proxy mounts on `app` at `/v1` — the same prefix as `v1_router`. FastAPI silently registers both; catch-all proxy routes can shadow gateway API endpoints. This is the default configuration for any deployment with LLM chat enabled. No startup warning was added despite being requested in the previous review round.\n\n**Required fix:**\n```python\nif settings.llmchat_enabled and settings.llm_api_prefix.rstrip(\"/\") == \"/v1\":\n    logger.critical(\n        \"LLM_API_PREFIX='/v1' conflicts with the gateway API prefix. \"\n        \"Set LLM_API_PREFIX to a different value (e.g. '/llm/v1') to avoid routing collisions.\"\n    )\n```\n\n---\n\n### B3 — Plugin Server Prometheus Path: Scope Creep + Broken Log\n**File:** `mcpgateway/plugins/framework/external/mcp/server/runtime.py`\n\nThe plugin server (a **standalone Starlette app**, separate from the gateway) registers its Prometheus endpoint at `/v1/metrics/prometheus`. This server has no relation to the gateway's API versioning prefix. Any existing Prometheus `scrape_configs` targeting `/metrics/prometheus` immediately receive 404 after this change.\n\nAdditionally the startup log still says:\n```python\nlogger.info(f\"Prometheus metrics available at http://{server_config.host}:{server_config.port}/metrics/prometheus\")\n```\n...while the actual route is now `/v1/metrics/prometheus` — the log is wrong and will mislead operators.\n\n**Fix:** Revert to `Route(\"/metrics/prometheus\", ...)` in `runtime.py`.\n\n---\n\n### B4 — Open Redirect via Unvalidated `root_path` in Location Headers\n**Files:** `mcpgateway/middleware/rbac.py`, `mcpgateway/routers/sso.py`, `mcpgateway/admin.py`\n\nAll redirect constructions use `f\"{settings.app_root_path}/v1/admin/login\"` without validating `app_root_path`. If a reverse proxy sets `X-Forwarded-Prefix` to an attacker-controlled value, this enables CWE-601 open redirect. This was raised as M4 in the previous review and was not addressed.\n\n**Fix:** Validate `app_root_path` at startup — reject any value containing `://`, a host component, or `..` path traversal sequences:\n```python\nimport re\nif settings.app_root_path and not re.fullmatch(r\"(/[A-Za-z0-9._~!$ & '()*+,;:@%-]*)*\", settings.app_root_path):\n    raise ValueError(f\"app_root_path '{settings.app_root_path}' contains invalid characters\")\n```\n\n---\n\n## Medium — Should Fix Before Merge\n\n### M1 — `.env.example` Sunset Date: 7 Days vs 90-Day `config.py` Default\n`config.py` correctly defaults to `\"Wed, 04 Aug 2026 00:00:00 GMT\"` (90 days). But `.env.example` still shows `LEGACY_API_SUNSET_DATE=Wed, 13 May 2026 00:00:00 GMT` (the original 7-day value). Operators deploying with stock `.env.example` get a 1-week migration window. Update to match the 90-day default or a clearly future date.\n\n### M2 — Service Layer Hardcodes `/v1/` Strings\n**Files:** `mcpgateway/services/email_auth_service.py`, `mcpgateway/services/export_service.py`\n\nPassword-reset email links and exported server endpoint URLs embed `/v1/` literally (e.g. `f\"{app_domain}{root_path}/v1/admin/forgot-password\"`). A future version bump requires hunting through service-layer business logic. Requested in prior review (M3); not addressed. Add `settings.api_version_prefix = \"/v1\"` and use it here.\n\n### M3 — `metrics_maintenance_router` Double-Mounted With Identical Log Strings\nRouter is included in `_assemble_routers()` (yielding `/v1/api/metrics/**`) **and** directly on `app` (yielding `/api/metrics/**`). Both branches log `\"Metrics maintenance router included - cleanup/rollup API endpoints enabled\"` — indistinguishable in output, confusing during debugging. Differentiate: `\"...mounted at /api/metrics (root)\"` vs `\"...mounted at /v1/api/metrics (versioned)\"`.\n\n### M4 — `validate_legacy_disabled.py` Gives False Positives for Auth-Required Routes\n`scripts/validate_legacy_disabled.py` makes unauthenticated requests and expects `404`. Auth-protected legacy routes return `401` when accessed without credentials, not `404` — the script incorrectly marks them as \"legacy enabled\". Either pass a bearer token as a CLI argument or explicitly document that the script only validates public routes.\n\n### M5 — Duplicate Migration Documentation Will Diverge\n`MIGRATION.md` (repo root, 161 lines) and `docs/docs/manage/api-v1-migration.md` (246 lines) cover the same ground at different detail levels. They will diverge. Designate one as canonical; make the other a one-paragraph pointer with a link.\n\n### M6 — `/v1/rpc` in `locustfile_mcp_protocol.py` Not Documented\n`/v1/rpc` appears in `charts/mcp-stack/files/ocp/locustfile_mcp_protocol.py` but `/rpc` is absent from `_assemble_routers()`, the PR description endpoint table, and MIGRATION.md. Either document this endpoint in the classification table or revert the locustfile change.\n\n### M7 — `AdminAuthMiddleware` Legacy `/admin` Branch: Add Expiry Comment\n```python\nis_admin_route = scope_path.startswith(\"/admin\") or scope_path.startswith(\"/v1/admin\")\n```\nWhen `LEGACY_API_ENABLED=false`, admin routes exist only at `/v1/admin/*`. The `startswith(\"/admin\")` branch is dead code in that configuration and will confuse future maintainers auditing this security middleware. Add: `# Legacy branch — remove when LEGACY_API_ENABLED support is dropped`.\n\n### M8 — Migration Scripts: One-Shot Utilities With No Tests or Labels\n`scripts/update_test_paths.py` (275 lines) and `scripts/fix_admin_redirects.py` (26 lines) are one-shot migration utilities that have already served their purpose in this PR. No tests, no \"one-time use\" documentation. Future maintainers may accidentally re-run them. Either delete them from this PR or move to `tools/migration/` with a clear header comment.\n\n---\n\n## Testing Gaps\n\n| Gap | Severity |\n|---|---|\n| No integration test: `TestClient` requests hitting `/v1/*` routes end-to-end | HIGH |\n| No test for LLM proxy collision when `llm_api_prefix=\"/v1\"` (default config) | HIGH |\n| No test asserting legacy paths return `404` when `LEGACY_API_ENABLED=false` (placeholder deleted, no unit test replacement) | MEDIUM |\n| `Sunset` header value not validated as parseable HTTP-date in any test | MEDIUM |\n| `_normalize_path_for_matching` edge cases untested: bare `/v1`, `/v1/v1/tools`, path traversal variants | MEDIUM |\n| Plugin server Prometheus path change: no E2E test verifying scrape path | LOW |\n\n---\n\n## Logging Gaps\n\n| Location | Gap |\n|---|---|\n| `api/v1/__init__.py` Group F | Admin router `ImportError` logged at `ERROR`; admin is a core feature — use `CRITICAL` |\n| `api/v1/__init__.py` Group B | `tool_plugin_bindings` `ImportError` logged at `ERROR` but silently skipped — severity mismatch with behavior |\n| `main.py` | No `CRITICAL` log when `llm_api_prefix=\"/v1\"` conflicts with gateway prefix (see B2) |\n| `runtime.py` startup log | Says `/metrics/prometheus` but route registered at `/v1/metrics/prometheus` — misleading |\n\n---\n\n## Documentation Gaps\n\n- `CLAUDE.md` and `docs/AGENTS.md` still reference unversioned endpoint paths — stale for contributors using them as reference\n- No `deprecated=True` marker on FastAPI route definitions in the legacy router (FastAPI surfaces this natively in `/docs` and API explorers)\n- MIGRATION.md endpoint classification table omits the `/rpc` endpoint that appears in the locustfile\n\n---\n\n## What Is Working Well\n\n- `build_v1_router()` / `build_legacy_router()` factory pattern via shared `_assemble_routers()` is clean and avoids logic duplication\n- Pure-ASGI `DeprecationHeadersMiddleware` correctly avoids SSE/streaming buffering issues\n- `test_api_versioning_parity.py` parity guard between `_LEGACY_PREFIXES` and `_assemble_routers` is the right approach\n- `include_in_schema=False` on legacy router prevents OpenAPI duplication\n- Sunset warning at startup when date is past or approaching is good operational hygiene\n- Test coverage of `DeprecationHeadersMiddleware` and `_is_legacy_path` is thorough\n- Protocol-level route classification (MCP, OAuth, well-known, health) is correct\n\n---\n\n## Merge Criteria\n\n**Cannot merge until:**\n1. B1: `well_known_router` removed from v1 — RFC 8615 violation\n2. B2: Startup `CRITICAL` log for `llm_api_prefix=\"/v1\"` collision\n3. B3: Plugin server Prometheus path reverted to `/metrics/prometheus`\n4. B4: `app_root_path` validation added to prevent open redirect\n5. M1: `.env.example` sunset date updated to 90-day value"
+    },
+    {
+      "id": "4251562321",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-08T10:30:22+00:00",
+      "body": "## Follow-up Review — PR #4403 (Final Sign-off)\n\nAll three remaining blockers have been verified in the current branch head (`f19f6605b`).\n\n---\n\n### ✅ All Blockers Resolved\n\n**B1 — `well_known_router` double-mount**\n`include_router(well_known_router)` is absent from `_assemble_routers()`. The RFC-violating `/v1/.well-known/**` routes no longer exist. The admin-status handler is correctly registered via a targeted `add_api_route(\"/admin/well-known\", get_well_known_status, ...)` — only the relevant handler is versioned, not the entire well-known router. ✅\n\n**B2 — `logger.critical` for `LLM_API_PREFIX='/v1'` collision**\nConfirmed present at `main.py:11696` (verified in prior round). ✅\n\n**B3 — Plugin server Prometheus path**\n`runtime.py` lines 349, 351, 421, 423 all register `Route(\"/metrics/prometheus\", ...)`. The stale `/v1/metrics/prometheus` entry is gone from the exempt-path set at line 181. Startup log at line 562 correctly announces `/metrics/prometheus`. ✅\n\n**B4 — Open redirect via `app_root_path` (CWE-601)**\n`config.py` lines 391–412 add `validate_app_root_path` as a Pydantic `field_validator`. Values containing `://` or starting with `//` raise `ValueError` at startup. Misconfiguration is caught at boot rather than exploited at runtime. ✅\n\n---\n\n### Merge Readiness\n\nNo blocking issues remain. The architecture is sound — the `build_v1_router()` / `build_legacy_router()` factory pattern via shared `_assemble_routers()` is clean, `DeprecationHeadersMiddleware` is correctly pure-ASGI, the parity test guards against `_LEGACY_PREFIXES` drift, and protocol-level routes (MCP, OAuth, health, well-known) are correctly unversioned.\n\nThe post-merge items from the prior round (deprecated=True on legacy routes, `_normalize_path_for_matching` edge case tests, `CLAUDE.md`/`AGENTS.md` path updates, `settings.api_version_prefix` centralization, hardcoded `/v1/` in service layer) remain good follow-up issues but are not blocking.\n\n**Approving. Ready to merge once #3754 merge dependency is clear.**"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "da910c8080041f11c6d1e9b4e2c235c5bd5c91c6",
+      "message": "feat: centralize API versioning with v1 router assembly and new namespace package\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-22T12:16:31+00:00"
+    },
+    {
+      "sha": "01dfba60ae8cb23d952659c94d4dcff9bbcd01fa",
+      "message": "Rource /Users/akshayshinde/Documents/codespace/github/mcp-context-forge.worktrees/API_v1/.venv/bin/activat\n\nfactor API paths to include versioning in tests\n\n- Updated test cases in  to change API paths from  and  to  and .\n- Modified pagination tests in  to reflect new API paths with versioning.\n- Adjusted proxy authentication tests in  to use  and .\n- Changed credential verification tests in  to redirect to .\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-22T12:17:35+00:00"
+    },
+    {
+      "sha": "8b377b115aabc2d16708ecef70f52203e39b7ab5",
+      "message": "Refactor MCP endpoint paths in unit tests to remove version prefix\n\n- Updated all instances of /v1/servers/{id}/mcp to /servers/{id}/mcp in test cases.\n- Ensured consistency across tests for authentication and authorization checks.\n- Adjusted related test assertions to reflect the new endpoint structure.\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-22T16:46:44+00:00"
+    },
+    {
+      "sha": "589836e5c781001a503b596b7a63d175e3163ddd",
+      "message": "Refactor API paths to remove versioning from endpoints\n\n- Updated various service and router files to remove the /v1 prefix from API paths.\n- Adjusted tests to reflect the new endpoint structure without versioning.\n- Ensured that all references to admin routes are updated to include the new path format.\n- Modified the metrics endpoint to return data without the version prefix.\n- Cleaned up related tests to ensure they align with the new routing structure.\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-22T17:37:41+00:00"
+    },
+    {
+      "sha": "116b330bb57bd5e64fd702bcde18f3416859dc02",
+      "message": "chore: update generated_at timestamp and fix line numbers in secrets baseline\nrefactor: reorder logging import in alembic env.py\nfix: add comment for first-party import in audit_trail_service.py\ncleanup: remove merge conflict markers in resource_service.py\nrefactor: add first-party comment in context.py\nrefactor: add blank line after import in streamablehttp_transport.py\ndocs: enhance API endpoint organization documentation in plan.md\nchmod: update permissions for update_test_paths.py script\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-26T13:27:46+00:00"
+    },
+    {
+      "sha": "b30acdd80b6067014eaf2872205fbe52104025e7",
+      "message": "chore: update generated_at timestamp, fix line numbers, and refactor API paths to include versioning in tests\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-26T14:41:25+00:00"
+    },
+    {
+      "sha": "f12f029d6d8c8825db4a207c4efed0df528010c0",
+      "message": "feat(tests): add new tests for admin auth middleware and enhance coverage\n\n- Implement tests for legacy /admin/* paths to ensure they trigger admin auth checks.\n- Ensure /admin/login remains exempt from authentication.\n- Add tests for browser and HTMX request redirects when unauthenticated admin is enabled.\n- Introduce tests for token scoping and cancellation router functionalities.\n- Enhance audit trail service tests to handle identity extraction failures gracefully.\n- Add email auth service tests for forgot and reset password URL constructions.\n- Introduce comprehensive tests for the v1 API router, covering various feature flags and import errors.\n- Remove obsolete cancellation router tests to streamline the codebase.\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-26T22:16:08+00:00"
+    },
+    {
+      "sha": "864e83261f5373e6e7d54064052e8d6f53847109",
+      "message": "chore: update generated_at timestamp and fix line number in secrets baseline; add noqa comment for import in main.py\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-26T22:45:15+00:00"
+    },
+    {
+      "sha": "f27f59a24081ca8680f05b9c84167bcf1727659a",
+      "message": "test: coverage fix\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-26T23:04:53+00:00"
+    },
+    {
+      "sha": "af1511871e09b0928dd34362f643d94adadbd373",
+      "message": "chore: update API endpoints in sql-sanitizer workflow to include versioning\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-27T09:46:00+00:00"
+    },
+    {
+      "sha": "9c24d6ce3c6c7d1660a59e641eb7298dba61b2c2",
+      "message": "chore: update admin routes to remove versioning and adjust router prefix in tests\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-27T12:02:04+00:00"
+    },
+    {
+      "sha": "894e09f1b0267474500f5f6b5c61872e30c03d41",
+      "message": "Update observability and admin routes to include versioning (v1)\n\n- Changed all admin-related fetch and form action URLs in observability templates to include the new versioning scheme (v1).\n- Updated paths in performance, prompts, resources, tools, and user management templates to reflect the new API structure.\n- Adjusted Playwright tests to align with the updated URL structure for admin routes.\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-27T15:11:21+00:00"
+    },
+    {
+      "sha": "3763498a17b02c39f729fba9bfa3daed7fb30a8e",
+      "message": "feat: update API endpoints to include versioning (v1)\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-27T16:02:30+00:00"
+    },
+    {
+      "sha": "a8940e7f0c4c4f4cd158eb6eb48bccb548cd5b80",
+      "message": "chore: update generated_at timestamp and adjust TestClient instantiation in logout tests\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-28T08:58:29+00:00"
+    },
+    {
+      "sha": "0ed5fb9f1293bfee533942c5c8efc3c504f450a0",
+      "message": "feat: update API endpoints to include versioning (v1) across various files\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-28T12:08:18+00:00"
+    },
+    {
+      "sha": "31a5e6c1fde1d01d6eddeb2541d4605569c2faf1",
+      "message": "format: fixup\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-05T13:14:57+00:00"
+    },
+    {
+      "sha": "9a51b8e1d3849bc12c371a67f8b7fce5b36c7942",
+      "message": "feat: Introduce legacy API support with deprecation headers\n\n- Added configuration options for enabling legacy API routes and setting a sunset date.\n- Implemented middleware to inject deprecation headers for legacy routes.\n- Updated main application to conditionally mount legacy routes based on configuration.\n- Created integration tests to verify behavior of legacy and v1 routes, including header presence and content parity.\n- Added unit tests for deprecation middleware and legacy router functionality.\n- Adjusted root path redirection to point to /v1/admin/ when UI is enabled.\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-05T15:54:16+00:00"
+    },
+    {
+      "sha": "955da02273856caf6b3d17560aeed9d81b7f3359",
+      "message": "format: fixup\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-06T10:11:56+00:00"
+    },
+    {
+      "sha": "7c2590a906f0a493e539c7cd27dbe6341de147ba",
+      "message": "feat: add legacy API support with sunset date configuration\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-06T12:20:04+00:00"
+    },
+    {
+      "sha": "e41acf5a222be9339debcbea283c1e9ec762da57",
+      "message": "feat: enhance legacy API support with improved deprecation handling and validation scripts\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-06T14:06:26+00:00"
+    },
+    {
+      "sha": "a5b9ff2fa424a37f703633eaa03b9da83b0b28d5",
+      "message": "fixup: secrets\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-06T15:37:14+00:00"
+    },
+    {
+      "sha": "1332e529039c38c3d3c327154b850f210de06dae",
+      "message": "fix: update error message for direct tool invocation failure in old format\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-06T15:56:54+00:00"
+    },
+    {
+      "sha": "aac14cd78be5333b8298390c540d7e59d1b9e7be",
+      "message": "feat: add initial plugin framework with server configuration, constants, and utility functions\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-07T10:49:19+00:00"
+    },
+    {
+      "sha": "95bd6b82c2d0ece5f20f37a2c58770fe2cf2fb53",
+      "message": "fix: update timestamps and line numbers in secrets baseline; adjust comments in framework files\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-07T10:55:57+00:00"
+    },
+    {
+      "sha": "ef30f984604e89c2fbf303759ffa4f3fe26e4e46",
+      "message": "fix: remove v1 prefix from metrics routes and update path validation regex\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-07T14:01:44+00:00"
+    },
+    {
+      "sha": "f9cb00c7a40c0980528224e6ff5d496a0574951c",
+      "message": "fix: update legacy API sunset date to August 4, 2026; adjust migration documentation and scripts\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-08T08:05:34+00:00"
+    },
+    {
+      "sha": "5159ac21edd12a9acc6a5836ad5074f7e6d90532",
+      "message": "fix: secret scan\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-08T08:21:22+00:00"
+    },
+    {
+      "sha": "e02f2bc8bbc656811ba740115e3017f2f2e3c956",
+      "message": "fix: update timestamps, adjust metrics routes, and enhance security validations\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-08T10:19:52+00:00"
+    }
+  ],
+  "files_changed": 247,
+  "additions": 8422,
+  "deletions": 3688,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:56.594221",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:56.594692",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4403,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4403.json"
+  }
+}

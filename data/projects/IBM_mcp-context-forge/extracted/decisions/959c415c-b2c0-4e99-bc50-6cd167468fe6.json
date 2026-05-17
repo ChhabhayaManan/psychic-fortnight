@@ -1,0 +1,42 @@
+{
+  "id": "959c415c-b2c0-4e99-bc50-6cd167468fe6",
+  "title": "feat(auth): verify OAuth access tokens via JWKS for virtual server MCP",
+  "summary": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nPartially addresses #2659 \r\n\r\n---\r\n\r\n## 📝 Summary\r\nVirtual servers with `oauth_enabled=True` advertise RFC 9728 Protected Resource Metadata, directing MCP clients to authenticate via an IdP (e.g., Keycloak, Authentik). However, when the client presents the IdP-issued access token, ContextForge rejects it with \"Invalid token\" because `verify_credentials()` only validates ContextForge-issued JWTs (`iss: \"mcpgateway\"`).\r\n\r\nThis PR adds IdP-issued OAuth access token verification via OIDC discovery + JWKS:\r\n\r\n- **Issuer-based routing**: Peeks at the token's `iss` claim before verification. ContextForge-issued tokens (`iss == settings.jwt_issuer`) go through the existing path; IdP-issued tokens are routed to JWKS-based verification.\r\n- **OIDC discovery + JWKS**: Fetches `/.well-known/openid-configuration` from the token's issuer, resolves `jwks_uri`, and verifies the signature using the IdP's public keys. Metadata is cached (300s TTL).\r\n- **Per-server issuer allowlist**: Each virtual server's `oauth_config.authorization_servers` determines which issuers are trusted. Server A (Authentik) and Server B (Keycloak) are fully independent.\r\n- **Audience validation**: When `oauth_config.client_id` is configured, the token's `aud` claim is validated. When not configured, audience check is skipped (opt-in).\r\n- **User resolution**: Verified tokens are resolved against the ContextForge user database. Users must already exist (no auto-creation) — the expected flow is SSO login first, then MCP client access.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n- **OIDC discovery cache duplication**: `sso_service.py` has a similar OIDC discovery + JWKS cache for SSO id_token verification. The two caches serve different request paths (SSO callback vs MCP transport) with different lifecycles. A shared utility extraction is possible as a follow-up.\r\n\r\n### Auth flow\r\n\r\n```\r\nMCP Client → POST /servers/{id}/mcp (Bearer <IdP token>)\r\n  → peek token iss claim\r\n  → iss != \"mcpgateway\" → _try_oauth_access_token()\r\n    → DB lookup: server.oauth_enabled? oauth_config?\r\n    → issuer in authorization_servers allowlist?\r\n    → OIDC discovery → JWKS → signature verification\r\n    → (optional) audience validation against client_id\r\n    → DB user lookup (must exist, must be active)\r\n    → teams resolved from DB → user_context populated\r\n```",
+  "reasoning": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nPartially addresses #2659 \r\n\r\n---\r\n\r\n## 📝 Summary\r\nVirtual servers with `oauth_enabled=True` advertise RFC 9728 Protected Resource Metadata, directing MCP clients to authenticate via an IdP (e.g., Keycloak, Authentik). However, when the client presents the IdP-issued access token, ContextForge rejects it with \"Invalid token\" because `verify_credentials()` only validates ContextForge-issued JWTs (`iss: \"mcpgateway\"`).\r\n\r\nThis PR adds IdP-issued OAuth access token verification via OIDC discovery + JWKS:\r\n\r\n- **Issuer-based routing**: Peeks at the token's `iss` claim before verification. ContextForge-issued tokens (`iss == settings.jwt_issue",
+  "confidence": 0.75,
+  "related_services": [],
+  "contributors": [
+    "kimsehwan96",
+    "crivetimihai",
+    "jonpspri"
+  ],
+  "tags": [
+    "MUST",
+    "security",
+    "mcp-protocol",
+    "caching",
+    "enhancement",
+    "database",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "d312cb88-d141-4c14-bf3c-3f4230e4aa1d",
+      "source_type": "pr",
+      "source_id": "3715",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/3715",
+      "contributor": "kimsehwan96",
+      "timestamp": "2026-03-18T01:00:18Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3715.json"
+    }
+  ],
+  "timestamp": "2026-03-18T01:00:18Z",
+  "created_at": "2026-05-17T17:23:08.281407",
+  "updated_at": "2026-05-17T17:23:08.281409",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:08.281845",
+    "artifact_type": "decisions",
+    "artifact_id": "959c415c-b2c0-4e99-bc50-6cd167468fe6"
+  }
+}

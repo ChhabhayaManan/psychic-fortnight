@@ -1,0 +1,80 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4749,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4749"
+  },
+  "metadata": {
+    "title": "chore(logging): migrate f-string log calls to lazy %-style in services",
+    "state": "open",
+    "created_at": "2026-05-13T14:06:33+00:00",
+    "updated_at": "2026-05-14T08:59:44+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "msureshkumar88",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Migrate ~1000+ `logger.<level>(f\"...\")` calls in `mcpgateway/services/` to lazy `%-style` interpolation\n- Enable `G004` in `pyproject.toml` ruff lint select to enforce the rule going forward\n- Add `scripts/fix_logging_fstrings.py` — the libcst codemod used to perform the bulk migration\n\n## Motivation\n\nf-string arguments are evaluated at the call site regardless of log level. On disabled levels (e.g. DEBUG in production), this wastes CPU allocating strings that are never printed. Lazy `%-style` defers interpolation to the logging framework, which skips it entirely when the level is filtered out.\n\nThis satisfies the documented convention in `AGENTS.md`: _\"Lazy logging style preferred\"_, and is caught automatically by `ruff G004` / pylint `W1203`.\n\n## Scope\n\n`mcpgateway/services/` only (~65 service files). Files outside this directory (routers, transports, middleware) are out of scope and addressed in a follow-up.\n\n## Ruff enforcement\n\n`G004` added to `[tool.ruff.lint] select` in `pyproject.toml`. New f-string log calls are now caught by `ruff check` and blocked by the pre-commit hook automatically — no hook config change needed.\n\nCloses #4617",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "fdbdc6117bf998c45842124192a511772e2fbbed",
+      "message": "chore(logging): migrate f-string log calls to lazy %-style in services\n\nConverts ~970 f-string logging calls across 46 service files to deferred\n%-style interpolation, eliminating unnecessary string allocation when log\nlevels are disabled. Adds G004 to ruff lint select to enforce the\nconvention going forward.\n\n- Automated via scripts/fix_logging_fstrings.py (regex-based codemod)\n- Manual fixes for multi-line, structured_logger, and mixed-concat cases\n- Fixes pre-existing %%.2f formatting bugs in metrics_cleanup_service and\n  performance_tracker where format specs were not consumed correctly\n- Preserves all SecurityValidator.sanitize_log_message() calls as args\n- Preserves exc_info/stack_info/extra kwargs on all affected calls\n\nCloses #4617\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-13T11:48:16+00:00"
+    },
+    {
+      "sha": "22e630820ef0bab1325e1f5f7b668d8e4bcdce51",
+      "message": "chore(logging): apply linter formatting after f-string migration\n\nBlack, isort, and pre-commit hooks reformatted service files and updated\n.secrets.baseline following the lazy logging migration.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-13T11:59:48+00:00"
+    },
+    {
+      "sha": "42ba54a629ca063cb4095f740bdc1c035f06fb61",
+      "message": "fix(logging): fix StructuredLogger compat and broken format specs in tests\n\n- Revert structured_logger calls in a2a_service and tool_service to\n  f-strings (StructuredLogger.info/error only accept **kwargs, not\n  positional %s args); suppress G004 with noqa since the API requires it\n- Fix performance_tracker.record_timing: %%.2f -> %.2f (pre-existing bug\n  where second arg was never consumed by the format string)\n- Update test assertions in test_argon2_service, test_mcp_client_chat_service,\n  and test_metrics_exception_coverage to match new %-style log call\n  signatures (format_str, *args) instead of interpolated single strings\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-13T13:24:28+00:00"
+    },
+    {
+      "sha": "654a0d27a4422c5112190f20e070064e200bf38b",
+      "message": "chore(logging): cleanup linter-flagged issues after f-string migration\n\n- Remove unused variable and fix import order in admin.py\n- Fix import ordering in main.py, auth.py, compliance_router.py, observability.py\n- Add First-Party comment markers in rbac.py\n- Fix package-lock.json project name (was jps-401-errors, now mcp-context-forge)\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-13T13:59:02+00:00"
+    },
+    {
+      "sha": "d48ba8fdca5ef6490afd789a2c4631c7ec8f94bd",
+      "message": "chore: scope G004 enforcement to mcpgateway/services/ only\n\nAdd per-file-ignores entries for all non-services directories so\nG004 (logging-f-string) is enforced only where fixes have been applied.\nOther directories deferred to follow-up PRs.\n\nCloses #4617\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-13T14:37:45+00:00"
+    },
+    {
+      "sha": "c39844afcc509aac265b2bba45a719711e4beb26",
+      "message": "fix: correct %%.Nf → %.Nf in converted log format strings\n\nFive PLE1205 errors from prior lazy-logging conversion where %%\nwas used instead of % for float format specifiers, producing\nliteral '%' and mismatched argument counts.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-13T14:52:22+00:00"
+    },
+    {
+      "sha": "f7a1722d2c9f80f3775efa387a516449f8814cfb",
+      "message": "chore(lint): defer G004 enforcement for plugins/ to separate PR\n\nAdd plugins/**/*.py to per-file-ignores so CI ruff check passes\nwhile mcpgateway/services/ migration (issue #4617) stays enforced.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-13T15:45:08+00:00"
+    }
+  ],
+  "files_changed": 59,
+  "additions": 1178,
+  "deletions": 1037,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:41.103963",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:41.104619",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4749,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4749.json"
+  }
+}

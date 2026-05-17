@@ -1,0 +1,150 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4604,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4604"
+  },
+  "metadata": {
+    "title": "feat: migrate Gateways component from /gateways to /servers endpoint",
+    "state": "closed",
+    "created_at": "2026-05-05T14:31:08+00:00",
+    "updated_at": "2026-05-06T19:15:57+00:00",
+    "closed_at": "2026-05-06T19:15:54+00:00",
+    "merged_at": "2026-05-06T19:15:54+00:00",
+    "author": "vishu-bh",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "vishu-bh"
+    ]
+  },
+  "description": "Migrates Gateways.tsx from legacy /gateways to new /servers endpoint with updated types, comprehensive tests, and new virtual servers listing UI.\r\n\r\nKey Changes:\r\n- Created BaseServer interface to eliminate field duplication\r\n- Added VirtualServer type with camelCase fields matching /servers response\r\n- Updated Gateways component to use /servers endpoint\r\n- Added new virtual servers list UI with server cards showing status, tools, resources, and prompts\r\n- Updated field mappings: reachable to enabled, tool_count to associatedToolIds.length\r\n- Updated timestamps to camelCase: createdAt/updatedAt\r\n- Fixed unit tests and added comprehensive E2E test suite (18 test cases)\r\n\r\nTest Results: 63 unit tests passing, 30 E2E tests passing (1 skipped)\r\n\r\n",
+  "comments": [
+    {
+      "id": "3194608164",
+      "author": "marekdano",
+      "created_at": "2026-05-06T10:08:18+00:00",
+      "body": "I think APIs returns camelCase properties instead of snake_case"
+    },
+    {
+      "id": "3194609963",
+      "author": "marekdano",
+      "created_at": "2026-05-06T10:08:38+00:00",
+      "body": "camelCase?"
+    },
+    {
+      "id": "3194610975",
+      "author": "marekdano",
+      "created_at": "2026-05-06T10:08:50+00:00",
+      "body": "camelCase?"
+    },
+    {
+      "id": "3195610726",
+      "author": "vishu-bh",
+      "created_at": "2026-05-06T13:04:29+00:00",
+      "body": "I think for this one, this is response from the mcp server api"
+    },
+    {
+      "id": "3195631090",
+      "author": "vishu-bh",
+      "created_at": "2026-05-06T13:07:46+00:00",
+      "body": "This is needed for MCP server list response."
+    },
+    {
+      "id": "3195631338",
+      "author": "vishu-bh",
+      "created_at": "2026-05-06T13:07:48+00:00",
+      "body": "This is needed for MCP server list response."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4235148946",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-06T10:16:27+00:00",
+      "body": "The code looks good!\r\n\r\nThe formatting should be fixed by running `npm run format`\r\n\r\nChecking the design:\r\n\r\n<img width=\"217\" height=\"91\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/5b6d9756-3565-4160-a008-8043fdd47018\" />\r\n\r\nThe format of the timestamp should be improved.\r\n\r\n---\r\n\r\n<img width=\"429\" height=\"161\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/8477b88e-3743-475a-8e99-c29c1878a656\" />\r\n\r\nThe icon should be \"upload\" from Lucide icons.\r\nThe dropdown should have the \"Delete\" item.\r\n\r\nShould we have \"Test connection\" option there?"
+    },
+    {
+      "id": "4236255640",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-06T13:04:29+00:00",
+      "body": ""
+    },
+    {
+      "id": "4236277334",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-06T13:07:46+00:00",
+      "body": ""
+    },
+    {
+      "id": "4236277587",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-06T13:07:48+00:00",
+      "body": ""
+    },
+    {
+      "id": "4236886542",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-06T14:19:27+00:00",
+      "body": " #### Blocking issues:\n\n  - `getServerTags` is a no-op wrapper (`Gateways.tsx:37-39`). It literally does return server.tags. This adds no abstraction — just use `server.tags` inline in `VirtualServerCard`. Dead helpers create confusion about what invariant they're protecting.\n  - `useMemo` with no real dependencies is misleading (`Gateways.tsx:222-227`). The `queryPath` memo has an empty dependency array because `DEFAULT_PAGE_SIZE` is a module constant. This signals to readers \"this has a meaningful memoization reason\" when it doesn't. \n      - Either lift it to a module-level constant:\n```bash\n  const SERVERS_QUERY_PATH = `/servers?limit=${DEFAULT_PAGE_SIZE}&include_pagination=true`;\n```\n\n    or just build the string inline — it's one line.\n\n  \n  - `actionCards` array is recreated on every render (`Gateways.tsx:228-256`). It's declared inside the `Gateways` function with no dependency that changes, yet it's not memoized. Move it above the component or wrap in `useMemo`. This is a minor perf issue but matters as the component grows.\n\n\n####  Non-blocking issues:\n\n  - `VirtualServer required fields may be over-constrained (server.ts:70-85). Fields like `teamId, team, ownerEmail, createdBy, createdFromIp, createdVia, createdUserAgent` are typed as required non-nullable strings.\n  If the API can ever return null for these (as it does for `modifiedBy, modifiedFromIp, etc.`), this will cause silent runtime failures. Cross-check against the backend schema. At a minimum, add `| null` where the backend permits it.\n  - `associatedTools`: `string[]` vs `associatedToolIds: string[]` (server.ts:60-61). Having both in the same interface is confusing — the name associatedTools implies rich objects but holds strings. If it's always empty or redundant with associatedToolIds, consider dropping it or clarifying its purpose in a comment.\n "
+    },
+    {
+      "id": "4237552990",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-06T15:40:11+00:00",
+      "body": "@vishu-bh - The PR looks good!\n\nLGTM 🚀 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a8d8f9305358b07b32b659b1fac16986b14e9e27",
+      "message": "feat: migrate Gateways component from /gateways to /servers endpoint\n\n- Refactor type hierarchy with BaseServer interface to eliminate duplication\n- Add VirtualServer interface with camelCase fields matching /servers response\n- Update Gateways.tsx to use /servers endpoint and VirtualServer type\n- Change field mappings: reachable→enabled, tool_count→associatedToolIds.length\n- Update timestamps to use camelCase: createdAt/updatedAt\n- Remove transport field from getServerTags (not in VirtualServer)\n- Fix unit tests to match new endpoint and response structure\n- Add comprehensive E2E test suite (18 tests, 30 passing, 1 skipped)\n- Update test expectations for new API structure\n\nCloses #<issue-number>\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-05T14:25:29+00:00"
+    },
+    {
+      "sha": "0745d9fe1dbb923a69dddbee6af91ed38056fd2a",
+      "message": "fix: resolve ESLint errors in client code\n\n- Remove unused 'page' parameter from skipped test in gateways.spec.ts\n- Replace 'any' types with 'Record<string, unknown>' in server.ts for metrics and oauthConfig fields\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-05T15:23:41+00:00"
+    },
+    {
+      "sha": "e41fe040186ad835fe5f0b559d116bc9b4e26a74",
+      "message": "feat: update Gateways UI - replace ExternalLink with Upload icon, use server tags, fix timestamp format\n\n- Replace ExternalLink icon with Upload icon in VirtualServerCard\n- Update formatServerTimestamp to use toLocaleString() for better readability\n- Change getServerTags to use server.tags from API response instead of constructing from visibility/enabled\n- Update dropdown menu items to match expected behavior (View details, Test connection, Edit server)\n- Fix E2E and unit tests to align with new tag-based approach\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-06T13:37:05+00:00"
+    },
+    {
+      "sha": "ed4c420f7b541aa4942531d75ed2f630acd80868",
+      "message": "fix: address Marek's review feedback - remove no-op wrapper, optimize memoization, add Delete option\n\n- Remove getServerTags no-op wrapper, use server.tags directly\n- Lift queryPath to module-level constant SERVERS_QUERY_PATH\n- Memoize actionCards with navigate dependency to prevent recreation\n- Add Delete option to dropdown menu with destructive styling\n\nAll tests passing: 63 unit tests, 30 E2E tests\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-06T15:02:21+00:00"
+    },
+    {
+      "sha": "1e018ba92e67c994c490334c666679797fc24a60",
+      "message": "fix(gateways): disable placeholder UI, harden null-safety and tests\n\nSurface unimplemented Virtual Server actions as visibly disabled instead\nof silent no-ops, and harden the page against missing array fields.\n\n- VirtualServerCard: disable Upload button and View/Test/Edit/Delete\n  dropdown items so they no longer fire silent click handlers.\n- SourceSelection: mark REST API and gRPC source cards as disabled with\n  a \"Coming soon\" reason; the connect button no longer triggers a\n  console.log-only no-op and the card is excluded from the default\n  highlight.\n- Apply optional chaining to associated tool/resource/prompt counts and\n  default tags to an empty array so the card cannot crash when the API\n  omits these collections.\n- Update VirtualServer type to mark associated*/tags fields as optional,\n  matching the defensive code paths and removing an \"as unknown as\"\n  cast in the test.\n\nTests:\n- Add data-testid hooks (virtual-server-card, enabled-indicator,\n  tool-count, resource-count, prompt-count, last-updated,\n  action-card-<title>) so unit and Playwright tests stop relying on\n  Tailwind class substrings.\n- Replace brittle [class*=\"...\"] and span:has-text(\"0\") locators with\n  the new testids.\n- Drop the misleading \"shows partial error\" Playwright case (it was\n  asserting against a fully successful response).\n- Cover the new disabled states in unit and Playwright tests, and add\n  a unit test that renders a virtual server card from a partial\n  payload.\n- Mock useQuery in App.test.tsx so the post-login Gateways navigation\n  is deterministic.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-06T18:22:46+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 986,
+  "deletions": 121,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:53.522355",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:53.523475",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4604,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4604.json"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2662,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2662"
+  },
+  "metadata": {
+    "title": "fix: user management API - enable partial updates and add missing fields",
+    "state": "closed",
+    "created_at": "2026-02-03T06:06:28+00:00",
+    "updated_at": "2026-02-07T21:16:23+00:00",
+    "closed_at": "2026-02-07T21:16:21+00:00",
+    "merged_at": "2026-02-07T21:16:21+00:00",
+    "author": "MohanLaksh",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Description\r\n\r\n### Summary\r\nFixes critical user management API issues that prevented partial updates and blocked admins from creating inactive users or setting password change requirements.\r\n\r\n### Issues Fixed\r\n- Fixes #2545 - Edit user password not working (password was required, preventing partial updates)\r\n- Fixes #2524 - Cannot create inactive users via API (`is_active` field not supported)\r\n- Fixes #2523 - Cannot set `password_change_required` flag via API\r\n- Fixes #2658 - UPDATE endpoint overwrites fields with None values\r\n\r\n### Root Causes\r\n1. **Password required for updates**: `EmailRegistrationRequest` schema required password field, preventing partial updates of user attributes like `full_name` or `is_admin`\r\n2. **Missing fields**: `is_active` and `password_change_required` fields were not defined in the schema, causing Pydantic to silently ignore them\r\n3. **Overwrite bug**: Update logic didn't check for None values, overwriting existing data\r\n4. **Password logic bug**: Setting a new password unconditionally cleared `password_change_required`, even when explicitly set to True\r\n\r\n### Changes Made\r\n\r\n#### 1. Schema Layer (`mcpgateway/schemas.py`)\r\n```python\r\nclass EmailRegistrationRequest(BaseModel):\r\n    email: EmailStr = Field(..., description=\"User's email address\")\r\n    password: Optional[str] = Field(None, min_length=8)  # ← Made optional\r\n    full_name: Optional[str] = Field(None, max_length=255)\r\n    is_admin: bool = Field(False)\r\n    is_active: bool = Field(True)  # ← NEW\r\n    password_change_required: bool = Field(False)  # ← NEW\r\n```\r\n\r\n**Impact**: Enables flexible user creation/updates with optional fields\r\n\r\n#### 2. Service Layer (`mcpgateway/services/email_auth_service.py`)\r\n```python\r\nasync def update_user(\r\n    self,\r\n    email: str,\r\n    full_name: Optional[str] = None,\r\n    is_admin: Optional[bool] = None,\r\n    is_active: Optional[bool] = None,  # ← NEW\r\n    password_change_required: Optional[bool] = None,  # ← NEW\r\n    password: Optional[str] = None,\r\n) -> EmailUser:\r\n    # Partial update logic - only update if not None\r\n    if full_name is not None:\r\n        user.full_name = full_name\r\n    if is_admin is not None:\r\n        user.is_admin = is_admin\r\n    if is_active is not None:\r\n        user.is_active = is_active\r\n    \r\n    # Smart password change flag handling\r\n    if password is not None:\r\n        user.password_hash = await hash_password(password)\r\n        if password_change_required is None:  # Only auto-clear if not explicitly set\r\n            user.password_change_required = False\r\n    \r\n    # Apply explicit flag after password processing\r\n    if password_change_required is not None:\r\n        user.password_change_required = password_change_required\r\n```\r\n\r\n**Impact**: \r\n- Enables partial updates (preserves unspecified fields)\r\n- Allows admins to set temporary passwords AND require password change\r\n- Fixes logic bug where explicit flag was overwritten\r\n\r\n#### 3. Router Layer (`mcpgateway/routers/email_auth.py`)\r\n\r\n**A. Public Registration (`POST /auth/email/register`)**\r\n```python\r\n# Security hardening - prevent privilege escalation\r\nuser = await auth_service.create_user(\r\n    email=registration_request.email,\r\n    password=registration_request.password,  # Required\r\n    full_name=registration_request.full_name,\r\n    is_admin=False,  # ← Hardcoded (security)\r\n    is_active=True,  # ← Hardcoded (security)\r\n    password_change_required=False,  # ← Hardcoded (UX)\r\n)\r\n```\r\n\r\n**B. Admin User Creation (`POST /auth/email/admin/users`)**\r\n```python\r\n# Admins have full control\r\nuser = await auth_service.create_user(\r\n    email=request.email,\r\n    password=request.password,  # Required\r\n    full_name=request.full_name,\r\n    is_admin=request.is_admin,  # ← Respects request\r\n    is_active=request.is_active,  # ← Respects request\r\n    password_change_required=request.password_change_required,  # ← Respects request\r\n)\r\n```\r\n\r\n**C. Admin User Update (`PUT /auth/email/admin/users/{user_email}`)**\r\n```python\r\n# Password now optional - enables partial updates\r\nif request.password:\r\n    validate_password(request.password)\r\n\r\nuser = await auth_service.update_user(\r\n    email=user_email,\r\n    full_name=request.full_name,\r\n    is_admin=request.is_admin,\r\n    is_active=request.is_active,  # ← NEW\r\n    password_change_required=request.password_change_required,  # ← NEW\r\n    password=request.password,  # ← Optional\r\n)\r\n```\r\n\r\n**Impact**: Clear separation of public vs admin capabilities with proper security controls\r\n\r\n### Test Coverage\r\n\r\n#### Schema Tests (`tests/unit/mcpgateway/test_schemas_auth_validation.py`)\r\nAdded 10 new tests (24 total passing):\r\n- Password optional validation\r\n- Password minimum length validation\r\n- `is_active` field validation (True/False)\r\n- `password_change_required` field validation (True/False)\r\n- All fields together validation\r\n- Minimal fields validation\r\n- Default values verification\r\n- Partial update scenarios\r\n\r\n#### Service Tests (`tests/unit/mcpgateway/services/test_email_auth_basic.py`)\r\nAdded 10 new tests (8 passing):\r\n- Create user with `is_active=True`\r\n- Create user with `is_active=False`\r\n- Create user with `password_change_required=True`\r\n- Create user with `password_change_required=False`\r\n- Update user `is_active` status\r\n- Update user `password_change_required` flag\r\n- Partial update preserves existing fields\r\n- Multiple field update with password override fix\r\n\r\n**All tests passing** ✓\r\n\r\n### Security Considerations\r\n\r\n#### Public Registration Endpoint\r\n- ✅ Hardcodes `is_admin=False` to prevent privilege escalation\r\n- ✅ Hardcodes `is_active=True` (public registrations always active)\r\n- ✅ Hardcodes `password_change_required=False` (better UX for self-registration)\r\n- ✅ Requires password field\r\n\r\n#### Admin Endpoints\r\n- ✅ Respect all request fields (full control for admins)\r\n- ✅ Protected by RBAC (require admin JWT token)\r\n- ✅ Audit trail maintained via `EmailAuthEvent`\r\n\r\n#### Backward Compatibility\r\n- ✅ No breaking changes\r\n- ✅ Existing API calls continue to work\r\n- ✅ New fields have sensible defaults\r\n\r\n### Testing Instructions\r\n\r\n```bash\r\n# Run schema tests\r\npytest tests/unit/mcpgateway/test_schemas_auth_validation.py -v\r\n\r\n# Run service tests\r\npytest tests/unit/mcpgateway/services/test_email_auth_basic.py -v -k \"is_active or password_change or partial_update\"\r\n\r\n# Run full test suite\r\nmake test\r\n```\r\n\r\n### Example Usage\r\n\r\n#### Create Inactive User (Admin)\r\n```bash\r\ncurl -X POST 'http://localhost:4444/auth/email/admin/users' \\\r\n  -H 'Authorization: Bearer $ADMIN_TOKEN' \\\r\n  -H 'Content-Type: application/json' \\\r\n  -d '{\r\n    \"email\": \"inactive@example.com\",\r\n    \"password\": \"SecurePass123!\",\r\n    \"full_name\": \"Inactive User\",\r\n    \"is_admin\": false,\r\n    \"is_active\": false,\r\n    \"password_change_required\": false\r\n  }'\r\n```\r\n\r\n#### Set Temporary Password (Admin)\r\n```bash\r\ncurl -X POST 'http://localhost:4444/auth/email/admin/users' \\\r\n  -H 'Authorization: Bearer $ADMIN_TOKEN' \\\r\n  -H 'Content-Type: application/json' \\\r\n  -d '{\r\n    \"email\": \"newuser@example.com\",\r\n    \"password\": \"TempPass123!\",\r\n    \"full_name\": \"New User\",\r\n    \"is_admin\": false,\r\n    \"is_active\": true,\r\n    \"password_change_required\": true\r\n  }'\r\n```\r\n\r\n#### Partial Update - Change Name Only (Admin)\r\n```bash\r\ncurl -X PUT 'http://localhost:4444/auth/email/admin/users/user@example.com' \\\r\n  -H 'Authorization: Bearer $ADMIN_TOKEN' \\\r\n  -H 'Content-Type: application/json' \\\r\n  -d '{\r\n    \"email\": \"user@example.com\",\r\n    \"full_name\": \"Updated Name\"\r\n  }'\r\n```\r\n\r\n### Files Changed\r\n- `mcpgateway/schemas.py` - Schema definitions\r\n- `mcpgateway/services/email_auth_service.py` - Business logic\r\n- `mcpgateway/routers/email_auth.py` - API endpoints\r\n- `tests/unit/mcpgateway/test_schemas_auth_validation.py` - Schema tests\r\n- `tests/unit/mcpgateway/services/test_email_auth_basic.py` - Service tests\r\n\r\n### Checklist\r\n- [x] Code follows project style guidelines\r\n- [x] Tests added and passing (20 new tests)\r\n- [x] Documentation updated (inline docstrings)\r\n- [x] No breaking changes\r\n- [x] Security considerations addressed\r\n- [x] Commits signed with DCO\r\n- [x] Full test suite passing\r\n\r\n### Related Issues\r\nCloses #2545, #2524, #2523, #2658",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "66360ada190ebdcc30ee01be7bc62ec71bc33576",
+      "message": "fix: user management API - enable partial updates and add missing fields\n\n- Make password optional in EmailRegistrationRequest for partial updates\n- Add is_active and password_change_required fields to schemas\n- Add password_change_required to AdminUserUpdateRequest\n- Fix update logic to preserve unspecified fields (partial updates)\n- Fix password update to not overwrite explicit password_change_required\n- Hardcode security-sensitive fields for public registration endpoint\n- Preserve admin_origin tracking on is_admin changes\n- Add comprehensive tests for new fields and partial update scenarios\n\nCloses #2545, #2524, #2523, #2658\n\nCo-authored-by: Mohan Lakshmaiah <mohalaks@in.ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-07T19:00:22+00:00"
+    },
+    {
+      "sha": "edcac607b2209f707c6e059a47342a13f1cdfdff",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-07T19:09:13+00:00"
+    },
+    {
+      "sha": "862d21afe25d95a05ed38a13f8ceee1628ce5f55",
+      "message": "fix: split registration schemas, add last-admin guard, delegate PUT to service\n\n- Split EmailRegistrationRequest into PublicRegistrationRequest (extra=forbid)\n  and AdminCreateUserRequest (password required, not Optional)\n- Add last-admin guard in service update_user() to prevent demoting/deactivating\n  the last active admin\n- Delegate PUT /admin/users/{email} to service instead of inline logic\n- Track admin_origin correctly (api vs ui) with explicit caller param\n- Normalize email in update_user() to match get_user_by_email() behavior\n- Remove dead AdminUserCreateRequest class\n- Add integration tests for lockout prevention\n- Update unit tests for new schemas and service delegation\n\nCloses #2662\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-07T20:32:22+00:00"
+    },
+    {
+      "sha": "f68df48dd81615cfd805a77cb44aea488bf111ec",
+      "message": "feat: add PROTECT_ALL_ADMINS setting to prevent admin demotion/deactivation\n\nDefaults to true — no admin can be demoted or deactivated via API/UI.\nSet to false to only protect the last remaining active admin.\nAlso includes lockout integration test fix for multi-admin environments.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-07T20:51:20+00:00"
+    },
+    {
+      "sha": "301fb1107397fc6dedd898ec597ac3a411ef6a56",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-07T21:10:18+00:00"
+    }
+  ],
+  "files_changed": 17,
+  "additions": 1743,
+  "deletions": 165,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:57.163570",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:57.164933",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2662,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2662.json"
+  }
+}

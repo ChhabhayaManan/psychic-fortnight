@@ -1,0 +1,135 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3217,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3217"
+  },
+  "metadata": {
+    "title": "feat(auth): add team scope support for session tokens",
+    "state": "closed",
+    "created_at": "2026-02-24T10:28:09+00:00",
+    "updated_at": "2026-03-23T14:26:48+00:00",
+    "closed_at": "2026-03-23T14:26:45+00:00",
+    "merged_at": "2026-03-23T14:26:45+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "MUST",
+      "internal-sari",
+      "release-fix",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3012 due to repository maintenance. Your code and branch are intact. @KKNithin please verify everything looks good.\n\n## 🔗 Related Issue\nCloses #3003 \n\n---\n\n## 📝 Summary\nWhen `teams` are part of claims in session tokens, use it to as token_teams this helps users to use team tokens functionality which they usually get when they create API tokens scoped to a particular team.\n\n---\n\n## 🏷️ Type of Change\n- [ ] Bug fix\n- [X] Feature / Enhancement\n- [ ] Documentation\n- [ ] Refactor\n- [ ] Chore (deps, CI, tooling)\n- [ ] Other (describe below)\n\n---\n\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3866718871",
+      "author": "jonpspri",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-27T12:33:54+00:00",
+      "body": "## Approval Summary\n\nReviewed the full changeset (original commits + refactor commit). The final state is clean and correct.\n\n### What changed\n\n- **`resolve_session_teams()`** extracted in `mcpgateway/auth.py` as the single policy point for session-token team resolution. Session tokens always resolve membership from DB/cache, ensuring revoked team memberships take effect immediately.\n- **Three call sites** (auth.py cached path, auth.py fallback path, token_scoping middleware) now delegate to `resolve_session_teams()` instead of inlining the logic or importing the private `_resolve_teams_from_db`.\n- **Debug comment removed** from `email_auth.py` (hardcoded UUID leftover).\n- **Docstring lint fix** in `main.py` (excess `Returns` on a `-> None` function).\n- **Docs updated** in `multitenancy.md` and `rbac.md` to document `resolve_session_teams()` alongside `normalize_token_teams()`.\n- **Tests** thoroughly cover session token DB resolution (cached + fallback paths), API token embedded teams, legacy tokens, and null/missing/multi-team edge cases.\n\n### Security review\n\n- Session tokens never trust embedded JWT team claims — membership is always current from DB/cache. This prevents stale authorization after team removal.\n- Admin bypass (`teams: null` + `is_admin: true`) is correctly routed through `_resolve_teams_from_db` which returns `None`.\n- API and legacy tokens continue to use `normalize_token_teams()` directly, which is the correct behavior for immutable programmatic tokens.\n\n### Nits (non-blocking)\n\n- `test_email_auth_router.py` fixture fixes (`auth_provider`, `get_teams`, `password_change_enforcement_enabled`) are compatibility fixes for other `main` changes, not part of #3003. Consider splitting into a separate commit on future PRs for cleaner history."
+    },
+    {
+      "id": "3870253712",
+      "author": "jonpspri",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-28T08:31:45+00:00",
+      "body": "## Approval\n\nAll findings from the deep-dive review have been addressed. The final state is clean, correct, and well-documented.\n\n### What was verified\n\n- **DB-first intersection policy** delivers the #3003 user story while maintaining security (revoked memberships enforced immediately, fail-closed on empty intersection)\n- **Single policy point** claim is now accurate — all 6 session-token resolution paths route through `resolve_session_teams()` / `resolve_session_teams_sync()`\n- **`_check_team_membership` bypass** for session tokens eliminates the JWT-vs-DB mismatch concern; staleness bounded by auth_cache TTL\n- **Cache isolation** stores raw DB teams, not per-session narrowed intersection, preventing cross-session cache poisoning\n- **Tests** cover intersection logic, empty intersection fail-closed, cache poisoning regression (with narrowing payload), admin bypass, and direct `_narrow_by_jwt_teams` edge cases (218 tests pass)\n- **Documentation** in `multitenancy.md`, `rbac.md`, and `securing.md` accurately reflects all behavioral changes including session token scoping tables, `teams: []` semantics, and cache TTL staleness"
+    },
+    {
+      "id": "3902969589",
+      "author": "jonpspri",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T10:46:01+00:00",
+      "body": "## Review: Approve\n\nReviewed the full diff against `main`, ran all relevant test suites (auth, token scoping, streamable HTTP transport, main extended, email auth router — all pass), confirmed ruff clean on changed production files, and verified single Alembic head.\n\n### What this delivers\n\nImplements #3003: session tokens now support team scoping via a DB-first intersection approach. `resolve_session_teams()` is the single async policy point — the database is always authoritative, and the JWT `teams` claim only narrows (never broadens) the result. Fail-closed on empty intersection (all JWT-claimed teams revoked → public-only scope).\n\n### Key design decisions (all sound)\n\n- All 6 session-token resolution paths centralized through `resolve_session_teams()`\n- Session tokens skip `_check_team_membership` in the middleware (DB resolution makes it redundant; staleness bounded by auth_cache TTL)\n- Cache stores raw DB teams, not the narrowed intersection, preventing cross-session cache poisoning\n- `_resolve_teams_from_db_sync` removed; `_normalize_jwt_payload` made async to use the shared policy point\n\n### No blocking findings\n\nTwo low/info items noted (async-only `_normalize_jwt_payload`, silent degradation UX on empty intersection) — neither requires action before merge."
+    },
+    {
+      "id": "3991839608",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-23T13:44:51+00:00",
+      "body": "**Review: Approve** (cannot self-approve via GitHub)\n\n**Code & Security:** The DB-first intersection model is well-designed. `resolve_session_teams()` correctly centralizes all 6 session-token resolution paths. Admin bypass is properly gated. JWT teams can only narrow (never broaden) session scope. Fail-closed on empty intersections. No privilege escalation vectors found.\n\n**Tests:** Comprehensive coverage — `TestResolveSessionTeams` (10 tests), `TestNarrowByJwtTeams` (8 tests), plus integration tests in middleware and transport layers. All branches exercised.\n\n**Docs:** All admin bypass statements now qualified by token type. Session-token contract documented in AGENTS.md.\n\n**Known limitation (out of scope):** RBAC Layer 2 `check_any_team` aggregation is not narrowed by `token_teams` — tracked in #3799."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "375a6e7dd3c0ac672ba387ecb701eb4586a55edc",
+      "message": "feat(#3003): add team scope support for session tokens\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>",
+      "author": "Nithin Katta",
+      "date": "2026-02-17T18:15:49+00:00"
+    },
+    {
+      "sha": "326cb82a03ef5f3bfc7b59db79ef82029a185e33",
+      "message": "feat(#3003): lint issues\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>",
+      "author": "Nithin Katta",
+      "date": "2026-02-17T18:26:11+00:00"
+    },
+    {
+      "sha": "4086cf56f449e93fb87faa1d89c1a91296432de1",
+      "message": "feat(#3003): restrict session token team scope to single-team tokens only\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>",
+      "author": "Nithin Katta",
+      "date": "2026-02-17T19:01:51+00:00"
+    },
+    {
+      "sha": "c40300aca5ef1db5bdf159ccdd269a960b0a894d",
+      "message": "test(#3003): verify normalize_token_teams called for single-team session tokens\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>",
+      "author": "Nithin Katta",
+      "date": "2026-02-17T19:24:40+00:00"
+    },
+    {
+      "sha": "99adf2c8e9e56518bdfb0245a2f2e5a6ea2819e7",
+      "message": "test(#3003): Coverage fix\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>",
+      "author": "Nithin Katta",
+      "date": "2026-02-17T20:31:49+00:00"
+    },
+    {
+      "sha": "7875328ecfa3dec8b0dc69ec0b4667fa18df9f54",
+      "message": "feat(#3003): implement DB-first intersection for session token team scoping\n\nImplement resolve_session_teams() as the single policy point for\nsession-token team resolution.  Teams are always resolved from the\ndatabase first so that revoked memberships take effect immediately.\nIf the JWT carries a non-empty teams claim, the result is narrowed to\nthe intersection of DB teams and JWT teams — letting callers scope a\nsession to a subset of their memberships without risking stale grants.\n\nAll six session-token resolution paths (auth.py cache, batched, and\nfallback; token_scoping middleware; AdminAuthMiddleware; streamablehttp\ntransport) now route through this function.  Session tokens skip\n_check_team_membership re-validation since resolve_session_teams()\nalready resolved membership from the DB.\n\nRemove _resolve_teams_from_db_sync (replaced by async-only path).\nRegenerate code2flow.svg and remove unused test mock attributes.\n\nCloses #3003\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-05T19:50:18+00:00"
+    },
+    {
+      "sha": "4cae8a55dce3df86545c21fc0b76aa3ebf9eb41c",
+      "message": "docs(rbac): clarify admin bypass requirements per token type\n\nThe warning box previously stated admin bypass requires `teams: null`\nwithout qualifying that this applies only to API/legacy tokens. This\ncontradicted the session token table directly above it, which correctly\nshows admin bypass is DB-derived regardless of JWT teams.\n\nSplit the warning into API/legacy vs session token sections to eliminate\nthe contradiction.\n\nCloses #3003\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T12:02:51+00:00"
+    },
+    {
+      "sha": "ef23603415e4eb480f64cf851ffa2bed98861812",
+      "message": "docs(AGENTS.md): document session-token scoping contract\n\nThe token scoping quick reference only described API/legacy token\nbehavior. Add the session-token table and key behaviors so the\nproject guidance reflects the dual-model introduced by #3003.\n\nAlso note that token scoping (Layer 1) is independent of RBAC\n(Layer 2) — session-token narrowing controls visibility, not which\nteam roles are checked for permissions. See #3799 for the Layer 2\nfollow-up.\n\nCloses #3003\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T12:41:03+00:00"
+    },
+    {
+      "sha": "4c3c910e86e8ed7769a73d145bb571b437c57f69",
+      "message": "docs: qualify all admin bypass statements by token type\n\nFix remaining stale references that described admin bypass without\ndistinguishing API/legacy tokens from session tokens:\n\n- AGENTS.md:112 — security invariant now references both\n  normalize_token_teams() and resolve_session_teams()\n- multitenancy.md:1247 — enforcement summary now qualifies admin\n  bypass per token type\n- rbac.md:246 — \"Explicit Admin Bypass\" section split by token type\n- rbac.md:639 — scoping strategy table corrected for session tokens\n\nCloses #3003\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T12:59:32+00:00"
+    },
+    {
+      "sha": "9069a0a74e845fb1b97905f390b3a8ef6072496e",
+      "message": "docs(multitenancy): qualify teams-key behavior by token type\n\nLines 1246 and 1248 described missing/empty teams behavior without\ndistinguishing API/legacy from session tokens. For session tokens,\nmissing/null/empty teams returns full DB membership (not public-only).\n\nCloses #3003\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T13:02:16+00:00"
+    }
+  ],
+  "files_changed": 15,
+  "additions": 956,
+  "deletions": 259,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:13.461680",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:13.464311",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3217,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3217.json"
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3570,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3570"
+  },
+  "metadata": {
+    "title": "fix: _prepare_gateway_for_read mutates ORM object ",
+    "state": "closed",
+    "created_at": "2026-03-09T22:03:04+00:00",
+    "updated_at": "2026-03-11T07:19:07+00:00",
+    "closed_at": "2026-03-11T07:19:03+00:00",
+    "merged_at": "2026-03-11T07:19:03+00:00",
+    "author": "madhu-mohan-jaishankar",
+    "labels": [
+      "bug",
+      "python",
+      "api"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #3540\r\n\r\n---\r\n\r\n## 📝 Summary\r\n`_prepare_gateway_for_read()` was mutating the attached SQLAlchemy `DbGateway` ORM instance in-place by converting `auth_value` from a dict to an encoded string. If the instance was still attached to an active session, SQLAlchemy could treat this as a dirty-field change and **persist the encoded string back into the JSON column on commit/flush**, unintentionally changing the stored shape of `auth_value` (dict → string).\r\n\r\nThis PR replaces the unsafe read-preparation usage with `convert_gateway_to_read()`, which produces a read model without mutating the underlying ORM object, preventing the auth_value “string writeback” behavior.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n### Problem / Root Cause\r\n- `_prepare_gateway_for_read()` performed an in-place transformation:\r\n  - `gateway.auth_value` dict → `encode_auth(dict)` string\r\n- When called on ORM instances still attached to a session, this mutation could be persisted on the next commit/flush.\r\n- This breaks the expectation that the `auth_value` JSON column stores a JSON object (dict) and causes subtle inconsistencies across read/write paths.\r\n\r\n### What changed\r\n- Replaced `_prepare_gateway_for_read()` usage with `convert_gateway_to_read()` so that:\r\n  - the response still contains the correctly encoded/masked representation for clients\r\n  - but the underlying ORM object is **not mutated**, avoiding unintended persistence changes\r\n- Updated tests to reflect the new non-mutating read conversion behavior.\r\n\r\n### Why this is safe\r\n- `convert_gateway_to_read()` is the intended safe replacement (constructs a read model via copying rather than mutating the ORM instance).\r\n- No functional change is intended for API consumers besides eliminating the side-effect of DB writeback on read paths.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3923746372",
+      "author": "ja8zyjits",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-10T16:25:16+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "3923869084",
+      "author": "cafalchio",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-10T16:44:28+00:00",
+      "body": "LGTM, perhaps _prepare_gateway_for_read can be removed?\n"
+    },
+    {
+      "id": "3925972346",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-10T23:12:31+00:00",
+      "body": "## Review: Approved\r\n\r\n**Correct fix, good design.** The 6 remaining call sites that used the mutating `_prepare_gateway_for_read()` are now replaced with the safe `convert_gateway_to_read()`, which operates on a dict copy and prevents SQLAlchemy from flushing encoded `auth_value` strings back to the DB.\r\n\r\n### Verified\r\n- All 260 gateway service unit tests pass\r\n- All 55 related tests (helpers, oauth, multi-auth-headers) pass\r\n- `.masked()` still called on every read path — credential masking preserved\r\n- No security or performance issues introduced\r\n- Consistent with existing `convert_gateway_to_read` usage elsewhere in the codebase\r\n\r\n### Changes made during review\r\n- Added non-mutation assertions (`assert isinstance(mock_gateway.auth_value, dict)` / `assert isinstance(mock_gateway.tags[0], str)`) to verify the core invariant\r\n- Renamed `TestPrepareGatewayForRead` → `TestConvertGatewayToRead` and updated section comment to reflect what's actually being tested\r\n\r\n### Minor note\r\n`tests/unit/mcpgateway/test_multi_auth_headers.py:333` still monkeypatches `_prepare_gateway_for_read` which is now dead code — can be cleaned up in a follow-up."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2fac0d2682adaf34cc21aff2dfcdfb13644a0d87",
+      "message": "#3540 replace _prepare_gateway_for_read with convert_gateway_to_read to prevent string writeback\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-09T21:53:04+00:00"
+    },
+    {
+      "sha": "4c08be0ea93127f0e74d86f29f421bf258afedce",
+      "message": "#3540 modified _PassthroughMasked wrapper to account for dict\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-03-10T13:26:03+00:00"
+    },
+    {
+      "sha": "396238cb14659eb7c966b419522d7a5186151417",
+      "message": "fix: add non-mutation assertions and rename test class for convert_gateway_to_read\n\nThe test class and comments referenced the deprecated _prepare_gateway_for_read\nbut actually tested convert_gateway_to_read. Rename to TestConvertGatewayToRead\nand add assertions verifying the ORM object is NOT mutated — the core invariant\nthis PR fixes.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T23:09:02+00:00"
+    },
+    {
+      "sha": "aec522c886c5551ffcbf6acd469d7a6ebdbe8312",
+      "message": "fix: remove dead _prepare_gateway_for_read monkeypatch in test_multi_auth_headers\n\nThe monkeypatch patched a method that is no longer called by production\ncode after the switch to convert_gateway_to_read.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T06:41:47+00:00"
+    },
+    {
+      "sha": "475f9b9b6677ec2a421ee6313e07613c2875eb3f",
+      "message": "fix: remove dead _prepare_gateway_for_read method and all remaining references\n\nThe method has zero production callers after the switch to\nconvert_gateway_to_read. Remove the method definition, two tests that\nexercised it directly, and a stale comment describing its mutation\nbehavior.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T06:51:19+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 26,
+  "deletions": 73,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:58.133454",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:58.134310",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3570,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3570.json"
+  }
+}

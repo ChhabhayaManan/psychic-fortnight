@@ -1,0 +1,58 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2250,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2250"
+  },
+  "metadata": {
+    "title": "Fix MCP servers/gateway tags not persisting in DB",
+    "state": "closed",
+    "created_at": "2026-01-20T14:43:34+00:00",
+    "updated_at": "2026-01-21T09:18:07+00:00",
+    "closed_at": "2026-01-21T09:18:05+00:00",
+    "merged_at": "2026-01-21T09:18:05+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nCloses #2203\r\n\r\nFixed tags not being properly stored in the database for MCP servers/gateways. Tags were being validated and converted to list of dictionaries [{\"id\": \"tag\", \"label\": \"Tag\"}] by the Pydantic schema, but the database model type annotation incorrectly specified List[str], causing tags to be stored as empty lists [] instead of the expected format.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Navigate to MCP Servers tab in the UI\r\n2. Create or update an MCP server/gateway with tags (e.g., \"dev\", \"git\", \"mcp\")\r\n3. Check the database: SELECT tags FROM gateways;\r\n4. Bug:\r\n    - Tags column shows [] (empty list) instead of [{\"id\": \"dev\", \"label\": \"dev\"}, ...]\r\n    - Tags do not display in the UI\r\n\r\n## 🐞 Root Cause\r\n1. The database model in `mcpgateway/db.py` had an incorrect type annotation:\r\n```python\r\ntags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)\r\n```\r\n\r\n2. The `validate_tags_field()` function is used as a Pydantic field validator in both `GatewayCreate` and `GatewayUpdate` schemas. This function:\r\n      1. Takes input: Optional[List[str]] - raw tag strings like [\"dev\", \"git\", \"mcp\"]\r\n      2. Normalizes: Converts to lowercase, removes duplicates, validates format\r\n      3. Returns: List[Dict[str, str]] - structured format like [{\"id\": \"dev\", \"label\": \"dev\"}, {\"id\": \"git\", \"label\": \"git\"}]\r\n\r\n3. The Problem:\r\n    1. Pydantic validator returns: List[Dict[str, str]] → [{\"id\": \"dev\", \"label\": \"dev\"}]\r\n    2. Database model expects: List[str] → [\"dev\", \"git\"]\r\n    3. SQLAlchemy sees the type mismatch and fails to serialize the dictionaries properly\r\n    4. Result: Empty list [] stored in database\r\n\r\n## 💡 Fix Description\r\n1. Database Model Type Fix: `mcpgateway/db.py`\r\n\r\nUpdated the Gateway model's tags type annotation to match what validate_tags_field() actually returns:\r\n```python\r\n# Before - incorrect type annotation\r\ntags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)\r\n\r\n# After - correct type annotation matching validate_tags_field() output\r\ntags: Mapped[List[Dict[str, str]]] = mapped_column(JSON, default=list, nullable=False)\r\n```\r\n\r\nThis aligns the database model with:\r\n    1. The output of validate_tags_field()\r\n    2. The format used by virtual servers and tools (which were working correctly)\r\n    3. The UI's expectation of [{\"id\": \"tag\", \"label\": \"Tag\"}] format\r\n\r\n\r\n2. Service Layer Cleanup `mcpgateway/services/gateway_service.py`\r\nOnly call the tag conversion in convert_gateway_to_read() method in the tags are List[str], otherwise the fucntion call is not needed. Previously, this method was calling validate_tags_field() again on already-validated tags from the database, which was redundant. Now it passes tags through directly with backward compatibility:\r\n\r\n```python\r\n# Before - was re-validating already validated tags\r\nif gateway.tags:\r\n    gateway_dict[\"tags\"] = validate_tags_field(gateway.tags)\r\nelse:\r\n    gateway_dict[\"tags\"] = []\r\n\r\n# After - pass through directly with backward compatibility check\r\nif gateway.tags:\r\n    # Check if tags are old format (List[str]) or new format (List[Dict[str, str]])\r\n    if isinstance(gateway.tags[0], str):\r\n        # Convert old format to new format for backward compatibility\r\n        gateway_dict[\"tags\"] = validate_tags_field(gateway.tags)\r\n    else:\r\n        # Already in correct format, pass through\r\n        gateway_dict[\"tags\"] = gateway.tags\r\nelse:\r\n    gateway_dict[\"tags\"] = []\r\n\r\n```\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3686140409",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-21T09:17:58+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6dedba7fabf161ad28e3ba9de4ff39f63ba4f00c",
+      "message": "fix tags in mcp servers\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-20T14:27:24+00:00"
+    },
+    {
+      "sha": "e7f2ef0a4e8ce774b62887ab4b04e51d4a2b7f29",
+      "message": "fix(tags): handle dict-format tags in filtering and read paths\n\nAddress issues with dict-format tag storage introduced by migration:\n\n- Add json_contains_tag_expr() to handle both List[str] and List[Dict]\n  tag formats in database queries (SQLite, PostgreSQL, MySQL)\n- Update all services (gateway, tool, server, prompt, resource, a2a)\n  to use json_contains_tag_expr for tag filtering\n- Fix catalog_service.py to pass through dict-format tags without\n  re-validation\n- Restore legacy tag handling in _prepare_gateway_for_read for\n  backward compatibility\n- Update tests to mock json_contains_tag_expr instead of json_contains_expr\n\nCloses #2203\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-21T00:59:52+00:00"
+    }
+  ],
+  "files_changed": 14,
+  "additions": 145,
+  "deletions": 33,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:57.745485",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:57.747140",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2250,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2250.json"
+  }
+}

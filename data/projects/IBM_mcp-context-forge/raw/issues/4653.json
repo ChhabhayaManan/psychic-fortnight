@@ -1,0 +1,35 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4653,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4653"
+  },
+  "metadata": {
+    "title": "[BUG]: Alpine.js standard build requires 'unsafe-eval', blocking CSP hardening",
+    "state": "open",
+    "created_at": "2026-05-07T13:33:25+00:00",
+    "updated_at": "2026-05-07T13:53:47+00:00",
+    "closed_at": null,
+    "author": "marekdano",
+    "labels": [
+      "bug",
+      "security",
+      "ui"
+    ],
+    "milestone": null,
+    "assignees": [
+      "marekdano"
+    ]
+  },
+  "description": "### 🐞 Bug Summary\n\nThe admin UI loads the standard Alpine.js CDN build (admin.html:286–291), which evaluates template expressions via `Function()` at runtime. This requires 'unsafe-eval' in `script-src`. Any effort to remove 'unsafe-eval' from the Content Security Policy will silently break all Alpine directives (`x-data, x-show, x-bind, @click`, etc.) across the admin panel.\n\n---\n\n### 🧩 Affected Component\nSelect the area of the project impacted:\n\n- [ ] `mcpgateway` - API\n- [x] `mcpgateway` - UI (admin panel)\n- [ ] `mcpgateway.wrapper` - stdio wrapper\n- [ ] Federation or Transports\n- [ ] CLI, Makefiles, or shell scripts\n- [ ] Container setup (Docker/Podman/Compose)\n- [ ] Other (explain below)\n\n---\n\n### 🔁 Steps to Reproduce\n\n1. Deploy the admin UI with a CSP that omits 'unsafe-eval' from `script-src`\n2. Open the admin panel in a browser\n3. Open the browser console\n\n---\n\n🤔 Expected Behaviour\n\n  Alpine directives render and respond to interaction normally under a strict CSP.\n\n  📓 Logs / Error Output\n\n  Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: \"script-src ...\".\n\n  All `x-data` components, `x-show` toggles, `@click` handlers, and `x-for` loops fail silently.\n\n  ---\n  🧩 Additional Context\n\n  Root cause: The standard Alpine.js build (alpinejs on npm / jsDelivr CDN) compiles expressions at runtime using new Function(). The CSP build (@alpinejs/csp) ships pre-compiled expression evaluators and does not require 'unsafe-eval'.\n\n  Affected scope: All 20 admin templates using Alpine directives (~228 directive usages), including observability views, tool cards, overflow menus, and the dark-mode toggle.\n\n  Two viable paths:\n\n  1. Switch to `@alpinejs/csp` — replace the CDN script tag and npm dependency with `@alpinejs/csp`. The CSP build is API-compatible but requires that complex expressions (ternaries, method calls) be moved into `x-data` object definitions rather than inline attribute strings. Some directives in the current templates may need light refactoring.\n  2. Bundle Alpine into the Vite output — import Alpine in `mcpgateway/admin_ui/index.js`, remove it from the external array in `vite.config.js`, and drop the CDN script tag. If using the standard build, this does not remove the `'unsafe-eval'` requirement; it must be combined with option 1 to be effective.\n\n  Related: The admin bundle already excludes Alpine as an external global (`window.Alpine`). The `alpinejs` npm package is pinned at `3.15.11` in `package-lock.json.`\n\nRelated: PR #4424 (CSP hardening) identified this gap — the policy introduced there cannot be fully enforced until these handlers are migrated.\n\n",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:49.403634",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:49.405192",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4653,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4653.json"
+  }
+}

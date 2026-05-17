@@ -1,0 +1,92 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3239,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3239"
+  },
+  "metadata": {
+    "title": "[FIX][API]: Server-scoped metrics recording across prompt, resource and tool services (#3237)",
+    "state": "closed",
+    "created_at": "2026-02-25T09:26:52+00:00",
+    "updated_at": "2026-03-08T11:10:16+00:00",
+    "closed_at": "2026-03-08T11:10:14+00:00",
+    "merged_at": "2026-03-08T11:10:14+00:00",
+    "author": "rakdutta",
+    "labels": [
+      "bug",
+      "performance",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "close #3237 \r\nThis pull request introduces enhanced metrics recording for server-specific operations across prompt, resource, and tool services. The main focus is to ensure that when operations are invoked through a virtual server endpoint (i.e., when a `server_id` is provided), both resource and prompt metrics, as well as server-specific metrics, are accurately recorded. Additionally, several refactorings improve logger configuration and code clarity.\r\n\r\n**Metrics and Server-Specific Recording Enhancements:**\r\n\r\n* Prompt Service:\r\n  - Added initialization and usage of `metrics_buffer` at the module level for prompt operations. [[1]](diffhunk://#diff-1d2d5a09951d64f6a81a8993771cd9bc7febbc0639d949084d0ac08c25fc8218R47) [[2]](diffhunk://#diff-1d2d5a09951d64f6a81a8993771cd9bc7febbc0639d949084d0ac08c25fc8218L111-R115)\r\n  - Now records server metrics (via `metrics_buffer.record_server_metric`) when a prompt is accessed through a specific virtual server (when `server_id` is provided).\r\n  - Refactored metrics recording to use the shared `metrics_buffer` instead of importing it inside functions.\r\n\r\n* Resource Service:\r\n  - Added `server_id` as an argument to `invoke_resource`, `read_resource`, and `list_resource_templates` to support server-scoped operations and metrics. [[1]](diffhunk://#diff-08c62d9c35cc87df6623a1d5e8bfdcf5fb3a514c172ad3399adce07f7215c126R1414) [[2]](diffhunk://#diff-08c62d9c35cc87df6623a1d5e8bfdcf5fb3a514c172ad3399adce07f7215c126R2324-R2330) [[3]](diffhunk://#diff-08c62d9c35cc87df6623a1d5e8bfdcf5fb3a514c172ad3399adce07f7215c126R3551)\r\n  - Metrics for resources are now recorded in a single place (`read_resource`'s `finally` block), avoiding duplication and providing a single source of truth. [[1]](diffhunk://#diff-08c62d9c35cc87df6623a1d5e8bfdcf5fb3a514c172ad3399adce07f7215c126L1921-R1929) [[2]](diffhunk://#diff-08c62d9c35cc87df6623a1d5e8bfdcf5fb3a514c172ad3399adce07f7215c126R2384-L2390)\r\n  - Server metrics are now recorded when a resource is accessed through a specific virtual server, and detailed debug logging was added for visibility.\r\n  - `list_resource_templates` now supports filtering by `server_id`. [[1]](diffhunk://#diff-08c62d9c35cc87df6623a1d5e8bfdcf5fb3a514c172ad3399adce07f7215c126R3564) [[2]](diffhunk://#diff-08c62d9c35cc87df6623a1d5e8bfdcf5fb3a514c172ad3399adce07f7215c126R3585-R3588)\r\n  - Module-level initialization of `metrics_buffer` for resource operations. [[1]](diffhunk://#diff-08c62d9c35cc87df6623a1d5e8bfdcf5fb3a514c172ad3399adce07f7215c126R64) [[2]](diffhunk://#diff-08c62d9c35cc87df6623a1d5e8bfdcf5fb3a514c172ad3399adce07f7215c126L109-R113)\r\n\r\n* Tool Service:\r\n  - Added module-level initialization of `metrics_buffer` for tool operations. [[1]](diffhunk://#diff-6dd24b32c559bf26f0b87904fd6f07c2b70e3044d8367915b20a4fb3938ce296R77) [[2]](diffhunk://#diff-6dd24b32c559bf26f0b87904fd6f07c2b70e3044d8367915b20a4fb3938ce296L137-R142)\r\n  - Improved logging for tool invocations to include `server_id`.\r\n  - Clarified `server_id` usage in global context creation for tool invocations.\r\n\r\n**Logging Improvements:**\r\n\r\n* Logging Service:\r\n  - Changed logger initialization to let child loggers inherit the root logger's level, ensuring that the environment variable `LOG_LEVEL` is always respected.\r\n  - When setting the log level, the root logger is now updated so that new child loggers inherit the correct level.\r\n\r\n**Other Notable Changes:**\r\n\r\n* Passed `server_id` through to tool execution in `main.py` to support server-scoped metrics and logic.\r\n\r\nThese changes collectively improve observability, metrics accuracy, and maintainability, especially in environments with multiple virtual servers and endpoints.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3903817816",
+      "author": "TS0713",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T13:49:11+00:00",
+      "body": "Have tested this PR - works as expected, no issues. \r\nTested by creating virtual server (based out of mcp server which has tools, resources, prompts added to gateway)\r\nAdded virtual server to mcp inspector (client) and invoked tools, resources (both resources & resource templates), prompts. \r\nEach of these calls are captured under server metrics and can be seen on gateway UI with server id (virtual server). Approved."
+    },
+    {
+      "id": "3904784268",
+      "author": "ja8zyjits",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T16:38:44+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "3911259922",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-08T09:46:43+00:00",
+      "body": "Approved after rebase, code review, LLMcross-review, and end-to-end verification on live deployment. All identified issues have been fixed."
+    },
+    {
+      "id": "3911324684",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-08T11:09:38+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "25ea1b70e6a7e39ca10ec1a6a5620f7b86ed8161",
+      "message": "fix(metrics): add server-scoped metrics recording across prompt, resource, and tool services\n\nWhen operations are invoked through a virtual server endpoint (server_id\nprovided), both entity-specific metrics and server-level metrics are now\nrecorded. Direct /rpc calls without a server context do not populate\nserver metrics, maintaining clean separation.\n\nChanges:\n- Move metrics_buffer initialization to module level in prompt, resource,\n  and tool services (consistent singleton pattern)\n- Add server_id parameter to invoke_resource, read_resource, and\n  list_resource_templates for server-scoped operations\n- Record server metrics via metrics_buffer.record_server_metric when\n  server_id is present in all three services\n- Fix variable shadowing in tool_service GlobalContext creation\n  (server_id -> context_server_id)\n- Consolidate resource metrics recording in read_resource finally block\n  (single source of truth, eliminates duplication from invoke_resource)\n- Fix observability span leak in invoke_resource (span now closes\n  regardless of resource_text value)\n- Thread server_id through streamablehttp_transport list_resource_templates\n- Let child loggers inherit root logger level instead of explicit set\n- Update root logger in set_level for consistent level propagation\n\nCloses #3237\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-08T09:10:10+00:00"
+    },
+    {
+      "sha": "44997b37b63b5ad29760ef8db4172737420d31bd",
+      "message": "fix(metrics): isolate server metrics flush and fix handler levels\n\nAddress issues identified during code review:\n\n- Flush server metrics in a separate transaction so that an invalid\n  server_id (FK violation from untrusted X-Server-ID header in admin\n  API paths) does not roll back tool/resource/prompt/a2a metrics\n- Update handler levels in LoggingService.set_level() so that changing\n  the log level at runtime actually takes effect on console/file/storage\n  handlers (previously only loggers were updated, handlers stayed pinned)\n- Remove ineffective `# noqa: vulture` annotation (vulture ignores it)\n- Fix prompt_service test patches to target module-level metrics_buffer\n  instead of the now-unused factory function\n- Add server_id assertions to streamable HTTP transport tests\n- Remove noisy else-branch debug log and redundant condition check\n- Merge duplicate logger.info calls and remove DEBUG-prefixed INFO log\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T09:44:54+00:00"
+    },
+    {
+      "sha": "a2380d7fa8472a99651079593be357bdf14c1787",
+      "message": "fix(metrics): validate server_id before recording and fix test state leaks\n\nRoot cause fix for server-scoped metrics: add `server_scoped` flag in\nprompt_service and resource_service that is only set True after the\nserver association check passes. Server metrics are now recorded only\nwhen server_id has been validated against the DB, preventing invalid\nserver_ids from untrusted admin API headers (X-Server-ID) or RPC params\nfrom reaching the metrics buffer.\n\nFix test state leaks caused by set_level() now updating root logger and\nhandler levels globally:\n- Add autouse fixtures in test_logging_service.py and\n  test_logging_service_comprehensive.py to save/restore root logger and\n  handler levels after each test\n- This prevents set_level(ERROR) from poisoning caplog in downstream\n  tests (test_multi_auth_headers, test_observability_service)\n\nFix test_flush_to_db_writes_all_metric_types to track both DB sessions\n(main batch + server metrics) instead of overwriting a single holder.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T10:02:26+00:00"
+    }
+  ],
+  "files_changed": 15,
+  "additions": 472,
+  "deletions": 126,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:22.361174",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:22.362283",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3239,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3239.json"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1890,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1890"
+  },
+  "metadata": {
+    "title": "Team Membership Query Optimization",
+    "state": "closed",
+    "created_at": "2026-01-03T22:08:22+00:00",
+    "updated_at": "2026-01-03T22:22:58+00:00",
+    "closed_at": "2026-01-03T22:22:56+00:00",
+    "merged_at": "2026-01-03T22:22:56+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# Performance: Team Membership Query Optimization\r\n\r\n## Issues Addressed\r\n\r\n- Closes #1887 - Combine double DB sessions in token_scoping middleware\r\n- Closes #1888 - Cache team membership validation in token_scoping middleware\r\n\r\n## Problem\r\n\r\nUnder load testing with 3000 concurrent connections, the `email_team_members` table was a major bottleneck:\r\n\r\n1. **Double DB sessions**: Token scoping middleware created 2 separate database sessions per request for resource endpoints (`/tools/{id}`, `/servers/{id}/mcp`, etc.)\r\n\r\n2. **Uncached team membership**: Every authenticated request with a team-scoped token queried `email_team_members`, even for the same user/team combination\r\n\r\n3. **N+1 query pattern**: Team membership validation looped through teams, executing one query per team\r\n\r\n4. **Lazy-loading N+1**: `EmailTeam.get_member_count()` loaded ALL team members into memory just to count them\r\n\r\n## Solution\r\n\r\n### 1. Single Session for Token Scoping (`mcpgateway/middleware/token_scoping.py`)\r\n\r\nCombined `_check_team_membership()` and `_check_resource_team_ownership()` into a single shared database session:\r\n\r\n```python\r\n# Before: 2 sessions per request\r\nif not self._check_team_membership(payload):  # Session #1\r\n    raise HTTPException(...)\r\nif not self._check_resource_team_ownership(path, teams):  # Session #2\r\n    raise HTTPException(...)\r\n\r\n# After: 1 shared session\r\ndb = next(get_db())\r\ntry:\r\n    if not self._check_team_membership(payload, db=db):\r\n        raise HTTPException(...)\r\n    if not self._check_resource_team_ownership(path, teams, db=db):\r\n        raise HTTPException(...)\r\nfinally:\r\n    db.commit()\r\n    db.close()\r\n```\r\n\r\n### 2. Team Membership Caching (`mcpgateway/cache/auth_cache.py`)\r\n\r\nAdded team membership validation caching with 60s TTL:\r\n\r\n- `get_team_membership_valid_sync()` - Synchronous in-memory lookup for middleware\r\n- `set_team_membership_valid_sync()` - Store validation result\r\n- `invalidate_team_membership()` - Clear cache on membership changes\r\n\r\nCache key format: `{user_email}:{sorted_team_ids}`\r\n\r\n### 3. Fixed N+1 Query Pattern (`mcpgateway/middleware/token_scoping.py`)\r\n\r\nReplaced loop with single IN query:\r\n\r\n```python\r\n# Before: N queries (one per team)\r\nfor team in teams:\r\n    membership = db.execute(\r\n        select(EmailTeamMember).where(team_id == team_id, ...)\r\n    ).scalar_one_or_none()\r\n\r\n# After: 1 query for all teams\r\nmemberships = db.execute(\r\n    select(EmailTeamMember.team_id).where(\r\n        EmailTeamMember.team_id.in_(team_ids),\r\n        EmailTeamMember.user_email == user_email,\r\n        EmailTeamMember.is_active == True,\r\n    )\r\n).scalars().all()\r\n```\r\n\r\n### 4. Fixed Model Method N+1 (`mcpgateway/db.py`)\r\n\r\nChanged `EmailTeam` methods to use direct SQL instead of lazy-loading:\r\n\r\n| Method | Before | After |\r\n|--------|--------|-------|\r\n| `get_member_count()` | `len([m for m in self.members if m.is_active])` | `SELECT COUNT(*) FROM email_team_members WHERE ...` |\r\n| `is_member()` | `any(m for m in self.members ...)` | `SELECT id FROM ... LIMIT 1` |\r\n| `get_member_role()` | `for member in self.members: ...` | `SELECT role FROM ... LIMIT 1` |\r\n\r\n### 5. Cache Invalidation\r\n\r\nAdded `invalidate_team_membership()` calls for all membership change paths:\r\n\r\n**`mcpgateway/services/team_management_service.py`**:\r\n- `delete_team()` - for all affected members\r\n- `add_member_to_team()` - for the added user\r\n- `remove_member_from_team()` - for the removed user\r\n- `approve_join_request()` - for the approved user\r\n\r\n**`mcpgateway/services/team_invitation_service.py`**:\r\n- `accept_invitation()` - when user accepts email invitation\r\n\r\n**`mcpgateway/services/email_auth_service.py`**:\r\n- `delete_user()` - when user is permanently deleted\r\n\r\n### 6. Fixed `invalidate_user()` to Clear Membership Cache (`mcpgateway/cache/auth_cache.py`)\r\n\r\nThe `invalidate_user()` method now properly clears membership cache entries by pattern matching keys that start with `{email}:` (membership cache keys are `email:team_id1:team_id2`).\r\n\r\n## Performance Impact\r\n\r\n| Metric | Before | After |\r\n|--------|--------|-------|\r\n| DB sessions per resource request | 2 | 1 |\r\n| `email_team_members` queries (cache hit) | N per request | 0 |\r\n| `email_team_members` queries (cache miss) | N per request | 1 |\r\n| Idle in transaction connections | 65-90 | ~14 |\r\n| Query pattern | SELECT all columns | SELECT COUNT / SELECT team_id |\r\n| Index utilization | Mixed | 99.9% index scans |\r\n\r\nLoad test results (3000 concurrent users):\r\n- **RPS**: ~1000+ sustained\r\n- **Failure rate**: 0%\r\n- **Connection cycling**: Healthy (1-3 second transaction ages)\r\n\r\n## Files Changed\r\n\r\n- `mcpgateway/middleware/token_scoping.py` - Single session + caching + N+1 fix\r\n- `mcpgateway/cache/auth_cache.py` - Team membership cache methods + fixed `invalidate_user()`\r\n- `mcpgateway/services/team_management_service.py` - Cache invalidation\r\n- `mcpgateway/services/team_invitation_service.py` - Cache invalidation on invitation acceptance\r\n- `mcpgateway/services/email_auth_service.py` - Cache invalidation on user deletion\r\n- `mcpgateway/db.py` - Efficient SQL for model methods\r\n\r\n## Testing\r\n\r\n```bash\r\n# Unit tests\r\nmake test\r\n\r\n# Specific tests\r\nuv run pytest tests/unit/mcpgateway/middleware/test_token_scoping.py -v\r\nuv run pytest tests/unit/mcpgateway/services/test_team_management_service.py -v\r\n\r\n# Load testing\r\nmake load-test-ui  # Then check http://localhost:8089\r\n```\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "07f21195fef3f7821dbf7023d42f28bf57627282",
+      "message": "Team Membership Query Optimization\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-03T22:07:54+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 323,
+  "deletions": 19,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:46.773506",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:46.774880",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1890,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1890.json"
+  }
+}

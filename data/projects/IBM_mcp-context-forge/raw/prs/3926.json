@@ -1,0 +1,217 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3926,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3926"
+  },
+  "metadata": {
+    "title": "feat(plugin): Rust acceleration for output length guard",
+    "state": "closed",
+    "created_at": "2026-03-30T13:25:17+00:00",
+    "updated_at": "2026-04-10T09:27:36+00:00",
+    "closed_at": "2026-04-09T22:00:51+00:00",
+    "merged_at": null,
+    "author": "gandhipratik203",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88",
+      "gandhipratik203"
+    ]
+  },
+  "description": "## Summary\n\nAdds a PyO3-based Rust execution engine for the output length guard plugin, carrying forward the Python-side v1.0.0 work from #3841 (token budgets, word-boundary truncation, recursive structuredContent processing, block/truncate strategies) and extending it with a high-performance Rust hot path for container processing.\n\nThe plugin remains intentionally hybrid: Python still owns lifecycle, hook integration, MCP content dict handling (structuredContent priority logic and content regeneration), and fallback behavior, while Rust now handles string truncation, recursive list/dict traversal, violation detection, and passthrough short-circuiting on the hot path.\n\nThe Rust engine exposes a high-level `process()` API that reduces the Python-Rust boundary to a single call per `tool_post_invoke` invocation. This keeps the existing plugin integration model intact while reducing request-path overhead for the common container shapes (strings, lists, nested dicts).\n\nDevelopment followed a TDD approach: the 331 existing Python tests served as the behavioral contract, with 47 mirrored Rust `#[test]`s written first (red), then implemented (green), then validated against the full Python suite as the acceptance gate.\n\n---\n\n## Gaps closed\n\n**Gap 1 (MEDIUM)** — No Rust acceleration path: the output length guard was the only post-invoke plugin without a Rust option, while exfil detection, PII filter, secrets detection, and URL reputation all had Rust engines. Fixed by introducing `OutputLengthGuardEngine` with a `process()` method that handles `str`, `list`, `dict`, and nested structures in a single FFI call. The Python plugin auto-detects the engine at init and delegates when available, falling back to pure Python otherwise.\n\n**Gap 2 (MEDIUM)** — O(n) character counting on large strings: the Python implementation uses `len()` (O(1) for code points) but the initial Rust port used `chars().count()` which walks the entire UTF-8 string. For a 1MB string with a 500-char limit, this was 124x slower than Python. Fixed by introducing `count_chars_capped()` which stops counting once the limit is exceeded — O(min(n, limit)) — plus a byte-length fast path that skips char counting entirely for ASCII strings under the limit.\n\n**Gap 3 (LOW)** — Per-item FFI overhead on list traversal: the initial Rust implementation processed each list item through a full `process_container` recursive call with per-item path string formatting and interleaved `PyList::append`. Fixed by adding a batch fast path for all-string lists in truncate mode: borrow all `&str` via `to_str()` in one pass, process in a tight Rust loop, build the output `PyList` in a single pass. This improved short-list passthrough from 10x to 19x faster.\n\n---\n\n## Additional hardening\n\n- **O(1) Python `len()` pre-check** — uses `PyAny::len()` on the Python string object before any Rust extraction; strings under the limit skip extraction entirely regardless of strategy\n- **Zero-copy `PyString::to_str()` borrow** — replaces `extract::<String>()` (full copy) with `cast::<PyString>().to_str()` (zero-copy borrow from Python's UTF-8 cache) for the string leaf path\n- **`count_chars_capped()` early-exit** — counts chars up to `limit + 1` then stops; includes byte-length fast path for ASCII where `byte_len == char_count`\n- **`byte_offset_of_char()` direct slicing** — replaces `.chars().take(n).collect::<String>()` with `&value[..byte_offset]` for zero-copy truncation\n- **`String::with_capacity()` pre-sized allocation** — eliminates reallocation during `truncated + ellipsis` by pre-computing exact buffer size\n- **Batch list processing** — for all-string lists in truncate mode, extracts all `&str` borrows in one pass, processes in a tight loop, builds output in one shot (better cache locality, fewer interleaved Python API calls)\n- **Numeric string skip for long strings** — skips `is_numeric_string()` check for strings > 50 bytes (no valid number representation is that long)\n- **MCP content dict exclusion** — Rust fast path skips dicts with a `content` key, preserving Python-side structuredContent priority logic and content regeneration\n- **Python fallback preserved** — if the Rust engine is unavailable or fails at init/runtime, the plugin falls through to the existing Python implementation with a warning log\n- **`_RUST_AVAILABLE` import guard** — defensive `try/except ImportError` + generic `except Exception` with logging, matching the pattern used by exfil detection and secrets detection plugins\n\n---\n\n## Architecture\n\nThe plugin is intentionally hybrid:\n\n- Python owns plugin lifecycle, hook integration, config validation, MCP content dict processing (structuredContent priority), and fallback behavior\n- Rust owns string truncation, recursive container traversal, violation detection, and passthrough short-circuiting\n- The Rust engine parses config once at init (no per-request parsing)\n\n<details>\n<summary>Plugin internals: request flow, Rust fast path, optimization layers, and fallback</summary>\n\n```text\n┌──────────────────────────────────────────────────────────────────────┐\n│                    OutputLengthGuardPlugin                           │\n│                                                                      │\n│  Hook:  tool_post_invoke                                            │\n│         (tool name + result payload)                                │\n└─────────────────────────────┬────────────────────────────────────────┘\n                              │\n                              │  Python responsibilities:\n                              │  - validate config (at init)\n                              │  - extract payload.result\n                              │  - route to Rust or Python path\n                              ▼\n                   ┌─────────────────────┐\n                   │  Is Rust available?  │\n                   │  Is result NOT an   │\n                   │  MCP content dict?  │\n                   └─────┬─────────┬─────┘\n                    yes  │         │  no\n                         ▼         ▼\n        ┌────────────────────┐  ┌──────────────────────────────┐\n        │  Rust fast path    │  │  Python fallback             │\n        │                    │  │                              │\n        │  engine.process()  │  │  handle_text() per string   │\n        │  single FFI call   │  │  _process_structured_data() │\n        │                    │  │  structuredContent priority  │\n        └────────┬───────────┘  │  content regeneration       │\n                 │              └──────────────┬───────────────┘\n                 ▼                             ▼\n        ┌────────────────────────────────────────────────┐\n        │              Rust Engine Layers                 │\n        │                                                │\n        │  Layer 1: O(1) PyAny::len() pre-check         │\n        │           → skip entirely if under limit       │\n        │                                                │\n        │  Layer 2: PyString::to_str() zero-copy borrow  │\n        │           → no String allocation               │\n        │                                                │\n        │  Layer 3: count_chars_capped() O(limit)        │\n        │           → byte-length fast path for ASCII    │\n        │                                                │\n        │  Layer 4: truncate() with byte_offset slicing  │\n        │           → pre-sized String::with_capacity()  │\n        │                                                │\n        │  Layer 5: batch list processing                │\n        │           → borrow all, process all, build all │\n        └────────────────────────────────────────────────┘\n                              │\n                              ▼\n        ┌──────────────────────────────────────────────────┐\n        │              Python result dispatch               │\n        │                                                   │\n        │  unchanged → ToolPostInvokeResult(metadata)      │\n        │  modified  → ToolPostInvokeResult(modified_payload)│\n        │  violation → ToolPostInvokeResult(violation)      │\n        └──────────────────────────────────────────────────┘\n```\n\n</details>\n\n---\n\n## Test results\n\n### Test results summary\n\n| # | Area | Result |\n|---|---|---|\n| 1 | Rust unit tests | `47/47` passed, clippy clean (`-D warnings`), rustfmt clean |\n| 2 | Python test suite | `331` passed, `1` expected skip, `0` failures |\n| 3 | Performance comparison | Up to `19x` faster (passthrough), `3-8.5x` faster (containers) |\n\n### 1. Rust unit tests (cargo test)\n\n47 tests covering all pure functions: `is_numeric_string`, `estimate_tokens`, `find_word_boundary`, `find_token_cut_point`, `truncate` (character mode, token mode, word boundary, unicode, edge cases), and mode segregation.\n\n### 2. Python test suite (331 tests)\n\nThe full existing Python test suite runs with the Rust engine active. The Rust path is exercised transparently for `str`, `list`, `dict`, and nested structures. MCP content dict tests exercise the Python fallback path. All 331 tests pass with zero modifications to the test file.\n\n### 3. Performance comparison\n\nMeasured with `compare_performance.py` — 1000 iterations + 50 warmup, character mode (max_chars=500).\n\n<details>\n<summary>Full benchmark results</summary>\n\n| Scenario | Python | Rust | Speedup |\n|----------|--------|------|---------|\n| Short list passthrough (4 items) | 2.88 us | 0.15 us | **18.9x faster** |\n| Short string passthrough (11 chars) | 0.62 us | 0.06 us | **9.8x faster** |\n| Wide nested dict (d=2, b=20, 400 leaves) | 651 us | 76 us | **8.5x faster** |\n| Deep nested dict (d=5, b=3, 243 leaves) | 426 us | 61 us | **7.0x faster** |\n| Block mode (10 KB string) | 10.4 us | 2.0 us | **5.1x faster** |\n| List of 10 x 10KB strings | 105 us | 35 us | **3.0x faster** |\n| Block mode (1 KB string) | 3.2 us | 2.0 us | **1.6x faster** |\n| Shallow nested dict (d=2, b=5, 25 leaves) | 63 us | 92 us | 1.5x slower |\n| List of 10 x 1KB strings (all truncated) | 21 us | 35 us | 1.7x slower |\n| Single string truncation (1KB-1MB) | 0.2 us | 2.4 us | ~11x slower |\n\n**Key findings:**\n- Container traversal (lists, nested dicts) and passthrough are the primary win scenarios — these are the most common production paths\n- Single string truncation has an irreducible ~2.4us constant FFI overhead (PyO3 function dispatch + UTF-8 validation) regardless of input size; Python's `len() + s[:500]` is ~0.2us because `len()` is O(1) and slicing is a single C-level `memcpy`\n- Lists of small strings that all need truncation are slightly slower because each truncated item requires a `PyString::new()` allocation (~1us per item from CPython's allocator)\n- Dropping the `abi3` stable ABI would give access to `PyUnicode_GET_LENGTH` (O(1) char count) and `PyString::data()` (raw UCS-1 access for ASCII), which would close the remaining gap — left as a future optimization when binary compatibility constraints allow\n\n</details>\n\n---\n\n## Files changed\n\n| File | Change |\n|------|--------|\n| `plugins_rust/output_length_guard/Cargo.toml` | New — Rust crate config (PyO3 + abi3-py311) |\n| `plugins_rust/output_length_guard/pyproject.toml` | New — maturin build config |\n| `plugins_rust/output_length_guard/Makefile` | New — build/test/install/coverage targets |\n| `plugins_rust/output_length_guard/src/lib.rs` | New — core implementation (1297 lines) + 47 tests |\n| `plugins_rust/output_length_guard/src/bin/stub_gen.rs` | New — Python type stub generator |\n| `plugins_rust/output_length_guard/compare_performance.py` | New — Python vs Rust benchmark (7 scenario groups) |\n| `plugins/output_length_guard/output_length_guard.py` | Modified — Rust import + engine init + fast path delegation (+70/-1) |",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4030724464",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-30T13:50:47+00:00",
+      "body": "Two blocking regressions need to be addressed before this can merge.\n\n1. The Rust fast path is broader than the existing plugin contract. `_use_rust` only excludes dict payloads with a top-level `content` key, so top-level MCP content arrays and other plain dict/list payloads now go through the recursive Rust walker. The preexisting Python implementation only mutates `dict[\"text\"]`, `list[str]`, and MCP `text` items, and otherwise passes metadata through unchanged. With Rust enabled, string-valued metadata such as `type`, `mimeType`, IDs, URLs, or annotations can now be truncated or blocked instead of only content text.\n\n2. Optional Rust support changes token-mode semantics instead of only accelerating them. For ordinary `str`, `dict[\"text\"]`, and `list[str]` results, the Python path still checks character bounds in `handle_text()` and calls `_truncate(..., max_tokens=None, ...)`, so token limits are effectively ignored there. The Rust engine enforces token bounds for those same shapes. That means identical config can produce different truncate/block decisions depending only on whether `output_length_guard_rust` imported successfully.\n\nResidual risk: the current Python tests do not appear to force the Rust module to load, so Rust-only regressions can still slip by while CI passes on the Python fallback."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "bb8d3241834b4d49a68d67b28fc79eebfca5d7f4",
+      "message": "fix content truncate issues and added support for list dict and nested dicts\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-23T10:17:10+00:00"
+    },
+    {
+      "sha": "9d7e474fdb36d9a3effb8dd2e010f16b1459c35f",
+      "message": "add support to blocking list, dict and nested dict\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-23T11:06:11+00:00"
+    },
+    {
+      "sha": "5e38956c7eb1093b5793c10ec3d9a9be767e6784",
+      "message": "add support to truncate at word boundaries to avoid mid-word cuts\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-23T11:29:16+00:00"
+    },
+    {
+      "sha": "393a24710b2ab0641ac9cba9c6d129351c32a2f5",
+      "message": "implement token size based output tokens\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-23T15:37:33+00:00"
+    },
+    {
+      "sha": "502c881847784e7231e141f20960f03d02e5e444",
+      "message": "add allow limit modes config to segregate character  and token\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-23T22:42:08+00:00"
+    },
+    {
+      "sha": "b5c4e65f0702d93f6d409255c76828f62cf11017",
+      "message": "add test mcp tools for list, dicts, and nested dicts\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-23T22:58:13+00:00"
+    },
+    {
+      "sha": "5214b19892ed10a5f92cea5234f609b1ae2d9e1d",
+      "message": "clear debug logs\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T11:09:24+00:00"
+    },
+    {
+      "sha": "784c093b6470e505cb3916e3a319996c95946e70",
+      "message": "add comprehensive logging\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T11:43:42+00:00"
+    },
+    {
+      "sha": "b81e939a6a66249938911c8a936ad932fdd6f422",
+      "message": "add exceptions handling\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T12:58:52+00:00"
+    },
+    {
+      "sha": "d6686ef5548a5a563446766da7d09f779fc84848",
+      "message": "reformatting code\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T13:05:03+00:00"
+    },
+    {
+      "sha": "34d674f997a772c13358db574dfb6de2dd9c1e7b",
+      "message": "add critical componant type supports\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T13:10:10+00:00"
+    },
+    {
+      "sha": "7c292ac18b116cdc0bc546b3ea104ba643d83635",
+      "message": "fix(output_length_guard): treat 0 as disabled for max limits\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T13:40:30+00:00"
+    },
+    {
+      "sha": "66c4370d87d7418d5ad362a95083b21e2b99c486",
+      "message": "add unittests\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T15:08:23+00:00"
+    },
+    {
+      "sha": "df367bc81f69f9aaaa78bba0348020e2079a7242",
+      "message": "add configuraton, readme, reformatting\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T15:23:52+00:00"
+    },
+    {
+      "sha": "1b63aa36514080310481a1b0684982afd99dfae5",
+      "message": "delete redundant test file\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T16:14:27+00:00"
+    },
+    {
+      "sha": "5e329766876e26ae9b6b15502b7b696cc0dd6a6a",
+      "message": "fix formatting\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T16:36:55+00:00"
+    },
+    {
+      "sha": "c7dc7d5b5fd8364a79acc3b4ba5fbef1b0f89ee4",
+      "message": "fix linting issues\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T16:42:55+00:00"
+    },
+    {
+      "sha": "fd80bba2ebdbff0901b61cc7639f3ecab34afe95",
+      "message": "fix syntax error\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T16:53:01+00:00"
+    },
+    {
+      "sha": "35f0cbc3d4e5deb3a8e39c9f9a5249000b3c2743",
+      "message": "fix syntax issue\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-24T17:35:20+00:00"
+    },
+    {
+      "sha": "ab0c7475f57994cfab31b2471824a590e91ae433",
+      "message": "feat(plugin): add Rust acceleration for output length guard\n\nAdd a PyO3-based Rust implementation of the output length guard's core\nprocessing logic (truncation, word-boundary search, token estimation,\nbinary search cut-point, recursive container traversal). The Python\nplugin auto-detects the Rust engine at init and delegates str, list,\ndict, and nested structure processing to it, falling back to Python\nwhen unavailable or for MCP content dicts that need structuredContent\npriority logic.\n\n- 47 Rust unit tests mirroring the Python test contract\n- 331 existing Python tests pass with Rust engine active\n- Clean clippy (-D warnings) and rustfmt\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-30T06:40:05+00:00"
+    },
+    {
+      "sha": "ff1cae95a2f69d7b07464d56c483bb42a2401dfb",
+      "message": "feat(plugin): add performance comparison script for Rust output length guard\n\nBenchmarks Python vs Rust across 7 scenario groups: single string\ntruncation, token-mode binary search, word-boundary truncation, list\nprocessing, nested dict traversal, block-mode violation detection, and\nunder-limit passthrough. Rust shows 3-10x speedup on container\ntraversal (lists, nested dicts, passthrough) while single string\ntruncation is FFI-bound.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-30T06:44:05+00:00"
+    },
+    {
+      "sha": "768e65cd61b9792ca1e9b72e2eea30e53f55df9e",
+      "message": "perf(plugin): optimize Rust output length guard with O(limit) char counting\n\nThree key optimizations that eliminate O(n) full-string scans:\n\n1. count_chars_capped(): early-exit char counting that stops once the\n   limit is exceeded, plus byte-length fast path for ASCII strings.\n   Turns O(n) into O(min(n, limit)).\n\n2. byte_offset_of_char() + direct slicing: replaces\n   .chars().take(n).collect() with &value[..byte_offset] for zero-copy\n   truncation.\n\n3. PyString pre-check in process_container(): uses Python's O(1)\n   str.__len__() to skip string extraction entirely for under-limit\n   strings in truncate mode.\n\nResults: 1MB string truncation dropped from 31us to 2.4us (constant\nregardless of input size). Passthrough improved to 12x faster.\nDeep/wide nested structures remain 5-7x faster.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-30T06:52:55+00:00"
+    },
+    {
+      "sha": "42d5e9ca54202a29b8499d799807b1fd84f3585a",
+      "message": "perf(plugin): use zero-copy PyString::to_str() in process_container\n\nReplace extract::<String>() (full copy) with PyString::cast() +\nto_str() (zero-copy borrow) for the string leaf path. Also skip\nis_numeric_string() for strings > 50 bytes, and extend the O(1)\npre-check to both truncate and block modes.\n\nResults vs previous commit:\n  - Deep nested dict:  5.4x → 7.1x faster\n  - Wide nested dict:  6.2x → 8.4x faster\n  - List passthrough:  9.7x → 13.6x faster\n  - Block mode 10KB:   4.5x → 5.0x faster\n  - All 331 Python tests + 47 Rust tests pass\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-30T06:58:37+00:00"
+    },
+    {
+      "sha": "fefd3ac9b23ff2a5bd064fa3500d82fd6e8ebe24",
+      "message": "perf(plugin): batch list processing and pre-sized String allocation\n\nTwo optimizations informed by the rate limiter PR (#3809) patterns:\n\n1. Batch list processing: for all-string lists in truncate mode, extract\n   all &str borrows in one pass, process in a tight Rust loop, build\n   output PyList in a single pass. Better cache locality and avoids\n   per-item path string formatting and interleaved append calls.\n\n2. Pre-sized String::with_capacity(): eliminate reallocation during\n   truncation by pre-computing body + ellipsis size.\n\nResults:\n  - Short list passthrough: 13.6x → 18.9x faster\n  - List 10x10KB:           2.6x → 3.0x faster\n  - Deep nested dict:       7.1x → 7.0x faster (stable)\n  - Wide nested dict:       8.4x → 8.5x faster (stable)\n  - 331 Python tests + 47 Rust tests pass\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-30T07:18:03+00:00"
+    },
+    {
+      "sha": "a994f2cdc2d939a3b6c60b6078349d37e331d2b8",
+      "message": "improve performance for Single String Truncation List of 10 x 1KB Strings Shallow Nested Dict and fix testcases\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-31T13:00:00+00:00"
+    },
+    {
+      "sha": "4c5a33a4a6f93353296ce53f4d4c83fa2892201c",
+      "message": "fix performance issue and match rast version to python version\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-02T09:34:50+00:00"
+    },
+    {
+      "sha": "a9c97de345af0015f1a8a5bf72e3bec83248b71d",
+      "message": "fix dictionary single key not setting in the content\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-02T12:13:14+00:00"
+    },
+    {
+      "sha": "a29a68f70c433757501477ced4b5e3b3669295e5",
+      "message": "fix request blocking\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-02T13:26:49+00:00"
+    }
+  ],
+  "files_changed": 15,
+  "additions": 9373,
+  "deletions": 237,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:08:47.562381",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:47.563808",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3926,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3926.json"
+  }
+}

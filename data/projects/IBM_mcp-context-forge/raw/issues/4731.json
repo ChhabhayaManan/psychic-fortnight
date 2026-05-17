@@ -1,0 +1,34 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4731,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4731"
+  },
+  "metadata": {
+    "title": "[ENHANCEMENT]: Add Disconnect and Test actions to connected MCP catalog servers",
+    "state": "open",
+    "created_at": "2026-05-12T19:28:57+00:00",
+    "updated_at": "2026-05-13T13:29:56+00:00",
+    "closed_at": null,
+    "author": "a-effort",
+    "labels": [
+      "enhancement",
+      "ui",
+      "ui-rewrite",
+      "planned-UI"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Overview\n\nIn the React Admin UI's MCP server catalog, registering (\"connect\") a catalog entry creates a `Gateway` record but the catalog view offers no follow-up actions on that entry. Add **Disconnect** and **Test** actions for catalog entries that are already registered, so users don't have to navigate away from the catalog to manage what they just connected. [Design](https://github.com/IBM/mcp-context-forge/issues/4732)\n\n**Part of Epic:** #4093\n**Deferred to:** post-RC2 (after #4098)\n\n## Context\n\nThe current catalog API (`/admin/mcp-registry/*`) exposes only list, register, status, and bulk-register. Once an entry is registered it becomes a regular `Gateway` row — there's no catalog-level lifecycle. The existing gateway endpoints already cover the underlying operations:\n\n- `DELETE /gateways/{gateway_id}` — disconnect\n- `POST /admin/gateways/test` — test connectivity (allowlist already includes registered gateway URLs)\n- `POST /gateways/{gateway_id}/tools/refresh` — live probe + tool rediscovery\n\nThe blocker is that `CatalogServer` (`mcpgateway/schemas.py`) exposes `is_registered: bool` but no `gateway_id`, so the React app can't resolve a registered catalog row to the gateway it should act on.\n\n## Scope\n\n### Backend\n- [ ] Add `gateway_id: Optional[str]` to `CatalogServer` schema.\n- [ ] Populate `gateway_id` in `catalog_service.get_catalog_servers()` from the URL-match query that already sets `is_registered`.\n- [ ] Invalidate the registry cache after `DELETE /gateways/{id}` succeeds for a `created_via=\"catalog\"` gateway, so `is_registered` flips back without a stale read (mirroring the invalidation in `register_catalog_server`).\n\n### Frontend (React prototype)\n- [ ] Show a contextual action menu on each catalog card based on `is_registered`:\n  - Not registered → existing **Connect** action.\n  - Registered → **Disconnect** and **Test** actions.\n- [ ] **Disconnect**: confirm dialog → `DELETE /gateways/{gateway_id}` → refetch catalog list.\n- [ ] **Test**: `POST /admin/gateways/test` with the catalog entry's URL → surface status code and latency from `GatewayTestResponse`.\n- [ ] Disable **Test** when `requires_oauth_config === true` (gateway exists but is `enabled=false` pending OAuth).\n- [ ] Respect permissions: only render Disconnect with `gateways.delete`, Test with `gateways.read`.\n\n## Acceptance Criteria\n\n- [ ] Registered catalog entries surface Disconnect and Test actions in the React UI.\n- [ ] Disconnecting from the catalog view removes the underlying gateway and updates the catalog card state without a manual refresh.\n- [ ] Test action shows a clear success/failure indicator with latency.\n- [ ] Actions are hidden or disabled for users without the relevant permissions, and for OAuth entries that haven't completed configuration.\n- [ ] No regression in the existing Connect flow.\n\n## If possible\n\nIn the confirm disconnect dialog, list any virtual servers that will be affected. \n",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:31.964101",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:31.964725",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4731,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4731.json"
+  }
+}

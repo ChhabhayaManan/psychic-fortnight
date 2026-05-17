@@ -1,0 +1,151 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4056,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4056"
+  },
+  "metadata": {
+    "title": "feat: api per tool plugin config",
+    "state": "closed",
+    "created_at": "2026-04-07T01:15:08+00:00",
+    "updated_at": "2026-04-07T22:32:19+00:00",
+    "closed_at": "2026-04-07T22:32:19+00:00",
+    "merged_at": null,
+    "author": "madhu-mohan-jaishankar",
+    "labels": [
+      "plugins",
+      "wxo",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #3996\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nAdds a `v1/tools/plugin_bindings` API that lets platform admins configure per-tool, per-team plugin policies in a single request. Each `(team_id, tool_name, plugin_id)` triple is upserted — existing rows are updated in place, new rows are inserted — making the endpoint idempotent.\r\n\r\n**What's included:**\r\n\r\n- **ORM model** (`ToolPluginBinding`) and **Alembic migration** for the new table\r\n- **Pydantic schemas** with full validation: `ToolPluginBindingRequest`, `TeamPolicies`, `PluginPolicyItem`, and plugin-specific config schemas (`OutputLengthGuardConfig`, `RateLimiterConfig`, `SecretsDetectionConfig`) each with cross-field validators and `extra='forbid'`\r\n- **Service layer** (`ToolPluginBindingService`): upsert, list (with optional team filter), delete\r\n- **Router** (`/v1/tools/plugin_bindings`): POST, GET `/`, GET `/{team_id}`, DELETE `/{binding_id}`, wired to RBAC (`tools.manage_plugins`, `tools.read`)\r\n- **66 tests** covering service and router with in-memory SQLite (no mocked DB or service responses), schema validation edge cases, and router error-handling wiring\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n- Router catches only `ValueError` from the service layer (maps to 400). All other exceptions propagate as 500 — intentional, so server-side bugs are not silently swallowed as \"bad request\".",
+  "comments": [
+    {
+      "id": "3044400529",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-07T10:31:19+00:00",
+      "body": "A user with tools.manage_plugins can create bindings for any team, even teams they don't belong to.\n\nConsider adding team membership validation, like so:\n\n```python\nuser_teams = current_user_ctx.get(\"teams\", [])\nis_admin = current_user_ctx.get(\"is_admin\", False)\n\nif not is_admin:\n    for team_id in request.teams.keys():\n        if team_id not in user_teams:\n            raise HTTPException(403, f\"Not authorized for team {team_id}\")\n```"
+    },
+    {
+      "id": "3044425835",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-07T10:36:41+00:00",
+      "body": "This might quickly become a performance issue. For instance, a request with 2 teams, 3 policies and 5 tools will run 30 (2 * 5 * 3) `SELECT` queries.\r\n\r\nHow about consolidating all existing bindings upfront, to then perform a single select?\r\n\r\n```python\r\n# Collect all (team_id, tool_name, plugin_id) tuples\r\nkeys = [(team_id, tool_name, policy.plugin_id.value) \r\n        for team_id, policies in request.teams.items()\r\n        for policy in policies.policies\r\n        for tool_name in policy.tool_names]\r\n\r\n# Single query with IN clause\r\nexisting_map = {\r\n    (b.team_id, b.tool_name, b.plugin_id): b\r\n    for b in db.query(ToolPluginBinding).filter(\r\n        tuple_(ToolPluginBinding.team_id, \r\n               ToolPluginBinding.tool_name,\r\n               ToolPluginBinding.plugin_id).in_(keys)\r\n    ).all()\r\n}\r\n```"
+    },
+    {
+      "id": "3045099668",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-07T12:53:25+00:00",
+      "body": "Good catch, thanks. Added the team membership guard. The implementation collects all unauthorized teams before raising, so the caller gets a complete list in a single 403 rather than failing one team at a time."
+    },
+    {
+      "id": "3045114554",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-07T12:56:00+00:00",
+      "body": " I went with team_id IN (team_ids) rather than tuple_().in_(keys) — SQLite (the default DB) doesn't support composite row-value expressions in IN, so tuple_ would break on SQLite while PostgreSQL handles it fine. The team_id IN approach fetches a slightly broader set (all bindings for the requested teams, not just the exact triples), but the result is still filtered in Python via dict lookup and the overhead is negligible in practice. Also consolidated the loop's db.flush() calls into a single flush after the loop."
+    },
+    {
+      "id": "3045156839",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-07T13:02:36+00:00",
+      "body": "Nice. 👍 "
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4067422816",
+      "author": "gcgoncalves",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-07T10:41:08+00:00",
+      "body": ""
+    },
+    {
+      "id": "4068180815",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T12:53:26+00:00",
+      "body": ""
+    },
+    {
+      "id": "4068196895",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T12:56:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "4068250066",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T13:02:36+00:00",
+      "body": ""
+    },
+    {
+      "id": "4068774265",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-07T14:13:35+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e9eb9970c3ff12422643d1e20e091db3f6164231",
+      "message": "feat: add per-tool plugin binding API with validation and tests\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-03T16:45:15+00:00"
+    },
+    {
+      "sha": "20abcc03c296d8451ba5d8683c4932e4bc888c57",
+      "message": "test: improve router and service test quality for tool plugin bindings\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T01:09:50+00:00"
+    },
+    {
+      "sha": "4bc9f4eae146fac0c90ddd16cb08f0dd85942f39",
+      "message": "fix: rebase migration onto cbedf4e580e0 to resolve multiple Alembic heads\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T08:53:35+00:00"
+    },
+    {
+      "sha": "17ff94cfa6dd3039b9063b88d14fb9e27cc8627a",
+      "message": "chore: update secrets baseline with migration revision IDs\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T10:30:23+00:00"
+    },
+    {
+      "sha": "42b7b86d278051745e8cd2172e58e56900e87bc6",
+      "message": "chore: mark migration revision IDs as non-secrets in baseline\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T10:35:09+00:00"
+    },
+    {
+      "sha": "91acdaf670b0dd14e31e08477a0d551a08b4b4a2",
+      "message": "feat: grant tools.manage_plugins to team_admin; fix service UUID and team guard\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T12:49:47+00:00"
+    },
+    {
+      "sha": "f630515cec20e26e0688af9b31a8ae2c1d13162f",
+      "message": "chore: add migration revision IDs to secrets baseline\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-07T13:10:40+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 2235,
+  "deletions": 4,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:07:23.781332",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:23.783080",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4056,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4056.json"
+  }
+}

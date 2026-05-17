@@ -1,0 +1,57 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3482,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3482"
+  },
+  "metadata": {
+    "title": "fix(testing): suppress JSON log noise in make doctest output",
+    "state": "closed",
+    "created_at": "2026-03-04T20:08:16+00:00",
+    "updated_at": "2026-03-10T22:47:05+00:00",
+    "closed_at": "2026-03-10T22:47:03+00:00",
+    "merged_at": "2026-03-10T22:47:03+00:00",
+    "author": "madhav165",
+    "labels": [
+      "testing",
+      "COULD"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\n\n---\n\n## 📌 Summary\nFixes #3481 — `make doctest` output was polluted with JSON-formatted structured log messages (ERROR level) interspersed with pytest's dot-progress output, making results hard to read.\n\n## 🔁 Reproduction Steps\n1. Run `make doctest`\n2. Observe JSON log lines like `{\"asctime\": \"...\", \"name\": \"mcpgateway.services.prompt_service\", \"levelname\": \"ERROR\", ...}` mixed into the dot output\n\n## 🐞 Root Cause\nSeveral doctests exercise error-handling code paths that trigger `logger.error()` calls. Two issues:\n\n1. **`MagicMock` used for async methods** — `_notify_prompt_added`, `_notify_prompt_deleted`, `_notify_prompt_activated`, `_notify_prompt_updated` are async but were mocked with `MagicMock` instead of `AsyncMock`, causing `TypeError` exceptions that were caught but logged as JSON.\n2. **`MagicMock` passed where strings expected** — `prompt.template`, `prompt.name`, `prompt.custom_name` were left as `MagicMock` objects instead of proper string values, causing `TypeError` in `slugify()` and `Formatter.parse()`.\n3. **No log suppression** — Error-path doctests in `root_service.py` and `db_util.py` intentionally trigger exceptions but didn't suppress the resulting log output.\n\n## 💡 Fix Description\n- **`prompt_service.py`**: Fixed 5 doctests — replaced `MagicMock` with `AsyncMock` for async notification methods, set proper string values on mock attributes (`template`, `name`, `custom_name`, `display_name`, `arguments`), wrapped with `logging.disable(logging.CRITICAL)` / `logging.disable(logging.NOTSET)`, and captured return values to prevent unwanted output.\n- **`root_service.py`**: Wrapped `_notify_subscribers` error-path doctest with log suppression.\n- **`db_util.py`**: Wrapped `query_tool_auth` exception-handling doctest with log suppression.\n\n## 🧪 Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Doctest suite                         | `make doctest`       | 1211 passed, 53 skipped, 0 failed |\n\n## ✅ Checklist\n- [x] No secrets/credentials committed\n- [x] All doctests still pass\n- [x] No functional code changes — only doctest setup code modified",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3925884712",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T22:46:29+00:00",
+      "body": "Rebased on main (clean, no conflicts) and reviewed.\n\n**Correctness:**\n- All 5 `_notify_prompt_*` methods are confirmed `async def` — switching from `MagicMock` to `AsyncMock` is the correct fix for the `TypeError` → JSON log noise.\n- Setting string values on mock attributes (`template`, `name`, `custom_name`, `display_name`, `arguments`) prevents `TypeError` in `slugify()` and `Formatter.parse()`.\n- Every `logging.disable(logging.CRITICAL)` has a matching `logging.disable(logging.NOTSET)` — no leaked state.\n\n**Consistency:** The `logging.disable()` pattern is the only log suppression method used in doctests across the codebase. Consistent.\n\n**Security/Performance:** No concerns — doctest-only changes, no functional code modified.\n\n**Tests:** Full doctest suite passes (1215 passed, 53 skipped, 0 failed) with zero JSON log noise in output."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "29a4b8739899a0123d1be576de54afbeba7bfdfd",
+      "message": "fix doctest logging errors\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-04T20:03:37+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 59,
+  "deletions": 13,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:32.583161",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:32.589478",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3482,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3482.json"
+  }
+}

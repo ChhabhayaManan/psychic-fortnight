@@ -1,0 +1,68 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3604,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3604"
+  },
+  "metadata": {
+    "title": "Logging Hardening and Sanitization",
+    "state": "closed",
+    "created_at": "2026-03-11T08:04:05+00:00",
+    "updated_at": "2026-03-11T20:40:49+00:00",
+    "closed_at": "2026-03-11T20:40:47+00:00",
+    "merged_at": "2026-03-11T20:40:47+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "ica",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "# Logging Hardening and Sanitization\r\n\r\n## Overview\r\n\r\nImplements comprehensive logging hardening across the codebase to improve log quality, prevent malformed log entries, and enhance observability infrastructure resilience.\r\n\r\n## Changes\r\n\r\n### Core Implementation\r\n- Added [`SecurityValidator.sanitize_log_message()`](mcpgateway/common/validators.py:884) static method\r\n- Removes newlines, ANSI escapes, and control characters from log messages\r\n- Truncates at 10,000 characters to prevent log flooding\r\n- Created 24 comprehensive unit tests in [`test_log_injection_protection.py`](tests/security/test_log_injection_protection.py)\r\n\r\n### Variables Sanitized\r\n\r\nAll user-provided and external data in log statements now sanitized:\r\n\r\n**User Identity:**\r\n- `user_email`, `email`, `username`, `user_id`\r\n- `admin_user.email`, `user['email']`, `user['sub']`\r\n- `owner_email`, `granted_by`\r\n\r\n**Team & Organization:**\r\n- `team_id`, `team_name`, `team.name`\r\n- `personal_team.name`\r\n\r\n**Authentication & Tokens:**\r\n- `token_teams`, `scope`, `scopes`\r\n- `session_id`, `mcp_session_id`\r\n- `jti` (JWT ID)\r\n\r\n**Resource Identifiers:**\r\n- `server_id`, `gateway_id`, `tool_id`, `resource_id`, `prompt_id`, `agent_id`\r\n- `gateway.name`, `role_def['name']`, `role.name`\r\n\r\n**Request Data:**\r\n- `request_id`, `run_id`\r\n- `uri`, `root_uri`\r\n- `agent_name`, `interaction_type`\r\n\r\n### Files Modified (22 files, 383 locations)\r\n\r\n**Authentication & Authorization:**\r\n- [`mcpgateway/auth.py`](mcpgateway/auth.py) - 4 locations\r\n- [`mcpgateway/middleware/token_scoping.py`](mcpgateway/middleware/token_scoping.py) - 50 locations\r\n- [`mcpgateway/routers/rbac.py`](mcpgateway/routers/rbac.py) - 9 locations\r\n- [`mcpgateway/routers/email_auth.py`](mcpgateway/routers/email_auth.py) - 13 locations\r\n- [`mcpgateway/routers/oauth_router.py`](mcpgateway/routers/oauth_router.py) - 11 locations\r\n\r\n**Core Application:**\r\n- [`mcpgateway/main.py`](mcpgateway/main.py) - 89 locations\r\n- [`mcpgateway/bootstrap_db.py`](mcpgateway/bootstrap_db.py) - 11 locations\r\n\r\n**Routers:**\r\n- [`mcpgateway/routers/teams.py`](mcpgateway/routers/teams.py) - 12 locations\r\n- [`mcpgateway/routers/llmchat_router.py`](mcpgateway/routers/llmchat_router.py) - 9 locations\r\n\r\n**Services (13 files):**\r\n- [`mcpgateway/services/team_management_service.py`](mcpgateway/services/team_management_service.py) - 52 locations\r\n- [`mcpgateway/services/email_auth_service.py`](mcpgateway/services/email_auth_service.py) - 41 locations\r\n- [`mcpgateway/services/sso_service.py`](mcpgateway/services/sso_service.py) - 17 locations\r\n- [`mcpgateway/services/oauth_manager.py`](mcpgateway/services/oauth_manager.py) - 16 locations\r\n- [`mcpgateway/services/gateway_service.py`](mcpgateway/services/gateway_service.py) - 15 locations\r\n- [`mcpgateway/services/team_invitation_service.py`](mcpgateway/services/team_invitation_service.py) - 14 locations\r\n- [`mcpgateway/services/permission_service.py`](mcpgateway/services/permission_service.py) - 7 locations\r\n- [`mcpgateway/services/token_storage_service.py`](mcpgateway/services/token_storage_service.py) - 5 locations\r\n- [`mcpgateway/services/mcp_client_chat_service.py`](mcpgateway/services/mcp_client_chat_service.py) - 4 locations\r\n- [`mcpgateway/services/tool_service.py`](mcpgateway/services/tool_service.py) - 3 locations\r\n- [`mcpgateway/services/mcp_session_pool.py`](mcpgateway/services/mcp_session_pool.py) - 2 locations\r\n- [`mcpgateway/services/token_catalog_service.py`](mcpgateway/services/token_catalog_service.py) - 2 locations\r\n- [`mcpgateway/services/resource_service.py`](mcpgateway/services/resource_service.py) - 1 location\r\n\r\n### Documentation\r\n- Enhanced [`SECURITY.md`](SECURITY.md:197-375) with comprehensive guidance on logging best practices\r\n- Added relevant sections\r\n- Documented implementation patterns and testing requirements\r\n\r\n## Testing\r\n\r\n- All 24 new tests passing\r\n- All existing tests passing \r\n- No regressions introduced\r\n- Verified syntax and imports across all modified files\r\n\r\n## Impact\r\n\r\n**Before:**\r\n- User-provided data logged without sanitization\r\n- Risk of malformed log entries disrupting log aggregation\r\n- Potential for log file corruption from control characters\r\n\r\n**After:**\r\n- 383 locations now sanitize user-provided data before logging\r\n- Defense in depth: newline removal, control character stripping, ANSI escape removal, length limiting\r\n- Improved log quality and SIEM compatibility\r\n\r\n## Implementation Pattern\r\n\r\n```python\r\n# Before\r\nlogger.info(f\"User {user_email} performed action\")\r\n\r\n# After\r\nlogger.info(f\"User {SecurityValidator.sanitize_log_message(user_email)} performed action\")\r\n```\r\n\r\n## Remaining Work\r\n\r\n5 files with system-level messages (~20 locations) can be addressed in follow-up:\r\n- [`mcpgateway/config.py`](mcpgateway/config.py) - Configuration warnings\r\n- [`mcpgateway/schemas.py`](mcpgateway/schemas.py) - Validation messages\r\n- [`mcpgateway/db.py`](mcpgateway/db.py) - Schema warnings\r\n- [`mcpgateway/translate_grpc.py`](mcpgateway/translate_grpc.py) - Service discovery\r\n- [`mcpgateway/translate_header_utils.py`](mcpgateway/translate_header_utils.py) - Header mapping\r\n\r\nAll critical user-facing paths are now hardened.\r\n\r\n## Commits\r\n\r\n```\r\n643a9b442 security: sanitize logs in bootstrap_db.py and main.py (100 locations)\r\n643a9b442 security: sanitize logs in teams router and remaining service files (81 locations)\r\n968e9b7d7 security: sanitize logs in email_auth and mcp_session_pool services (43 locations)\r\n1711c92c2 security: sanitize logs in team_management and gateway services (67 locations)\r\n5613fbd2a security: sanitize logs in rbac.py and email_auth.py (22 locations)\r\n88f072046 security: sanitize logs in llmchat_router.py (9 locations)\r\nc2dd06597 security: sanitize logs in oauth_router.py (11 locations)\r\n071d85a29 security: Apply log injection protection to middleware layer\r\n9129bbce4 fix: add missing SecurityValidator import in auth.py\r\n1b6f3ac8c docs: enhance SECURITY.md with XSS, SSRF, and log injection protection details\r\nc7b71456f security: Add log injection protection \r\n```\r\n\r\nAll commits are DCO-signed.\r\n\r\n## Checklist\r\n\r\n- [x] Code changes implemented\r\n- [x] Tests added and passing\r\n- [x] Documentation updated\r\n- [x] All existing tests passing\r\n- [x] No regressions detected\r\n- [x] Code review completed\r\n- [x] Commits signed (DCO)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3932381407",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-11T20:32:45+00:00",
+      "body": "## Review: Approved\n\n### Summary\nSolid implementation of CWE-117 (Log Injection) protection. The `SecurityValidator.sanitize_log_message()` method correctly strips newlines, ANSI escapes, and control characters from user-controlled data across 383 log statements in 22 files.\n\n### Changes made during review\n- **Squashed 13 commits** (including 3 fix-up commits) into 1 clean commit, plus 2 review fix commits\n- **Fixed type hint**: `sanitize_log_message(message: str)` → `sanitize_log_message(message: Optional[Any])` — the function handles `None` and non-string inputs per its own docstring and tests\n- **Removed unused `import pytest`** from test file\n- **Removed stray `# Made with Bob` comment** from test file\n- **Applied Black formatting** to lines exceeding 200 chars due to long `sanitize_log_message()` calls\n\n### Test verification\n- 24/24 new security tests pass\n- 929 auth + middleware tests pass\n- 260 gateway service tests pass\n- 200 team management + email auth tests pass\n- No regressions\n\n### Architecture note (non-blocking)\nThe codebase already has a centralized logging filter pattern (`_HttpxUrlSanitizeFilter` in `logging_service.py`). A similar root-level `_LogInjectionFilter` could achieve the same protection without per-call-site wrapping. Worth considering as a future simplification, but the current explicit approach is valid and well-tested."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "84d358c9d504f88416e5c978b5491fc0558645e1",
+      "message": "security: add log injection protection across codebase (CWE-117)\n\nImplement centralized log sanitization to prevent log injection attacks\nas identified in Mend security scan.\n\nChanges:\n- Add SecurityValidator.sanitize_log_message() method to strip newlines,\n  ANSI escapes, and control characters from user-controlled data in logs\n- Apply sanitization to 383 log statements across 22 files covering\n  authentication, middleware, routers, and service layers\n- Add 24 comprehensive tests in tests/security/test_log_injection_protection.py\n- Enhance SECURITY.md with XSS, SSRF, and log injection protection docs\n\nProtected data categories: user emails, session IDs, team IDs,\nresource identifiers, error messages, and request parameters.\n\nRefs: Mend Security Report 2026-03-09\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-03-11T20:28:59+00:00"
+    },
+    {
+      "sha": "ada7fd9cf7d97efc3227782a1812c9a2bf45cf3d",
+      "message": "fix: review cleanup for log injection protection\n\n- Fix type hint: sanitize_log_message accepts Optional[Any], not str\n  (function handles None and non-string inputs per its tests/docstring)\n- Remove unused pytest import from test file\n- Remove stray comment from test file\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T20:29:16+00:00"
+    },
+    {
+      "sha": "d705ac4c2fa6c7d369fb7398c928710ba0b15125",
+      "message": "style: black formatting for long sanitize_log_message lines\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T20:32:22+00:00"
+    }
+  ],
+  "files_changed": 25,
+  "additions": 866,
+  "deletions": 389,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:09.683573",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:09.684422",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3604,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3604.json"
+  }
+}

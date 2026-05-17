@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3797,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3797"
+  },
+  "metadata": {
+    "title": "feat(infra): s390x wheel builder container and workflow",
+    "state": "closed",
+    "created_at": "2026-03-23T11:24:57+00:00",
+    "updated_at": "2026-03-23T14:53:15+00:00",
+    "closed_at": "2026-03-23T14:53:13+00:00",
+    "merged_at": "2026-03-23T14:53:13+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Adds `infra/s390x/Containerfile` that builds native Python wheels from source for packages lacking pre-built s390x binaries on PyPI: cryptography, granian, setproctitle, jq, MarkupSafe, grpcio, psutil, brotli, httptools, uvloop, and argon2-cffi-bindings.\n- Adds `.github/workflows/s390x-wheels.yml` — a manually-triggered workflow that builds and pushes the wheel container to `ghcr.io` so downstream Containerfile stages can `COPY --from` the pre-built wheels.\n- Sets `GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=True` for the grpcio build since s390x does not support BoringSSL.\n\n## Test plan\n\n- [ ] Trigger the workflow manually via Actions > \"s390x Wheel Builder\" > Run workflow\n- [ ] Verify the image is pushed to `ghcr.io/ibm/mcp-context-forge-s390x-wheels`\n- [ ] Verify wheels are present at `/wheels` inside the container",
+  "comments": [
+    {
+      "id": "2974459870",
+      "author": "Copilot",
+      "created_at": "2026-03-23T11:29:55+00:00",
+      "body": "`microdnf install` here is missing the size-reduction flags used elsewhere in the repo (e.g., `--nodocs --setopt=install_weak_deps=0`) and doesn’t remove `/var/cache/yum`. Without those, this wheel builder image will likely pull weak deps and retain RPM caches, making it larger than necessary. Consider aligning with the existing UBI10 minimal pattern: use `microdnf upgrade/install` with `--nodocs --setopt=install_weak_deps=0`, then `microdnf clean all` and `rm -rf /var/cache/yum`."
+    },
+    {
+      "id": "2974459892",
+      "author": "Copilot",
+      "created_at": "2026-03-23T11:29:55+00:00",
+      "body": "The comments say this builds everything in a single layer “to keep the image small,” but the image will still include the full build toolchain layer plus pip’s download/build caches (e.g. under `/root/.cache/pip`). To actually keep the published wheel image small, consider (1) using `--no-cache-dir`/`PIP_NO_CACHE_DIR=1` and cleaning pip caches after the wheel build, and (2) using a multi-stage build where the final stage contains only `/wheels` (copy from the builder stage) and excludes compilers/rust/autotools."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3991092839",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-23T11:29:55+00:00",
+      "body": "## Pull request overview\n\nAdds an s390x-focused wheel-builder container and a manual GitHub Actions workflow to publish it to GHCR, enabling downstream container builds to reuse prebuilt native wheels for packages that don’t ship s390x binaries on PyPI.\n\n**Changes:**\n- Introduces `infra/s390x/Containerfile` to build a wheelhouse under `/wheels` (e.g., cryptography, grpcio, uvloop).\n- Adds a manual `s390x Wheel Builder` workflow to build and push the wheel-builder image to GHCR.\n- Forces grpcio to build against system OpenSSL on s390x via `GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=True`.\n\n### Reviewed changes\n\nCopilot reviewed 2 out of 2 changed files in this pull request and generated 2 comments.\n\n| File | Description |\n| ---- | ----------- |\n| `infra/s390x/Containerfile` | Builds and stores native s390x wheels in `/wheels` for reuse in downstream builds. |\n| `.github/workflows/s390x-wheels.yml` | Manual workflow to build/push the wheel-builder container to GHCR with `latest`, `sha`, and date tags. |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3992366284",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-23T14:52:40+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b6e4a41e9b9b076b647d6d915e092ea22c328ca9",
+      "message": "feat(infra): add s390x wheel builder Containerfile and workflow\n\nPre-build native Python wheels for packages lacking s390x binaries\non PyPI (cryptography, granian, grpcio, etc.) so downstream container\nbuilds can COPY them in rather than compiling from source each time.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-23T11:24:42+00:00"
+    },
+    {
+      "sha": "9614204d277d6cb07e553b5c9a5419134ffe2a8a",
+      "message": "Merge branch 'main' into jps-s390x-infra-container",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T14:52:19+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 141,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:08.237042",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:08.238486",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3797,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3797.json"
+  }
+}

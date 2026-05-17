@@ -1,0 +1,85 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2765,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2765"
+  },
+  "metadata": {
+    "title": "fix: reduce JWT cookie size by removing teams/namespaces from session tokens",
+    "state": "closed",
+    "created_at": "2026-02-08T09:32:10+00:00",
+    "updated_at": "2026-02-11T10:43:46+00:00",
+    "closed_at": "2026-02-08T18:06:28+00:00",
+    "merged_at": "2026-02-08T18:06:28+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "ica",
+      "revisit"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Session tokens (login/SSO) no longer embed `teams` or `namespaces` claims, resolving the **4KB cookie size limit** (RFC 6265 §6.1) for users with many team memberships\n- Introduces `token_use` claim (`session` vs `api`) — session tokens resolve teams server-side via DB + L1/L2 cache, API tokens continue embedding teams\n- Adds cookie size validation with `CookieTooLargeError` (warn at 3800B, hard error at 4096B)\n- Improves error UX for cookie-related auth failures in login and SSO flows\n\n### Key changes across 21 files:\n\n- **`auth.py`**: `_resolve_teams_from_db()` (async) and `_resolve_teams_from_db_sync()` (sync with L1 cache) for server-side team resolution on session tokens\n- **`security_cookies.py`**: Cookie size validation, `CookieTooLargeError` exception\n- **`email_auth.py` / `sso.py`**: Removed dead code, session tokens no longer embed teams\n- **`token_scoping.py` / `rbac.py`**: Handle `token_use: \"session\"` by resolving teams from DB instead of JWT\n- **`streamablehttp_transport.py`**: Uses `_resolve_teams_from_db_sync()` with L1 cache (previously hit DB directly on every request)\n- **`admin.py`**: Cookie error handling in login/SSO redirects\n- **`create_jwt_token.py`**: Removed `namespaces` parameter\n\n### Results (verified on deployed environment with 109 teams):\n\n| Metric | Before | After |\n|--------|--------|-------|\n| Admin session token | ~4860 bytes (exceeds 4KB limit) | **583 bytes** |\n| Non-admin session token | ~variable | **616 bytes** |\n| Size reduction | — | **~8x** |\n\nCloses #2757\n\n## Test plan\n\n- [x] All 7960 unit tests pass\n- [x] Linting clean: flake8, bandit (0 issues), pylint (10.00/10), interrogate (100%)\n- [x] End-to-end verification on deployed environment with 109 teams\n- [x] Admin sees all resources (29 tools, 23 servers, 20 prompts)\n- [x] RBAC enforced for non-admin users (403 on unauthorized endpoints)\n- [x] Cookie set correctly via admin UI login (583 bytes, well under 4KB)\n- [x] `token_use: \"session\"` present in session tokens, no teams/namespaces embedded",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "ad85912d3b7de4989661b46468ff1820b3ba5e4b",
+      "message": "fix: reduce JWT cookie size by removing teams/namespaces from session tokens\n\nSession tokens (login/SSO) no longer embed teams or namespaces claims,\nresolving the 4KB cookie size limit for users with many team memberships.\n\n- Phase 1: Remove dead `namespaces` claim from all token creation paths\n- Phase 2: Introduce `token_use` claim (session vs api) with server-side\n  team resolution via DB/cache for session tokens\n- Phase 3: Add cookie size validation (warn 3800B, error 4096B) with\n  CookieTooLargeError exception\n- Phase 4: Improve error UX for cookie auth failures in login and SSO\n\nCloses #2757\n\nSigned-off-by: Mihai Criveti <crmihai1@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-08T08:40:25+00:00"
+    },
+    {
+      "sha": "9062b462b9acafdc7b8480d32b236702d613f0e8",
+      "message": "fix: remove dead code in email_auth and add sync cache for StreamableHTTP\n\n- Remove unused get_teams() call and team_ids construction in\n  create_access_token (dead code after teams removal from session tokens)\n- Add _resolve_teams_from_db_sync() with L1 in-memory cache support\n  for StreamableHTTP transport (was hitting DB on every request)\n\nSigned-off-by: Mihai Criveti <crmihai1@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-08T09:22:44+00:00"
+    },
+    {
+      "sha": "9f6a4c52177c39d870b9fbc59511b0bd39d68c1d",
+      "message": "Lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-08T15:56:45+00:00"
+    },
+    {
+      "sha": "0a875cc92d69aa06af40b0b081ac80813c953410",
+      "message": "lint fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-08T16:36:50+00:00"
+    },
+    {
+      "sha": "7127e981dbe26ad0344410b10b716d5a510f1680",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-08T17:26:41+00:00"
+    },
+    {
+      "sha": "b9ab4aa8051d90fcde6274b44f763129848410bd",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-08T17:42:59+00:00"
+    },
+    {
+      "sha": "776a114c6c8f2b75da58cfb8f34715ce435fe61b",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-08T17:52:24+00:00"
+    }
+  ],
+  "files_changed": 22,
+  "additions": 594,
+  "deletions": 770,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:10.261537",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:10.263184",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2765,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2765.json"
+  }
+}

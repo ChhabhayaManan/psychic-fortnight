@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4457,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4457"
+  },
+  "metadata": {
+    "title": "fix(servers): validate UUID format in server association fields to prevent silent tool assignment failures",
+    "state": "closed",
+    "created_at": "2026-04-27T09:19:32+00:00",
+    "updated_at": "2026-05-10T14:05:10+00:00",
+    "closed_at": "2026-05-10T14:05:08+00:00",
+    "merged_at": "2026-05-10T14:05:08+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "bug",
+      "MUST",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4287\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixed a bug where tools were not being assigned when creating virtual servers via the API (`POST /servers`). The issue occurred when users copied API response data containing `associatedTools` (tool names) instead of `associated_tool_ids` (UUIDs). The validator accepted these names without validation, causing silent failures in the association logic.\r\n\r\n**Root Cause:** The `split_comma_separated` validator in `ServerCreate` and `ServerUpdate` schemas accepted lists without validating that items were valid UUIDs.\r\n\r\n**Solution:** Added UUID validation using `SecurityValidator.validate_uuid()` to ensure only valid UUIDs are accepted, with clear error messages directing users to use the correct field names.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable) - N/A for bug fix\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Files Modified\r\n\r\n1. **mcpgateway/schemas.py** (Core Fix)\r\n   - Lines 4137-4177: Updated `ServerCreate.split_comma_separated()` validator\r\n   - Lines 4324-4364: Updated `ServerUpdate.split_comma_separated()` validator\r\n   - Added UUID validation for list items using `SecurityValidator.validate_uuid()`\r\n\r\n2. **tests/test_server_create_tool_assignment_bug.py** (New File)\r\n   - 12 comprehensive test cases covering:\r\n     - Valid UUIDs (with/without hyphens)\r\n     - Rejection of non-UUID strings (tool names)\r\n     - Empty lists and None handling\r\n     - All association fields (tools, resources, prompts, agents)\r\n     - Clear error message validation\r\n\r\n3. **tests/unit/mcpgateway/test_schemas.py** (Updated)\r\n   - Lines 710-785: Updated `test_server_create` and `test_server_update` to use valid UUIDs\r\n\r\n4. **tests/unit/mcpgateway/services/test_server_service.py** (Updated)\r\n   - Updated all test fixtures and test cases to use valid UUIDs\r\n   - Fixed assertion messages to match new UUID format\r\n\r\n5. **tests/unit/mcpgateway/services/test_import_service.py** (Updated)\r\n   - Lines 2678-2700: Updated tool reference resolution tests to use valid UUIDs\r\n\r\n### Technical Details\r\n\r\n**Before (Bug):**\r\n```python\r\ndef split_comma_separated(cls, v):\r\n    if isinstance(v, str):\r\n        return [item.strip() for item in v.split(\",\") if item.strip()]\r\n    return v  # ❌ Lists passed through without validation\r\n```\r\n\r\n**After (Fixed):**\r\n```python\r\ndef split_comma_separated(cls, v):\r\n    if isinstance(v, str):\r\n        return [item.strip() for item in v.split(\",\") if item.strip()]\r\n    if isinstance(v, list):\r\n        validated = []\r\n        for item in v:\r\n            item_str = str(item).strip()\r\n            if not item_str:\r\n                continue\r\n            try:\r\n                SecurityValidator.validate_uuid(item_str, \"ID\")  # ✅ UUID validation\r\n                validated.append(item_str)\r\n            except ValueError:\r\n                raise ValueError(\r\n                    f\"Invalid ID format: '{item_str}'. \"\r\n                    \"Use 'associated_tool_ids' instead of 'associatedTools'. \"\r\n                    \"IDs must be UUIDs, not names.\"\r\n                )\r\n        return validated\r\n    return v\r\n```\r\n\r\n### Error Message Example\r\n\r\nWhen users now send tool names instead of UUIDs:\r\n```\r\nInvalid ID format: 'my-tool-name'. \r\nUse 'associated_tool_ids', 'associated_resource_ids', 'associated_prompt_ids', or 'associated_a2a_agent_ids' \r\ninstead of 'associatedTools', 'associatedResources', 'associatedPrompts', or 'associatedA2AAgents'. \r\nIDs must be UUIDs, not names.\r\n```\r\n\r\nThis provides clear guidance on which field to use and what format is expected.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "122f96b76570bed785bae38933b96c84f39c8a1f",
+      "message": "fix: validate UUID format in server association fields to prevent silent tool assignment failures\n\n- Add UUID validation to split_comma_separated validator in ServerCreate and ServerUpdate schemas\n- Reject tool/resource/prompt/agent names and require valid UUIDs\n- Provide clear error messages directing users to use correct field names (associated_tool_ids vs associatedTools)\n- Add comprehensive test suite (12 tests) covering valid UUIDs, rejection of non-UUIDs, and all association fields\n- Update existing tests to use valid UUIDs instead of simple numeric IDs\n\nFixes bug where tools were not assigned when creating virtual servers via API because\nthe validator accepted tool names from API response field 'associatedTools' instead of\nrequiring UUIDs from 'associated_tool_ids', causing silent failures in _associate_server_entities().\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-27T09:07:42+00:00"
+    },
+    {
+      "sha": "9ba9edbd86da81c54b0d0729caf79fb166b70c0c",
+      "message": "improve testing coverage\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-27T11:20:03+00:00"
+    },
+    {
+      "sha": "2d06c6fa9cf8142315e9cba2f85969e6e2db9442",
+      "message": "fix: validate UUID format in server association fields to prevent silent tool assignment failures\n\n- Extract duplicated validator logic into _validate_association_ids() helper\n- Validate comma-separated strings AND list inputs as UUIDs (no bypass)\n- Use SecurityValidator.validate_uuid() normalized return value (hex form)\n- Fix error messages to reference correct field semantics\n- Update all test files to use valid UUIDs matching normalization\n- Move bug fix tests to tests/unit/mcpgateway/\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T11:43:55+00:00"
+    },
+    {
+      "sha": "3695cf799a7275df3b14009d6c68475c12978d5b",
+      "message": "chore: add detect-secrets pragma comments to test fixture UUIDs\n\nAdd '# pragma: allowlist secret' inline comments to test UUID string\nliterals flagged by detect-secrets as Hex High Entropy String false\npositives. Update .secrets.baseline after scan.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T12:01:59+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 797,
+  "deletions": 362,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:14.639155",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:14.640292",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4457,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4457.json"
+  }
+}

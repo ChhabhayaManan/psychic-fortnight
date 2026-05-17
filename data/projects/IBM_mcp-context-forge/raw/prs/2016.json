@@ -1,0 +1,68 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2016,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2016"
+  },
+  "metadata": {
+    "title": "fix: MCP list operations respect token team scope (#1915)",
+    "state": "closed",
+    "created_at": "2026-01-09T21:36:17+00:00",
+    "updated_at": "2026-01-10T02:54:32+00:00",
+    "closed_at": "2026-01-10T02:54:30+00:00",
+    "merged_at": "2026-01-10T02:54:30+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Previously, tools/list, resources/list, and prompts/list operations returned unfiltered results regardless of the authenticated token's team scope. This allowed public access tokens to see private resources they shouldn't have access to.\n\n## Token Scoping Security Model\n\n### Unified Token Teams Semantics\n\nAll enforcement layers (middleware, REST endpoints, RPC, /mcp transport) now follow consistent rules:\n\n```\n┌─────────────────────────────────────────────────────────────────────────────┐\n│                        Token Teams Claim Handling                           │\n├─────────────────────────────────────────────────────────────────────────────┤\n│  JWT Claim State          │  Admin User           │  Non-Admin User         │\n├───────────────────────────┼───────────────────────┼─────────────────────────┤\n│  No \"teams\" key           │  UNRESTRICTED         │  PUBLIC-ONLY (secure)   │\n│  teams: null              │  UNRESTRICTED         │  PUBLIC-ONLY (secure)   │\n│  teams: []                │  PUBLIC-ONLY          │  PUBLIC-ONLY            │\n│  teams: [\"team-id-1\"]     │  Team + Public        │  Team + Public          │\n└───────────────────────────┴───────────────────────┴─────────────────────────┘\n```\n\n### Security Design Principles\n\n1. **Principle of Least Privilege**: Non-admin tokens without explicit team scope default to public-only access\n2. **Scoped Automation Tokens**: Admin tokens with `teams: []` are intentionally restricted to public resources (for CI/CD, monitoring)\n3. **Backward Compatible Admin Access**: Admin session tokens (from UI login) omit the teams claim entirely, granting unrestricted access\n\n### Token Scoping Flow\n\n```\n                                 ┌──────────────────┐\n                                 │   JWT Token      │\n                                 │   Received       │\n                                 └────────┬─────────┘\n                                          │\n                                          ▼\n                              ┌───────────────────────┐\n                              │  Extract \"teams\"      │\n                              │  claim from JWT       │\n                              └───────────┬───────────┘\n                                          │\n                          ┌───────────────┴───────────────┐\n                          │                               │\n                          ▼                               ▼\n               ┌─────────────────────┐       ┌─────────────────────┐\n               │ \"teams\" key exists  │       │ \"teams\" key missing │\n               │ with non-null value │       │ OR teams: null      │\n               └──────────┬──────────┘       └──────────┬──────────┘\n                          │                             │\n                          ▼                             ▼\n               ┌─────────────────────┐       ┌─────────────────────┐\n               │ Use explicit scope  │       │ Check is_admin flag │\n               │ (may be empty [])   │       └──────────┬──────────┘\n               └──────────┬──────────┘                  │\n                          │                 ┌───────────┴───────────┐\n                          │                 │                       │\n                          │                 ▼                       ▼\n                          │      ┌──────────────────┐   ┌──────────────────┐\n                          │      │ Admin: token_    │   │ Non-Admin:       │\n                          │      │ teams = None     │   │ token_teams = [] │\n                          │      │ (UNRESTRICTED)   │   │ (PUBLIC-ONLY)    │\n                          │      └────────┬─────────┘   └────────┬─────────┘\n                          │               │                      │\n                          └───────────────┴──────────────────────┘\n                                          │\n                                          ▼\n                              ┌───────────────────────┐\n                              │   Apply visibility    │\n                              │   filter to query     │\n                              └───────────────────────┘\n```\n\n### Enforcement Points Updated\n\n- **Token Scoping Middleware** (`token_scoping.py`): Request-level access control\n- **REST Endpoints** (`main.py`): `/tools`, `/resources`, `/prompts`, `/servers/{id}/*`\n- **RPC Handler** (`main.py`): `tools/list`, `resources/list`, `prompts/list`, legacy `list_tools`\n- **Streamable HTTP Transport** (`streamablehttp_transport.py`): MCP protocol filtering\n- **Service Layer** (`tool_service.py`, `resource_service.py`, `prompt_service.py`): Query filtering\n\n---\n\n## MCP List Visibility Fix\n\nChanges:\n- Add token_teams parameter to service list functions (tool_service, resource_service, prompt_service) to filter by token scope instead of DB team membership lookup\n- Add helper functions in main.py to extract and normalize token teams from JWT payloads (`_normalize_token_teams`, `_get_token_teams_from_request`, `_get_rpc_filter_context`)\n- Wire /rpc and /servers/{id}/tools|resources|prompts endpoints to use token-based filtering\n- Fix SSE token forwarding to read auth from cookies (for admin UI) and preserve is_admin status in fallback tokens\n- Update streamable HTTP auth to check both top-level and nested is_admin in JWT payloads\n- **Admin session tokens now omit teams claim** to enable unrestricted access bypass\n- **Non-admin tokens without teams default to public-only** (secure default)\n\n## Token Details Modal & Scope Display\n\nAdded enhanced token visibility in the Admin UI at `/admin/#tokens`:\n\n**Token List Enhancements:**\n- Team badge showing team name (if team-scoped)\n- IP restrictions count badge (e.g., \"2 IP restrictions\")\n- New \"Details\" button for full token information\n\n**Token Details Modal:**\n- Basic Info: ID (with copy button), name, description, creator, team, dates, status\n- Scope & Restrictions: server ID, permissions list, IP restrictions, time restrictions, usage limits\n- Tags section\n- Revocation details (for revoked tokens)\n\n## Input Validation\n\nAdded comprehensive validation for token scope fields:\n\n**Frontend Validation (admin.js):**\n- `isValidIpOrCidr()` - Validates IPv4/IPv6 addresses and CIDR notation using regex\n- `isValidPermission()` - Validates `resource.action` format or wildcard `*`\n- Immediate feedback before API call with clear error messages\n\n**Backend Validation (schemas.py):**\n- `TokenScopeRequest.validate_ip_restrictions()` - Uses Python's `ipaddress` module for robust validation\n- `TokenScopeRequest.validate_permissions()` - Regex pattern matching for `resource.action` format\n\n**Validation Examples:**\n- Valid IPs: `192.168.1.1`, `10.0.0.0/8`, `::1`, `2001:db8::/32`\n- Invalid IPs: `sfas`, `192.168.1.256`, `192.168.1.0/33`\n- Valid permissions: `tools.read`, `resources.write`, `*`\n- Invalid permissions: `read`, `tools.`, `123.read`\n\n## Security Improvements\n\n- Replaced inline `onclick` handlers with event delegation pattern to prevent XSS\n- Added `extractApiError()` helper to properly parse Pydantic validation error arrays\n- Added `parseErrorResponse()` helper to handle non-JSON error responses (500 errors)\n- One-time guard pattern for event handlers to prevent handler stacking on re-renders\n- **Consistent token scoping across all enforcement layers**\n- **Secure default: non-admin tokens without teams = public-only**\n\nCloses #1915",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "9b39a40a768da3b7e7fc0fc4b90f49cfed9ee6c6",
+      "message": "fix: MCP list operations respect token team scope (#1915)\n\nPreviously, tools/list, resources/list, and prompts/list operations\nreturned unfiltered results regardless of the authenticated token's\nteam scope. This allowed public access tokens to see private resources\nthey shouldn't have access to.\n\nChanges:\n- Add token_teams parameter to service list functions (tool_service,\n  resource_service, prompt_service) to filter by token scope instead\n  of DB team membership lookup\n- Add helper functions in main.py to extract and normalize token teams\n  from JWT payloads (_normalize_token_teams, _get_token_teams_from_request,\n  _get_rpc_filter_context)\n- Wire /rpc and /servers/{id}/tools|resources|prompts endpoints to use\n  token-based filtering\n- Fix SSE token forwarding to read auth from cookies (for admin UI) and\n  preserve is_admin status in fallback tokens\n- Update streamable HTTP auth to check both top-level and nested is_admin\n  in JWT payloads\n- Update token_scoping middleware to allow empty-team tokens access to\n  owned resources (own + public policy)\n- Update admin UI message from \"public-only access\" to \"your own resources\n  and public resources only\"\n\nThe empty-team token policy is now \"own + public\" - users with tokens\nthat have no teams can see their own resources plus public resources,\nnot just public resources.\n\nCloses #1915\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-09T21:35:08+00:00"
+    },
+    {
+      "sha": "eeb0d74d00beb97f3f40b12a7763a566dde9f8f5",
+      "message": "Linting\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-09T22:46:40+00:00"
+    },
+    {
+      "sha": "7d7a831eed404e8a58c0e30c44608e2c955266a3",
+      "message": "UI Validation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-10T00:10:01+00:00"
+    },
+    {
+      "sha": "231458e755498396b3bd74c9c20a5c40627f654a",
+      "message": "fix: enforce consistent token scoping across all enforcement layers\n\nSecurity improvements to token team scoping:\n\n- Unify teams claim semantics: missing key or null = unrestricted for admin,\n  public-only for non-admin (secure default)\n- Admin bypass now requires token_teams is None (not just is_admin flag)\n- Admin with teams: [] explicitly scoped to public-only resources\n- Fix inconsistency where /rpc treated missing teams differently than REST\n- Update session token generation to omit teams for admin users (unrestricted)\n- Fix all enforcement points: middleware, main.py, services, transports\n\nToken scoping rules:\n- Admin, no teams key: unrestricted (sees all)\n- Admin, teams: null: unrestricted (same as missing)\n- Admin, teams: []: public-only (scoped automation token)\n- Non-admin, no teams: public-only (secure default)\n- Non-admin, teams: []: public-only\n\nAlso:\n- Update UI text to reflect public-only policy for unscoped tokens\n- Add tests for teams: null handling\n- Fix docstrings to document correct semantics\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-10T02:10:05+00:00"
+    },
+    {
+      "sha": "6bc173a08d85ea138539beee20f69a4b97401c5a",
+      "message": "docs: expand RBAC documentation with token scoping model\n\nAdd comprehensive documentation for token-based access control:\n\n- Token teams claim semantics (missing key, null, empty, explicit teams)\n- Different behavior for admin vs non-admin users\n- ASCII flow diagrams for token scoping decision tree\n- Visibility levels (public, team, private) explanation\n- Enforcement points across all access layers\n- Token types and use cases (session, API, automation)\n- CLI examples for generating scoped tokens\n- Best practices for token lifecycle and team organization\n- Troubleshooting guide for common access issues\n\nAlso add summary table and cross-reference in securing.md.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-10T02:27:06+00:00"
+    }
+  ],
+  "files_changed": 22,
+  "additions": 2256,
+  "deletions": 167,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:11.696344",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:11.697114",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2016,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2016.json"
+  }
+}

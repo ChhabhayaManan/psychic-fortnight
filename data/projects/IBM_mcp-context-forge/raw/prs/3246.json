@@ -1,0 +1,112 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3246,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3246"
+  },
+  "metadata": {
+    "title": "[FIX][AUTH]: Fix auth_type naming inconsistency and UI custom headers event handler (#3240, #3241)",
+    "state": "closed",
+    "created_at": "2026-02-25T12:31:07+00:00",
+    "updated_at": "2026-02-26T13:28:45+00:00",
+    "closed_at": "2026-02-26T06:59:23+00:00",
+    "merged_at": "2026-02-26T06:59:23+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "bug",
+      "wxo",
+      "ui",
+      "ica",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3240 and #3241\r\n\r\n## 📌 Summary\r\nFixed two related bugs affecting custom authentication header configuration:\r\n\r\n1. API Documentation Bug: Error messages claimed auth_type: \"headers\" was valid, but the code required \"authheaders\" (no space), causing user confusion and failed API requests.\r\n2. UI Event Handler Bug: Custom authentication headers in the Admin UI weren't being captured when users typed into input fields, causing gateway creation to fail unless a workaround (adding a second empty header row) was used.\r\n\r\nBoth bugs prevented users from successfully configuring custom authentication headers via API or UI.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\nBug 1 - API Naming Inconsistency:\r\n\r\n1. Send POST to /gateways/ with auth_type: \"headers\" (as error message suggests)\r\n2. Observe validation error claiming \"headers\" is valid\r\n3. Try using \"headers\" -> fails\r\n4. Only \"authheaders\" works, contradicting error message\r\n\r\n\r\nBug 2 - UI Event Handler:\r\n\r\n1. Navigate to Admin UI -> MCP Servers -> Add Gateway\r\n2. Select \"Custom Headers\" auth type\r\n3. Click \"Add Header\", enter key: Authorization, value: Bearer token123\r\n4. Click \"Add Gateway\" -> FAILS with \"auth_headers list must be provided\"\r\n5. Workaround: Click \"Add Header\" again (empty 2nd row), then submit → WORKS\r\n\r\n## 🐞 Root Cause\r\n\r\nBug 1 - Naming Inconsistency:\r\n\r\n1. Location: mcpgateway/schemas.py (19 locations), mcpgateway/db.py (2 locations)\r\n2. Issue: Error messages and comments referenced \"headers\" but all code logic (100+ locations) checked for \"authheaders\"\r\n3. Impact: Documentation/implementation mismatch confused users\r\n\r\nBug 2 - Event Handler:\r\n\r\n1. Location: mcpgateway/static/admin.js: 19448, 19458\r\n2. Issue: Inline oninput=\"updateAuthHeadersJSON('${containerId}')\" attributes in dynamically created HTML via innerHTML don't fire reliably in modern browsers\r\n3. Why workaround worked: Adding a 2nd header triggered line 19505 which manually called updateAuthHeadersJSON(), collecting ALL headers including the first one\r\n\r\n## 💡 Fix Description\r\n\r\nBug 1 - Naming Consistency (21 changes):\r\n\r\n1. Updated all error messages and comments to use \"authheaders\" consistently\r\n2. mcpgateway/schemas.py: 19 changes (error messages, field descriptions)\r\n3. mcpgateway/db.py: 2 changes (model comments)\r\n4. Design decision: Kept \"authheaders\" as canonical value since 100% of code logic uses it\r\n\r\nBug 2 - Event Handlers (4 changes):\r\n\r\n1. mcpgateway/static/admin.js:19448, 19458: Removed unreliable inline oninput attributes\r\n2. mcpgateway/static/admin.js:19489, 19504: Added programmatic addEventListener(\"input\", ...) after DOM insertion\r\n3. Design pattern: Matches existing codebase pattern (e.g., line 16949) where event handlers are attached programmatically for reliability\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅     |\r\n| Unit tests                            | `make test`          |    ✅     |\r\n| Coverage ≥ 80 %                       | `make coverage`      |   ✅      |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅     |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3855325053",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-25T16:20:25+00:00",
+      "body": "Tested locally and it worked well. I was able to reproduce the issue on main only once, though."
+    },
+    {
+      "id": "3858048827",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-26T02:20:08+00:00",
+      "body": "Found no major issues during review"
+    },
+    {
+      "id": "3858854540",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-26T06:58:34+00:00",
+      "body": "Approved after thorough review, rebase, and fixup.\n\n**Original PR (3 commits):** Correctly fixes error message text (schemas.py, db.py) and UI event handler bug (admin.js). All changes verified as safe and consistent.\n\n**Maintainer additions (2 commits):**\n- Fixed the runtime decode guard in `_initialize_gateway` (`\"headers\"` → `\"authheaders\"`) that was causing encoded auth strings to bypass `decode_auth()` on activation/refresh paths\n- Fixed remaining docstring inconsistencies in `GatewayRead` and `A2AAgentRead`\n- Fixed plugin docs (`gateway-hooks.md`)\n- Added 11 unit regression tests (error message text + decode path)\n- Added Playwright e2e test for the exact UI bug scenario\n- Tightened test assertions per Codex review\n\nAll 140 related unit tests pass. Playwright tests green."
+    },
+    {
+      "id": "3858855367",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-26T06:58:50+00:00",
+      "body": "Approved after thorough review, rebase, and fixup.\n\n**Original PR (3 commits):** Correctly fixes error message text (schemas.py, db.py) and UI event handler bug (admin.js). All changes verified as safe and consistent.\n\n**Maintainer additions (2 commits):**\n- Fixed the runtime decode guard in _initialize_gateway (headers to authheaders) that was causing encoded auth strings to bypass decode_auth() on activation/refresh paths\n- Fixed remaining docstring inconsistencies in GatewayRead and A2AAgentRead\n- Fixed plugin docs (gateway-hooks.md)\n- Added 11 unit regression tests (error message text + decode path)\n- Added Playwright e2e test for the exact UI bug scenario\n- Tightened test assertions per Codex review\n\nAll 140 related unit tests pass. Playwright tests green."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0b48c7bcba4fca44aeca5733d3afbdc37c0c0604",
+      "message": "rename headers to authheaders for consistency\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-25T06:46:50+00:00"
+    },
+    {
+      "sha": "ed9ffcbd75df393861ec08f5fa4de6060f1cb009",
+      "message": "fix population of custom headers\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-25T08:22:54+00:00"
+    },
+    {
+      "sha": "4f73bd9e25a0f9d60fdf137eac42bf45466df0aa",
+      "message": "web lint\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-25T12:35:27+00:00"
+    },
+    {
+      "sha": "49b91d29f4be0411051aee43727f5581ba7ecb70",
+      "message": "fix(auth): fix authheaders decode in gateway init and add regression tests\n\nFix remaining \"headers\" → \"authheaders\" references missed in the\noriginal PR commits:\n\n- gateway_service.py:3654: runtime decode guard checked \"headers\"\n  instead of \"authheaders\", causing encoded auth strings to be passed\n  raw to SSE/HTTP connections on activation and tool-refresh paths\n- gateway_service.py:3567: docstring still referenced \"headers\"\n- gateway-hooks.md:1194: plugin docs still referenced \"headers\"\n\nAdd differential tests:\n- 10 schema tests verifying error messages contain \"authheaders\"\n  across GatewayCreate, GatewayUpdate, A2AAgentCreate, A2AAgentUpdate\n- 1 regression test for _initialize_gateway decode path confirming\n  encoded authheaders strings are decoded before being passed to\n  sse_client\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T06:26:33+00:00"
+    },
+    {
+      "sha": "4e69a11c934e535222adefe6e71b6172e335d7cb",
+      "message": "fix(auth): address codex review — docstrings, test precision, e2e coverage\n\n1. Fix remaining \"headers\" → \"authheaders\" in GatewayRead and\n   A2AAgentRead class docstrings (schemas.py:3170, 3178-3179,\n   4937, 4946-4947).\n\n2. Add Playwright e2e regression test for the exact UI bug scenario:\n   select Custom Headers auth, type into key/value fields, verify the\n   hidden JSON field is populated by addEventListener handlers.\n   Add page-object helpers (add_auth_header, get_auth_headers_json).\n\n3. Remove unused decode_auth import from the regression test.\n\n4. Tighten schema error-message tests from pytest.raises((ValueError,\n   Exception)) to pytest.raises(ValidationError) — all paths raise\n   ValidationError, so the broader catch weakened regression precision.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T06:47:18+00:00"
+    },
+    {
+      "sha": "4351c8b385b2ad5dff1c80ecb12b386041751814",
+      "message": "Update docs\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T06:49:35+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 222,
+  "deletions": 38,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:24.349575",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:24.351273",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3246,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3246.json"
+  }
+}

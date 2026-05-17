@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2208,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2208"
+  },
+  "metadata": {
+    "title": "2182 - Observability loading issues",
+    "state": "closed",
+    "created_at": "2026-01-20T10:17:05+00:00",
+    "updated_at": "2026-01-20T21:52:27+00:00",
+    "closed_at": "2026-01-20T21:52:25+00:00",
+    "merged_at": "2026-01-20T21:52:25+00:00",
+    "author": "gcgoncalves",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nThis PR addresses several issues:\r\n\r\n1. PostgreSQL `GroupingError` in Observability: The observability API endpoints for tools, prompts, and resources would fail when using a PostgreSQL database due to an SQL GROUP BY error. This prevented users on PostgreSQL\r\n  from using the observability features.\r\n2. Frontend Chart Rendering Bugs: The observability dashboard experienced rendering errors, such as \"Canvas is already in use,\" when navigating between tabs or when charts were redrawn. This led to a broken and unreliable\r\n  user experience.\r\n3. Inconsistent Tooling Behavior: Some data-generating tools did not correctly handle workspace directories, and some write-intensive tools did not properly respect read-only mode.\r\n4. Partial Data Loading in UI: The observability sub-tabs (Metrics, Tools, Prompts) would re-fetch and re-render their content unnecessarily on every view, leading to slow performance and flickering.\r\n\r\nThese fixes are important for ensuring the platform is stable, performant, and database-agnostic, providing a reliable experience for administrators and developers monitoring the system.\r\n\r\nCloses #2182\r\n\r\n## 🔁 Reproduction Steps\r\n1. PostgreSQL `GroupingError`:\r\n    - Configure the application with a PostgreSQL database.\r\n    - Navigate to Admin > Observability and open the \"Tools\", \"Prompts\", or \"Resources\" sub-tabs.\r\n    - Observe API failures for the analytics data and errors in the UI.\r\n\r\n2. Frontend Chart Rendering Errors:\r\n    - Navigate to Admin > Observability.\r\n    - Quickly switch between the \"Metrics\", \"Tools\", and \"Prompts\" tabs.\r\n    - Observe \"Canvas is already in use\" errors in the browser's developer console and broken chart visualizations.\r\n\r\n## 🐞 Root Cause\r\n* PostgreSQL Error: The issue stemmed from SQLAlchemy generating different column expressions for the `SELECT` list and the `GROUP BY` clause when extracting data from JSON fields. PostgreSQL requires these expressions to be identical, which was not the case, leading to a GroupingError.\r\n* Frontend Chart Bug: Chart.js instances were not being properly destroyed before being re-initialized on the same `<canvas>` element. This occurred because each observability panel managed its own charts independently and without a proper cleanup lifecycle when the view was changed.\r\n\r\n## 💡 Fix Description\r\n* PostgreSQL Error: The queries in mcpgateway/admin.py were refactored to create a single SQLAlchemy expression for the JSON field extraction. This expression is now stored in a variable and reused in both the `SELECT` and `GROUP BY` clauses, ensuring compatibility with PostgreSQL's strict grouping requirements.\r\n* Frontend Chart Bug:\r\n    * A global window.chartRegistry was introduced in `mcpgateway/static/admin.js` to manage the lifecycle of all Chart.js instances centrally.\r\n    * The observability panels now register their charts with this registry and use it to destroy old charts before creating new ones.\r\n    * Logic was added to automatically destroy charts when a user navigates away from the observability tab, preventing memory leaks and rendering conflicts.\r\n    * The partial views are now loaded only once and cached, preventing redundant API calls and re-renders.\r\n\r\n## 📋 Testing\r\n* End-to-End Test (`tests/e2e/test_admin_apis.py`): A new test test_observability_endpoints_with_database was added to call the affected API endpoints and ensure they return a successful response with the correct data\r\n  structure when backed by a database.\r\n* Unit Tests (`tests/unit/mcpgateway/test_admin_observability_sql.py`): New test classes were added to verify the query construction. These tests are parameterized to run against both \"postgresql\" and \"sqlite\" dialects,\r\n  ensuring the fix works for both and doesn't introduce regressions.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 90 %                       | `make coverage`      |   ✅     |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "d55bc34ce99806c8628e6ad662494cc5b32e9f3a",
+      "message": "Resolve PostgreSQL GROUP BY error in analytics\n\nResolves a GroupingError that occurred in PostgreSQL when querying\nobservability data (tools, prompts, resources). The error was caused by\nSQLAlchemy generating different column expressions for the SELECT list\nand the GROUP BY clause when extracting data from JSON fields.\n\nThis fix refactors the queries to create a single expression for the\nJSON field extraction and reuses it in both the SELECT and GROUP BY\nclauses, ensuring compatibility with PostgreSQL's strict grouping requirements.\n\nAdditionally, this commit introduces:\n  - Unit tests parametrized for both PostgreSQL and SQLite dialects to\n  verify the fix at the query construction level.\n  - An end-to-end test that calls the affected API endpoints to ensure they\n  function correctly with a database backend.\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-01-19T15:57:24+00:00"
+    },
+    {
+      "sha": "3cd90fcb6828f85afc93706e18b15d00a3cbdd01",
+      "message": "2182 - Improve observability charts lifecycle\n\nIntroduces a global Chart.js registry to manage chart instances\nacross the admin UI, preventing \"canvas already in use\" errors.\nEnhances observability panels (metrics, tools, prompts) by:\n\n - Centralizing chart destruction and registration.\n - Implementing visibility checks to defer rendering of charts on hidden canvases.\n - Adding safeguards to prevent redundant and concurrent loading of partial views.\n - Ensuring proper cleanup of charts and auto-refresh intervals when navigating\n  between tabs or unloading the page.\n\nThese changes improve the stability and performance of the observability\ndashboard, providing a smoother user experience.\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-01-19T15:57:46+00:00"
+    },
+    {
+      "sha": "cdb13da81a4e40b7c9d7ceadda00c35593bd0214",
+      "message": "Linting and testing fix\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-01-20T10:07:45+00:00"
+    },
+    {
+      "sha": "e664b6f3b50d3a3b9473d46b679e00e8dd614541",
+      "message": "fix(tests): use proper user context in observability SQL tests\n\nThe RBAC decorator expects a dict with 'email' and 'db' keys, not a\nMagicMock. Updated the tests to use create_mock_user_context() which\nprovides the correct structure for permission checks.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T20:08:30+00:00"
+    },
+    {
+      "sha": "e8b8b751037b61bf66d89af739d26e445d91f0dc",
+      "message": "fix(observability): address chart lifecycle and cleanup issues\n\n- Remove redundant chart destruction on observability tab entry\n  (charts are already destroyed when leaving the tab)\n- Replace ineffective 'destroy' DOM event listeners with beforeunload\n  handlers (Alpine.js doesn't emit 'destroy' DOM events)\n- Move e2e test before __main__ block so it runs with pytest --main\n- Update observability_resources.html to use global chart registry\n  for consistent chart lifecycle management\n- Add resources- prefix to chart cleanup when leaving observability tab\n\nThese fixes address blank chart issues when returning to the\nobservability tab and ensure proper cleanup of intervals/handlers.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T21:32:35+00:00"
+    },
+    {
+      "sha": "03b638aa92db5a25b12d5e3a9fa106169b122810",
+      "message": "fix(observability): stop auto-refresh and reset state on tab leave\n\nAddresses two issues identified in review:\n\n1. Blank charts on return: When leaving observability tab, charts are\n   destroyed but `metricsLoaded` etc. flags remained true, preventing\n   partials from reloading. Now dispatch `observability:leave` event\n   that resets loaded flags so partials reload on return.\n\n2. Orphaned intervals: Auto-refresh timers continued running after\n   leaving the tab. Now each partial (metrics, tools, prompts, resources)\n   listens for `observability:leave` and calls cleanup() to stop intervals.\n\nThe cleanup lifecycle is now:\n- Tab leave: dispatches observability:leave event\n- Partials: listen for event, call cleanup() to stop intervals\n- Parent: resets loaded flags so partials reload on next visit\n- Event handlers are properly removed in cleanup() to avoid leaks\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T21:40:51+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 1210,
+  "deletions": 211,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:54.691676",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:54.695332",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2208,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2208.json"
+  }
+}

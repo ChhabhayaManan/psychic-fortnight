@@ -1,0 +1,86 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1782,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1782"
+  },
+  "metadata": {
+    "title": "Metrics rollup cl",
+    "state": "closed",
+    "created_at": "2025-12-30T00:02:13+00:00",
+    "updated_at": "2025-12-30T00:41:07+00:00",
+    "closed_at": "2025-12-30T00:41:06+00:00",
+    "merged_at": "2025-12-30T00:41:06+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# PR: Metrics Cleanup, Rollup, and Deletion-Aware Handling\r\n\r\n## Summary\r\n\r\nImplements configurable metrics cleanup and hourly rollup for long-term performance, plus deletion-aware handling for top performers. Closes #1735.\r\n\r\n## Changes\r\n\r\n### Metrics Cleanup Service\r\n- Automatic deletion of old raw metrics with batched processing (prevents long table locks)\r\n- Configurable retention period (`METRICS_RETENTION_DAYS`, default: 30)\r\n- Background task running at configurable intervals (`METRICS_CLEANUP_INTERVAL_HOURS`, default: 24)\r\n- Hour-aligned cutoffs to prevent gaps with rollup queries\r\n- Special handling for `retention=0` (delete all) that bypasses hour-alignment\r\n\r\n### Metrics Rollup Service\r\n- Pre-aggregation of raw metrics into hourly summary tables\r\n- Percentile calculation (p50, p95, p99) for SLA reporting\r\n- Configurable late-data window (`METRICS_ROLLUP_LATE_DATA_HOURS`, default: 4)\r\n- Smart backfill detection on startup\r\n- Upsert logic for safe re-runs\r\n\r\n### Hourly Summary Tables\r\nNew tables for pre-aggregated metrics:\r\n- `tool_metrics_hourly`\r\n- `resource_metrics_hourly`\r\n- `prompt_metrics_hourly`\r\n- `server_metrics_hourly`\r\n- `a2a_agent_metrics_hourly`\r\n\r\nEach includes entity ID, preserved name, counts, min/max/avg response times, and percentiles.\r\n\r\n### Combined Raw + Rollup Queries\r\n- `metrics_query_service.py` provides unified queries combining recent raw data with historical rollups\r\n- Hour-aligned cutoff prevents double-counting at boundary\r\n- Weighted averages using `sum(avg * count) / sum(count)`\r\n- Proper NULL handling for deleted entities (GROUP BY preserved_name, IS NULL check)\r\n\r\n### Deletion-Aware Top Performers\r\n- `include_deleted` parameter (default: False) - deleted entities hidden by default\r\n- `purge_metrics` option on delete endpoints to fully remove metrics data\r\n- Batched purge using `METRICS_CLEANUP_BATCH_SIZE` for performance\r\n- Atomic transactions (raw metrics → hourly rollups → entity delete order)\r\n- Cache invalidation on delete/purge\r\n\r\n### Admin API Endpoints\r\n- `POST /api/metrics/cleanup` - Manual cleanup trigger\r\n- `POST /api/metrics/rollup` - Manual rollup trigger\r\n- `GET /api/metrics/stats` - Cleanup/rollup statistics\r\n- `GET /api/metrics/config` - Current configuration (includes `late_data_hours`)\r\n\r\n### Admin UI\r\n- Maintenance tab for metrics management\r\n- Two-step delete confirmation with optional purge prompt\r\n- Reset metrics now clears hourly rollups too\r\n\r\n## Configuration\r\n\r\n| Variable | Description | Default | Range |\r\n|----------|-------------|---------|-------|\r\n| `METRICS_CLEANUP_ENABLED` | Enable automatic cleanup | `true` | bool |\r\n| `METRICS_RETENTION_DAYS` | Days to retain raw metrics | `30` | 1-365 |\r\n| `METRICS_CLEANUP_INTERVAL_HOURS` | Hours between cleanup runs | `24` | 1-168 |\r\n| `METRICS_CLEANUP_BATCH_SIZE` | Batch size for deletion | `10000` | 100-100000 |\r\n| `METRICS_ROLLUP_ENABLED` | Enable hourly rollup | `true` | bool |\r\n| `METRICS_ROLLUP_INTERVAL_HOURS` | Hours between rollup runs | `1` | 1-24 |\r\n| `METRICS_ROLLUP_RETENTION_DAYS` | Days to retain rollup data | `365` | 30-3650 |\r\n| `METRICS_ROLLUP_LATE_DATA_HOURS` | Hours to re-process for late data | `4` | 1-48 |\r\n| `METRICS_DELETE_RAW_AFTER_ROLLUP` | Delete raw after rollup (aggressive) | `false` | bool |\r\n| `METRICS_DELETE_RAW_AFTER_ROLLUP_DAYS` | Days before raw deletion if rollup exists | `7` | 1-30 |\r\n\r\n## Performance Characteristics\r\n\r\n**Before (unbounded growth):**\r\n- ~45M raw metrics rows/month at 1000 req/min\r\n- Aggregate query P95: 500ms → 5s as tables grow\r\n\r\n**After (with cleanup + rollup):**\r\n- Raw metrics: ~1.5M rows (30 days)\r\n- Hourly rollups: ~365K rows (1 year)\r\n- Historical query P95: <50ms\r\n- **90-99% reduction** in storage and query latency\r\n\r\n## Files Changed\r\n\r\n### New Files\r\n- `mcpgateway/services/metrics_cleanup_service.py`\r\n- `mcpgateway/services/metrics_rollup_service.py`\r\n- `mcpgateway/services/metrics_query_service.py`\r\n- `mcpgateway/routers/metrics_maintenance.py`\r\n- `mcpgateway/alembic/versions/q1b2c3d4e5f6_add_metrics_hourly_rollup_tables.py`\r\n- `docs/docs/architecture/adr/030-metrics-cleanup-rollup.md`\r\n\r\n### Modified Files\r\n- `mcpgateway/main.py` - Register router, start background tasks\r\n- `mcpgateway/admin.py` - Maintenance tab, purge support\r\n- `mcpgateway/config.py` - New settings\r\n- `mcpgateway/db.py` - Hourly rollup models\r\n- `mcpgateway/services/tool_service.py` - Combined queries, purge, reset\r\n- `mcpgateway/services/resource_service.py` - Combined queries, purge, reset\r\n- `mcpgateway/services/prompt_service.py` - Combined queries, purge, reset\r\n- `mcpgateway/services/server_service.py` - Combined queries, purge, reset\r\n- `mcpgateway/services/a2a_service.py` - Combined queries, purge, reset\r\n- `.env.example` - Document new settings\r\n- `README.md` - Configuration table\r\n- `docs/docs/manage/configuration.md` - Full documentation\r\n- `charts/mcp-stack/values.yaml` - Helm chart defaults\r\n- `Makefile` - Fixed `make verify` to use `uv build`/`uvx`\r\n\r\n## Testing\r\n\r\n```bash\r\n# Run all metrics-related tests\r\npytest tests/unit/mcpgateway/test_metrics.py\r\npytest tests/unit/mcpgateway/services/test_metrics_cleanup_service.py\r\npytest tests/unit/mcpgateway/services/test_metrics_rollup_service.py\r\n\r\n# Test purge and reset paths\r\npytest tests/unit/mcpgateway/services/test_tool_service.py -k \"purge_metrics or reset_metrics\"\r\npytest tests/unit/mcpgateway/services/test_resource_service.py -k \"purge_metrics or reset_metrics\"\r\npytest tests/unit/mcpgateway/services/test_prompt_service.py -k \"purge_metrics or reset_metrics\"\r\npytest tests/unit/mcpgateway/services/test_server_service.py -k \"purge_metrics or reset_metrics\"\r\npytest tests/unit/mcpgateway/services/test_a2a_service.py -k \"purge_metrics or reset_metrics\"\r\n\r\n# Verify package build\r\nmake verify\r\n```\r\n\r\n## Migration\r\n\r\n1. Apply migration: `alembic upgrade head`\r\n2. Services auto-start with default configuration\r\n3. First rollup processes existing data\r\n4. First cleanup runs after 24h (default)\r\n\r\nNo breaking changes to existing APIs.\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "dafa968be0d66fe11d89b0072e5679258df5d059",
+      "message": "[ENHANCEMENT]: Add metrics cleanup and rollup for long-term performance #1735\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-29T19:24:34+00:00"
+    },
+    {
+      "sha": "6f673fb9aaed1f31a6a9b5a795bc9de0731bf115",
+      "message": "[ENHANCEMENT]: Add metrics cleanup and rollup for long-term performance #1735\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-29T19:24:38+00:00"
+    },
+    {
+      "sha": "37d2e5c32fd4de5900ceb3d0161ea9051f6bc64c",
+      "message": "[ENHANCEMENT]: Add metrics cleanup and rollup for long-term performance #1735\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-29T21:55:31+00:00"
+    },
+    {
+      "sha": "8b2ea5609e576623c00bdda111c053b750412bb6",
+      "message": "[ENHANCEMENT]: Add metrics cleanup and rollup for long-term performance #1735\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-29T22:22:01+00:00"
+    },
+    {
+      "sha": "530d35d1c4cbf2e9b2e0c226f88efafe3347c9a5",
+      "message": "[ENHANCEMENT]: Add metrics cleanup and rollup for long-term performance #1735\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-29T23:14:29+00:00"
+    },
+    {
+      "sha": "873084788591256c26065d35a641c341e6f9f784",
+      "message": "[ENHANCEMENT]: Add metrics cleanup and rollup for long-term performance #1735\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-29T23:55:27+00:00"
+    },
+    {
+      "sha": "4046932934235f306dd6b3d60eb0ccb9d075d936",
+      "message": "[ENHANCEMENT]: Add metrics cleanup and rollup for long-term performance #1735\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-30T00:24:21+00:00"
+    },
+    {
+      "sha": "c8c7e06dfc8389c0005fdbc76b9eae93e6ffaab3",
+      "message": "[ENHANCEMENT]: Add metrics cleanup and rollup for long-term performance #1735\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-30T00:30:37+00:00"
+    }
+  ],
+  "files_changed": 37,
+  "additions": 4487,
+  "deletions": 536,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:19.137486",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:19.139114",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1782,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1782.json"
+  }
+}

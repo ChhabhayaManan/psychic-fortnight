@@ -1,0 +1,39 @@
+{
+  "id": "884d92c4-a216-4f05-b8d0-650b4ae3c8c5",
+  "title": "[CHORE]: Remove `init_db()` create_all bypass and migrate raw CREATE TABLE to Alembic",
+  "summary": "## Summary",
+  "reasoning": "## Summary\n\nTwo locations create database schema outside Alembic migrations, risking inconsistent schema state and broken upgrade paths:\n\n1. **`mcpgateway/db.py:6027`** — `init_db()` calls `Base.metadata.create_all()` directly\n2. **`mcp-servers/python/mcp_eval_server/mcp_eval_server/storage/results_store.py:35–70`** — raw `CREATE TABLE IF NOT EXISTS` SQL for three tables\n\n---\n\n## 1. `mcpgateway/db.py` — `init_db()` / `__main__` block\n\n### Location\n\n```\nmcpgateway/db.py:6027–6038   # init_db() definition\nmcpgateway/db.py:6595–6599   # __main__ block that calls init_db()\n```\n\n### Code\n\n```python\ndef init_db():\n    try:\n        Base.metadata.create_all(bind=engine)   # <-- bypasses Alembic\n    except SQLAlchemyError as e:\n        raise Exception(f\"Failed to initialize database: {str(e)}\")\n\nif __name__ == \"__main__\":\n    wait_for_db_ready(...)\n    init_db()\n```\n\n### Problem\n\n- `create_all()` creates every table in `Base.metadata` but writes **no Alembic version row**.\n- Running `python -m ",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "cafalchio",
+    "Lang-Akshay"
+  ],
+  "tags": [
+    "chore",
+    "triage",
+    "database",
+    "rest",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "cfa04828-3f7c-472b-a9dd-a08cac072cf3",
+      "source_type": "issue",
+      "source_id": "4766",
+      "url": "https://github.com/IBM/mcp-context-forge/issues/4766",
+      "contributor": "Lang-Akshay",
+      "timestamp": "2026-05-14T12:13:20Z",
+      "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4766.json"
+    }
+  ],
+  "timestamp": "2026-05-14T12:13:20Z",
+  "created_at": "2026-05-17T18:18:43.860448",
+  "updated_at": "2026-05-17T18:18:43.860450",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T18:18:43.861287",
+    "artifact_type": "decisions",
+    "artifact_id": "884d92c4-a216-4f05-b8d0-650b4ae3c8c5"
+  }
+}

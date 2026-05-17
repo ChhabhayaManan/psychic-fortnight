@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3615,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3615"
+  },
+  "metadata": {
+    "title": "fix(metrics): aggregate from both raw and hourly rollup tables (#3598) ",
+    "state": "closed",
+    "created_at": "2026-03-11T11:24:21+00:00",
+    "updated_at": "2026-03-12T05:30:57+00:00",
+    "closed_at": "2026-03-12T05:30:56+00:00",
+    "merged_at": null,
+    "author": "rakdutta",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "\r\n  ## 🐛 Bug Fix\r\n\r\n  Fixes #3598 - Metrics API returns `total_executions = 0` after hourly rollup and cleanup.\r\n\r\n  ## 📋 Problem\r\n\r\n  When calling `/servers/{server_id}/tools?include_metrics=true` (and similar endpoints for resources/prompts/servers), the API returned `total_executions = 0` after raw metrics were aggregated into hourly rollup tables and cleaned up.\r\n\r\n  This affected all production deployments using the default configuration where `METRICS_DELETE_RAW_AFTER_ROLLUP=true` (default behavior).\r\n\r\n  **Root Cause**: The `metrics_summary` property only queried raw metrics tables (`tool_metrics`, etc.) and ignored hourly rollup tables (`tool_metrics_hourly`, etc.) where historical data resides after cleanup.\r\n\r\n  ## ✅ Solution\r\n\r\n  Modified `metrics_summary` property in all affected entity models to query **BOTH**:\r\n  - **Raw metrics tables** - Recent data not yet rolled up/cleaned\r\n  - **Hourly rollup tables** - Historical data after cleanup\r\n\r\n  The fix properly aggregates:\r\n  - Total/success/failure counts (sum from both sources)\r\n  - Min/max response times (extremes from both sources)\r\n  - Average response times (weighted average based on counts)\r\n  - Last execution timestamp (most recent from either source)\r\n\r\n  ## 📝 Changes\r\n\r\n  ### Core Fix\r\n  - `mcpgateway/db.py` - Fixed `metrics_summary` for all entities:\r\n    - `Tool.metrics_summary`\r\n    - `Resource.metrics_summary`\r\n    - `Prompt.metrics_summary` \r\n    - `Server.metrics_summary` \r\n\r\n  ### Tests\r\n  - `tests/unit/mcpgateway/test_db.py` - Updated 4 unit tests to mock dual queries:\r\n    - `test_tool_metrics_summary_sql_path`\r\n    - `test_resource_metrics_summary_sql_path`\r\n    - `test_prompt_metrics_summary_sql_path`\r\n    - `test_server_metrics_summary_sql_path`\r\n\r\n  ## ✅ Verification\r\n\r\n  ### Before Fix\r\n  ```bash\r\n  total_executions BEFORE deletion: 10\r\n  total_executions AFTER deletion: 0  ❌ BUG\r\n\r\n  After Fix\r\n\r\n  total_executions BEFORE deletion: 10\r\n  total_executions AFTER deletion: 10  ✅ FIXED\r\n\r\n  Test Results\r\n\r\n  - ✅ Reproduction test passes\r\n  - ✅ All 30 metrics tests pass\r\n  - ✅ Full test suite: 14,236 passed, 0 failed\r\n\r\n  🎯 Impact\r\n\r\n  Before\r\n\r\n  - ❌ Dashboards showed zero executions after metrics rollup\r\n  - ❌ Historical analytics disappeared\r\n  - ❌ Monitoring/alerting systems failed\r\n\r\n  After\r\n\r\n  - ✅ Metrics persist across rollup/cleanup cycles\r\n  - ✅ Historical data visible via API\r\n  - ✅ Dashboards show correct execution counts\r\n  - ✅ Monitoring/alerting systems work correctly\r\n\r\n  🔧 Technical Details\r\n\r\n  Query Strategy: Uses two queries per entity:\r\n  1. Aggregate from raw metrics table (recent data)\r\n  2. Aggregate from hourly rollup table (historical data)\r\n  3. Combine results with proper weighted averages\r\n\r\n  Edge Cases Handled:\r\n  - ✅ No hourly data (new entities) → returns raw metrics only\r\n  - ✅ No raw data (old entities) → returns hourly aggregates only\r\n  - ✅ Both sources present → correctly aggregates from both\r\n  - ✅ No data at all → returns zeros/nulls as expected\r\n\r\n  📊 Performance\r\n\r\n  - Query count: 1 → 2 queries per metrics_summary call\r\n  - Impact: Minimal - simple aggregations with indexed foreign keys\r\n  - Optimization: Future work could use UNION ALL or materialized views\r\n\r\n\r\n  🧪 Testing\r\n\r\n  # Run metrics tests\r\n  pytest tests/unit/mcpgateway/test_db.py -k \"metric\" -v\r\n\r\n  # Run full suite\r\n  make test\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "88f6a023750e064737246fc338f707f72396d0c9",
+      "message": "issue fixed\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-11T11:16:38+00:00"
+    },
+    {
+      "sha": "2641d33d80fd0e1375bdabda44e29f83005467eb",
+      "message": "remove md\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-11T11:26:45+00:00"
+    },
+    {
+      "sha": "6065be43f871deedc8cdf30bc1cc4ba3d7d792f5",
+      "message": "refactor\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-11T11:42:59+00:00"
+    },
+    {
+      "sha": "773c90fb028739462a98b5b16a6205299d9ae41d",
+      "message": "code fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-11T15:26:14+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 432,
+  "deletions": 358,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:04.916521",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:04.919049",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3615,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3615.json"
+  }
+}

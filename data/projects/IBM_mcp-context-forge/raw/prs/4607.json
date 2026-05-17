@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4607,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4607"
+  },
+  "metadata": {
+    "title": "fix: bound in-memory rate limit storage to prevent memory exhaustion (CWE-400)",
+    "state": "open",
+    "created_at": "2026-05-05T18:32:28+00:00",
+    "updated_at": "2026-05-05T18:32:29+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "sebastiondev",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nThe in-memory rate limit storage in `mcpgateway/admin.py` is an unbounded `defaultdict(list)` keyed by client IP. Each new client IP that hits a `@rate_limit` endpoint adds a new key, and keys are never removed — even after the timestamps for that IP have all expired. Over time (or under sustained load from many distinct source IPs) the dict grows without bound, eventually exhausting process memory.\n\nThis PR bounds the storage to 10,000 entries using an `OrderedDict` with LRU-style eviction, and prunes keys whose timestamps have fully expired.\n\n- **CWE:** CWE-400 (Uncontrolled Resource Consumption)\n- **Severity:** Low — see \"Honest scoping\" below\n- **File:** `mcpgateway/admin.py` — `rate_limit_storage` and the `rate_limit()` decorator\n- **Data flow:** `request.client.host` (TCP peer address) → used as a dict key in `rate_limit_storage` → key is created on first request and never deleted.\n\n## Fix\n\n```python\n# Before\nrate_limit_storage = defaultdict(list)\n\n# After\n_RATE_LIMIT_MAX_KEYS: int = 10_000\nrate_limit_storage: OrderedDict[str, list] = OrderedDict()\n```\n\nInside the decorator:\n\n1. Prune expired timestamps for the current IP into a local list, then write back.\n2. `move_to_end(client_ip)` so active IPs are treated as most-recently-used.\n3. Evict the oldest entries with `popitem(last=False)` while the dict exceeds `_RATE_LIMIT_MAX_KEYS`.\n4. Remove keys whose timestamp lists are empty or whose last timestamp is older than the 60-second window.\n\nThe cap of 10,000 was chosen to comfortably accommodate any plausible legitimate client population for an admin API while keeping worst-case memory bounded (~hundreds of KB).\n\n## Tests\n\n- The existing test in `tests/unit/mcpgateway/test_admin.py` was updated to assert `rate_limit_storage` is an `OrderedDict` rather than a `defaultdict`, and to use the new access pattern.\n- The decorator's docstring example was updated to match the new type.\n- All existing `rate_limit` behavior (limit enforcement, 429 response, per-IP isolation, time-window pruning) is preserved.\n\n## Security analysis\n\nWe verified the issue is real but its exploitability is limited:\n\n- **Authenticated only.** Every endpoint that uses `@rate_limit` is also gated by `@require_permission`, so an attacker needs valid credentials before any of their traffic reaches this code path.\n- **TCP peer, not header.** The key is `request.client.host` (the TCP source address), not a header-derived value. `X-Forwarded-For` spoofing does **not** create new keys — distinct TCP source IPs are required, which means a real botnet or proxy pool.\n- **Admin API is dev-only by policy.** `SECURITY.md` documents that the Admin UI/API should not be exposed in production.\n\nGiven those preconditions, growth is slow and gated. But \"unbounded dict on a long-running process\" is still a real defense-in-depth bug worth fixing — especially since the fix is small, local, and changes no externally observable behavior.\n\n## Honest scoping\n\nBefore submitting we tried to disprove this. We checked whether anything upstream (auth, framework limits, or another cleanup path) would already bound the dict — nothing does; entries are added on first use and there is no eviction or TTL anywhere. We also want to be straightforward that the worst-case attacker here is an authenticated user with access to many distinct source IPs against an admin API that your own SECURITY.md says shouldn't be in production. That puts this firmly in low-severity / hardening territory rather than a critical DoS, and we'd rather under-claim than over-claim.\n\ncc @lewiswigmore\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "417d9bdc15319810fd2168c1fe3fcf819bb41458",
+      "message": "fix: bound in-memory rate limit storage to prevent memory exhaustion (CWE-400)\n\nReplace unbounded defaultdict(list) with a capped OrderedDict for\nrate_limit_storage. The storage is now bounded to 10,000 keys maximum.\n\nChanges:\n- Use OrderedDict instead of defaultdict for rate_limit_storage\n- Evict least-recently-used IPs when storage exceeds _RATE_LIMIT_MAX_KEYS\n- Remove keys whose timestamps have all expired (stale key cleanup)\n- Update existing test to validate stale entry cleanup behavior\n- Update doctest to reflect OrderedDict type\n\nSigned-off-by: Sebastion <sebastion@sebastion.dev>",
+      "author": "Sebastion",
+      "date": "2026-03-25T00:49:19+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 39,
+  "deletions": 21,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:55.944095",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:55.944966",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4607,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4607.json"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4241,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4241"
+  },
+  "metadata": {
+    "title": "fix: implement LRU eviction for SSL context cache and unify OAuth error handling",
+    "state": "open",
+    "created_at": "2026-04-16T09:02:10+00:00",
+    "updated_at": "2026-04-28T10:46:55+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "SHOULD",
+      "api"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4239\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes two critical bugs affecting production deployments:\r\n\r\n1. **SSL Context Cache Thrash (HIGH)**: The SSL context cache was performing a full wipe when reaching capacity (100 entries), causing severe performance degradation in deployments with >100 gateways using custom CA certificates. Now implements proper LRU (Least Recently Used) eviction.\r\n\r\n2. **OAuth Error Handling Inconsistency (MEDIUM)**: The `refresh_token` method used manual status code checking while other OAuth flows (`_client_credentials_flow`, `_password_flow`) used `raise_for_status()`. This inconsistency has been unified for better maintainability.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🔧 Changes Made\r\n\r\n### Issue 1: SSL Context Cache LRU Eviction\r\n**File:** `mcpgateway/utils/ssl_context_cache.py`\r\n\r\n- Imported `OrderedDict` from `collections` for LRU tracking\r\n- Changed cache data structures from `dict` to `OrderedDict`\r\n- Added `move_to_end()` calls on cache hits to mark entries as recently used\r\n- Replaced full cache wipe with `popitem(last=False)` to remove only the oldest entry\r\n- Added graceful handling for empty timestamps dict during eviction\r\n\r\n**Before (Cache Thrash):**\r\n```python\r\nif len(_ssl_context_cache) > _SSL_CONTEXT_CACHE_MAX_SIZE:\r\n    _ssl_context_cache.clear()  # Wiped ALL 100+ entries\r\n```\r\n\r\n**After (LRU Eviction):**\r\n```python\r\nif len(_ssl_context_cache) >= _SSL_CONTEXT_CACHE_MAX_SIZE:\r\n    _ssl_context_cache.popitem(last=False)  # Remove oldest only\r\n    if _ssl_context_cache_timestamps:\r\n        _ssl_context_cache_timestamps.popitem(last=False)\r\n```\r\n\r\n### Issue 2: OAuth Error Handling Consistency\r\n**File:** `mcpgateway/services/oauth_manager.py`\r\n\r\n- Standardized `refresh_token` to use `response.raise_for_status()` like other OAuth flows\r\n- Preserved special handling for 400/401 errors (invalid refresh tokens) via `HTTPStatusError` exception handling\r\n- Maintained retry logic with exponential backoff for transient errors\r\n\r\n**Before (Manual Status Check):**\r\n```python\r\nif response.status_code == 200:\r\n    token_response = response.json()\r\n    # ...\r\nelse:\r\n    raise OAuthError(...)\r\n```\r\n\r\n**After (Consistent raise_for_status):**\r\n```python\r\nresponse.raise_for_status()\r\ntoken_response = response.json()\r\n# ...\r\nexcept httpx.HTTPStatusError as e:\r\n    if e.response.status_code in [400, 401]:\r\n        raise OAuthError(f\"Refresh token invalid or expired: {e.response.text}\")\r\n```\r\n\r\n### Test Updates\r\n**Files:** `tests/unit/mcpgateway/utils/test_ssl_context_cache.py`, `tests/unit/mcpgateway/services/test_oauth_manager.py`, `tests/unit/mcpgateway/services/test_oauth_manager_pkce.py`\r\n\r\n- Updated SSL cache tests to expect LRU behavior (100 entries maintained, oldest evicted)\r\n- Updated OAuth tests to mock `raise_for_status()` with `HTTPStatusError` exceptions\r\n- Added `Mock` import to `test_oauth_manager_pkce.py`\r\n- Adjusted error message regex patterns to match new error handling format\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | Pass ✅ |\r\n| Unit tests                | `make test`     | Pass ✅ |\r\n| Coverage ≥ 80%            | `make coverage` | Pass ✅ |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Impact Assessment\r\n\r\n**Issue 1 - SSL Cache (HIGH SEVERITY):**\r\n- **Before**: Every 101st unique CA certificate cleared all 100 cached SSL contexts\r\n- **After**: Only the least recently used entry is evicted, maintaining cache efficiency\r\n- **Benefit**: Eliminates cache thrash in high-traffic deployments with many gateways\r\n\r\n**Issue 2 - OAuth Consistency (MEDIUM SEVERITY):**\r\n- **Before**: Three different error handling patterns across OAuth flows\r\n- **After**: Unified `raise_for_status()` pattern with specialized exception handling\r\n- **Benefit**: Improved code maintainability and predictable error behavior\r\n\r\n### Testing Strategy\r\nAll existing tests updated to reflect new behavior:\r\n- SSL cache tests verify LRU eviction (oldest entry removed, 100 entries maintained)\r\n- OAuth tests mock `HTTPStatusError` exceptions for status code validation\r\n- Special handling for 400/401 refresh token errors preserved and tested\r\n\r\n### Backward Compatibility\r\n✅ **Fully backward compatible** - No breaking changes to public APIs or behavior, only internal implementation improvements.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "f63f8b4eb741047d736180f89226ed45f885d9e4",
+      "message": "fix: implement LRU eviction for SSL context cache and unify OAuth error handling\n\nIssue 1 - SSL Context Cache Thrash (HIGH):\n- Replace full cache wipe with LRU eviction using OrderedDict\n- Move cache entries to end on access to mark as recently used\n- Remove only oldest entry when cache reaches capacity (100 entries)\n- Prevents cache thrash in deployments with >100 gateways using custom CA certs\n- Gracefully handle empty timestamps dict during eviction\n\nIssue 2 - OAuth Error Handling Consistency (MEDIUM):\n- Standardize refresh_token to use raise_for_status() like other OAuth flows\n- Preserve special handling for 400/401 errors (invalid refresh tokens)\n- Maintain retry logic with exponential backoff for transient errors\n- Improves code maintainability and predictability\n\nTest Updates:\n- Update SSL cache tests to expect LRU behavior (100 entries maintained)\n- Update OAuth tests to mock raise_for_status() with HTTPStatusError\n- Add Mock import to test_oauth_manager_pkce.py\n- Adjust error message regex patterns for new error handling\n\nFixes cache thrash under high traffic and unifies OAuth error patterns.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-16T08:58:22+00:00"
+    },
+    {
+      "sha": "02c2dd9585ffccc8db9969f3059cd3d7c8edf63b",
+      "message": "fix: resolve linting issues in SSL context cache\n\n- Remove unused typing.Any and typing.Dict imports (ruff F401)\n- Fix mypy type errors for _SSL_CONTEXT_CACHE_TTL variable\n- Add type annotation for ca_certificate parameter to accept str | bytes\n- Remove trailing whitespace from test file (pre-commit hook)\n\nResolves mypy assignment and arg-type errors while maintaining backward compatibility.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-16T09:18:47+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 86,
+  "deletions": 50,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:13.046940",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:13.048349",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4241,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4241.json"
+  }
+}

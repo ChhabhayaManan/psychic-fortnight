@@ -1,0 +1,178 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3219,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3219"
+  },
+  "metadata": {
+    "title": "[TESTING][SECURITY]: Add OWASP A01 direct and ZAP DAST test suites",
+    "state": "closed",
+    "created_at": "2026-02-24T12:02:34+00:00",
+    "updated_at": "2026-03-10T20:09:29+00:00",
+    "closed_at": "2026-03-10T20:09:27+00:00",
+    "merged_at": "2026-03-10T20:09:27+00:00",
+    "author": "gcgoncalves",
+    "labels": [
+      "testing",
+      "security",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nRelates to #259\r\n\r\n---\r\n\r\n## 📝 Summary\r\nIntroduces two-layer DAST coverage for OWASP A01:2025 – Broken Access Control.\r\n\r\nLayer 1 – direct Playwright API tests (no ZAP required, marker: owasp_a01):\r\n- Force browsing: 7 endpoints must reject anonymous requests with 401\r\n- IDOR/cross-tenant: Team A token must not access Team B resources (CWE-639)\r\n- Vertical privilege escalation: non-admin cannot reach admin-only APIs (CWE-269/285)\r\n- JWT tampering: unsigned, payload-modified, expired, alg=none, wrong iss/aud (CWE-345/287)\r\n- CORS: no wildcard or reflected ACAO header for arbitrary origins (CWE-942)\r\n\r\nLayer 2 – ZAP DAST integration (marker: owasp_a01_zap, skipped when ZAP_BASE_URL unset):\r\n- Spider discovers protected endpoints; passive scan checks for HIGH/CRITICAL A01 CWEs; active scan checks for CRITICAL findings; JSON report written to tests/reports/\r\n\r\nInfrastructure:\r\n- docker-compose.yml: add zap service under --profile testing (ports 8090/8091, waits for nginx health, 60 s JVM start_period, 2 CPU / 2 GB limit)\r\n- pyproject.toml: add python-owasp-zap-v2.4>=0.0.21 to playwright extras; register owasp_a01 and owasp_a01_zap pytest markers\r\n\r\nRun without ZAP:  make test-owasp\r\nRun with ZAP:     make testing-up test-zap\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [X] Other (describe below)\r\n- [X] Testing\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] Documentation updated (if applicable)\r\n- [X] No secrets or credentials committed\r\n",
+  "comments": [
+    {
+      "id": "2858410851",
+      "author": "brian-hussey",
+      "created_at": "2026-02-26T11:11:12+00:00",
+      "body": "This one might cause false positives as it is, at least this way we get a skip instead of a false positive if it times out.\n```suggestion\n            pytest.skip(\"Active scan exceeded 15 min timeout - results incomplete. Increase timeout or optimize scan scope.\")\n```"
+    },
+    {
+      "id": "2858431774",
+      "author": "brian-hussey",
+      "created_at": "2026-02-26T11:15:05+00:00",
+      "body": "If you can use specific Exceptions here instead of the generic exception it creates far more robust code.\n\n```suggestion\n            except (ConnectionError, TimeoutError, ImportError) as exc:\n                pytest.skip(\n                    \"ZAP connection lost during active scan; proceeding with partial results. Error: %s\",\n                    exc,\n                )\n                break\n            \n```\n(you'll need to import those exception types as well."
+    },
+    {
+      "id": "2858433413",
+      "author": "brian-hussey",
+      "created_at": "2026-02-26T11:15:25+00:00",
+      "body": "Same as above."
+    },
+    {
+      "id": "2858439168",
+      "author": "brian-hussey",
+      "created_at": "2026-02-26T11:16:38+00:00",
+      "body": "As below, you should use more specific exceptions if possible before defaulting to the generic Exception."
+    },
+    {
+      "id": "2858444733",
+      "author": "brian-hussey",
+      "created_at": "2026-02-26T11:17:47+00:00",
+      "body": "This one can lead to false positive/missing coverage, if you change it to:\n\n```suggestion\n        pytest.skip(\n        f\"ZAP Replacer add-on required for authenticated endpoint testing. \"\n        f\"Install it in ZAP or tests will only cover public endpoints. Error: {exc}\"\n    )\n```\nAt least it will notify of the skip and give a message that is useful to resolve."
+    },
+    {
+      "id": "2858570104",
+      "author": "gcgoncalves",
+      "created_at": "2026-02-26T11:44:23+00:00",
+      "body": "Awesome catch here!"
+    },
+    {
+      "id": "2859711405",
+      "author": "brian-hussey",
+      "created_at": "2026-02-26T15:32:05+00:00",
+      "body": "Code fixed above, this looks stale but isn't. Resolving."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3848157165",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-24T14:07:19+00:00",
+      "body": "- Summary of change\n\n  - Adds OWASP A01 (Broken Access Control) security tests under tests/playwright/security/owasp/ with two layers:\n  - Direct Playwright API tests for force-browsing, IDOR (cross-tenant/user), privilege escalation, JWT tampering/expiry, and CORS behavior.\n  - Optional OWASP ZAP DAST scan with spidering, passive/active checks, and JSON report artifacts.\n  - Adds Make targets test-owasp and test-zap.\n  - Adds a ZAP service to docker-compose.yml for the testing profile.\n  - Updates testing docs navigation to include “Security Testing”.\n \n - **What’s good**\n   - Strong, focused A01 coverage with realistic attack patterns.\n   - ZAP integration is gated by environment variables and produces reports for CI artifacts.\n   - Fixtures create/cleanup test users, teams, and servers to keep isolation.\n- **Concerns / improvements**\n   - pyproject.toml was not updated with the python-owasp-zap-v2.4 dependency or new pytest markers (owasp_a01, owasp_a01_zap) as stated in the PR summary.\n   - docs/docs/testing/security.md is referenced in nav but doesn’t exist.\n   - Default pytest addopts ignore tests/playwright, so make test-owasp / make test-zap likely won’t run unless addopts are overridden.\n   - ZAP_TARGET_URL default uses host.docker.internal, which isn’t available on many Linux setups; consider documenting http://nginx:8080 as a Linux-safe default.\n \n- Security notes\n  - ZAP is bound to 0.0.0.0 with api.addrs.addr.name=.* Consider restricting to 127.0.0.1 or requiring a non-default key to avoid accidental exposure.\n   - Only one test asserts expiration; most JWT tokens don’t set exp. Recommend adding explicit exp to all test tokens for realism while keeping the dedicated expired-token test.\n\n"
+    },
+    {
+      "id": "3854348075",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-25T13:41:59+00:00",
+      "body": "Thanks @gcgoncalves , it looks good. But PR is still draft. Approving it still"
+    },
+    {
+      "id": "3860222720",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-02-26T11:19:49+00:00",
+      "body": "All functions correctly, the design is good.\nJust a couple of small robustness changes to exception handling but more importantly the chances of false positive results."
+    },
+    {
+      "id": "3860419909",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T11:44:23+00:00",
+      "body": ""
+    },
+    {
+      "id": "3861769024",
+      "author": "brian-hussey",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T15:32:05+00:00",
+      "body": ""
+    },
+    {
+      "id": "3861783875",
+      "author": "brian-hussey",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-26T15:34:20+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "3874923424",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-02T09:13:51+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "3925101202",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T20:06:52+00:00",
+      "body": "## Review Summary\r\n\r\nRebased onto main, reviewed, tested, and enhanced. **31/31 tests pass** from a clean `make testing-up && make testing-zap-up` run.\r\n\r\n### Original PR (commit 1)\r\nSolid two-layer OWASP A01:2021 test suite:\r\n- **Layer 1**: 24 direct Playwright tests — force browsing, cross-tenant IDOR, vertical privilege escalation, JWT tampering (6 attack types), CORS enforcement\r\n- **Layer 2**: 4 ZAP DAST tests — OpenAPI spec import, spider, passive scan, active scan, JSON/HTML reports\r\n- Supporting: docker-compose ZAP service, Makefile targets, conftest fixtures, pytest markers, docs\r\n\r\n### Review fixes (commits 2–6)\r\n\r\n| Fix | Details |\r\n|-----|---------|\r\n| **OWASP version** | `A01:2025` → `A01:2021` (no 2025 edition exists) |\r\n| **Cleanup path bug** | `non_admin_ctx` fixture deleted users at wrong endpoint (`/admin/users/` → `/auth/email/admin/users/`) — would silently leak test users |\r\n| **Code dedup** | Removed duplicate `_make_jwt`/`_api_context` from test file; imports from conftest |\r\n| **Dead code** | Removed unused `_UNSET` sentinel |\r\n| **Type annotation** | Added `teams: list[str] \\| None` to conftest `_make_jwt` |\r\n| **ZAP profile separation** | Moved ZAP from `testing` to dedicated `dast` profile — `make testing-zap-up/down` |\r\n| **Dead port** | Removed unused 8091 port mapping; ZAP daemon only serves on 8090 |\r\n| **Cross-user IDOR tests** | Added `TestIDORCrossUserObjects` (3 tests) — User B can't read/update/delete User A's private server. Fixed fixture to use admin API for server creation |\r\n| **HTML reports** | Added `_write_html_report()` via `zap.core.htmlreport()` alongside JSON |\r\n| **OpenAPI import** | ZAP now imports the full OpenAPI spec (367 URLs) instead of manually seeding 5 paths |\r\n| **Scoped active scan** | Active scan targets 7 security-sensitive prefixes (`/auth/`, `/rbac/`, `/tokens/`, `/servers`, `/teams/`, `/tools`, `/gateways`) with 45min timeout instead of full surface with 15min |\r\n| **ZAP memory** | 16GB limit / 8GB reservation — active scan peaked at 6GB |\r\n| **ZAP resilience** | All ZAP API calls (passive scan polling, alert retrieval, report generation) now handle connection errors gracefully |\r\n\r\n### ZAP DAST Results (clean run)\r\n- **367 URLs** discovered via OpenAPI import\r\n- **0 A01 access control alerts** (HIGH/CRITICAL)\r\n- **HTML report** + JSON reports in `tests/reports/` (gitignored)\r\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "907de9fa70477e8b3639e5cd347b5ae64ef925f8",
+      "message": "test(security): add OWASP A01 direct and ZAP DAST test suites\n\nIntroduces two-layer DAST coverage for OWASP A01:2025 – Broken Access Control.\n\nLayer 1 – direct Playwright API tests (no ZAP required, marker: owasp_a01):\n- Force browsing: 7 endpoints must reject anonymous requests with 401\n- IDOR/cross-tenant: Team A token must not access Team B resources (CWE-639)\n- Vertical privilege escalation: non-admin cannot reach admin-only APIs (CWE-269/285)\n- JWT tampering: unsigned, payload-modified, expired, alg=none, wrong iss/aud (CWE-345/287)\n- CORS: no wildcard or reflected ACAO header for arbitrary origins (CWE-942)\n\nLayer 2 – ZAP DAST integration (marker: owasp_a01_zap, skipped when ZAP_BASE_URL unset):\n- Spider discovers protected endpoints; passive scan checks for HIGH/CRITICAL A01 CWEs;\n  active scan checks for CRITICAL findings; JSON report written to tests/reports/\n\nInfrastructure:\n- docker-compose.yml: add zap service under --profile testing (ports 8090/8091,\n  waits for nginx health, 60 s JVM start_period, 2 CPU / 2 GB limit)\n- pyproject.toml: add python-owasp-zap-v2.4>=0.0.21 to playwright extras;\n  register owasp_a01 and owasp_a01_zap pytest markers\n\nRun without ZAP:  make test-owasp\nRun with ZAP:     make testing-up test-zap\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-02-24T10:25:16+00:00"
+    },
+    {
+      "sha": "8e7cd2d02903748811f5bf1c4b06cf904b9924e4",
+      "message": "fix: review fixes for OWASP A01 test suite\n\n- Fix OWASP version references: A01:2025 → A01:2021 (2021 is latest release)\n- Remove duplicate _make_jwt and _api_context from test file; import from conftest\n- Remove unused _UNSET sentinel variable\n- Fix cleanup path bug: /admin/users/{email} → /auth/email/admin/users/{email}\n- Add type annotation for teams parameter in conftest _make_jwt\n- Apply black/isort formatting\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T18:09:37+00:00"
+    },
+    {
+      "sha": "79d46b8ada7dfe0cd45da3bb004296ae54c2737c",
+      "message": "fix: separate ZAP into dedicated dast profile and harden resilience\n\n- Move ZAP from \"testing\" to \"dast\" Docker Compose profile so it doesn't\n  start with make testing-up (avoids ~600MB pull and 1GB+ RAM for devs\n  who don't need DAST)\n- Add make testing-zap-up / testing-zap-down targets\n- Add connection-error resilience to passive scan and report tests\n  (ZAP can OOM and restart mid-run; previously only active scan handled this)\n- Update docs to reflect new workflow\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T18:28:52+00:00"
+    },
+    {
+      "sha": "dc2bdb3d065f28717afdc3aa30660161497572c9",
+      "message": "fix: remove dead port 8091 mapping and fix ZAP UI URL\n\nZAP daemon mode only serves on port 8090. The API UI is at /UI path.\nPort 8091 was mapped but never used.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T18:35:21+00:00"
+    },
+    {
+      "sha": "58e77865459ebf9b2e69762bdda0b87a94d24a3a",
+      "message": "feat: add cross-user IDOR tests and HTML report generation\n\n- Add TestIDORCrossUserObjects: 3 tests verifying User B cannot\n  read/update/delete User A's private server (CWE-639)\n- Fix private_server_owned_by_user_a fixture to use admin API\n  (non-admin users with teams=[] lack servers.create permission)\n- Add _write_html_report() using ZAP's built-in core.htmlreport()\n- Harden _wait_for_passive_scan with connection-error resilience\n- All previously unused conftest fixtures now exercised\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T18:50:03+00:00"
+    },
+    {
+      "sha": "0b6c73cdffc531805e4dc65e080476fdc431ff99",
+      "message": "fix: bump ZAP to 4GB and import OpenAPI spec for full API coverage\n\n- Increase ZAP memory limit from 2GB to 4GB (reservation 2GB)\n- Import FastAPI's /openapi.json spec via zap.openapi.import_url()\n  for full 300+ endpoint coverage instead of manually seeding 5 paths\n- Fall back to manual seeding if OpenAPI import fails\n- Update docs to reflect 4GB requirement\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T19:16:40+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 1361,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:14.744280",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:14.745214",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3219,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3219.json"
+  }
+}

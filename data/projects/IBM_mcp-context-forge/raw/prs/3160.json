@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3160,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3160"
+  },
+  "metadata": {
+    "title": "[FIX][A2A]: Fix response serialization to produce valid JSON instead of Python repr",
+    "state": "closed",
+    "created_at": "2026-02-24T09:27:32+00:00",
+    "updated_at": "2026-03-09T01:52:05+00:00",
+    "closed_at": "2026-02-27T14:58:02+00:00",
+    "merged_at": "2026-02-27T14:58:02+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "fixed",
+      "a2a",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3025 due to repository maintenance. Your code and branch are intact. @madhav165 please verify everything looks good.\n\n# 🐛 Bug-fix PR\r\n\r\nCloses #2672\r\n\r\n---\r\n\r\n## 📌 Summary\r\nFixes response serialization across the gateway where `str()` was used instead of `orjson.dumps()` to convert Python dicts into `TextContent.text` fields. This produced Python repr output (`{'key': False}` with single quotes and Python booleans) instead of valid JSON (`{\"key\": false}`), causing downstream consumers to fail when parsing the text content.\r\n\r\n## 🐞 Root Cause\r\nWhen the gateway receives a JSON response (from A2A agents or forwarded MCP responses), the result is a Python dict. Multiple code paths wrapped this dict into `TextContent(type=\"text\", text=str(response_data))`. Python's `str()` on a dict produces repr-style output with single quotes and `True`/`False` literals, which is not valid JSON.\r\n\r\nThis explains the DEV vs UAT trace discrepancy in the issue:\r\n- **DEV** (valid): `\"text\": \"{\\\"has_chart\\\": false, ...}\"` — proper JSON\r\n- **UAT** (broken): `\"text\": \"{'has_chart': False, ...}\"` — Python repr\r\n\r\n## 💡 Fix Description\r\n- **`mcpgateway/services/tool_service.py`**: Replace `str()` with `orjson.dumps().decode()` for dict/list values in A2A response wrapping paths (lines ~3810, ~4765) and REST error response handling (line ~3205). String values are passed through as-is to avoid double-encoding.\r\n- **`mcpgateway/transports/streamablehttp_transport.py`**: Apply the same fix in `_rehydrate_content_items` for unknown content types and validation error fallbacks (line ~800), unknown content type serialization in `call_tool` (line ~914), and A2A response handling in `connect_to_streamablehttp_server` (lines ~3810, ~3842).\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    pass    |\r\n| Unit tests                            | `make test`          |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3852375170",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-25T07:20:50+00:00",
+      "body": "Looks fine."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "1fb0ef9efaba2079fcd740c624851a4c179059bf",
+      "message": "fix(a2a): serialize response dicts as valid JSON instead of Python repr\n\nReplace str() with orjson.dumps().decode() when converting Python dicts\ninto TextContent.text fields across A2A response handling, REST error\npaths, and streamable HTTP transport content rehydration.\n\nstr() on a dict produces Python repr output ({'key': False} with single\nquotes and Python booleans), which is not valid JSON and causes\ndownstream consumers to fail when parsing the text content.\n\nString values are passed through as-is to avoid double-encoding.\n\nCloses #2672\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T14:19:07+00:00"
+    },
+    {
+      "sha": "e2dc41ded295908f297a68a7b7cf89a6aa4e4833",
+      "message": "fix(a2a): add defensive fallback for unserializable plugin post-invoke results\n\nWrap orjson.dumps() in try/except at the plugin post-invoke path so\nthat unserializable types (sets, custom objects) returned by plugins\nfall back to str() instead of crashing the entire tool invocation with\nToolInvocationError.\n\nAligns with the existing defensive pattern at tool_service.py:1142-1145.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T14:36:08+00:00"
+    },
+    {
+      "sha": "25dab9ca7614db84feb630da3164b67289d8c12f",
+      "message": "test(a2a): add edge-case tests for scalar/null/list serialization paths\n\nCover the remaining serialization paths with targeted tests:\n- _invoke_a2a_tool: None, numeric, list response values and list root\n- invoke_tool A2A path: None, list response values and list root\n- Plugin post-invoke: unserializable payload fallback to str()\n\nEnsures 100% differential test coverage for all changed lines.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T14:43:40+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 533,
+  "deletions": 9,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:53.315547",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:53.317033",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3160,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3160.json"
+  }
+}

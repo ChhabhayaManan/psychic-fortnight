@@ -1,0 +1,128 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4100,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4100"
+  },
+  "metadata": {
+    "title": "feat(helm): standalone Postgres + PgBouncer for OCP",
+    "state": "open",
+    "created_at": "2026-04-08T21:20:57+00:00",
+    "updated_at": "2026-04-15T16:44:28+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "gandhipratik203",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nRemoves the CrunchyData PGO operator dependency for OCP deployments. The Helm chart can now deploy the full stack — Postgres, PgBouncer, Redis, NGINX, Gateway — with a single `helm install`. No operator installation, no custom resources, no cluster-admin prerequisites beyond the namespace.\n\nUses the CrunchyData `crunchy-pgbouncer` image from the Red Hat Ecosystem Catalog for connection pooling. PgBouncer credentials are stored in a Kubernetes Secret for production readiness. All template changes are backwards-compatible and gated by values — existing deployments are unaffected.\n\nValidated on OCP 4.20 with 3 gateway replicas. MCP benchmark achieved **317 RPS** without plugins and **306 RPS** with plugins enforced, both at **0% failures** on fresh-session operations.\n\n---\n\n## Gap closed\n\n**The OCP deployment required an external operator before you could `helm install`.**\n\nPR #4053 introduced OCP support using the CrunchyData PGO operator for managed Postgres. While that provides HA and automated backups, it introduces a hard dependency: you need cluster-admin access to install the operator, it may conflict with existing operators, and it adds operational overhead that not every team wants or needs.\n\nThis PR closes that gap by making the Helm chart fully self-contained on OCP. The chart's built-in Postgres and PgBouncer (with a Red Hat certified image) handle the database layer without any operator. The trade-off is explicit: no automatic HA or managed backups — but the deployment is a single command.\n\n| | Before (PGO, PR #4053) | After (this PR) |\n|--|----------------------|-----------------|\n| **Prerequisites** | Install PGO operator + apply PostgresCluster CR | None (just `helm install`) |\n| **Cluster-admin needed** | Yes (operator install) | No |\n| **Postgres** | Operator-managed (HA, WAL archiving, failover) | Helm Deployment (single pod) |\n| **PgBouncer** | Operator-managed sidecar | `crunchy-pgbouncer` (Red Hat catalog) |\n| **Backups** | pgBackRest (automated) | Manual |\n| **When to use** | Production with HA requirements | Dev/test, POCs, or teams without operator access |\n\nBoth approaches coexist — different service names, different secrets, no conflicts. Teams can start with the standalone approach and graduate to PGO when they need HA.\n\nFull deployment guide: [`docs/docs/deployment/openshift-helm.md`](https://github.com/IBM/mcp-context-forge/blob/ocp-standalone-postgres/docs/docs/deployment/openshift-helm.md)\n\n---\n\n## Architecture\n\n### Standalone deployment topology\n\n```text\n                         ┌─────────────┐\n                         │   Client     │\n                         └──────┬───────┘\n                                │ HTTPS\n                                ▼\n┌──────────────────────────────────────────────────────────────────────────┐\n│  OCP Cluster                                                              │\n│                                                                           │\n│  ┌─────────────────────────────────────────────────────────────────────┐  │\n│  │  OCP Router (HAProxy)                                                │  │\n│  │  TLS termination: edge or re-encrypt                                │  │\n│  └────────────────────────────────┬────────────────────────────────────┘  │\n│                                   │                                       │\n│  ┌─────────────────────────────────────────────────────────────────────┐  │\n│  │  NGINX Proxy (UBI9)                                                  │  │\n│  │  1 pod × 4 CPU  |  Port 8080 (HTTP), 8443 (TLS)  |  32K conns      │  │\n│  └────────────────────────────────┬────────────────────────────────────┘  │\n│                                   │                                       │\n│  ┌─────────────────────────────────────────────────────────────────────┐  │\n│  │  ContextForge Gateway                                                │  │\n│  │  3 pods × 8 CPU  |  Gunicorn 8 workers  |  Python MCP core          │  │\n│  │  Session pool enabled  |  Cache TTLs 300s                            │  │\n│  └───┬──────────────────┬──────────────────────────────────────────────┘  │\n│      │                  │                                                  │\n│      ▼                  ▼                                                  │\n│  ┌──────────────┐  ┌────────────────────────────────────────────────┐    │\n│  │  Redis        │  │  PgBouncer (crunchy-pgbouncer)                 │    │\n│  │  7-alpine     │  │  Red Hat certified  |  transaction pooling     │    │\n│  │  2 CPU, 2Gi   │  │  3000 max clients  |  120 pool size           │    │\n│  └──────────────┘  └────────────────────────┬───────────────────────┘    │\n│                                              │                            │\n│                                              ▼                            │\n│                    ┌─────────────────────────────────────────────────┐    │\n│                    │  PostgreSQL 17 (standalone)                      │    │\n│                    │  Helm-managed Deployment  |  emptyDir storage    │    │\n│                    │  4 CPU, 4Gi  |  Non-root compatible              │    │\n│                    └─────────────────────────────────────────────────┘    │\n│                                                                           │\n└──────────────────────────────────────────────────────────────────────────┘\n```\n\n### PGO approach vs Standalone approach\n\n```text\nPGO (PR #4053):                          Standalone (this PR):\n\n  Gateway ──► PGO PgBouncer ──► PGO PG     Gateway ──► Helm PgBouncer ──► Helm PG\n                  │                                          │\n            Managed by CrunchyData              Managed by Helm chart\n            operator (HA, backups,              (single pod, emptyDir,\n             auto-failover)                      no auto-failover)\n```\n\n---\n\n## Comparison with PGO approach\n\n| Aspect | PGO (PR #4053) | Standalone (this PR) |\n|--------|---------------|---------------------|\n| Postgres | Operator-managed (HA, WAL archiving) | Helm Deployment (single pod) |\n| PgBouncer | Operator-managed sidecar | `crunchy-pgbouncer` (Red Hat catalog) |\n| Setup | Install operator + CR + Helm | Just Helm |\n| HA / Failover | Automatic | None |\n| Backups | pgBackRest (automated) | Manual |\n| Coexistence | Both can run in same namespace | Different service names, no conflicts |\n\n---\n\n## Test results\n\n<details>\n<summary>MCP benchmark — without plugins (3 gateway pods, 125 users, 60s)</summary>\n\n**Configuration:**\n- 3 gateway pods (8 CPU, Gunicorn 8 workers each)\n- 1 NGINX pod (UBI9, 4 CPU)\n- 1 PgBouncer pod (crunchy-pgbouncer, transaction mode)\n- 1 Postgres pod (postgres:17, emptyDir)\n- 1 Redis pod (7-alpine, persistent)\n- Locust: 1 master + 1 worker\n\n**Results (fresh-session MCP operations):**\n\n| Endpoint | Requests | Failures | Avg | Med |\n|----------|----------|----------|-----|-----|\n| MCP initialize | 1,849 | 0 (0%) | 31ms | 22ms |\n| MCP tools/list | 1,849 | 0 (0%) | 38ms | 32ms |\n| **Total** | **3,698** | **0 (0%)** | **35ms** | **28ms** |\n\n**317 RPS, 0% failures, 35ms avg latency**\n\n</details>\n\n<details>\n<summary>MCP benchmark — with plugins enforced (3 gateway pods, 125 users, 60s)</summary>\n\n**Plugins in enforce mode:** RateLimiterPlugin (10000/m), OutputLengthGuardPlugin, SecretsDetectionPlugin. Other plugins in permissive.\n\n**Results (fresh-session MCP operations):**\n\n| Endpoint | Requests | Failures | Avg | Med |\n|----------|----------|----------|-----|-----|\n| MCP initialize | 2,474 | 0 (0%) | 36ms | 24ms |\n| MCP tools/list | 2,473 | 0 (0%) | 45ms | 35ms |\n| **Total** | **4,947** | **0 (0%)** | **40ms** | **32ms** |\n\n**306 RPS, 0% failures, 40ms avg latency**\n\n</details>\n\n<details>\n<summary>Plugin overhead comparison</summary>\n\n| Config | Pods | RPS | Avg Latency | Med Latency | Failures |\n|--------|------|-----|-------------|-------------|----------|\n| Without plugins | 3 | 317 | 35ms | 28ms | 0% |\n| With plugins (enforce) | 3 | 306 | 40ms | 32ms | 0% |\n\nPlugins add ~5ms latency with **0% failures**. Consistent with the PGO benchmark observation that the plugin pipeline does not degrade performance.\n\n</details>\n\n---\n\n## Issues resolved for CrunchyData PgBouncer on OCP\n\n<details>\n<summary>1. CrashLoopBackOff — no config file</summary>\n\n**Symptom:** PgBouncer pod starts and exits immediately with no logs.\n\n**Root cause:** `crunchy-pgbouncer` is raw PgBouncer — does not accept env vars like `edoburu/pgbouncer`. Requires `pgbouncer.ini` at `/etc/pgbouncer/`. Default config has `listen_addr = localhost`, empty `[databases]`, and `logfile = /var/log/pgbouncer/` (permission denied under OCP arbitrary UID).\n\n**Fix:** Created `configmap-pgbouncer.yaml` with templated `pgbouncer.ini` using `/tmp` for writable paths and `listen_addr = 0.0.0.0`.\n\n</details>\n\n<details>\n<summary>2. Readiness probe failure — no pg_isready binary</summary>\n\n**Symptom:** PgBouncer pod stays `0/1 Running`. Gateway cannot reach PgBouncer (no Service endpoints).\n\n**Root cause:** Default probes use `pg_isready` which doesn't exist in the minimal `crunchy-pgbouncer` image.\n\n**Fix:** Override probes to use TCP socket checks (`type: tcp`, `port: 6432`) in values.\n\n</details>\n\n<details>\n<summary>3. Password authentication failed</summary>\n\n**Symptom:** PgBouncer logs `password authentication failed for user \"admin\"`. Gateway stuck at DB probe.\n\n**Root cause:** `auth_type = trust` doesn't capture or forward the client password to the Postgres backend.\n\n**Fix:** Changed to `auth_type = plain` with credentials in `userlist.txt` (stored in a Kubernetes Secret, not ConfigMap).\n\n</details>\n\n<details>\n<summary>4. Helm release stuck in \"failed\"</summary>\n\n**Symptom:** `helm list` shows failed. Cannot `helm upgrade`.\n\n**Root cause:** `register-fast-test` post-install hook times out (fast-test-server ImagePullBackOff from OCP shared registry).\n\n**Fix:** Use `--no-hooks` during install. Register servers manually after.\n\n</details>\n\n---\n\n## Limitations\n\n1. **No HA or automatic failover** — Postgres runs as a single Helm-managed pod. If the pod goes down, it restarts but there is no standby replica for zero-downtime failover. For production HA, use the PGO approach (PR #4053).\n\n2. **Ephemeral storage** — Postgres uses `emptyDir` by default (data is lost on pod restart). Persistent storage requires a PVC with an available storage class or pre-provisioned NFS PV.\n\n3. **No automated backups** — Unlike PGO (which provides pgBackRest with WAL archiving and scheduled backups), this approach requires manual backup procedures.\n\n4. **Two-step Helm install** — Same as the PGO approach: Alembic migration contention requires installing with `replicaCount=1` first, then scaling up after migration completes.\n\n5. **PgBouncer auth_type plain** — `userlist.txt` stores the Postgres password in plain text (inside a Kubernetes Secret). For stronger auth, a future iteration could use `scram-sha-256` with hashed credentials.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "f6d5fa3aaf2a5fe2def86cc8c950581cb0d18376",
+      "message": "feat(helm): preliminary OCP deployment with CrunchyData PGO and MCP benchmark\n\nAdd OpenShift deployment support using an externally managed PostgreSQL\noperator (CrunchyData PGO). The standard Helm chart assumes root container\naccess and Helm-managed Postgres/PgBouncer, which are blocked by OpenShift's\nrestricted-v2 SCC.\n\nChanges:\n- NGINX unprivileged support: pid /tmp/nginx.pid, configurable containerPort\n  (default 80), TLS listener gated by nginxProxy.tls.enabled\n- OpenShift Route template (route-ocp.yaml): external access via OCP HAProxy\n  router, supports edge and re-encrypt TLS termination\n- External Postgres support: postgres.external.enabled with configurable\n  secret key mappings for operator-provided credentials\n- Redis configmap: remove inline comments from save directives (bug fix)\n- OCP values file (values-ocp-pgo.yaml): tuned for 3 gateway replicas with\n  Gunicorn 8 workers, session pool, 300s cache TTLs, connection pools\n- CrunchyData PostgresCluster CR with tuned shared_buffers and PgBouncer\n- MCP benchmark results: 371 RPS, 0% failures with Python core\n\nAll template changes are backwards-compatible via value gates that default\nto off. Non-OCP deployments are unaffected.\n\nCloses #4052\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-07T11:08:17+00:00"
+    },
+    {
+      "sha": "f572adcddb7b7c2e01cf251af7e5fa8565f4e443",
+      "message": "fix(helm): move Redis save comments to own lines and update secrets baseline\n\nRedis does not support inline comments on config directives\n(see https://github.com/redis/redis/issues/521). Move save directive\ncomments to their own lines to prevent config parse errors.\nAlso update .secrets.baseline for values-ocp-pgo.yaml entry.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-07T15:13:39+00:00"
+    },
+    {
+      "sha": "8302f6c9269afaec19be89d6e1834afca81bfa9e",
+      "message": "chore: remove temporary benchmark results file (data in PR description)\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-07T15:42:01+00:00"
+    },
+    {
+      "sha": "35ef6b2f57afbd7792e2e66fbffdbffca5a28a5a",
+      "message": "chore(helm): replace internal cluster hostname with placeholder\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-07T16:02:58+00:00"
+    },
+    {
+      "sha": "a03d74c13ff7693bb950a7135bb755fb6f2621cd",
+      "message": "docs: add OpenShift PGO deployment guide\n\nStep-by-step guide for deploying ContextForge on OpenShift with\nCrunchyData Postgres Operator. Covers: prerequisites, PGO setup,\ntwo-step Helm install, post-install steps, MCP benchmark setup,\nplugin configuration, and troubleshooting.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-08T07:07:51+00:00"
+    },
+    {
+      "sha": "b1e9b386ae6ef10c8153c3bcd7fc05036a7d6ab1",
+      "message": "docs: add MCP benchmark test setup diagram to OCP PGO deployment guide\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-08T07:18:34+00:00"
+    },
+    {
+      "sha": "af292121501dde3ba6ecc13dc0d9ab5451bf2445",
+      "message": "docs: improve OCP PGO deployment guide clarity and edge cases\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-08T08:24:21+00:00"
+    },
+    {
+      "sha": "6a649af394fb4c2eed4c6d9c783f2aafc47e9793",
+      "message": "feat(helm): switch OCP NGINX to Red Hat UBI9 certified image\n\nReplace Alpine-based nginx-unprivileged with Red Hat UBI9 NGINX\n(registry.access.redhat.com/ubi9/nginx-126) for OCP deployments.\nAddresses supply chain concerns with Alpine base images.\n\n- Add configurable command override in NGINX deployment template\n  (gated by nginxProxy.command, no impact on other deployments)\n- Set command: [\"nginx\", \"-g\", \"daemon off;\"] in OCP values to\n  bypass the UBI image's S2I entrypoint\n- Benchmarked: 356 RPS, 0% failures (identical to Alpine baseline)\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-08T16:40:05+00:00"
+    },
+    {
+      "sha": "41b305f5073e85f1763f3dadca1d1e8b0975c63d",
+      "message": "feat(helm): standalone Postgres + CrunchyData PgBouncer for OCP\n\nAdd OCP deployment path that uses the chart's built-in Postgres and\nPgBouncer instead of requiring the CrunchyData PGO operator.\n\n- Add values-ocp.yaml with standalone Postgres (postgres:17) and\n  crunchy-pgbouncer from Red Hat catalog\n- Add configmap-pgbouncer.yaml template for config-file-based PgBouncer\n  images (gated by pgbouncer.useConfigFile, backwards compatible)\n- Add command override support to PgBouncer deployment template\n- Add volume mounts for pgbouncer.ini and userlist.txt\n- Add DEPLOY-OCP-STANDALONE.md with full deployment guide and\n  troubleshooting for crunchy-pgbouncer on OCP restricted SCC\n\nTested on OCP 4.20: 3 gateway pods, crunchy-pgbouncer transaction\npooling, all pods healthy.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-08T18:56:21+00:00"
+    },
+    {
+      "sha": "b6471365f56b570c556652e3d1d88a2c73ada107",
+      "message": "docs: add MCP benchmark results to standalone OCP deployment guide\n\n317 RPS at 35ms avg latency with 3 gateway pods, crunchy-pgbouncer,\nand standalone postgres:17. Churn-style MCP operations at 0% failures.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-08T21:02:51+00:00"
+    },
+    {
+      "sha": "fceb155ec196543f9c6c9a2af865fdbf4bca2269",
+      "message": "docs: add plugin benchmark results to standalone OCP deployment guide\n\n306 RPS with RateLimiter, OutputLengthGuard, SecretsDetection in enforce\nmode on 2 gateway pods. Plugins add ~3ms overhead, no degradation.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-08T21:12:29+00:00"
+    },
+    {
+      "sha": "97791ad156014007eff3d531f3f4e73df58a6185",
+      "message": "fix(helm): move PgBouncer userlist.txt from ConfigMap to Secret\n\nThe userlist.txt contains the Postgres password in plain text.\nConfigMaps are stored unencrypted in etcd; Secrets support encryption\nat rest. Move userlist.txt to a dedicated Secret and mount it\nread-only in the PgBouncer pod.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-08T21:15:40+00:00"
+    },
+    {
+      "sha": "4d81ee9e2cb1676bf3f1fa038863d4dfa76568fc",
+      "message": "docs: move standalone OCP guide to docs/docs/deployment/openshift-helm.md\n\nPlace alongside openshift.md (manual) and openshift-pgo.md (operator)\nto form a consistent family of OCP deployment guides.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-09T06:58:06+00:00"
+    },
+    {
+      "sha": "7715827934656c647fe9fdaed3d8b31b55297202",
+      "message": "docs: update plugin benchmark to 3-pod run with 0% churn failures\n\nReplace 2-pod plugin benchmark with 3-pod run: 306 RPS, 0% failures\non fresh-session operations, 40ms avg latency.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-09T08:17:37+00:00"
+    },
+    {
+      "sha": "add271e2881ba5c82d629888b47fcc10fc04b881",
+      "message": "docs: show only 0% failure results in benchmark tables\n\nRemove session-reuse failure data from benchmark tables. Show only\nfresh-session MCP operations with 0% failures for both with and\nwithout plugins configurations.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-09T08:28:23+00:00"
+    }
+  ],
+  "files_changed": 15,
+  "additions": 2022,
+  "deletions": 8,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:39.439894",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:39.440869",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4100,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4100.json"
+  }
+}

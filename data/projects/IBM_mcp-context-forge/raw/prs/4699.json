@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4699,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4699"
+  },
+  "metadata": {
+    "title": "fix(a2a): add type validation for email extraction in list_agents_for_user",
+    "state": "open",
+    "created_at": "2026-05-11T10:43:48+00:00",
+    "updated_at": "2026-05-11T11:57:16+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "bug",
+      "a2a",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4670\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\n**Root Cause Fix**: Adds type validation for email extraction in the deprecated [`list_agents_for_user()`](mcpgateway/services/a2a_service.py:1114-1127) method to prevent passing dict objects to SQL queries.\r\n\r\n**Problem**: The method was extracting email from `user_info` dict without validating it was a string. When the `\"email\"` key contained a nested dict or other object, it was passed directly to SQL queries, causing:\r\n```\r\nError binding parameter 1: type 'dict' is not supported\r\n```\r\n\r\n**Solution**: Added type validation immediately after email extraction (lines 1118-1126). If a non-string is detected:\r\n- Logs a warning with type information for debugging\r\n- Uses empty string (public-only access, fail-safe)\r\n- Prevents SQL binding error\r\n\r\n**Defense-in-Depth**: This fix complements the defensive validation added in PR #4637 at the [`get_rpc_filter_context()`](mcpgateway/auth_context.py:358-365) level. Both layers follow security best practices.\r\n\r\n**Why Other Code Paths Are Safe**:\r\n- Other service methods accept `user_email: str` parameters, not dicts\r\n- The [`get_user_email()`](mcpgateway/auth_context.py:197-200) helper already has proper type validation\r\n- Endpoint handlers receive validated dicts from `get_current_user_with_permissions()`\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Investigation Methodology**:\r\n1. Traced error from [`TeamManagementService.get_user_teams()`](mcpgateway/services/team_management_service.py:1077) back through call chain\r\n2. Examined all 31 calls to `get_user_teams()` across the codebase\r\n3. Searched for all 74 occurrences of `.get(\"email\")` patterns\r\n4. Identified [`list_agents_for_user()`](mcpgateway/services/a2a_service.py:1114-1127) as the only vulnerable code path\r\n\r\n**Code Change** (lines 1118-1126):\r\n```python\r\n# BEFORE (buggy):\r\nuser_email = user_info.get(\"email\", \"\")\r\n\r\n# AFTER (fixed):\r\nemail_value = user_info.get(\"email\", \"\")\r\n# SECURITY: Ensure email is a string, not a nested dict or other object\r\n# This prevents passing entire user dicts to SQL queries\r\nif isinstance(email_value, str):\r\n    user_email = email_value\r\nelse:\r\n    logger.warning(\r\n        f\"list_agents_for_user: user_info['email'] is non-string type {type(email_value).__name__}, using empty string\"\r\n    )\r\n    user_email = \"\"\r\n```\r\n\r\n**Security Consideration**: Setting `user_email` to empty string when type validation fails results in public-only access, which is the secure default per the two-layer security model documented in `AGENTS.md`.\r\n\r\n**Test Coverage**: PR #4637 added comprehensive test coverage for the symptom at the `get_rpc_filter_context()` level. This root cause fix ensures those tests continue to pass, but warning logs should not fire in normal operation since the issue is now prevented at the source.\r\n\r\nAdded tests for type validation logic: `/tests/unit/mcpgateway/services/test_a2a_service.py::TestListAgentsForUserTypeValidation`",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "f0982208c86fbf1ad604b1dba7907d05c6641fa3",
+      "message": "fix(a2a): add type validation for email extraction in list_agents_for_user\n\nRoot cause fix for issue #4670. The deprecated list_agents_for_user() method\nwas extracting email from user_info dict without validating it was a string.\nIf the 'email' key contained a nested dict or other object, it would be passed\ndirectly to SQL queries, causing:\n\n  Error binding parameter 1: type 'dict' is not supported\n\nThis fix adds type validation immediately after email extraction, logging a\nwarning and using empty string (public-only access) if a non-string is detected.\n\nThis complements the defensive fix in PR #4637 which added validation at the\nget_rpc_filter_context() level. Both layers of validation follow defense-in-depth\nsecurity principles.\n\nCloses #4670\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-11T10:40:44+00:00"
+    },
+    {
+      "sha": "4613c5aea48d9c275de1ba861027430309b213f2",
+      "message": "add tests for type validation logic\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-11T11:03:12+00:00"
+    },
+    {
+      "sha": "452dd69f1fe0accf2a9c526cced8dda178ddd746",
+      "message": "fix .secrets.baseline\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-11T11:18:30+00:00"
+    },
+    {
+      "sha": "0e49f40c7bb7e2c5babada9d65bd69546f9c1e72",
+      "message": "fix .secrets.baseline\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-11T11:57:09+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 214,
+  "deletions": 2,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:25.386215",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:25.386843",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4699,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4699.json"
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3227,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3227"
+  },
+  "metadata": {
+    "title": "[FIX][SECURITY]: Add log sanitizer utility to prevent log injection attacks (#3000)",
+    "state": "closed",
+    "created_at": "2026-02-24T16:14:54+00:00",
+    "updated_at": "2026-03-05T19:12:02+00:00",
+    "closed_at": "2026-03-05T19:12:00+00:00",
+    "merged_at": "2026-03-05T19:12:00+00:00",
+    "author": "smrutisahoo10",
+    "labels": [
+      "bug",
+      "security",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "…ging\r\n\r\n<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3000\r\n\r\n---\r\n\r\n## 📝 Summary\r\nAdded utility function to strip control characters from values before logging to prevent log injection attacks. This prevents malicious input from manipulating log output by injecting newlines, carriage returns, or other control characters that could be used to forge log entries or hide malicious activity.\r\n\r\nFiles Added:\r\n\r\n- mcpgateway/utils/log_sanitizer.py\r\n- tests/unit/mcpgateway/utils/test_log_sanitizer.py\r\n\r\nModified files:\r\n\r\n- mcpgateway/routers/oauth_router.py\r\n- mcpgateway/routers/sso.py\r\n- mcpgateway/routers/well_known.py\r\n\r\n\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [X] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | Pass |\r\n| Unit tests                | `make test`     | Pass |\r\n| Coverage ≥ 80%            | `make coverage` | Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [X] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3895523997",
+      "author": "MohanLaksh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-05T10:32:39+00:00",
+      "body": "Approved. The below test file PASSED all Log Injection Vulnerabilities Tests.\n```\n#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\n\"\"\"Manual test script for log sanitizer to verify it works correctly.\"\"\"\n\nimport sys\nimport logging\nimport io\n\n# Set UTF-8 encoding for Windows console\nif sys.platform == 'win32':\n    import codecs\n    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')\n\n# Add mcpgateway to path\nsys.path.insert(0, '.')\n\nfrom mcpgateway.utils.log_sanitizer import sanitize_for_log\n\n# Setup logging to capture output\nhandler = logging.StreamHandler(stream := io.StringIO())\nhandler.setFormatter(logging.Formatter('%(levelname)s:%(name)s:%(message)s'))\nlogger = logging.getLogger('test')\nlogger.addHandler(handler)\nlogger.setLevel(logging.DEBUG)\n\nprint(\"=\" * 60)\nprint(\"Testing Log Injection Prevention\")\nprint(\"=\" * 60)\n\n# Test 1: Normal text (should pass through unchanged)\nprint(\"\\n1. Normal text test:\")\nnormal_text = \"normal error message\"\nlogger.warning(f\"OAuth error: {sanitize_for_log(normal_text)}\")\noutput = stream.getvalue()\nprint(f\"Input: {repr(normal_text)}\")\nprint(f\"Output: {output.strip()}\")\nassert \"\\n\" not in output or output.count(\"\\n\") == 1, \"Should be single line\"\nstream.truncate(0)\nstream.seek(0)\n\n# Test 2: Newline injection (the actual vulnerability)\nprint(\"\\n2. Newline injection test (VULNERABILITY):\")\nmalicious_input = \"bad scope\\nCRITICAL:root:SECURITY BREACH detected\"\nlogger.warning(f\"OAuth error: {sanitize_for_log(malicious_input)}\")\noutput = stream.getvalue()\nprint(f\"Input: {repr(malicious_input)}\")\nprint(f\"Output: {output.strip()}\")\nlines = output.strip().split('\\n')\nassert len(lines) == 1, f\"Should be single line, got {len(lines)} lines\"\nassert \"SECURITY BREACH\" in output, \"Content should be preserved\"\nprint(\"✓ Attack prevented - single log line produced\")\nstream.truncate(0)\nstream.seek(0)\n\n# Test 3: CRLF injection\nprint(\"\\n3. CRLF injection test:\")\ncrlf_input = \"error\\r\\nINFO:fake:Fake log entry\"\nlogger.warning(f\"OAuth error: {sanitize_for_log(crlf_input)}\")\noutput = stream.getvalue()\nprint(f\"Input: {repr(crlf_input)}\")\nprint(f\"Output: {output.strip()}\")\nlines = output.strip().split('\\n')\nassert len(lines) == 1, f\"Should be single line, got {len(lines)} lines\"\nprint(\"✓ CRLF attack prevented\")\nstream.truncate(0)\nstream.seek(0)\n\n# Test 4: Tab injection\nprint(\"\\n4. Tab character test:\")\ntab_input = \"col1\\tcol2\\tcol3\"\nlogger.warning(f\"Data: {sanitize_for_log(tab_input)}\")\noutput = stream.getvalue()\nprint(f\"Input: {repr(tab_input)}\")\nprint(f\"Output: {output.strip()}\")\nassert \"\\t\" not in output, \"Tabs should be removed\"\nprint(\"✓ Tabs sanitized\")\nstream.truncate(0)\nstream.seek(0)\n\n# Test 5: Multiple control characters\nprint(\"\\n5. Multiple control characters test:\")\nmulti_input = \"text\\nwith\\rmany\\tcontrol\\vchars\"\nlogger.warning(f\"Message: {sanitize_for_log(multi_input)}\")\noutput = stream.getvalue()\nprint(f\"Input: {repr(multi_input)}\")\nprint(f\"Output: {output.strip()}\")\nassert \"\\n\" not in output or output.count(\"\\n\") == 1\nassert \"\\r\" not in output\nassert \"\\t\" not in output\nassert \"\\v\" not in output\nprint(\"✓ All control characters sanitized\")\nstream.truncate(0)\nstream.seek(0)\n\n# Test 6: Real-world OAuth scenario\nprint(\"\\n6. Real-world OAuth callback scenario:\")\nerror = \"invalid_scope\"\nerror_description = \"Requested scope not available\\nCRITICAL:security:BREACH DETECTED\"\nlogger.warning(f\"OAuth provider returned error callback: error={sanitize_for_log(error)}, description={sanitize_for_log(error_description)}\")\noutput = stream.getvalue()\nprint(f\"Error: {repr(error)}\")\nprint(f\"Description: {repr(error_description)}\")\nprint(f\"Output: {output.strip()}\")\nlines = output.strip().split('\\n')\nassert len(lines) == 1, f\"Should be single line, got {len(lines)} lines\"\nprint(\"✓ Real-world scenario protected\")\n\nprint(\"\\n\" + \"=\" * 60)\nprint(\"✅ ALL TESTS PASSED - Log injection vulnerability fixed!\")\nprint(\"=\" * 60)\n\n\n```"
+    },
+    {
+      "id": "3898920729",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-05T18:59:16+00:00",
+      "body": "## Review: Approved\n\nClean, focused security fix for CWE-117 (log injection via control characters in untrusted input).\n\n### What was reviewed\n\n- **`mcpgateway/utils/log_sanitizer.py`** — New utility with `sanitize_for_log()`, `sanitize_dict_for_log()`, and `sanitize_optional()`. Pre-compiled regex `[\\x00-\\x1f\\x7f-\\x9f]` correctly strips C0/C1 control characters while preserving printable space.\n- **Router integration** — Applied at 4 sites where untrusted user input (OAuth callback query params, SSO redirect_uri, RFC 9728 path segments) is logged. Server-side values correctly left unsanitized.\n- **Test suite** — 45 tests with 100% coverage on the new module, including real-world attack scenarios (CRLF injection, log forging, SIEM evasion).\n\n### Changes made during review\n\n- Rebased onto `main` (clean, no conflicts)\n- Removed unused `import pytest` from test file\n\n### Notes\n\n- Unicode line separators (U+2028/U+2029) are intentionally not filtered — Python's logging module doesn't treat them as newlines, so they're not an injection vector. This is correctly documented in the tests.\n- No security or performance issues introduced."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "408223d7dab68ae049d246a65ca51e2d20d92cfd",
+      "message": "Added utility for strips and control character from values before logging\n\nSigned-off-by: Smruti Sahoo <smruti.sahoo1@ibm.com>",
+      "author": "Smruti Sahoo",
+      "date": "2026-02-24T05:00:29+00:00"
+    },
+    {
+      "sha": "00d02cb8993b7f8bab38776bba328cdbc6e5da48",
+      "message": "fix(tests): remove unused pytest import from log sanitizer tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T18:57:18+00:00"
+    },
+    {
+      "sha": "aa6b139c3d20bcf4f299db1b969dbfa7ed1c2485",
+      "message": "style(tests): remove trailing whitespace in log sanitizer tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T18:59:26+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 505,
+  "deletions": 5,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:19.166694",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:19.168320",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3227,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3227.json"
+  }
+}

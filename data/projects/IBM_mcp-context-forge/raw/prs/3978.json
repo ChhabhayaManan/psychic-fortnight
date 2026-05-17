@@ -1,0 +1,110 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3978,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3978"
+  },
+  "metadata": {
+    "title": "feat(api): comprehensive Virtual Meta-Server with 12 meta-tools",
+    "state": "open",
+    "created_at": "2026-04-01T16:05:42+00:00",
+    "updated_at": "2026-04-28T09:56:09+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "ecthelion77",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\n\nCloses #2230\nSupersedes #3653\n\n## 📝 Summary\n\nThis PR implements the Virtual Meta-Server feature — a comprehensive tool aggregation layer that enables AI agents to discover and invoke thousands of underlying tools through a unified interface. It exposes **12 meta-tools** to the agent while completely hiding the complexity of the underlying tool ecosystem.\n\nThis is a **production-tested alternative** to PR #3653, with additional features, security hardening, and 2+ weeks of real-world testing with VS Code Copilot and Copilot Studio.\n\n### Problem Statement\n\nTraditional MCP architectures expose all tools directly to AI agents, leading to:\n- Context window exhaustion with hundreds or thousands of tools\n- Poor agent decision-making due to overwhelming tool choices\n- No dynamic tool discovery — agents must know tools upfront\n- No OAuth integration — agents cannot authorize gateway access interactively\n\n### Solution — 12 Meta-Tools\n\n#### Core (same as #3653)\n- `search_tools`: hybrid semantic + keyword search with scope filtering\n- `list_tools`: paginated tool listing with sorting and filtering\n- `describe_tool`: detailed tool info with schema and metadata\n- `execute_tool`: tool execution with JSON schema validation and routing\n- `get_tool_categories`: aggregated categories with counts\n- `get_similar_tools`: vector similarity search for related tools\n\n#### New (beyond #3653)\n- `authorize_gateway`: interactive OAuth authorization with token refresh\n- `authorize_all_gateways`: one-click authorization for all OAuth gateways\n- `list_resources`: paginated MCP resource listing\n- `read_resource`: read MCP resource content by URI\n- `list_prompts`: paginated MCP prompt listing\n- `get_prompt`: prompt template retrieval with optional rendering\n\n### Key Improvements Over #3653\n\n| Feature | #3653 | This PR |\n|---------|-------|---------|\n| Meta-tools | 6 | **12** |\n| OAuth integration | ❌ | ✅ (user identity propagation) |\n| Authorize interactively | ❌ | ✅ (authorize_gateway, authorize_all) |\n| Resources + Prompts | ❌ | ✅ (list/read/get) |\n| camelCase normalization | ❌ | ✅ (MCP clients → snake_case) |\n| Copilot Studio compat | ❌ | ✅ (flat argument tolerance) |\n| Observability spans | ❌ | ✅ (prompt.render, resource.read) |\n| JSON serialization | str() ❌ | orjson.dumps() ✅ |\n| SSRF loopback validation | Removed ❌ | **Preserved** ✅ |\n| OAuth config protection | Removed ❌ | **Preserved** ✅ |\n| Production tested | ❌ | ✅ (2+ weeks) |\n\n### Security Fixes (vs #3653)\n\nThe original PR #3653 introduced several security regressions that this PR avoids:\n\n1. **SSRF prevention preserved**: `x-forwarded-internally` header validation against loopback IP is maintained (the original PR removed this check)\n2. **OAuth secret protection preserved**: `protect_oauth_config_for_storage()` is called on server updates (the original PR removed this)\n3. **Proper JSON serialization**: Uses `orjson.dumps()` instead of Python `str()` which produces invalid JSON with single quotes\n4. **Missing import fixed**: `wraps` from `functools` is properly imported (the original PR had a `NameError` at startup)\n5. **Login redirect safety**: Post-login redirect uses `_is_safe_local_path()` validation to prevent open redirect attacks\n\n## 🏷️ Type of Change\n\n- [x] Feature / Enhancement\n\n### Test Coverage\n\n- ✅ 2400+ lines of tests covering all 12 meta-tools\n- ✅ MetaServerService: tool definitions, meta-tool detection, scope filtering\n- ✅ MetaToolService: describe_tool, execute_tool with schema validation\n- ✅ All request/response schemas with Pydantic validation\n- ✅ camelCase → snake_case argument normalization\n- ✅ Scope filtering with AND semantics and edge cases\n- ✅ Error handling for all code paths\n\n## 📓 Notes\n\n### Files Changed (26 files, +6584/-23)\n\n#### New Files\n- `mcpgateway/meta_server/__init__.py` — Package initialization\n- `mcpgateway/meta_server/schemas.py` — Pydantic models for all 12 meta-tools\n- `mcpgateway/meta_server/service.py` — MetaServerService with all handler implementations\n- `mcpgateway/routers/meta_router.py` — HTTP endpoints under `/meta/*`\n- `mcpgateway/services/meta_tool_service.py` — Business logic for describe/execute\n- `mcpgateway/services/semantic_search_service.py` — Semantic search stub (graceful fallback)\n- `mcpgateway/services/vector_search_service.py` — Vector search with numpy fallback\n- `mcpgateway/services/embedding_service.py` — Embedding stub (no-op without model)\n- `mcpgateway/utils/pgvector.py` — pgvector compatibility shim\n- `mcpgateway/alembic/versions/5126ced48fd0` — Migration for meta-server fields\n\n#### Modified Files\n- `mcpgateway/schemas.py` — server_type, hide_underlying_tools, meta_config, meta_scope fields\n- `mcpgateway/db.py` — ToolEmbedding model + meta-server fields on Server\n- `mcpgateway/transports/streamablehttp_transport.py` — Tool hiding + meta-tool routing\n- `mcpgateway/middleware/rbac.py` — Login redirect with ?next= preservation\n- `mcpgateway/routers/oauth_router.py` — Chained OAuth flow + authorize-all endpoint\n- `mcpgateway/routers/sso.py` — Post-login redirect cookie handling\n- `mcpgateway/services/server_service.py` — Meta-server field handling\n- `mcpgateway/services/tool_service.py` — Absolute OAuth authorize URL\n- `mcpgateway/admin.py` — Meta-server fields in admin UI\n- `mcpgateway/static/admin.js` — Meta-server JS config\n- `mcpgateway/templates/admin.html` — Meta-server form fields\n- `mcpgateway/templates/gateways_partial.html` — Authorize button for non-admin users\n- `mcpgateway/main.py` — Router registration\n- `mcpgateway/config.py` — semantic_search_rate_limit setting\n\n#### Tests\n- `tests/unit/mcpgateway/test_meta_server.py` — 2257 lines covering all meta-tools\n- `tests/unit/mcpgateway/services/test_meta_tool_service.py` — 180 lines for tool service\n\n### Migration & Compatibility\n- ✅ Backward compatible: existing servers default to `server_type=\"standard\"`\n- ✅ Additive changes: no breaking changes to existing endpoints\n- ✅ Opt-in feature: meta-servers explicitly created with `server_type=\"meta\"`\n- ✅ Graceful degradation: semantic search falls back to keyword search\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "de3e57045e3abd4d455128f54e1a738c1b6fb5aa",
+      "message": "feat(api): comprehensive Virtual Meta-Server with 12 meta-tools\n\nImplements the Virtual Meta-Server feature (#2230) — a tool aggregation\nlayer that enables AI agents to discover and invoke thousands of underlying\ntools through a unified interface.\n\nMeta-tools:\n- search_tools: hybrid semantic + keyword search with scope filtering\n- list_tools: paginated tool listing with sorting and filtering\n- describe_tool: detailed tool info with schema and metadata\n- execute_tool: tool execution with JSON schema validation and routing\n- get_tool_categories: aggregated categories with counts\n- get_similar_tools: vector similarity search for related tools\n- authorize_gateway: interactive OAuth authorization with token refresh\n- authorize_all_gateways: one-click authorization for all OAuth gateways\n- list_resources: paginated MCP resource listing\n- read_resource: read MCP resource content by URI\n- list_prompts: paginated MCP prompt listing\n- get_prompt: prompt template retrieval with optional rendering\n\nFeatures:\n- OAuth integration: propagates user identity through the call chain\n- Chained OAuth flow: authorize-all endpoint chains multiple gateways\n- camelCase normalization for MCP clients\n- Flat argument tolerance for Copilot Studio\n- Post-login redirect via cookie with safe path validation\n- Observability: prompt.render and resource.read spans\n- JSON serialization: orjson.dumps() for proper JSON output\n- Admin UI: meta-server checkbox and hide-underlying-tools in server forms\n- Preserves protect_oauth_config_for_storage() on server update\n- RBAC enforcement via middleware on all meta endpoints\n\nCloses #2230\nSupersedes #3653\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-14T14:29:12+00:00"
+    },
+    {
+      "sha": "646b16a1fa6752f648b557f376f3e56bb985a5ec",
+      "message": "fix: enforce access control on all meta-server handlers\n\nAll 12 meta-server tool handlers now enforce visibility-based access\ncontrol using user_email and token_teams from the JWT context.\n\nPreviously fixed (execute_tool, authorize_gateway, authorize_all_gateways)\nalready passed user context correctly. The following handlers were\nbypassing access control entirely:\n\n- _list_tools: now passes user_email/token_teams to ToolService.list_tools()\n- _search_tools: replaced raw db.query(Tool) with ToolService.list_tools()\n- _stub_describe_tool: passes user_email/token_teams to MetaToolService\n- _get_similar_tools: filters vector search results against accessible\n  tool set via ToolService.list_tools()\n- _list_resources: applies ResourceService._apply_access_control() to query\n- _read_resource: checks ResourceService._check_resource_access() before\n  returning content\n- _list_prompts: applies PromptService._apply_access_control() to query\n- _get_prompt: checks PromptService._check_prompt_access() before\n  returning content\n\nAdds _extract_user_context() static helper for consistent extraction\nof (user_email, token_teams, request_headers) from handler kwargs.\n\n_get_tool_categories remains hardcoded to actor_scope=public_user which\nis already restrictive by default.\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-16T08:11:58+00:00"
+    },
+    {
+      "sha": "9be6a19b5a8e5aae239c7b4126529ada0fe21c0c",
+      "message": "ui: hide tool/resource/prompt selectors when meta-server mode is enabled\n\nMove the meta-server checkbox above the tool/resource/prompt selection\nsections in both the create and edit virtual server modals. When\nmeta-server mode is enabled, the selectors are hidden and replaced\nwith an info banner explaining that a meta-server dynamically exposes\nall items based on the user's access rights.\n\nChanges:\n- admin.html: move meta-server checkbox before tool selection in both\n  create and edit modals; wrap tools/resources/prompts sections in\n  togglable container divs; add info banner\n- servers.js: toggle items section and info banner when populating\n  the edit modal based on server_type\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-16T09:02:40+00:00"
+    },
+    {
+      "sha": "b32c8d15086f7eba4c102df670e62c1d9c35ea70",
+      "message": "ui: also hide MCP server selector when meta-server mode is enabled\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-16T09:35:15+00:00"
+    },
+    {
+      "sha": "e7d46545006084968ea8780d72152f00c9df57a4",
+      "message": "refactor: code review cleanup — remove dead code, factor helpers, fix tests\n\n- Remove duplicate meta-server sections in CREATE and EDIT modals (admin.html)\n- Remove dead imports: ToolEmbedding, top-level or_ (service.py)\n- Fix docstring: meta-server exposes 12 tools, not 6 (service.py)\n- Factor _resolve_effective_email() helper for JWT extraction (service.py)\n- Factor _apply_scope_header() helper for X-Scope processing (meta_router.py)\n- Move inline 'import json' to module level (meta_router.py)\n- Fix test assertion: len(defs) == 12, add new meta-tool assertions (test_meta_server.py)\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-16T10:39:59+00:00"
+    },
+    {
+      "sha": "6a648c5fcb5f61335a5e68352c27990c422051ee",
+      "message": "feat(search): tokenized multi-word keyword search for search_tools\n\nReplace single-block substring matching with tokenized multi-word\nsearch. Query is split on whitespace/hyphens/underscores into tokens,\neach matched independently against tool name tokens and description.\n\nScoring weights name matches higher than description matches:\n- 1.0: exact full name match\n- 0.95: all tokens match, majority in name\n- 0.85: all tokens match, mostly in description\n- 0.6-0.8: partial match with name hits\n- 0.3-0.6: partial match, description only\n\nThis fixes queries like 'compile context compiler' that previously\nreturned 0 results because the entire string was used as one block.\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-22T14:52:16+00:00"
+    },
+    {
+      "sha": "a72906de892f0e9ac2b725657135076b31430405",
+      "message": "fix(search): fetch all tools before keyword matching instead of using search limit\n\nThe keyword search was passing the search result limit (default 50) to\nToolService.list_tools, causing it to only scan the first 50 tools instead\nof the full catalog (200+). Use limit=0 to fetch all tools for matching,\nthen paginate after scoring.\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-24T07:46:16+00:00"
+    },
+    {
+      "sha": "46547d093806d2a2d5313b67725217824f787919",
+      "message": "fix(meta-tools): sort order, serverId, tag inheritance, keyword similarity\n\n- list_tools: implement sort_by name/created_at with sort_order asc/desc\n- describe_tool: use gateway_id as primary source for serverId (not M2M servers)\n- tag inheritance: tools with no tags inherit from their parent Gateway\n- get_similar_tools: keyword-based Jaccard fallback when no embeddings\n  available (same-gateway boost)\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-24T08:11:00+00:00"
+    },
+    {
+      "sha": "562354ac2b33771dcb88732af805e44159df80d9",
+      "message": "feat(meta-server): get_tool_categories uses inherited gateway tags\n\nReplace ToolService.get_tool_categories delegation with direct DB query\nthat applies the same tag inheritance logic as other meta-tools: when a\ntool has no tags of its own, inherit from the parent Gateway.\n\nCategories are aggregated by tag name with tool counts.\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-24T08:41:12+00:00"
+    },
+    {
+      "sha": "7dc54efd3daa057eb4eaf3066d65b20169414350",
+      "message": "fix(admin-ui): fix 4 div nesting bugs causing invisible panels\n\n- catalog create form: close unclosed grid div (gap-7)\n- a2a agent create form: close unclosed grid div (gap-7 sm:grid-cols-2)\n- a2a-edit-modal: add missing outer closing div\n- server-modal edit section: remove duplicate closing div for items-section\n\nThese div imbalances caused all panels after catalog-panel to render\nat incorrect nesting depth, making them invisible in the admin UI.\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-28T08:33:51+00:00"
+    },
+    {
+      "sha": "98abec1ef66aac642c07dfd3f09ca4a0818ef68d",
+      "message": "fix: add card styling to Resources and Prompts panels in create server form\n\nThe Associated Resources and Associated Prompts panels in the create\nserver form were missing the card wrapper (p-4, bg-white, rounded-lg,\nshadow-lg, border) that MCP Servers and Tools panels already had.\nThe edit modal already had the correct styling.\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-28T09:14:13+00:00"
+    },
+    {
+      "sha": "45c55237fa994cce0fcf898c73f8cef933daa0ae",
+      "message": "fix: Resources/Prompts width in edit modal - close grid before nested grid\n\nThe Resources and Prompts grid in the edit server modal was nested\ninside the MCP Servers + Tools 2-column grid, constraining it to 50%\nwidth. Fixed by closing the outer grid before the Resources/Prompts\nsection.\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-28T09:29:27+00:00"
+    }
+  ],
+  "files_changed": 30,
+  "additions": 7435,
+  "deletions": 244,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:59.555998",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:59.556873",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3978,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3978.json"
+  }
+}

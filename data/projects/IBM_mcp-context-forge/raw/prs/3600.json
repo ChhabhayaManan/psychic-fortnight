@@ -1,0 +1,114 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3600,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3600"
+  },
+  "metadata": {
+    "title": "[Fix][Observability]: Fix duplicate DB session in observability middleware",
+    "state": "closed",
+    "created_at": "2026-03-11T05:53:48+00:00",
+    "updated_at": "2026-03-20T21:46:55+00:00",
+    "closed_at": "2026-03-20T21:46:53+00:00",
+    "merged_at": "2026-03-20T21:46:53+00:00",
+    "author": "smrutisahoo10",
+    "labels": [
+      "bug",
+      "performance",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3467\r\n\r\n---\r\n\r\n## 📝 Summary\r\n**What does this PR do?**\r\nEliminates duplicate database session creation in observability middleware by implementing request-scoped session sharing between middleware and route handlers.\r\n\r\n**Why?**\r\n- Reduces database connection usage by 50% for traced requests\r\n- Prevents SQLite segfaults with StaticPool under concurrent load\r\n- Improves performance by reducing session creation/destruction overhead\r\n- Lowers connection pool pressure in production environments\r\n\r\n**Technical Changes**:\r\n1. `mcpgateway/middleware/observability_middleware.py`:\r\n   - Creates request-scoped session and stores in `request.state.db`\r\n   - Handles complete session lifecycle (commit/rollback/close)\r\n   - Added session ownership tracking for proper cleanup\r\n\r\n2. `mcpgateway/main.py` (`get_db()` function):\r\n   - Checks for `request.state.db` and reuses if present\r\n   - Falls back to creating own session if middleware didn't create one\r\n   - Maintains backward compatibility for non-traced requests\r\n\r\n3. `tests/unit/mcpgateway/middleware/test_observability_middleware.py`:\r\n   - Updated 8 tests to mock `should_skip_observability` for proper coverage\r\n   - Added verification for session reuse behavior\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [X] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |     Pass   |\r\n| Unit tests                | `make test`     |    Pass    |\r\n| Coverage ≥ 80%            | `make coverage` |   Pass     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [X] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n**Manual Testing Results:**\r\n\r\n**With OBSERVABILITY_ENABLED=true, single session ID confirmed:**\r\n[OBSERVABILITY] DB session created: 139870311167472\r\n[GET_DB] Reusing session from middleware: 139870311167472  ← Same ID ✅\r\n\r\n**Before fix (two different session IDs):**\r\n[OBSERVABILITY] DB session created: 4709458000\r\n[GET_DB] DB session created: 4710405520  ← Different ID ❌",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3930416195",
+      "author": "ja8zyjits",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-11T15:20:06+00:00",
+      "body": "additional validation needed as per the comments https://github.com/IBM/mcp-context-forge/pull/3600#issuecomment-4039642103"
+    },
+    {
+      "id": "3965483064",
+      "author": "MohanLaksh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-18T06:50:52+00:00",
+      "body": "# PR #3600 Review Summary\n\n\n### Core Implementation (Excellent)\n- **Successfully eliminates duplicate session creation** - The middleware now creates a request-scoped session stored in `request.state.db`, which `get_db()` reuses\n- **50% reduction in database connections** for traced requests\n- **Prevents SQLite StaticPool segfaults** under concurrent load\n- **Maintains backward compatibility** - `get_db()` falls back to creating its own session when observability is disabled\n\n### Code Quality\n- **Comprehensive test coverage** - Added 4 new tests + updated 8 existing tests\n- **Proper error handling** - Includes rollback, invalidation, and cleanup logic\n- **Good documentation** - Clear comments explaining the session sharing pattern\n\n### Review Response\nThe author has **addressed all critical review comments** from @ja8zyjits:\n1. ✅ Added connection invalidation in both error paths (trace setup + main exception handler)\n2. ✅ Added `db.in_transaction()` check to prevent double-commit issues\n3. ✅ Changed logging from INFO to DEBUG level\n4. ✅ Achieved 100% test coverage (up from 76%)\n\n## 🎯 Current State\n\n### Files Changed (3)\n1. `mcpgateway/middleware/observability_middleware.py` (+45, -5 lines)\n2. `mcpgateway/main.py` (+22, -1 lines)  \n3. `tests/unit/mcpgateway/middleware/test_observability_middleware.py` (+384, -10 lines)\n\n### Key Design Decisions\n- **Session ownership tracking** via `session_owned_by_middleware` flag\n- **Request state storage** using `request.state.db`\n- **Lifecycle management** - Middleware handles commit/rollback/close for shared sessions\n- **Safe commit logic** - Only commits if `db.is_active and db.in_transaction()`\n\n## 🔍 Technical Review\n\n### Architecture Alignment ✅\n- Follows the synchronous SQLAlchemy pattern (per AGENTS.md design decision)\n- Consistent with existing error handling patterns in `get_db()`\n- Respects the two-layer security model (token scoping + RBAC)\n\n### Error Handling ✅\n- **Connection invalidation** properly implemented in both error paths\n- **Graceful degradation** - Continues without tracing if setup fails\n- **Proper cleanup** - Removes `request.state.db` to prevent stale references\n\n### Testing ✅\n- **Integration test** verifies single session per request (critical assertion)\n- **Error path coverage** includes rollback failures, invalidation failures\n- **Session reuse tests** confirm `get_db()` behavior in both scenarios\n\n## ⚠️ Minor Observation (Non-Blocking):\n\n1. **Documentation Gap** - No updates to architecture docs (mentioned as \"Future Work\" in review)\n   - Consider updating `docs/docs/architecture/multitenancy.md` with session lifecycle info\n   - Could add note to `docs/docs/manage/observability.md` about session sharing\n\n## 🚦 Recommendation\n\n**APPROVE** - This PR is ready to merge.\n\n### Rationale\n1. ✅ All critical review comments have been addressed\n2. ✅ 100% test coverage with comprehensive edge case testing\n3. ✅ Production-ready error handling (connection invalidation, double-commit prevention)\n4. ✅ Proper logging levels for production use\n5. ✅ Maintains backward compatibility\n6. ✅ Solves the stated problem (duplicate sessions) effectively\n\n### Post-Merge Recommendations\n- Monitor production metrics for session usage reduction\n- Consider adding session lifecycle documentation in a follow-up PR\n- Watch for any edge cases with services that explicitly commit (399 instances across 53 files)\n\n## 📊 Impact Assessment\n\n**Risk Level:** LOW  \n**Performance Impact:** POSITIVE (50% reduction in session usage)  \n**Breaking Changes:** NONE  \n**Deployment Notes:** Safe to deploy - graceful degradation if issues occur\n\n---\n\n**Final Verdict:** This is a well-implemented fix with excellent test coverage and proper error handling. The author has been responsive to feedback and addressed all critical concerns. Ready for merge. 🚀"
+    },
+    {
+      "id": "3971148487",
+      "author": "ja8zyjits",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-18T22:14:30+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "3984211768",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-20T21:37:13+00:00",
+      "body": "Reviewed, rebased, tested end-to-end. Fix is correct and complete for its scope. All code paths verified, 100% differential coverage, bandit clean, full E2E passing against docker-compose stack."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "74d5af24f648d683f7543ab3eb3de2e900390dfb",
+      "message": "Fix duplicate DB session in observability middleware\n\nSigned-off-by: Smruti Sahoo <talktodaisy19@gmail.com>",
+      "author": "Smruti Sahoo",
+      "date": "2026-03-11T05:36:05+00:00"
+    },
+    {
+      "sha": "df3e5dfe6f9a68f689357788c131121e31ea19ef",
+      "message": "Added a test for exception handler for when db rollback fails\n\nSigned-off-by: Smruti Sahoo <talktodaisy19@gmail.com>",
+      "author": "Smruti Sahoo",
+      "date": "2026-03-11T09:17:12+00:00"
+    },
+    {
+      "sha": "bb775db0ad009964aa4b56eae8e775f07b66b1c0",
+      "message": "fix: add connection invalidation and double-commit prevention for observability\n\nSigned-off-by: Smruti Sahoo <talktodaisy19@gmail.com>",
+      "author": "Smruti Sahoo",
+      "date": "2026-03-12T09:35:07+00:00"
+    },
+    {
+      "sha": "6a9205c125cd1a42be39ccdceda4c6c0b84612a4",
+      "message": "Added test cases\n\nSigned-off-by: Smruti Sahoo <talktodaisy19@gmail.com>",
+      "author": "Smruti Sahoo",
+      "date": "2026-03-12T09:54:51+00:00"
+    },
+    {
+      "sha": "4e101fa221ad0462736315ec06767344504f4d36",
+      "message": "fix(tests): remove duplicate mock_request fixture and unused import\n\nRemove duplicate mock_request fixture that was overriding the original\nand dropping the traceparent header, which caused lines 99-102 of\nobservability_middleware.py to lose test coverage. Also remove unused\nasyncio import and add missing trailing newline.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T18:32:42+00:00"
+    },
+    {
+      "sha": "f6174a020f253cb0d8f732f85b2c169007b59e86",
+      "message": "fix(lint): add nosec B110 for best-effort invalidate cleanup\n\nBandit flags try/except/pass as B110. These two sites are\nintentional best-effort cleanup when db.invalidate() fails\nafter a broken connection — there is nothing useful to do\nwith the exception.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T21:08:51+00:00"
+    },
+    {
+      "sha": "d4ae9b5c74dca286abbabf76b526d1d812565eeb",
+      "message": "style(tests): fix trailing whitespace in observability tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T21:09:11+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 435,
+  "deletions": 17,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:08.282808",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:08.283939",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3600,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3600.json"
+  }
+}

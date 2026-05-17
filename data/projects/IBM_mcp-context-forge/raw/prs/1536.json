@@ -1,0 +1,82 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1536,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1536"
+  },
+  "metadata": {
+    "title": "Feature-221 : Gateway-Level Input Validation & Output Sanitization",
+    "state": "closed",
+    "created_at": "2025-12-02T09:46:25+00:00",
+    "updated_at": "2025-12-12T17:52:14+00:00",
+    "closed_at": "2025-12-12T17:52:12+00:00",
+    "merged_at": "2025-12-12T17:52:12+00:00",
+    "author": "nmveeresh",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# Gateway-Level Input Validation & Output Sanitization\r\n\r\nCloses https://github.com/IBM/mcp-context-forge/issues/221\r\n\r\n## 🔒 Security Enhancement\r\nThis PR introduces a comprehensive security layer for **input validation** and **output sanitization** within the MCP Gateway, significantly reducing the attack surface for path traversal, command injection, and control-character exploits.\r\n\r\n---\r\n\r\n## 🎯 Key Features\r\n\r\n### **1. Path Traversal Defense**\r\n- Normalizes all paths using secure resolvers.\r\n- Enforces confinement to declared root directories.\r\n- Blocks attempts like:\r\n  - ../../../etc/passwd\r\n  - ......\\windows\\system32\r\n\r\n\r\n### **2. Parameter Validation**\r\n- Detects and rejects:\r\n- Shell metacharacters  \r\n- SQL injection patterns  \r\n- XSS-oriented strings  \r\n- Unsafe URLs (`javascript:`)  \r\n- Control characters (0x00–0x1F, 0x7F–0x9F)\r\n\r\n### **3. Output Sanitization**\r\n- Removes unsafe control characters before delivering responses.\r\n- Validates MIME types and prevents malicious payloads.\r\n\r\n### **4. Configurable Security Modes**\r\n- Fully feature-flagged via:\r\n- `EXPERIMENTAL_VALIDATE_IO`\r\n- Strict vs warn mode\r\n- Sanitization toggle\r\n\r\n### **5. System-Wide Coverage**\r\n- New validation middleware applied early in request lifecycle.\r\n- Safe wrapper for subprocess execution.\r\n- Updated resource service path normalization.\r\n- Sanitization pipeline for responses.\r\n\r\n---\r\n\r\n## 🛠️ Implementation Details\r\n\r\n### **New Components**\r\n- Request validation middleware  \r\n- Secure path normalization utility  \r\n- Sanitized response generator  \r\n- Safe subprocess command executor  \r\n\r\n### **Updated Components**\r\n- Resource service  \r\n- Tool execution pipeline  \r\n- Global configuration manager  \r\n\r\n---\r\n\r\n## 🔧 Configuration Added (in `.env`)  \r\n\r\n```env\r\nEXPERIMENTAL_VALIDATE_IO=false\r\nVALIDATION_MIDDLEWARE_ENABLED=false\r\nVALIDATION_STRICT=false\r\nSANITIZE_OUTPUT=false\r\nALLOWED_ROOTS=[]\r\nMAX_PATH_DEPTH=10\r\nMAX_PARAM_LENGTH=10000\r\nDANGEROUS_PATTERNS=[\r\n\"[;&|`$(){}\\\\[\\\\]<>]\",\r\n\"\\\\.\\\\.[/\\\\\\\\]\",\r\n\"[\\\\x00-\\\\x1f\\\\x7f-\\\\x9f]\"\r\n]\r\n```\r\n\r\n# 🎯 Security Impact\r\n---\r\n### **Prevents:**\r\n\r\n- Directory traversal\r\n- Shell/command injection\r\n- SQL injection attempts\r\n- XSS injection into tool metadata\r\n- Malicious binary/control-character output\r\n\r\n### **Benefits:**\r\n\r\n- Stronger baseline security posture\r\n- Consistent validation across the entire gateway\r\n- Clean and predictable output guarantees\r\n-Foundation for future MCP spec hardening\r\n\r\n\r\n# 🛡️ Quick Security Validation Tests\r\nEssential attack patterns that MUST be blocked by the Gateway.\r\n\r\n---\r\n\r\nExport environment variables for each mode and check logs.\r\n\r\nThis section explains—step by step—how to run the gateway in different validation modes and verify the expected log behavior.\r\n\r\n# Validation Behavior Summary\r\n\r\n**This document explains how validation behaves based on different environment configurations.**\r\n\r\n### **🧪 Development Mode — Validation Disabled**\r\n\r\n### **Environment variables:**\r\n```\r\nexport ENVIRONMENT=development\r\n\r\nexport VALIDATION_MIDDLEWARE_ENABLED=true\r\nexport EXPERIMENTAL_VALIDATE_IO=false\r\nexport VALIDATION_STRICT=false\r\nexport SANITIZE_OUTPUT=false\r\nmake serve\r\n```\r\n\r\n**Behavior:**\r\n- Validation is disabled.\r\n- No warning logs appear.\r\n- Useful when rapidly iterating during development.\r\n\r\n### **🧪 Development Mode — Validation Enabled**\r\n\r\nEnvironment variables:\r\n```\r\nexport ENVIRONMENT=development\r\n\r\nexport VALIDATION_MIDDLEWARE_ENABLED=true\r\nexport EXPERIMENTAL_VALIDATE_IO=true\r\nexport VALIDATION_STRICT=true\r\nexport SANITIZE_OUTPUT=true\r\nmake serve\r\n```\r\n\r\n**Behavior:**\r\n- Validation runs, but environment is non-production.\r\n- System logs warnings, not errors.\r\n- Helps developers identify issues without blocking execution.\r\n\r\nExample log level:\r\n```\r\nWARNING – validation warnings appear in logs\r\n```\r\n\r\n### **🚀 Production Mode — Validation Enabled**\r\n\r\nEnvironment variables:\r\n```\r\nexport ENVIRONMENT=production\r\n\r\nexport VALIDATION_MIDDLEWARE_ENABLED=true\r\nexport EXPERIMENTAL_VALIDATE_IO=true\r\nexport VALIDATION_STRICT=true\r\nexport SANITIZE_OUTPUT=true\r\nmake serve\r\n```\r\n\r\n**Behavior:**\r\n- Full input/output validation is enabled.\r\n- Failures trigger ERROR logs.\r\n- Strict enforcement to avoid invalid payloads reaching downstream systems.\r\n\r\nExample log:\r\n```\r\nmcpgateway.middleware.validation_middleware - ERROR - [VALIDATION] Input validation failed\r\n```\r\n\r\n## 🧪 Test Script\r\n\r\n```bash\r\n#!/bin/bash\r\n# Quick security validation tests - Essential attacks that MUST be blocked\r\n\r\nBASE_URL=\"http://localhost:4444\"\r\nTOKEN=\"Paste token here\"\r\n\r\n\r\n#########################################\r\n# LOGGING HELPERS\r\n#########################################\r\n\r\nlog_info()    { echo -e \"\\033[34mℹ️  INFO:\\033[0m $1\"; }\r\nlog_warn()    { echo -e \"\\033[33m⚠️  WARNING:\\033[0m $1\"; }\r\nlog_error()   { echo -e \"\\033[31m❌ ERROR:\\033[0m $1\"; }\r\nlog_ok()      { echo -e \"\\033[32m✔️  OK:\\033[0m $1\"; }\r\n\r\n#########################################\r\n# RESPONSE HELPERS\r\n#########################################\r\n\r\nextract_status() {\r\n    echo \"$1\" | sed -n 's/.*HTTPSTATUS://p'\r\n}\r\n\r\nextract_body() {\r\n    echo \"$1\" | sed 's/HTTPSTATUS:.*//'\r\n}\r\n\r\ncall_api() {\r\n    curl -s -w \"HTTPSTATUS:%{http_code}\" \"$@\"\r\n}\r\n\r\ncheck_result() {\r\n    body=\"$1\"\r\n\r\n    # If any error/warning message appears → blocked correctly\r\n    if echo \"$body\" | grep -Ei \"error|value error|validation|failed|cannot|not allowed|invalid|html tags|directory traversal|metacharacters\"; then\r\n        log_ok \"Attack BLOCKED as expected\"\r\n        return\r\n    fi\r\n\r\n    # Successful unsafe acceptance = BAD\r\n    log_error \"Should have been BLOCKED\"\r\n}\r\n\r\n\r\ncheck_allowed() {\r\n    if echo \"$1\" | grep -q \"\\\"id\\\"\"; then\r\n        log_ok \"Allowed as expected\"\r\n    else\r\n        log_error \"Should have been ALLOWED\"\r\n    fi\r\n}\r\n\r\n#########################################\r\n# START TESTING\r\n#########################################\r\n\r\nlog_info \"Starting Quick Security Tests\"\r\necho \"===================================\"\r\n\r\n#########################################\r\necho \"🔒 Test 1: Path Traversal\"\r\nresp=$(call_api -X POST \"$BASE_URL/resources\" \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -d '{\r\n    \"resource\": {\r\n      \"uri\": \"../../../etc/passwd\",\r\n      \"name\": \"test_traversal\",\r\n      \"content\": \"dummy\"\r\n    },\r\n    \"team_id\": null,\r\n    \"visibility\": \"private\"\r\n  }')\r\n\r\nbody=$(extract_body \"$resp\")\r\nstatus=$(extract_status \"$resp\")\r\n\r\necho \"$body\" | jq .\r\nlog_info \"HTTP Status: $status\"\r\ncheck_result \"$body\"\r\necho \"\"\r\n\r\n#########################################\r\necho \"🔒 Test 2: Shell Injection\"\r\nresp=$(call_api -X POST \"$BASE_URL/tools\" \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -d '{\"tool\": {\"name\": \"test_shell\", \"description\": \"ls && cat /etc/passwd\"}}')\r\n\r\nbody=$(extract_body \"$resp\")\r\nstatus=$(extract_status \"$resp\")\r\n\r\necho \"$body\" | jq .\r\nlog_info \"HTTP Status: $status\"\r\ncheck_result \"$body\"\r\necho \"\"\r\n\r\n#########################################\r\necho \"🔒 Test 3: SQL Injection\"\r\nresp=$(call_api -X POST \"$BASE_URL/tools\" \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -d '{\"tool\": {\"name\": \"test_sql\", \"description\": \"'\"'\"'; DROP TABLE users; --\"}}')\r\n\r\nbody=$(extract_body \"$resp\")\r\nstatus=$(extract_status \"$resp\")\r\n\r\necho \"$body\" | jq .\r\nlog_info \"HTTP Status: $status\"\r\ncheck_result \"$body\"\r\necho \"\"\r\n\r\n#########################################\r\necho \"🔒 Test 4: XSS\"\r\nresp=$(call_api -X POST \"$BASE_URL/tools\" \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -d '{\"tool\": {\"name\": \"test_xss\", \"description\": \"<script>alert(1)</script>\"}}')\r\n\r\nbody=$(extract_body \"$resp\")\r\nstatus=$(extract_status \"$resp\")\r\n\r\necho \"$body\" | jq .\r\nlog_info \"HTTP Status: $status\"\r\ncheck_result \"$body\"\r\necho \"\"\r\n\r\n#########################################\r\necho \"🔒 Test 5: Dangerous URL\"\r\nresp=$(call_api -X POST \"$BASE_URL/tools\" \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -d '{\"tool\": {\"name\": \"test_url\", \"url\": \"javascript:alert(1)\"}}')\r\n\r\nbody=$(extract_body \"$resp\")\r\nstatus=$(extract_status \"$resp\")\r\n\r\necho \"$body\" | jq .\r\nlog_info \"HTTP Status: $status\"\r\ncheck_result \"$body\"\r\necho \"\"\r\n\r\n#########################################\r\necho \"✅ Test 6: Safe Command\"\r\nresp=$(call_api -X POST \"$BASE_URL/tools\" \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -d \"{\\\"tool\\\": {\\\"name\\\": \\\"safe_tool_$(date +%s)\\\", \\\"description\\\": \\\"echo hello world\\\"}}\")\r\n\r\nbody=$(extract_body \"$resp\")\r\nstatus=$(extract_status \"$resp\")\r\n\r\necho \"$body\" | jq .\r\nlog_info \"HTTP Status: $status\"\r\ncheck_allowed \"$body\"\r\necho \"\"\r\n\r\nlog_info \"🏁 All tests completed!\"\r\n\r\n```",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3566045952",
+      "author": "rakdutta",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-11T07:13:14+00:00",
+      "body": "The PR is working as expected. When testing through the main API, we correctly receive a warning message in the development environment and an error message in the production environment.\r\nHowever, in the Admin UI, the user should also receive a clear and user-friendly warning or error message.\r\n\r\nPlease create a separate PR to address this UI handling issue."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a1dac9604fc0bf346dc27a176b727403c66f6a16",
+      "message": "added input security validation\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-11-26T12:43:43+00:00"
+    },
+    {
+      "sha": "42d44f4b6932b259d8aea5f7cae1d059ea88e0af",
+      "message": "testcases fixed\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-12-02T05:09:18+00:00"
+    },
+    {
+      "sha": "bba472e8bed194be53c947e5f3129042e09efa46",
+      "message": "fixed config.py\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-12-02T10:02:10+00:00"
+    },
+    {
+      "sha": "2c8c5201f972c0459c6e224d2ac27f6d66c2ec36",
+      "message": "added env vars and fixed validation code\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-12-10T07:44:24+00:00"
+    },
+    {
+      "sha": "06d7d78ec2e8037db59a78eb146e84be7cd7bf8f",
+      "message": "remove input_validator.py file\n\nSigned-off-by: Veeresh K <veeruveeresh1522@gmail.com>",
+      "author": "Veeresh K",
+      "date": "2025-12-10T08:28:32+00:00"
+    },
+    {
+      "sha": "d28a8281d23bb6df6c7641db16b11c4cb9b4e688",
+      "message": "fix: remove duplicate SecurityValidator import\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-12T17:31:22+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 1519,
+  "deletions": 4,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:21:12.089638",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:21:12.090560",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1536,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1536.json"
+  }
+}

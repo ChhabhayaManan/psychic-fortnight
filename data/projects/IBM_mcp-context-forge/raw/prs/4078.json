@@ -1,0 +1,112 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4078,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4078"
+  },
+  "metadata": {
+    "title": "3955 bug plugin condition evaluation system requires comprehensive overhaul",
+    "state": "closed",
+    "created_at": "2026-04-08T07:42:59+00:00",
+    "updated_at": "2026-04-08T10:16:22+00:00",
+    "closed_at": "2026-04-08T10:16:20+00:00",
+    "merged_at": "2026-04-08T10:16:20+00:00",
+    "author": "ja8zyjits",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nBefore opening this PR please:\r\n\r\n1. `make lint`            - passes `ruff`, `mypy`, `pylint`\r\n2. `make test`            - all unit + integration tests green\r\n3. `make coverage`        - ≥ 80 %\r\n4. `make docker docker-run-ssl` or `make podman podman-run-ssl`\r\n5. Update relevant documentation.\r\n6. Tested with sqlite and postgres + redis.\r\n7. Manual regression no longer fails. Ensure the UI and /version work correctly.\r\n\r\n---\r\n\r\n## 📌 Summary\r\n\r\nThis PR fixes two critical issues in the plugin condition evaluation system that together create security vulnerabilities and silent failures:\r\n\r\n1. **Missing Implementation**: The `PluginCondition.content_types` field is defined but never implemented in the conditional matching logic, making it a non-functional configuration option that silently fails.\r\n\r\n2. **Architectural Flaw**: The current OR-based condition evaluation logic in `payload_matches()` is too permissive and prevents precise, fine-grained control over plugin execution, creating security gaps and making it impossible to implement defense-in-depth policies requiring multiple conditions to be satisfied simultaneously.\r\n\r\n**Why this matters**: The OR logic creates policy bypass vulnerabilities where plugins execute in unintended contexts, while the missing content_types implementation means users cannot filter plugins by content type despite the field being documented and available for configuration.\r\n\r\n**Related Issues**: Closes #3955, #3925, #3930\r\n\r\n---\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n### Issue 1: Missing content_types Implementation\r\n\r\n1. Configure a plugin with `content_types` condition in `plugins/config.yaml`:\r\n   ```yaml\r\n   plugins:\r\n     - name: \"TestPlugin\"\r\n       conditions:\r\n         - content_types: [\"application/json\", \"text/plain\"]\r\n   ```\r\n\r\n2. Send requests with different content types\r\n\r\n3. **Observed**: Plugin executes regardless of content type (field is silently ignored)\r\n\r\n4. **Expected**: Plugin should only execute for matching content types\r\n\r\n### Issue 2: OR-based Evaluation Logic Flaw\r\n\r\n1. Configure a plugin with multiple conditions:\r\n   ```yaml\r\n   plugins:\r\n     - name: \"SecurityPlugin\"\r\n       conditions:\r\n         - tenant_ids: [\"healthcare\"]\r\n           tools: [\"patient_data_reader\"]\r\n           user_patterns: [\"admin_.*\"]\r\n   ```\r\n\r\n2. Send a request matching only ONE condition (e.g., `tenant=\"healthcare\"` but `tool=\"other_tool\"` and `user=\"regular_user\"`)\r\n\r\n3. **Observed**: Plugin executes due to OR logic, even though not all security requirements are met\r\n\r\n4. **Expected**: Plugin should only execute when ALL conditions match (AND logic)\r\n\r\n---\r\n\r\n## 🐞 Root Cause\r\n\r\n### Issue 1: content_types Not Implemented\r\n\r\n**Location**: `mcpgateway/plugins/framework/utils.py`\r\n\r\n- The `PluginCondition` model defines `content_types: Optional[list[str]] = None` at line 212 in `models.py`\r\n- The `matches()` function (line 187 in `utils.py`) only checks `server_ids`, `tenant_ids`, and `user_patterns`\r\n- The `payload_matches()` function (line 300 in `utils.py`) handles `tools`, `prompts`, `resources`, `agents` but NOT `content_types`\r\n- No content type extraction from request headers or payload metadata exists\r\n\r\n**Impact**: Silent failure - users configure content_types thinking it works, but plugins execute regardless of content type.\r\n\r\n### Issue 2: OR Logic Too Permissive\r\n\r\n**Location**: `mcpgateway/plugins/framework/utils.py:300` (`payload_matches()`)\r\n\r\n```python\r\ndef payload_matches(...) -> bool:\r\n    for condition in conditions:\r\n        if matches(condition, context):\r\n            # Check payload-specific conditions...\r\n            return True  # ← OR logic - first match wins, too permissive\r\n    return False\r\n```\r\n\r\n**Impact**: Security vulnerability - plugins execute when ANY condition matches instead of requiring ALL conditions to match, allowing policy bypass.\r\n\r\n---\r\n\r\n## 💡 Fix Description\r\n\r\n### Phase 1: Implement content_types Support (Non-Breaking)\r\n\r\n1. **Content Type Extraction**: Add content type extraction from request headers (`Content-Type`) and payload metadata\r\n2. **Matching Logic**: Implement content type matching in `matches()` function with MIME type comparison\r\n3. **Integration**: Wire content type checking into `payload_matches()` evaluation flow\r\n4. **Testing**: Comprehensive unit tests for all content type matching scenarios\r\n\r\n### Phase 2: Implement AND-based Evaluation (Breaking Change)\r\n\r\n1. **Logic Replacement**: Replace OR logic with AND logic in `payload_matches()`\r\n   - All conditions within a single `PluginCondition` must match (AND)\r\n   - Multiple `PluginCondition` objects in the list are still evaluated with OR\r\n2. **Fail-Fast**: Add short-circuit evaluation on first non-matching condition\r\n3. **Debug Logging**: Add comprehensive logging showing which conditions matched/failed\r\n4. **Migration Support**: Provide clear migration guide and validation tooling\r\n\r\n### Key Design Points\r\n\r\n- **Backward Compatibility**: content_types is additive (non-breaking)\r\n- **Breaking Change**: AND logic requires major version bump and migration guide\r\n- **Security First**: Fail-closed approach - if any condition fails, plugin doesn't execute\r\n- **Performance**: Short-circuit evaluation minimizes overhead\r\n- **Observability**: Debug logging for troubleshooting condition evaluation\r\n\r\n### Code Changes\r\n\r\n**Files Modified**:\r\n- `mcpgateway/plugins/framework/models.py` - Document content_types field behavior\r\n- `mcpgateway/plugins/framework/utils.py` - Implement content_types matching and AND logic\r\n- `mcpgateway/plugins/framework/manager.py` - Update plugin execution flow\r\n- `tests/unit/mcpgateway/plugins/framework/` - Comprehensive test coverage\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          | ✅     |\r\n| Unit tests                            | `make test`          | ✅     |\r\n| Coverage ≥ 80 %                       | `make coverage`      | ✅     |\r\n| Manual regression no longer fails     | See test scenarios   | ✅     |\r\n\r\n### Test Scenarios Validated\r\n\r\n1. **content_types matching**:\r\n   - ✅ Plugin executes only for matching content types\r\n   - ✅ Plugin skips for non-matching content types\r\n   - ✅ Multiple content types in condition (OR within content_types)\r\n   - ✅ Missing content type header handling\r\n   - ✅ Invalid content type format handling\r\n\r\n2. **AND-based evaluation**:\r\n   - ✅ All conditions must match for plugin execution\r\n   - ✅ Plugin skips if any condition fails\r\n   - ✅ Short-circuit evaluation on first failure\r\n   - ✅ Debug logging shows condition evaluation details\r\n   - ✅ Multiple PluginCondition objects still use OR\r\n\r\n3. **Combined functionality**:\r\n   - ✅ content_types + tenant_ids + tools + user_patterns (all must match)\r\n   - ✅ Security policies with defense-in-depth\r\n   - ✅ Performance benchmarks show minimal overhead\r\n\r\n4. **Migration validation**:\r\n   - ✅ Existing configurations identified that need updates\r\n   - ✅ Migration guide examples validated\r\n   - ✅ Breaking change clearly documented\r\n\r\n---\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n**Note**: This is an internal plugin framework change that doesn't affect MCP protocol compliance. The changes are transparent to MCP clients.\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] Unit tests added for content_types matching\r\n- [x] Unit tests added for AND-based evaluation\r\n- [x] Integration tests validate combined functionality\r\n- [x] Documentation updated (`docs/docs/architecture/plugins.md`)\r\n- [x] Migration guide created with examples\r\n- [x] Breaking change clearly documented in CHANGELOG.md\r\n- [x] Version bump to 2.0.0 (major version for breaking change)\r\n- [x] Security review completed\r\n- [x] Performance benchmarks show acceptable overhead\r\n\r\n---\r\n\r\n## 📋 Migration Guide Summary\r\n\r\n**Breaking Change**: Plugin condition evaluation now uses AND logic instead of OR logic.\r\n\r\n**Before (v1.x - OR logic)**:\r\n```yaml\r\nplugins:\r\n  - name: \"SecurityPlugin\"\r\n    conditions:\r\n      - tenant_ids: [\"healthcare\"]\r\n        tools: [\"patient_data_reader\"]\r\n        user_patterns: [\"admin_.*\"]\r\n```\r\nPlugin executes if ANY condition matches (tenant OR tool OR user).\r\n\r\n**After (v2.0 - AND logic)**:\r\n```yaml\r\nplugins:\r\n  - name: \"SecurityPlugin\"\r\n    conditions:\r\n      - tenant_ids: [\"healthcare\"]\r\n        tools: [\"patient_data_reader\"]\r\n        user_patterns: [\"admin_.*\"]\r\n```\r\nPlugin executes ONLY if ALL conditions match (tenant AND tool AND user).\r\n\r\n**Migration Steps**:\r\n1. Audit existing plugin configurations\r\n2. Test in non-production environment\r\n3. Update conditions to match intended behavior\r\n4. Deploy with monitoring\r\n5. Validate plugin execution patterns\r\n\r\nSee full migration guide in `docs/docs/architecture/plugins-migration-v2.md`.\r\n\r\n---\r\n\r\n## 🔗 References\r\n\r\n- Issue #3955: Plugin Condition Evaluation System Requires Comprehensive Overhaul\r\n- Issue #3925: PluginCondition.content_types field is defined but not implemented\r\n- Issue #3930: Hierarchical Plugin Condition Evaluation (Breaking Change)\r\n- `mcpgateway/plugins/framework/` - Plugin framework implementation\r\n- `docs/docs/architecture/plugins.md` - Plugin architecture documentation\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4074395197",
+      "author": "jonpspri",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-08T10:16:10+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ad9c75dae461e56f78b5947b2ea4afb57578ccd5",
+      "message": "Fixes #3925\n\n## Summary\n\nImplemented the `content_types` field functionality for `PluginCondition` to enable plugins to execute conditionally based on HTTP Content-Type headers.\n\n## Changes\n\n### Core Implementation\n- **models.py**: Added `content_type: Optional[str]` field to `GlobalContext`\n- **utils.py**:\n  - Added `normalize_content_type()` helper for case-insensitive matching with charset/parameter stripping\n  - Updated `matches()` function to check `content_types` conditions\n- **auth.py**: Extract Content-Type from request headers (2 locations)\n- **tool_service.py**: Extract Content-Type from request headers (3 locations)\n- **http_auth_middleware.py**: Extract Content-Type from request headers (1 location)\n- **rbac.py**: Extract Content-Type from request headers (1 location)\n\n### Testing\n- **test_content_type_matching.py**: Added 21 comprehensive unit tests covering:\n  - Exact matching, case-insensitive matching, charset parameter stripping\n  - Multiple content types (OR logic), combined conditions (AND logic)\n  - Permissive defaults (None content_type, empty conditions)\n  - Edge cases (empty strings, whitespace, malformed headers)\n\n### Documentation\n- **plugins.md**: Added \"Content Type Filtering\" section with examples, security notes, and performance benefits\n- **index.md**: Enhanced \"Conditional Execution\" section with practical content_types examples\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-02T15:29:08+00:00"
+    },
+    {
+      "sha": "dd443131aa2ea99b1b8d0c9087f99f1002f45420",
+      "message": "Fixed the concerns raised in PR review https://github.com/IBM/mcp-context-forge/pull/4005\\#issuecomment-4198300827\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-07T13:09:29+00:00"
+    },
+    {
+      "sha": "03bbdc67a82353c4b832bb2a8ac6dce27ae4e037",
+      "message": "Merge pull request #4005 from IBM/3925-bug-pluginconditioncontent_types-field-is-defined-but-not-implemented\n\nFixes #3925: Implemented the `content_types` field functionality for `PluginCondition`",
+      "author": "Jitesh Nair",
+      "date": "2026-04-07T15:28:54+00:00"
+    },
+    {
+      "sha": "8fe96854baa7b3d000c060bb237f6545a28e2f00",
+      "message": "feat: implement hierarchical plugin condition evaluation\n\n- Add support for AND/OR/NOT logical operators in plugin conditions\n- Implement nested condition evaluation with proper precedence\n- Add comprehensive test coverage for condition logic\n- Update documentation with examples and migration guide\n\nBREAKING CHANGE: Plugin condition syntax now supports hierarchical\nevaluation. Simple string conditions are still supported but complex\nconditions require new AND/OR/NOT structure.\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-07T10:09:52+00:00"
+    },
+    {
+      "sha": "4bd81b10502f22960b7f8d46b58a66239a745f86",
+      "message": "Ran Precommit and other refacotring\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-07T10:53:41+00:00"
+    },
+    {
+      "sha": "43cb677d2ecd536b5152e39a00019ecea25fae9a",
+      "message": "merged origin/3925-bug-pluginconditioncontent_types-field-is-defined-but-not-implemented\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-08T06:46:23+00:00"
+    },
+    {
+      "sha": "39530fd2e5b5ef9782d54026be6ead25128c53d8",
+      "message": "merged origin/3930-feature-hierarchical-plugin-condition-evaluation-breaking-change\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-08T07:35:56+00:00"
+    },
+    {
+      "sha": "422c9fcfc3913472236949d6194a6da3633d002d",
+      "message": "fixed linting issues\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-08T08:00:18+00:00"
+    },
+    {
+      "sha": "a04bdacb1fe405c0553a299c1909b88ead181c11",
+      "message": "fixing secrets baseline\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-08T08:10:10+00:00"
+    },
+    {
+      "sha": "c20ffadcba1d92d26a30fe1269c1f9f5b5e0d3e2",
+      "message": "rebased with main\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-08T08:18:10+00:00"
+    },
+    {
+      "sha": "21295709362a7d77030ab8b86de1cd1c6a6934e4",
+      "message": "worked on code reviews and fixed linting issues\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-08T09:57:07+00:00"
+    }
+  ],
+  "files_changed": 16,
+  "additions": 1291,
+  "deletions": 49,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:32.883393",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:32.883880",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4078,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4078.json"
+  }
+}

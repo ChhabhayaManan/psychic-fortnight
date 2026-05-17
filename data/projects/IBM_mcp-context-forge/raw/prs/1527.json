@@ -1,0 +1,190 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1527,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1527"
+  },
+  "metadata": {
+    "title": "Query and code performance optimizations in services",
+    "state": "closed",
+    "created_at": "2025-12-01T15:04:00+00:00",
+    "updated_at": "2025-12-02T11:57:12+00:00",
+    "closed_at": "2025-12-02T11:57:10+00:00",
+    "merged_at": "2025-12-02T11:57:10+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #1522 \r\nCloses #1523\r\n\r\n## 📌 Summary\r\n\r\nThis PR resolves major performance degradation across `gateway_service.py`, `tool_service.py`, and `server_service.py`.\r\nImplemented concurrent Gateway health checks with batches and configurable batch sizes.\r\n\r\n## 🐞 Root Cause\r\n\r\n- N+1 DB query patterns when resolving team names and related entities.\r\n- One query per item for tools, resources, prompts, and servers.\r\n- Sequential health checks for gateways (O(n * t) execution).\r\n- Multiple redundant aggregation queries for metrics (7–8 per request).\r\n\r\n\r\n## 💡 Fix Description\r\n1. `gateway_service.py `\r\n\r\n- Eliminated N+1 Queries:Batch-fetched team names in `list_gateways()` and `list_gateways_for_user()`, reducing lookups from O(n) to O(1).\r\n- Refactored `_update_or_create_tools()`, `_update_or_create_resources()`, and `_update_or_create_prompts()` to use bulk fetching (IN clause), reducing queries from O(n) to O(1) for entity creation/updates.\r\n- Refactored `check_health_of_gateways()` to Use `asyncio.gather()` for Parallel Execution\r\nUpdated the `check_health_of_gateways()` function to leverage `asyncio.gather()` for executing health checks concurrently.\r\nIntroduced a dynamic concurrency_limit that adapts based on system capabilities. The new limit is calculated as the minimum of the configured `MAX_CONCURRENT_HEALTH_CHECKS` and an adaptive value based on the system's CPU count. \r\nThis ensures that the system doesn't overload when the specified concurrent checks exceed the system's capacity.\r\n```python\r\nconcurrency_limit = min(settings.max_concurrent_health_checks, max(10, os.cpu_count() * 5))  # adaptive concurrency\r\n```\r\n\r\n\r\n\r\n2. `tool_service.py`:\r\n\r\n- `aggregate_metrics()`: Reduced from 8 separate queries to a single, aggregated SQL query (87.5% reduction in network round-trips).\r\n- Batch-fetched team names in `list_tools()` and `list_tools_for_user()`, reducing queries from ~101 to ~2 for 100 tools (98% reduction).\r\n\r\n3. `server_service.py`\r\n\r\n- Batch-fetched team names in `list_servers()` and `list_servers_for_user()`, reducing queries from O(n) to O(1) (up to ~100x faster).\r\n- `aggregate_metrics()`: Reduced from 7 queries to a single query (85.7% reduction, 7x faster).\r\n-  Implemented bulk validation/update queries in `register_server()` and `update_server()`, resulting in ~4.5 speedup for typical cases.\r\n- Optimized `_convert_server_to_read()` for single-pass metrics calculation, reducing iterations from 8 to 1 (~8x faster).\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3528856409",
+      "author": "madhav165",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-02T08:31:03+00:00",
+      "body": "Normal functionality works as expected"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "fe30edc50802da0ca886349a29e5987ebebca0c1",
+      "message": "optimized list gateways\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T06:20:00+00:00"
+    },
+    {
+      "sha": "425fe1cdbece4306c42a708efe61f986175b4087",
+      "message": "concurrent health checks for multiple gateways\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T06:21:54+00:00"
+    },
+    {
+      "sha": "c75755eace22c763e5442ab37bff9c51ec1931d1",
+      "message": "optimize update_or_create functions\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T06:23:39+00:00"
+    },
+    {
+      "sha": "2d77fc19518d28e9bf79237e06cf6ef8fae77c9c",
+      "message": "updated test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T06:25:44+00:00"
+    },
+    {
+      "sha": "d7218853b63061cb171b5624a4ebab10bdea696b",
+      "message": "updated test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T06:25:59+00:00"
+    },
+    {
+      "sha": "7e00c1989ffa64c3cff257cba3d32a27303bc44d",
+      "message": "linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T06:26:39+00:00"
+    },
+    {
+      "sha": "bdb5bd05025ca137e1102536ae05506e49b113ce",
+      "message": "health check active status update\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T06:42:06+00:00"
+    },
+    {
+      "sha": "3a654564be7b7c3e7385d8ac00fe3650377f5679",
+      "message": "logging level change for health cehck\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T07:57:57+00:00"
+    },
+    {
+      "sha": "a1b246e81dfc700ce32b36218184382c0efa6602",
+      "message": "update top tools\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T08:00:23+00:00"
+    },
+    {
+      "sha": "5dab3ad51a81d2649c62d20ddebdc4923962f900",
+      "message": "minor changes\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T08:02:24+00:00"
+    },
+    {
+      "sha": "35660ac0e8e97bb0e727c66908e2615f3ed609d4",
+      "message": "optimize listing tools\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T08:04:51+00:00"
+    },
+    {
+      "sha": "79d58f849b8da6939b9089db4f0ac28cc4448111",
+      "message": "optimized aggregated metrics\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T08:05:52+00:00"
+    },
+    {
+      "sha": "0316129f60d5315cedd3b823a59d1cb09a857c54",
+      "message": "update doctest\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T08:06:19+00:00"
+    },
+    {
+      "sha": "a80c81652ec8f67735054a568dac2dde899128be",
+      "message": "updated test case\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T08:46:56+00:00"
+    },
+    {
+      "sha": "38e397cf825f9e70ed2e71b4f34aecde05c5c636",
+      "message": "more test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-28T08:48:12+00:00"
+    },
+    {
+      "sha": "06494025c68dc1171581800a39bfa8b65d7a7960",
+      "message": "minor updates\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-11-30T07:29:36+00:00"
+    },
+    {
+      "sha": "7a782e1587c4da3daaee1481ff8530d83ea76353",
+      "message": "server service performance fix\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-01T07:08:21+00:00"
+    },
+    {
+      "sha": "d3feca6a6937661055c22f7ffcb4b12e7863b79b",
+      "message": "update test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-01T07:08:38+00:00"
+    },
+    {
+      "sha": "8eb28cd30b447ff481d441d8e37ac93a80049d0f",
+      "message": "linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-01T07:33:23+00:00"
+    },
+    {
+      "sha": "64d43ccf41d594c16641d4c9866d88ae55b6997e",
+      "message": "configurable max concurrent health check batch size\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-01T12:41:32+00:00"
+    },
+    {
+      "sha": "a8e5ba82cfc8e752b8fff4d95d99391a0c903ced",
+      "message": "linting issues\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-01T12:46:37+00:00"
+    },
+    {
+      "sha": "6a6ccfc2c5f78a58574b84c0ee750c82286bccc8",
+      "message": "web linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-01T15:08:46+00:00"
+    },
+    {
+      "sha": "76978a7d65c36f800ba4a19a5c886ad732b153fc",
+      "message": "docstrings and doctests\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-01T15:37:08+00:00"
+    },
+    {
+      "sha": "e6b44fa6d173aa22c00cee4b5eeb0e7ea27c03dc",
+      "message": "removed redundant return in docstring\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-01T15:49:03+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 639,
+  "deletions": 405,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:21:08.384016",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:21:08.385299",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1527,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1527.json"
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3653,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3653"
+  },
+  "metadata": {
+    "title": "feat(api): add Virtual Meta Server implementation",
+    "state": "closed",
+    "created_at": "2026-03-12T13:18:47+00:00",
+    "updated_at": "2026-04-09T22:18:13+00:00",
+    "closed_at": "2026-04-09T22:18:13+00:00",
+    "merged_at": null,
+    "author": "AbdulR11",
+    "labels": [
+      "tcd",
+      "COULD"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #2230\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR introduces the **Virtual Meta-Server** feature, a powerful abstraction layer that enables AI agents to discover and invoke thousands of underlying tools through a unified, simple interface. The meta-server exposes only **6 meta-tools** to the agent while completely hiding the complexity of the underlying tool ecosystem.\r\n\r\n### Problem Statement\r\nTraditional MCP architectures expose all tools directly to AI agents, leading to:\r\n- **Context window exhaustion** with hundreds or thousands of tools\r\n- **Poor agent decision-making** due to overwhelming tool choices\r\n- **Lack of dynamic tool discovery** - agents must know tools upfront\r\n- **No semantic search capabilities** - keyword matching only\r\n\r\n### Solution\r\n- **6 unified meta-tools** for discovery and execution (`search_tools`, `list_tools`, `describe_tool`, `execute_tool`, `get_tool_categories`, `get_similar_tools`)\r\n- **Semantic search** via embedding-based similarity\r\n- **Hybrid search** combining semantic + keyword (BM25) ranking\r\n- **Tool hiding** - underlying tools invisible to agents when `server_type='meta'`\r\n- **Scope-based filtering** - fine-grained access control\r\n- **Enterprise-grade observability** - full audit trail\r\n\r\n### Key Components\r\n- **Meta-Server Module**: New `mcpgateway/meta_server/` package with schemas and service\r\n- **Embedding Service**: Tool embedding generation with pgvector support\r\n- **Semantic Search**: Hybrid search combining semantic similarity + BM25 keyword ranking\r\n- **Vector Search**: Cosine similarity search (pgvector for PostgreSQL, numpy fallback for SQLite)\r\n- **Transport Integration**: Tool hiding and meta-tool routing in `streamablehttp_transport.py`\r\n- **API Endpoints**: 6 new endpoints under `/meta/*`\r\n- **Database**: New `ToolEmbedding` model and `server_type` field on servers table\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n\r\n\r\n### Test Coverage\r\n- ✅ ServerType enum validation, MetaToolScope filtering (all filter types)\r\n- ✅ All 6 meta-tool request/response schemas\r\n- ✅ MetaServerService business logic, tool hiding enforcement\r\n- ✅ Scope evaluation (AND semantics), edge cases\r\n- ✅ Meta-server creation end-to-end\r\n- ✅ Meta-tool execution via HTTP endpoints\r\n- ✅ Performance tests with 1000+ tools\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Files Changed \r\n\r\n#### Core Implementation\r\n- `mcpgateway/meta_server/__init__.py` - Package initialization\r\n- `mcpgateway/meta_server/schemas.py` - Pydantic models (ServerType, MetaToolScope, MetaConfig, all request/response schemas)\r\n- `mcpgateway/meta_server/service.py` - MetaServerService with all 6 meta-tool implementations\r\n- `mcpgateway/routers/meta_router.py` - HTTP endpoints for meta-tools\r\n- `mcpgateway/services/meta_tool_service.py` - Meta-tool coordination layer\r\n- `mcpgateway/services/server_service.py` - Meta-server field handling\r\n- `mcpgateway/services/dynamic_server_service.py` - Semantic search integration\r\n- `mcpgateway/transports/streamablehttp_transport.py` - Tool hiding & meta-tool routing\r\n\r\n#### Database & Schemas \r\n- `mcpgateway/db.py` - ToolEmbedding model, server table extensions\r\n- `mcpgateway/alembic/versions/5126ced48fd0_add_meta_server_fields.py` - Migration\r\n- `mcpgateway/schemas.py` - ServerCreate/Update/Read with meta-server fields\r\n\r\n#### Application Integration \r\n- `mcpgateway/main.py` - Router registration\r\n\r\n#### Tests \r\n- `tests/unit/mcpgateway/test_meta_server.py` - Comprehensive meta-server tests\r\n- `tests/unit/mcpgateway/services/test_meta_tool_service.py` - Meta-tool service tests\r\n\r\n\r\n### Usage Example\r\n\r\n**Creating a Meta-Server:**\r\n```bash\r\nPOST /servers\r\n{\r\n  \"name\": \"Production Meta-Server\",\r\n  \"server_type\": \"meta\",\r\n  \"hide_underlying_tools\": true,\r\n  \"meta_scope\": {\r\n    \"include_tags\": [\"production\"],\r\n    \"exclude_tags\": [\"deprecated\"],\r\n    \"include_visibility\": [\"team\", \"public\"]\r\n  },\r\n  \"meta_config\": {\r\n    \"enable_semantic_search\": true,\r\n    \"default_search_limit\": 25,\r\n    \"similarity_threshold\": 0.7\r\n  }\r\n}\r\n```\r\n\r\n**Using Meta-Tools:**\r\n```bash\r\n# Semantic search for tools\r\nPOST /meta/search_tools\r\n{\r\n  \"query\": \"analyze customer data\",\r\n  \"limit\": 10,\r\n  \"filters\": {\"include_tags\": [\"analytics\"]}\r\n}\r\n\r\n# Execute discovered tool\r\nPOST /meta/execute_tool\r\n{\r\n  \"tool_name\": \"analyze_customer_churn\",\r\n  \"arguments\": {\"dataset\": \"customers_2024\"}\r\n}\r\n```\r\n\r\n### Benefits\r\n\r\n**For AI Agents:**\r\n- Reduced context usage: 6 meta-tools vs. 1000+ real tools\r\n- Dynamic discovery via semantic search\r\n- Better decision-making with focused tool set\r\n\r\n**For Platform Operators:**\r\n- Centralized governance via scopes\r\n- Full observability and audit trail\r\n- Scalability for thousands of tools\r\n- RBAC + scope-based access control\r\n\r\n### Migration & Compatibility\r\n- ✅ **Backward compatible**: Existing servers default to `server_type='standard'`\r\n- ✅ **Additive changes**: No breaking changes to existing endpoints\r\n- ✅ **Opt-in feature**: Meta-servers explicitly created with `server_type='meta'`\r\n- ✅ **Graceful degradation**: Semantic search falls back to keyword search if embeddings unavailable\r\n\r\n### Configuration\r\n```bash\r\n# Embedding Service\r\nEMBEDDING_MODEL=text-embedding-3-small\r\nEMBEDDING_PROVIDER=openai\r\nOPENAI_API_KEY=sk-...\r\n\r\n# Vector Search  \r\nDATABASE_URL=postgresql+psycopg://user:pass@host/db  # pgvector support\r\n```\r\n\r\n",
+  "comments": [
+    {
+      "id": "2924708624",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:22+00:00",
+      "body": "`semantic_search_rate_limit()` uses `@wraps(func_to_wrap)` but `wraps` is not imported anywhere in this module, which will raise a `NameError` the first time this decorator is evaluated (likely at import time). Import `wraps` from `functools` (or remove the decorator) to avoid breaking app startup."
+    },
+    {
+      "id": "2924708659",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:22+00:00",
+      "body": "`is_internally_forwarded` now trusts `x-forwarded-internally: true` without validating the request origin (e.g., loopback/sidecar or another trusted hop). This allows external clients to set the header and potentially bypass internal-only protections/flows. Please reintroduce a source validation (remote addr / trusted proxy list / mTLS) before treating a request as internally forwarded."
+    },
+    {
+      "id": "2924708698",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:23+00:00",
+      "body": "`is_internally_forwarded` is now determined solely by the `x-forwarded-internally` header value. Without verifying the request actually came from a trusted internal forwarder, external clients can spoof this header and trigger internal-forward paths (potentially bypassing auth/session-affinity rules). Add an origin/trust check (loopback/allowlist/mTLS) before trusting this header.\n```suggestion\n        client = scope.get(\"client\")\n        is_trusted_internal_origin = False\n        if isinstance(client, tuple) and len(client) >= 1:\n            client_host = client[0]\n            # Only treat x-forwarded-internally as authoritative when the request\n            # originates from a trusted internal source (loopback).\n            if client_host in (\"127.0.0.1\", \"::1\"):\n                is_trusted_internal_origin = True\n\n        is_internally_forwarded = (\n            headers.get(\"x-forwarded-internally\") == \"true\"\n            and is_trusted_internal_origin\n        )\n```"
+    },
+    {
+      "id": "2924708763",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:23+00:00",
+      "body": "`_rehydrate_content_items()` now falls back to `str(item)` for unknown content types. For dict/list payloads this produces non-JSON (single quotes, Python repr), which can break downstream MCP clients expecting JSON-compatible text. Prefer encoding via `orjson.dumps(...)` (with a safe fallback) so the representation is stable and JSON."
+    },
+    {
+      "id": "2924708800",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:23+00:00",
+      "body": "For unknown content types, `_convert_meta()` now uses `str(content.model_dump(...))`, which again yields a Python dict repr (not JSON) and can make client parsing inconsistent. Prefer serializing the model dump as JSON (e.g., `orjson.dumps(...)`) to keep the wire representation stable.\n```suggestion\n                    if hasattr(content, \"model_dump\"):\n                        dumped = content.model_dump(by_alias=True, mode=\"json\")\n                        text_value = orjson.dumps(dumped).decode(\"utf-8\")\n                    else:\n                        text_value = str(content)\n                    unstructured.append(types.TextContent(type=\"text\", text=text_value))\n```"
+    },
+    {
+      "id": "2924708822",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:23+00:00",
+      "body": "In permissive auth mode, the `except` path attempts `verify_credentials(..., proxy_user=request_headers.get('x-proxy-user'))` even when `mcp_client_auth_enabled` is true. This can allow an attacker to present an invalid/expired Bearer token and still authenticate via a spoofed `x-proxy-user` header (if `trust_proxy_auth` is enabled). Proxy-user auth should only be considered when explicitly in proxy-auth mode (and ideally only from a trusted upstream), not as a fallback for failed JWT verification."
+    },
+    {
+      "id": "2924708850",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:24+00:00",
+      "body": "`convert_server_to_read()` now returns `ServerRead` directly without masking sensitive fields (e.g., `oauth_config`). Since `ServerRead.masked()` was removed, any API returning `ServerRead` may now expose secrets to callers who can read servers. Please restore masking (like the Gateway/A2A read flows) or ensure `oauth_config` is never included in non-admin responses."
+    },
+    {
+      "id": "2924708876",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:24+00:00",
+      "body": "Server `oauth_config` is being persisted directly from user input (`server_data.get(\"oauth_config\")`) without passing through `protect_oauth_config_for_storage()`. This is inconsistent with the gateway/a2a flows and risks storing secrets unencrypted/unsanitized at rest. Please reintroduce the protection step (or document/guarantee an equivalent protection layer)."
+    },
+    {
+      "id": "2924708893",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:24+00:00",
+      "body": "`update_server()` assigns `server.oauth_config = oauth_config` directly. If `oauth_config` contains client secrets/refresh tokens, this stores them without applying `protect_oauth_config_for_storage()` (which is used elsewhere) and also interacts with the removal of `ServerRead.masked()` to increase exposure risk. Please ensure server OAuth config is protected at rest and never returned unmasked to unauthorized callers."
+    },
+    {
+      "id": "2924708928",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:24+00:00",
+      "body": "Meta-tool endpoints are only gated by `get_current_user_with_permissions` but do not require specific permissions. As written, any authenticated user could potentially describe/execute tools (and depending on global auth settings, possibly unauthenticated users). These routes should enforce RBAC explicitly (e.g., `tools.read` for describe/search/list, and `tools.execute` for execute)."
+    },
+    {
+      "id": "2924708956",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:24+00:00",
+      "body": "`/meta/search_tools` (and related endpoints) likewise lack explicit permission checks beyond authentication. Given these can enumerate tool metadata across the system, please add RBAC enforcement consistent with the rest of the API (e.g., require `tools.read`)."
+    },
+    {
+      "id": "2924708980",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:25+00:00",
+      "body": "`X-Scope` is treated inconsistently across meta endpoints: `describe_tool/execute_tool` pass the raw header string into `MetaToolService` (which expects values like `public`, `team:<id>`, `private`), while `search_tools/list_tools/get_similar_tools` parse `X-Scope` as JSON into a dict-based scope. This mismatch makes the API confusing and easy to misuse (e.g., clients sending JSON scope to describe/execute will silently lose scoping). Consider standardizing the `X-Scope` format across all meta endpoints."
+    },
+    {
+      "id": "2924709004",
+      "author": "Copilot",
+      "created_at": "2026-03-12T13:39:25+00:00",
+      "body": "Team-based filtering in `_resolve_tool()` includes any tool with `team_id in token_teams` regardless of the tool's `visibility`. This means a tool marked `visibility=\"private\"` could still be returned to any member of that team. Please restrict the team clause to team-visible tools (e.g., `visibility in {\"public\",\"team\"}`) and keep private tools owner-only.\n```suggestion\n                from sqlalchemy import and_, or_\n\n                query = query.where(\n                    or_(\n                        DbTool.visibility == \"public\",\n                        and_(DbTool.visibility == \"team\", DbTool.team_id.in_(token_teams)),\n                    )\n                )\n```"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3936676070",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-12T13:39:25+00:00",
+      "body": "## Pull request overview\n\nThis PR introduces “meta-server / meta-tool” functionality to MCP Gateway so clients can discover, describe, and execute tools via dedicated meta endpoints/handlers, with additional transport-layer support for meta-tool dispatch and session-affinity forwarding behavior.\n\n**Changes:**\n- Add meta-tool API surface (FastAPI `/meta/*` routes) and service-layer logic for tool description/execution with schema validation.\n- Update Streamable HTTP transport to support meta-server behavior (meta-tool short-circuiting, meta-tool-only listing) and adjust forwarding/logging/rehydration behavior.\n- Add unit tests for `MetaToolService` covering describe/execute paths and error handling.\n\n### Reviewed changes\n\nCopilot reviewed 13 out of 13 changed files in this pull request and generated 13 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `mcpgateway/main.py` | Adds new behaviors (e.g., semantic search rate-limiting) and adjusts session-affinity/internal-forwarding logic. |\r\n| `mcpgateway/transports/streamablehttp_transport.py` | Implements meta-tool dispatch/listing for meta-servers and modifies request forwarding and content rehydration behavior. |\r\n| `mcpgateway/routers/meta_router.py` | Adds `/meta/*` FastAPI endpoints for meta-tool operations (describe/execute/search/list/similar). |\r\n| `mcpgateway/services/meta_tool_service.py` | Implements meta-tool describe/execute logic, including tool resolution and JSON-schema validation. |\r\n| `mcpgateway/services/server_service.py` | Extends server read/create/update handling for meta-server fields and OAuth config handling. |\r\n| `tests/unit/mcpgateway/services/test_meta_tool_service.py` | Adds unit tests validating meta-tool service behavior for success and error cases. |\n</details>\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (1)</summary>\n\n**mcpgateway/main.py:5863**\n* These root endpoints are no longer protected by `@require_permission([\"admin.system_config\"])`, which means any authenticated caller could potentially list and modify root server configuration (and possibly unauthenticated callers depending on global auth settings). If this de-authorization is unintentional, restore the permission guard (or replace with an equivalent authorization check).\n```\n@root_router.get(\"\", response_model=List[Root])\n@root_router.get(\"/\", response_model=List[Root])\nasync def list_roots(\n    user=Depends(get_current_user_with_permissions),\n) -> List[Root]:\n    \"\"\"\n```\n</details>\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>.<br><br>You can also share your feedback on Copilot code review. [Take the survey](https://www.surveymonkey.com/r/XP6L3XJ)."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8ff137fbfd151bf1cdbbb982953fa6ed8fe7d72c",
+      "message": "add Virtual Meta Server Implementation",
+      "author": "AbdulR11",
+      "date": "2026-03-12T13:00:06+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 5803,
+  "deletions": 1055,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:09:19.652921",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:19.654669",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3653,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3653.json"
+  }
+}

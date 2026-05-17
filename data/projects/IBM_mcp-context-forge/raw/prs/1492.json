@@ -1,0 +1,90 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1492,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1492"
+  },
+  "metadata": {
+    "title": "feat: Lazy initialization",
+    "state": "closed",
+    "created_at": "2025-11-21T23:02:20+00:00",
+    "updated_at": "2025-11-27T16:56:09+00:00",
+    "closed_at": "2025-11-27T16:56:09+00:00",
+    "merged_at": "2025-11-27T16:56:09+00:00",
+    "author": "gabe-l-hart",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "madhav165"
+    ]
+  },
+  "description": "## Description\r\n\r\nThe goal of this PR is to enable `import mcpgateway`, `import mcpgateway.config`, and `import mcpgateway.schemas` to run without initializing the database and without performing all of the server-side config validation. The reason for this is to enable portions of the library to be used for purposes other than running the server. These include:\r\n\r\n* Client-side use in the CLI\r\n* Utility use such as `mcpgateway.translate`\r\n\r\n## Changes\r\n\r\n* Remove proactive imports from the top-level `__init__.py`. The portions that were proactively imported before were all the utility helpers, but proactively importing them has no effect on running them as scripts (eg `python -m mcpgateway.translate`)\r\n* Add `Settings.client_mode`\r\n* In all server-side validation that may throw a warning, only perform the validation if `client_mode` is not true\r\n* Create a lazy instance-wrapper for the module-level `settings` object on `mcpgateway.config` that will invoke `get_settings()` only when `__getattr__` is called\r\n  * NOTE: I made this abstract so that other settings objects can reuse it such as `mcpgateway.common.settings`, but I haven't made the change there yet\r\n* Allow `**kwargs` through `get_settings` so that the singleton can have override fields when instantiated. This is necessary so a client app can set `client_mode=True` intentionally.\r\n\r\n## Discussion\r\n\r\nI also tried to do all of this in a more invasive way where I removed the module-level work entirely and made all uses of `settings` just-in-time. Due to the use of settings for defaults in many methods, this got cumbersome. For the curious, the branch is here: https://github.com/gabe-l-hart/mcp-context-forge/tree/LazySettings",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3516359248",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-11-27T16:40:12+00:00",
+      "body": "The lru_cache() + **kwargs combination means calling get_settings() vs get_settings(client_mode=True) creates separate cached instances. This is intentional for the PR's use case (CLI tools can initialize with client_mode=True before any other code runs), but it's worth being aware that multiple Settings instances can exist if used incorrectly."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "9d50f66665594db2e083ca02902c51aab53724df",
+      "message": "refactor: Remove proactive imports from top-level __init__.py\n\nBranch: LazyImports\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>",
+      "author": "Gabe Goodhart",
+      "date": "2025-11-21T21:34:22+00:00"
+    },
+    {
+      "sha": "82774d1a47a41d3d5795eb2a608cf703d201b1bd",
+      "message": "feat: Add client_mode to settings\n\nThis allows client-side apps such as the CLI to use the settings without\nall of the server-side initialization and validation.\n\nBranch: LazySettings\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>",
+      "author": "Gabe Goodhart",
+      "date": "2025-11-21T20:31:09+00:00"
+    },
+    {
+      "sha": "589119b8c581aabf1cc7c2879a8a321ba15b940a",
+      "message": "feat: Create a lazy wrapper around the `settings` singleton\n\nThe underlying object will only be instantiated when an attribute is\naccessed. This will enable non-server uses of the library to carefully set\nup settings before triggering the creation of the singleton.\n\nNOTE: We still need to plumb-out all of the import-time settings use!\n\nBranch: LazySettings\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>",
+      "author": "Gabe Goodhart",
+      "date": "2025-11-21T19:02:18+00:00"
+    },
+    {
+      "sha": "ef2c35b44b4949cbe52dae46e9cc7374c11fe50e",
+      "message": "fix: Fix warning skipping for settings in client mode\n\nBranch: LazyImports\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>",
+      "author": "Gabe Goodhart",
+      "date": "2025-11-21T22:18:58+00:00"
+    },
+    {
+      "sha": "5905174c74a9243e5a1db9d995065a70de45e877",
+      "message": "test: Re-clear cache after testing LRU with the Settings class mocked\n\nBranch: LazyImports\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>",
+      "author": "Gabe Goodhart",
+      "date": "2025-11-21T23:22:34+00:00"
+    },
+    {
+      "sha": "70ff24ea848131c4a85d5a635aaaade4a2583c0c",
+      "message": "fix: Fix flake8 docstring issues\n\nAlso remove the ability to give an arbitrary get_settings function to the\nlazy wrapper. This for some reason was not passing flake8 even with the\ndocstring fixed.\n\nBranch: LazyImports\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>",
+      "author": "Gabe Goodhart",
+      "date": "2025-11-26T17:43:30+00:00"
+    },
+    {
+      "sha": "e3c1d64dc5bfded30b5e70d5564abc406363f5f5",
+      "message": "fix: Correct type annotation for get_settings kwargs parameter\n\nThe **kwargs type hint was incorrectly specified as Dict[str, Any],\nwhich implies each value is a Dict. The correct annotation is Any,\nindicating each value in kwargs can be of any type.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-11-27T16:32:18+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 86,
+  "deletions": 64,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:54.624654",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:54.626143",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1492,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1492.json"
+  }
+}

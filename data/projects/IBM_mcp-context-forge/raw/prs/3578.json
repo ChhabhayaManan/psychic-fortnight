@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3578,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3578"
+  },
+  "metadata": {
+    "title": "fix: accept camelCase passthroughHeaders in gateway creation",
+    "state": "closed",
+    "created_at": "2026-03-10T08:12:30+00:00",
+    "updated_at": "2026-03-22T01:38:57+00:00",
+    "closed_at": "2026-03-22T01:38:57+00:00",
+    "merged_at": null,
+    "author": "abhin1899",
+    "labels": [
+      "bug",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "Closes #3577\r\n\r\n## 📌 Summary\r\nFixes inconsistent API behavior where `passthroughHeaders` (camelCase) works in UPDATE but not CREATE operations.\r\n\r\n## 🔁 Reproduction Steps\r\nSee issue #3577\r\n\r\n## 🐞 Root Cause\r\n`GatewayCreate` was extending `BaseModel` without automatic camelCase alias generation, while `GatewayUpdate` extends `BaseModelWithConfigDict` which includes `alias_generator=to_camel_case`.\r\n\r\n## 💡 Fix Description\r\nChanged `GatewayCreate` to extend `BaseModelWithConfigDict` (same as `GatewayUpdate`), ensuring:\r\n- Automatic camelCase aliases for all snake_case fields\r\n- Consistent behavior between CREATE and UPDATE operations\r\n- Backward compatibility maintained (both naming conventions work)\r\n- Proper serialization to camelCase in API responses\r\n\r\n**Changes:**\r\n- `mcpgateway/schemas.py`: Changed base class from `BaseModel` to `BaseModelWithConfigDict`\r\n- Simplified `model_config` to only include `str_strip_whitespace=True`\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|-------|---------|--------|\r\n| Lint suite (`make lint`) | ✅ |\r\n| Unit tests (`make test`) | ✅ |\r\n| Manual testing | ✅ |\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted\r\n- [x] DCO sign-off included\r\n- [x] No secrets committed\r\n\r\n**Test Results:**\r\n```python\r\n# camelCase (the bug we fixed)\r\nGatewayCreate(passthroughHeaders=['billingId']) \r\n# ✅ Works now!\r\n\r\n# snake_case (backward compatibility)\r\nGatewayCreate(passthrough_headers=['billingId'])\r\n# ✅ Still works!\r\n\r\n# Serialization\r\ngw.model_dump(by_alias=True)\r\n# ✅ Outputs: {\"passthroughHeaders\": [...]}\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3929162235",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-11T12:09:52+00:00",
+      "body": "✅ Overall Assessment: APPROVED with minor suggestions\n\n   The fix correctly addresses the inconsistency between GatewayCreate and GatewayUpdate by making both extend BaseModelWithConfigDict.\n\n   ---\n\n   🔍 Code Changes Review\n\n   ✅ Core Fix (mcpgateway/schemas.py:2541)\n    1 -class GatewayCreate(BaseModel):\n    2 +class GatewayCreate(BaseModelWithConfigDict):\n\n   Strengths:\n    - ✅ Minimal, surgical change\n    - ✅ Achieves consistency with GatewayUpdate (line 2898)\n    - ✅ Leverages existing BaseModelWithConfigDict infrastructure\n    - ✅ Automatic camelCase alias generation via alias_generator=to_camel_case\n    - ✅ Maintains backward compatibility (populate_by_name=True allows both naming conventions)\n\n   Verification:\n    - BaseModelWithConfigDict provides:\n      - alias_generator=to_camel_case - converts snake_case → camelCase\n      - populate_by_name=True - accepts both snake_case and camelCase input\n      - from_attributes=True - ORM compatibility\n      - use_enum_values=True - proper enum serialization\n\n   ---\n\n   🧪 Testing Observations\n\n   Missing Test Coverage\n   ⚠️ RECOMMENDATION: Add explicit test for this fix\n\n   The codebase has extensive GatewayCreate tests (113 matches found), but none specifically test camelCase field acceptance. Consider adding:\n\n```bash\n# tests/unit/mcpgateway/test_schemas.py\ndef test_gateway_create_accepts_camelcase_passthrough_headers():\n    \"\"\"Test GatewayCreate accepts camelCase passthroughHeaders (issue #3577).\"\"\"\n     # camelCase input\n     gw = GatewayCreate(\n          name=\"test\",\n          url=\"http://example.com\",\n           passthroughHeaders=[\"X-Custom\", \"X-Trace\"]\n     )\n     assert gw.passthrough_headers == [\"X-Custom\", \"X-Trace\"]\n    \n     # Verify serialization\n     serialized = gw.model_dump(by_alias=True)\n     assert \"passthroughHeaders\" in serialized\n     assert serialized[\"passthroughHeaders\"] == [\"X-Custom\", \"X-Trace\"]\n    \ndef test_gateway_create_backward_compatible_snake_case():\n    \"\"\"Test GatewayCreate still accepts snake_case (backward compatibility).\"\"\"\n    gw = GatewayCreate(\n        name=\"test\",\n        url=\"http://example.com\",\n        passthrough_headers=[\"X-Custom\"]\n     )\n    assert gw.passthrough_headers == [\"X-Custom\"]\n```\n   ---\n\n   📋 Additional Considerations\n\n   1. Model Config Override\n   The model_config = ConfigDict(str_strip_whitespace=True) on line 2562 correctly overrides only the str_strip_whitespace setting while inheriting all other config from BaseModelWithConfigDict.\n\n   ✅ This is the right approach - it doesn't break the inherited alias_generator.\n\n   2. Consistency Check\n   Both schemas now use the same base class:\n    - GatewayCreate(BaseModelWithConfigDict) ✅\n    - GatewayUpdate(BaseModelWithConfigDict) ✅\n\n   3. API Response Behavior\n   FastAPI automatically uses by_alias=True when serializing responses, so all API responses will now correctly use camelCase field names for GatewayCreate responses.\n\n   4. Impact on Other Fields\n   This change affects ALL snake_case fields in `GatewayCreate`, not just `passthrough_headers`:\n    - passthrough_headers → passthroughHeaders\n    - auth_type → authType\n    - auth_username → authUsername\n    - auth_password → authPassword\n    - auth_token → authToken\n    - auth_header_key → authHeaderKey\n    - auth_header_value → authHeaderValue\n    - auth_headers → authHeaders\n    - oauth_config → oauthConfig\n    - auth_query_param_key → authQueryParamKey\n    - auth_query_param_value → authQueryParamValue\n    - auth_value → authValue\n    - one_time_auth → oneTimeAuth\n    - team_id → teamId\n    - owner_email → ownerEmail\n    - ca_certificate → caCertificate\n    - ca_certificate_sig → caCertificateSig\n    - signing_algorithm → signingAlgorithm\n    - refresh_interval_seconds → refreshIntervalSeconds\n    - gateway_mode → gatewayMode\n\n   This is actually GOOD - it makes the entire API consistent with MCP specification's camelCase convention.\n\n   ---\n\n   🎯 Recommendations\n\n   High Priority\n    1. ✅ Merge as-is - The fix is correct and minimal\n    2. ⚠️ Add regression test - Prevent future regressions of this specific issue\n\n   Low Priority (Future Enhancements)\n    3. 📝 Consider documenting the camelCase/snake_case dual-input behavior in API docs\n    4. 🔍 Audit other schema classes for similar inconsistencies (though this appears to be the only one)\n\n   ---\n\n   ✅ Final Verdict\n\n   APPROVED - This is a well-targeted fix that:\n    - Solves the reported issue (#3577)\n    - Maintains backward compatibility\n    - Improves API consistency\n    - Follows existing patterns in the codebase\n    - Has minimal risk\n\n   The only improvement would be adding an explicit regression test for this specific scenario.\n\nLGTM 🚀 \n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "682ad5a79bfda62e3b6f5883cfe18d6c40eca0e2",
+      "message": "fix: accept camelCase passthroughHeaders in gateway creation\n\n- Changed GatewayCreate to extend BaseModelWithConfigDict\n- Ensures consistent camelCase alias generation for all fields\n- Maintains backward compatibility with snake_case\n- Fixes inconsistency where UPDATE accepts camelCase but CREATE doesn't\n\nSigned-off-by: Abhin Lingamaneni <abhinl99@gmail.com>",
+      "author": "Abhin Lingamaneni",
+      "date": "2026-03-10T07:57:12+00:00"
+    },
+    {
+      "sha": "5c9f0dffe3982dda67e8943ced244ee6bdae67ee",
+      "message": "Merge branch 'main' into fix/gateway-passthrough-headers-camelcase",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T01:35:18+00:00"
+    }
+  ],
+  "files_changed": 0,
+  "additions": 0,
+  "deletions": 0,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:11:00.096784",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:00.098185",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3578,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3578.json"
+  }
+}

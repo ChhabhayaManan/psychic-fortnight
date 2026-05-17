@@ -1,0 +1,134 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4430,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4430"
+  },
+  "metadata": {
+    "title": "feat(ui-rewrite): add useQuery hook for fetching data from API endpoints",
+    "state": "closed",
+    "created_at": "2026-04-24T10:57:00+00:00",
+    "updated_at": "2026-05-10T10:15:41+00:00",
+    "closed_at": "2026-04-28T10:18:57+00:00",
+    "merged_at": "2026-04-28T10:18:56+00:00",
+    "author": "marekdano",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "\r\n## 🔗 Related Issue\r\nRelated #4175 \r\n\r\n---\r\n\r\n## 📝 Summary\r\nAdd useQuery hook (wrapper of the api cleint) for fetching data from API endpoints\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [ ] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [
+    {
+      "id": "3147991581",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-27T14:23:42+00:00",
+      "body": "Raw errors are exposed in component state without sanitization:\n```typescript\ncatch (err) {\n  setError(err);  // ❌ Exposes full error object\n  throw err;\n}\n```\n\n**Risk:** \n- Backend error messages may leak sensitive information (stack traces, internal paths, database details)\n- Error objects could contain authentication tokens or session data\n- Violates principle of least privilege for error information\n\n**Recommendation:**\n```typescript\ninterface QueryError {\n  message: string;\n  code?: string;\n  status?: number;\n}\n\nfunction sanitizeError(err: unknown): QueryError {\n  if (err instanceof Error) {\n    return {\n      message: err.message,\n      status: (err as any).status,\n      code: (err as any).code,\n    };\n  }\n  return { message: \"An unexpected error occurred\" };\n}\n\ncatch (err) {\n  const sanitized = sanitizeError(err);\n  setError(sanitized);\n  throw sanitized;\n}\n```"
+    },
+    {
+      "id": "3147999844",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-27T14:24:58+00:00",
+      "body": "`JSON.stringify` on arbitrary body data without validation:\n```typescript\nfunction createBodyKey(body: unknown): string {\n  if (body === undefined) return \"\";\n  return JSON.stringify(body);  // ❌ No validation\n}\n```\n\n**Risk:**\n- Circular references cause runtime errors\n- Large objects cause memory issues\n- Prototype pollution if body contains `__proto__`\n\n**Recommendation:**\n```typescript\nfunction createBodyKey(body: unknown): string {\n  if (body === undefined) return \"\";\n  try {\n    // Use replacer to handle circular refs and limit depth\n    return JSON.stringify(body, (key, value) => {\n      if (key === \"__proto__\" || key === \"constructor\") return undefined;\n      return value;\n    });\n  } catch (err) {\n    console.warn(\"Failed to serialize body for cache key:\", err);\n    return `[unserializable-${Date.now()}]`;\n  }\n}\n```"
+    },
+    {
+      "id": "3148007372",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-27T14:26:08+00:00",
+      "body": "No timeout mechanism for requests:\n```typescript\nasync function executeRequest<TData, TBody>(\n  path: string,\n  method: QueryMethod,\n  headers?: Record<string, string>,\n  body?: TBody,\n): Promise<TData> {\n  // ❌ No timeout - requests can hang indefinitely\n  switch (method) {\n    case \"GET\":\n      return api.get<TData>(path, headers);\n    // ...\n  }\n}\n```\n\n**Risk:**\n- Slow/hanging requests block UI indefinitely\n- Resource exhaustion from accumulated pending requests\n- Poor user experience with no timeout feedback\n\n**Recommendation:**\n```typescript\ninterface UseQueryOptions<TData, TBody = unknown> {\n  // ... existing options\n  timeout?: number; // milliseconds, default 30000\n}\n\nasync function executeRequest<TData, TBody>(\n  path: string,\n  method: QueryMethod,\n  headers?: Record<string, string>,\n  body?: TBody,\n  timeout = 30000,\n): Promise<TData> {\n  const controller = new AbortController();\n  const timeoutId = setTimeout(() => controller.abort(), timeout);\n  \n  try {\n    // Pass signal to api client (requires client.ts update)\n    const result = await api.get<TData>(path, { \n      headers, \n      signal: controller.signal \n    });\n    return result;\n  } finally {\n    clearTimeout(timeoutId);\n  }\n}\n```"
+    },
+    {
+      "id": "3148021031",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-27T14:28:11+00:00",
+      "body": "Effect dependencies include `headers` and `body` objects directly:\n```typescript\nuseEffect(() => {\n  // ...\n}, [\n  path,\n  method,\n  headers,    // ❌ Object reference changes cause re-fetches\n  body,       // ❌ Object reference changes cause re-fetches\n  enabled,\n  shouldFetchImmediately,\n  initialData,\n  headersKey, // ✅ Correct - serialized key\n  bodyKey,    // ✅ Correct - serialized key\n]);\n```\n\n**Impact:**\n- Every parent re-render triggers new fetch if headers/body are inline objects\n- Causes infinite loops if parent doesn't memoize these objects\n- Wastes network bandwidth and server resources\n\n**Fix:**\n```typescript\nuseEffect(() => {\n  // ...\n}, [\n  path,\n  method,\n  // headers,    // ❌ Remove\n  // body,       // ❌ Remove\n  enabled,\n  shouldFetchImmediately,\n  initialData,\n  headersKey,    // ✅ Keep - this is the stable key\n  bodyKey,       // ✅ Keep - this is the stable key\n]);\n```"
+    },
+    {
+      "id": "3148156230",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-27T14:48:42+00:00",
+      "body": "Cleanup only prevents state updates, doesn't abort requests:\n```typescript\nuseEffect(() => {\n  let active = true;\n  \n  executeRequest(...)\n    .then((result) => {\n      if (!active) return;  // ✅ Prevents state update\n      setData(result);\n    });\n  \n  return () => {\n    active = false;  // ❌ Request still completes in background\n  };\n}, [...]);\n```\n\n**Impact:**\n- Unmounted components still process network responses\n- Memory accumulation from pending promises\n- Wasted bandwidth for cancelled operations\n\n**Recommendation:**\n```typescript\nuseEffect(() => {\n  const controller = new AbortController();\n  \n  executeRequest(path, method, headers, body, controller.signal)\n    .then(setData)\n    .catch((err) => {\n      if (err.name !== \"AbortError\") {\n        setError(err);\n      }\n    })\n    .finally(() => setIsLoading(false));\n  \n  return () => {\n    controller.abort();  // ✅ Cancels in-flight request\n  };\n}, [...]);\n```"
+    },
+    {
+      "id": "3148173587",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-27T14:51:20+00:00",
+      "body": "`execute` is recreated on every dependency change  \n**Impact:** Minor - causes re-renders in components using `execute` in effects\n\n**Enhancement:**\n```typescript\nconst execute = useCallback(\n  async (overrideBody?: TBody): Promise<TData> => {\n    // ... implementation\n  },\n  [path, method, headersKey, bodyKey], // Use keys, not objects\n);\n```"
+    },
+    {
+      "id": "3148183694",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-27T14:52:57+00:00",
+      "body": "No validation of hook parameters:\n```typescript\nexport function useQuery<TData, TBody = unknown>(\n  path: string,  // ❌ No validation - could be empty, malformed\n  {\n    method = \"GET\",\n    enabled = true,\n    immediate,\n    initialData,\n    body,\n    headers,\n  }: UseQueryOptions<TData, TBody> = {},\n): UseQueryResult<TData, TBody> {\n```\n\n**Impact:**\n- Runtime errors from invalid paths\n- Confusing behavior with empty strings\n- No developer feedback for mistakes\n\n**Recommendation:**\n```typescript\nexport function useQuery<TData, TBody = unknown>(\n  path: string,\n  options: UseQueryOptions<TData, TBody> = {},\n): UseQueryResult<TData, TBody> {\n  // Validate inputs\n  if (!path || typeof path !== \"string\") {\n    throw new Error(\"useQuery: path must be a non-empty string\");\n  }\n  \n  if (path.startsWith(\"//\")) {\n    throw new Error(\"useQuery: path must be relative (no protocol)\");\n  }\n  \n  const {\n    method = \"GET\",\n    enabled = true,\n    immediate,\n    initialData,\n    body,\n    headers,\n  } = options;\n  \n  // ... rest of implementation\n}\n```"
+    },
+    {
+      "id": "3148208757",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-27T14:56:35+00:00",
+      "body": "No request deduplication:\n```typescript\nuseEffect(() => {\n  // ❌ If effect runs twice quickly, both requests complete\n  executeRequest(path, method, headers, body)\n    .then((result) => {\n      if (!active) return;\n      setData(result);  // ❌ Last response wins, not necessarily latest request\n    });\n}, [...]);\n```\n\n**Impact:**\n- Stale data if older request completes after newer one\n- Wasted network bandwidth\n- Confusing UI state\n\n**Recommendation:**\n```typescript\nuseEffect(() => {\n  let requestId = Date.now();\n  const currentRequestId = requestId;\n  \n  executeRequest(path, method, headers, body)\n    .then((result) => {\n      if (requestId !== currentRequestId) return;  // ✅ Ignore stale responses\n      setData(result);\n    });\n  \n  return () => {\n    requestId = 0;  // Invalidate on cleanup\n  };\n}, [...]);\n```"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4180729450",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-27T12:06:41+00:00",
+      "body": "It is a nice addition. LGTM. \n\nMinor improvement, can you add JSDoc comments would help other developers understand the hook's options. "
+    },
+    {
+      "id": "4180924446",
+      "author": "vishu-bh",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-27T12:35:40+00:00",
+      "body": ""
+    },
+    {
+      "id": "4181688894",
+      "author": "gcgoncalves",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-27T14:59:32+00:00",
+      "body": "Good hook, quite useful! There are a few suggestions for improving performance and security."
+    },
+    {
+      "id": "4187244054",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-28T09:02:36+00:00",
+      "body": "🧇 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "baa8c565a71e81b2392039ebac84bb11ed0238db",
+      "message": "feat: add useQuery hook for fetching data from API endpoints\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-24T10:54:37+00:00"
+    },
+    {
+      "sha": "f665303848d37ebc42651680ea28c24f14f67e99",
+      "message": "fix: the timeout, abort request, errors and dependencie array in useQuery hook\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-28T08:22:34+00:00"
+    },
+    {
+      "sha": "b34db906bed25ebe48f88709dff437f424dc328e",
+      "message": "fix: Development section in README.md file under client folder\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-27T17:02:45+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 241,
+  "deletions": 14,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:08.187822",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:08.188470",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4430,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4430.json"
+  }
+}

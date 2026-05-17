@@ -1,0 +1,76 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1642,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1642"
+  },
+  "metadata": {
+    "title": "perf: Eliminate redundant JSON encoding in session registry broadcast (#1615)",
+    "state": "closed",
+    "created_at": "2025-12-17T11:29:34+00:00",
+    "updated_at": "2025-12-18T12:18:13+00:00",
+    "closed_at": "2025-12-18T12:18:12+00:00",
+    "merged_at": "2025-12-18T12:18:11+00:00",
+    "author": "rakdutta",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Closes #1615 - Eliminates redundant JSON encoding in `SessionRegistry.broadcast()` method, improving performance for message broadcasting across all backend types (Redis, database, memory).\r\n\r\n## 🔧 Changes Made\r\n\r\n### Core Implementation (`mcpgateway/cache/session_registry.py`)\r\n\r\n**Redis Backend** (Lines 708-719):\r\n- Changed message handling to keep original data type instead of pre-encoding\r\n- Implemented single `json.dumps()` call for the complete payload\r\n- Added inline comments clarifying the single-encode approach\r\n\r\n**Memory & Database Backends**:\r\n- Ensured consistent single-encoding pattern across all backends\r\n- Maintained backward compatibility with existing message formats\r\n\r\n### Key Code Change\r\n```python\r\n# Before (implicit double encoding):\r\n# message was potentially encoded, then encoded again in payload\r\n\r\n# After (single encoding):\r\nbroadcast_payload = {\r\n    \"type\": \"message\",\r\n    \"message\": message,  # Keep as original type, not pre-encoded\r\n    \"timestamp\": time.time(),\r\n}\r\npayload_json = json.dumps(broadcast_payload)  # Single encode\r\nawait self._redis.publish(session_id, payload_json)\r\n```\r\n\r\n## ✅ Testing\r\n\r\n### New Tests Added\r\n\r\n1. **`tests/unit/test_session_registry_redis_broadcast.py`** (NEW)\r\n   - Dedicated unit test for single-encoding verification\r\n   - Uses mock Redis client to capture and validate payload format\r\n   - Confirms payload is JSON string with correct structure\r\n   - Validates that `message` field contains original data structure\r\n\r\n2. **`tests/integration/test_session_registry_redis_integration.py`** (NEW)\r\n   - End-to-end integration test with real Redis instance\r\n   - Tests actual pub/sub message delivery between registry instances\r\n   - Automatically starts Redis container if Docker is available\r\n   - Validates complete message flow from broadcast to receive\r\n   - Includes cleanup and error handling\r\n\r\n3. **Enhanced Existing Tests** (`tests/unit/mcpgateway/cache/test_session_registry.py`)\r\n   - `test_broadcast_redis_input()`: Validates multiple message types (dict, list, int, string)\r\n   - `test_broadcast_database_input()`: Ensures database backend consistency\r\n   - Fixed timestamp mocking for deterministic assertions\r\n## 🧪How to Test  \r\n\r\n### Prerequisites\r\n\r\n **Install aiohttp for integration test\r\n```\r\npip install aiohttp\r\n```\r\n### Step 1: Redis Verification\r\n1. **Terminal A** - Subscribe to Redis channel:\r\n```bash\r\nredis-cli -h 127.0.0.1 -p 6379 subscribe session-1\r\n```\r\nKeep this terminal open.\r\n\r\n2. **Terminal B** - Create `publish.py`:\r\n```python\r\n# publish.py\r\nimport asyncio\r\nfrom mcpgateway.cache.session_registry import SessionRegistry\r\n\r\nasync def main():\r\n    reg = SessionRegistry(backend=\"redis\", redis_url=\"redis://127.0.0.1:6379\")\r\n    await reg.initialize()\r\n    await reg.broadcast(\"session-1\", {\"method\": \"ping\", \"id\": 1})\r\n    await reg.shutdown()\r\n\r\nif __name__ == \"__main__\":\r\n    asyncio.run(main())\r\n```\r\n\r\nRun the publisher:\r\n```bash\r\npython publish.py\r\n```\r\n\r\n**Expected Output in Terminal A:**\r\n```\r\n1) \"message\"\r\n2) \"session-1\"\r\n3) \"{\\\"type\\\": \\\"message\\\", \\\"message\\\": {\\\"method\\\": \\\"ping\\\", \\\"id\\\": 1}, \\\"timestamp\\\": 1765951100.8238003}\"\r\n```\r\n\r\n✅ **Verify:** The `message` field is an object `{\\\"method\\\": \\\"ping\\\", \\\"id\\\": 1}`, NOT a double-encoded JSON string like `\\\"{\\\\\\\"method\\\\\\\": \\\\\\\"ping\\\\\\\", \\\\\\\"id\\\\\\\": 1}\\\"`\r\n\r\n---\r\n\r\n### Step 3: Memory Backend Verification\r\n\r\nCreate `memory_test.py`:\r\n```python\r\n# memory_test.py\r\nimport asyncio\r\nimport json\r\nfrom mcpgateway.cache.session_registry import SessionRegistry\r\n\r\nasync def main():\r\n    reg = SessionRegistry(backend=\"memory\")\r\n    await reg.broadcast(\"session-1\", {\"method\": \"ping\", \"id\": 1})\r\n    \r\n    # Print the stored message\r\n    print(\"Stored message:\", reg._session_message)\r\n    \r\n    # Parse and verify structure\r\n    message_data = json.loads(reg._session_message['message'])\r\n    print(\"Parsed payload:\", message_data)\r\n    print(\"Inner message:\", message_data['message'])\r\n    \r\n    # Verify it's an object, not a string\r\n    assert isinstance(message_data['message'], dict), \"Message should be dict, not string!\"\r\n    print(\"✅ Single encoding verified!\")\r\n\r\nif __name__ == \"__main__\":\r\n    asyncio.run(main())\r\n```\r\n\r\nRun it:\r\n```bash\r\npython memory_test.py\r\n```\r\n\r\n**Expected Output:**\r\n```\r\nStored message: {'session_id': 'session-1', 'message': '{\"type\": \"message\", \"message\": {\"method\": \"ping\", \"id\": 1}, \"timestamp\": 1234567.89}'}\r\nParsed payload: {'type': 'message', 'message': {'method': 'ping', 'id': 1}, 'timestamp': 1234567.89}\r\nInner message: {'method': 'ping', 'id': 1}\r\n✅ Single encoding verified!\r\n```\r\n\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3592604877",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-18T12:09:29+00:00",
+      "body": "The PR correctly eliminates redundant JSON encoding in SessionRegistry.broadcast().\r\n\r\nBefore (double encoding):\r\nmsg_json = json.dumps(message)  # First encode\r\nawait self._redis.publish(session_id, json.dumps({..., \"message\": msg_json, ...}))  # Second encode\r\n\r\nAfter (single encoding):\r\npayload = {\"type\": \"message\", \"message\": message, \"timestamp\": time.time()}\r\nawait self._redis.publish(session_id, json.dumps(payload))  # Single encode\r\n\r\nKey changes:\r\n1. Added _build_payload() helper for consistent payload structure\r\n2. All backends (memory, redis, database) now use same payload format\r\n3. respond() method updated to extract data[\"message\"] from wrapped payload\r\n4. Fallback handling for backward compatibility with old message format\r\n5. Fixed Redis pubsub cleanup to use aclose() with fallback to close()\r\n\r\nTest Results: ✅ All Pass\r\n\r\n- 56 unit tests for session registry: All pass\r\n- 88 cache tests total: All pass (3 known skips)\r\n- 108 doctests: All pass\r\n\r\nPerformance Results: ✅ Significant Improvement\r\n\r\n| Message Type    | Speedup | Size Reduction    |\r\n|-----------------|---------|-------------------|\r\n| Small dict      | 1.52x   | 9 bytes (9.0%)    |\r\n| Medium dict     | 1.53x   | 20 bytes (10.6%)  |\r\n| Large dict      | 1.29x   | 117 bytes (14.7%) |\r\n| List message    | 1.48x   | 33 bytes (13.4%)  |\r\n| String message  | 1.19x   | 4 bytes (3.8%)    |\r\n| Integer message | 1.17x   | 7 bytes (9.6%)    |"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "38456f7932fee9595783a2bbcc44384a798e80dc",
+      "message": "single encode\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-12-17T05:37:39+00:00"
+    },
+    {
+      "sha": "a64b3caf1116f07a959f2d3becd11d6790c88fda",
+      "message": "test\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-12-17T09:11:41+00:00"
+    },
+    {
+      "sha": "c296e1bd3cf971418fda6464ceba32a0c01d4431",
+      "message": "test\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-12-17T10:11:15+00:00"
+    },
+    {
+      "sha": "980853bc0152ada30ddf1d8fce79248c52750bb8",
+      "message": "single encode\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-12-17T10:59:34+00:00"
+    },
+    {
+      "sha": "dba21107cd2976cbd3b4839871893d6bae4d680f",
+      "message": "docstring\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-12-17T11:51:22+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 277,
+  "deletions": 40,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:21:46.472403",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:21:46.473124",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1642,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1642.json"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2728,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2728"
+  },
+  "metadata": {
+    "title": "fix: API token 422 error on GET /auth/email/me",
+    "state": "closed",
+    "created_at": "2026-02-06T09:26:45+00:00",
+    "updated_at": "2026-02-07T11:32:09+00:00",
+    "closed_at": "2026-02-07T11:32:07+00:00",
+    "merged_at": "2026-02-07T11:32:07+00:00",
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nFixed 422 validation error when calling `GET /auth/email/me` with API tokens. The `EmailUserResponse` schema requires `auth_provider` and `password_change_required` fields, but some code paths in `auth.py` were creating `EmailUser` objects without setting these fields, causing Pydantic validation to fail with a 422 error.\r\n\r\n## 🔗 Related Issue\r\nCloses #2700\r\n\r\n## 🐞 Root Cause\r\nThe `EmailUserResponse` schema (`mcpgateway/schemas.py:5318-5319`) requires `auth_provider` and `password_change_required` as mandatory fields. However, 5 locations in `mcpgateway/auth.py` that instantiate `EmailUser` objects were not setting these fields:\r\n\r\n- `_get_user_by_email_sync()` (line 375)\r\n- `_user_from_cached_dict()` (line 475) \r\n- Plugin authentication path (line 617)\r\n- Platform admin bootstrap - batched query path (line 869)\r\n- Platform admin bootstrap - fallback path (line 1007)\r\n\r\nWhen `get_current_user_profile()` called `EmailUserResponse.from_email_user()`, it attempted to access these missing fields, triggering Pydantic validation errors.\r\n\r\n## 💡 Fix Description\r\n**Implementation Changes:**\r\n- Updated all 5 `EmailUser()` instantiation points in `auth.py` to include:\r\n  - `auth_provider` (defaults to `\"local\"`, `\"api_token\"` for API tokens)\r\n  - `password_change_required` (defaults to `False`)\r\n- Updated `_get_auth_context_batched_sync()` to include both fields in cached user dicts (line 436)\r\n\r\n**Test Changes:**\r\n- Updated `test_api_token_authentication_success()` to use realistic mocks with all required fields\r\n- Added `test_emailuser_response_serialization_with_api_token()` regression test to verify serialization works without validation errors\r\n\r\nAll changes maintain backward compatibility and follow existing patterns in the codebase.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          | ✅     |\r\n| Unit tests                            | `make test`          | ✅     |\r\n| Coverage ≥ 90 %                       | `make coverage`      | ✅     |\r\n| Manual regression no longer fails     | GET /auth/email/me with API token returns 200 | ✅     |\r\n\r\n**Tests added:**\r\n- `tests/unit/mcpgateway/routers/test_email_auth_router.py::test_emailuser_response_serialization_with_api_token`\r\n- Updated: `tests/unit/mcpgateway/test_auth.py::TestGetCurrentUser::test_api_token_authentication_success`\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec (N/A - internal auth API)\r\n- [x] No breaking change to MCP clients (N/A - internal auth API)\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] Regression test added to prevent recurrence\r\n- [x] All existing tests pass",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3766894461",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-07T11:24:27+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0e6b3a897fe1d81039baf55193984e349d03ac8a",
+      "message": "fix(auth): add missing fields to EmailUser instantiations\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-05T11:15:26+00:00"
+    },
+    {
+      "sha": "0fcc389099ace63855eade1e61cb216b4c007278",
+      "message": "add regression test for API token /me endpoint serialization\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-06T07:31:22+00:00"
+    },
+    {
+      "sha": "076c2e6d0c63dbdc196850c34f41387015bcf077",
+      "message": "test fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-06T10:10:41+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 61,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:22.639346",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:22.642155",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2728,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2728.json"
+  }
+}

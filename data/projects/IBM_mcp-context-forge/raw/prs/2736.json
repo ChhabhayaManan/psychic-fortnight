@@ -1,0 +1,73 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2736,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2736"
+  },
+  "metadata": {
+    "title": "fix: add is_admin and full_name fields as optional in the request when updating user details ",
+    "state": "closed",
+    "created_at": "2026-02-06T15:23:16+00:00",
+    "updated_at": "2026-02-07T11:49:14+00:00",
+    "closed_at": "2026-02-07T11:49:13+00:00",
+    "merged_at": "2026-02-07T11:49:13+00:00",
+    "author": "marekdano",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses https://github.com/IBM/mcp-context-forge/issues/2693\r\n\r\n## 📌 Summary\r\nUpdating admin privileges through the API requires mandatory fields (`password`, `full_name`), which results in unintended overwriting of existing user details.\r\n\r\nThe `full_name` and `is_admin` fields should be optional and should update the user's `full_name` and `is_admin` when they are included in the request\r\n\r\n## 🔁 Reproduction Steps\r\n1. Call the admin user update API without providing all required fields.\r\n2. The API returns a \"required field missing\" error.\r\n3. Provide all mandatory fields and update the user.\r\n\r\nExample API Call:\r\n```bash\r\ncurl -X 'PUT' \\\r\n  'http://localhost:4444/auth/email/admin/users/user_admin%40example.com' \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -H 'accept: application/json' \\\r\n  -H 'Content-Type: application/json' \\\r\n  -d '{\r\n  \"email\": \"user_admin@example.com\",\r\n  \"password\": \"abcd1235\",\r\n  \"is_admin\": true\r\n}'\r\n```\r\nIn this case, the `user.full_name` is going to be `None` and it'll be displayed as `N/A` in UI.\r\n\r\n## 🐞 Root Cause\r\n`email`, `password`, `is_admin`, and `full_name` are treated as mandatory fields.\r\n\r\nIf `full_name` is not included in the request payload, the existing full name is overwritten and becomes `null` / `NA`.\r\n\r\n## 💡 Fix Description\r\n\r\n1. The`update_user` function in `mcpgateway/routers/email_auth.py` \r\n\r\n- Replace `EmailRegistrationRequest` with `AdminUserUpdateRequest` to have fields optional.\r\n- Handle `full_name` and `is_admin` fields from the request as optional and update them in the DB when they are available.\r\n- Add to catch `PasswordValidationError` exception when the password does not meet the requirements\r\n\r\n2. The `AdminUserUpdateRequest in `mcpgateway/schemas.py`\r\n\r\nAdd the optional password field to `AdminUserUpdateRequest` with basic min_length=8, and let the existing service validation handle the rest!\r\n\r\n3. Add more unit tests to cover the change\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |     ✅    |\r\n| Unit tests                            | `make test`          |   ✅      |\r\n| Coverage ≥ 80 %                       | `make coverage`      |   ✅      |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3766899681",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-07T11:36:10+00:00",
+      "body": "Rebased onto latest `main` (18abdde) — no conflicts, all tests pass.\n\n**Review notes:**\n\n- Logic is correct. Optional fields default to `None` and are only applied when explicitly provided. Password validation is properly enforced through `auth_service.validate_password()` before hashing.\n- No security concerns — schema provides baseline `min_length=8`, service layer enforces full complexity rules. `PasswordValidationError` is caught and returned as HTTP 400.\n- No performance impact.\n\n**Minor observations (non-blocking):**\n\n1. **`hasattr()` is redundant** — on a Pydantic model, `hasattr(user_request, \"full_name\")` is always `True` since the field is declared. The `is not None` check alone suffices. Cosmetic — functionality is correct either way.\n2. **`is_active` not handled** — `AdminUserUpdateRequest` defines `is_active`, but the endpoint ignores it. Pre-existing issue (not introduced by this PR); the UI uses separate `/activate` and `/deactivate` endpoints.\n3. **Consistency** — other endpoints (e.g., `rbac.py`) use `.dict(exclude_unset=True)` for partial updates. This PR uses `is not None` checks. Both work correctly for this use case.\n4. **Test coverage** — could add a test for single-field partial updates (e.g., only `full_name` or only `is_admin`), but existing tests cover the main scenarios well.\n\nLGTM overall — the fix correctly addresses the reported bug."
+    },
+    {
+      "id": "3766906348",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-07T11:49:06+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7ba79e1d204f9baf86942bf22c50a288e60b0a76",
+      "message": "fix: add password and full_name fields as optional for update user request\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-06T14:33:45+00:00"
+    },
+    {
+      "sha": "19ecb753da07dae098031f61588ad22fd733c384",
+      "message": "fix: add is_admin field as optional for the update user request\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-06T15:17:34+00:00"
+    },
+    {
+      "sha": "18817f53f9a5c8eaa4b3a7e6a962e962ddbbb80f",
+      "message": "fix: lint issue when running make flake8\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-06T15:51:49+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 126,
+  "deletions": 7,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:22.973679",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:22.975563",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2736,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2736.json"
+  }
+}

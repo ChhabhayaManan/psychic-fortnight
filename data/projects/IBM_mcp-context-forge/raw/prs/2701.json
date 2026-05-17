@@ -1,0 +1,120 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2701,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2701"
+  },
+  "metadata": {
+    "title": "fix: update user fields full_name, administrator, password in UI",
+    "state": "closed",
+    "created_at": "2026-02-04T15:37:03+00:00",
+    "updated_at": "2026-02-07T00:05:17+00:00",
+    "closed_at": "2026-02-07T00:05:15+00:00",
+    "merged_at": "2026-02-07T00:05:15+00:00",
+    "author": "marekdano",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nRelates: https://github.com/IBM/mcp-context-forge/issues/2693\r\n\r\n## 📌 Summary\r\nUnable to update Users via Admin UI on the `Users` page. Error `htmx:targetError` is logged to the browser console after hitting `Cancel` or Update User` buttons in the Edit User modal.\r\n\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Create a user without admin privileges.\r\n2. Navigate to the Edit User page.\r\n3. Modify any of the following:\r\n    - Administrator checkbox\r\n    - Password\r\n    - Full Name\r\n\r\n4. Click on the `Update User` button and observe. The user details are not updated.\r\n5. Open the browser console and try to Edit the user again\r\n6. Observe -  the error `htmx:targetError` is logged to the browser console, and no `Update user` modal is not displayed again\r\n\r\n## 🐞 Root Cause\r\nThe browser console was logging htmx:targetError\r\nThis occurred because HTMX was trying to swap content into a target element that was hidden or not yet visible.\r\n\r\n## 💡 Fix Description\r\n\r\n  Files Modified\r\n\r\n   1. mcpgateway/admin.py (2 changes)\r\n    - Changed form from `hx-target=\"#user-edit-modal-content\"` to `hx-swap=\"none\"`\r\n      - Prevents HTMX from swapping the success response after the modal closes\r\n      - Modal closing is handled via HX-Trigger event (adminUserAction)\r\n\r\n    - Added `hx-swap=\"none\"` to Cancel button\r\n      - Prevents HTMX from attempting content swap when the modal is hidden\r\n\r\n   2. mcpgateway/templates/users_partial.html (1 change)\r\n    - Added inline event handler to Edit button\r\n      - Added `hx-on::before-request` to show modal synchronously before HTMX request\r\n      - Added `hx-swap=\"innerHTML show:top\"` for proper content swapping\r\n      - Forces browser reflow with `void modal.offsetHeight` to ensure target is accessible\r\n\r\n   3. mcpgateway/templates/admin.html (1 change)\r\n    - Added `htmx:targetError` event listener\r\n      - Suppresses targetError for user edit modal operations\r\n      - Necessary because `hx-swap=\"none\"` still triggers target lookup\r\n\r\n   4. mcpgateway/static/admin.js (1 change)\r\n    - Removed redundant global `htmx:beforeRequest` listener\r\n      - No longer needed since modal visibility is handled inline on the Edit button\r\n      - Cleaner, more maintainable code\r\n\r\n   Solution Architecture\r\n\r\n   Before: Global event listeners checking every HTMX request\r\n   After: Inline event handler scoped to specific button + error suppression\r\n\r\n   Benefits\r\n   ✅ No more console errors\r\n   ✅ Modal opens/closes correctly every time\r\n   ✅ Better performance (no global listeners)\r\n   ✅ Follows HTMX best practices\r\n\r\nNow, no errors are logged, and user details can be updated.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint-web`          |   ✅   |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [
+    {
+      "id": "2768025967",
+      "author": "gcgoncalves",
+      "created_at": "2026-02-05T09:44:20+00:00",
+      "body": "There's a conflict here with the changes on https://github.com/IBM/mcp-context-forge/pull/2703. The hx-swap shouldn't be none, that id should be added to the wrapper above (line 6129). "
+    },
+    {
+      "id": "2768030017",
+      "author": "gcgoncalves",
+      "created_at": "2026-02-05T09:45:22+00:00",
+      "body": "With the changes listed in the comment above, `hx-swap=\"none\"` is not needed. Also, without the swap, the success message is not displayed on updating the user."
+    },
+    {
+      "id": "2768036801",
+      "author": "gcgoncalves",
+      "created_at": "2026-02-05T09:47:06+00:00",
+      "body": "Nice work here replacing the event listener with a htmx call! 👏 "
+    },
+    {
+      "id": "2768930938",
+      "author": "marekdano",
+      "created_at": "2026-02-05T12:31:44+00:00",
+      "body": "Good point! I removed `hx-swap=\"none\"`, and I can also see the success notification message. "
+    },
+    {
+      "id": "2768931970",
+      "author": "marekdano",
+      "created_at": "2026-02-05T12:32:00+00:00",
+      "body": "Good point! I removed `hx-swap=\"none\"`."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3755681238",
+      "author": "gcgoncalves",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-02-05T09:45:28+00:00",
+      "body": ""
+    },
+    {
+      "id": "3755694862",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-05T09:47:11+00:00",
+      "body": ""
+    },
+    {
+      "id": "3756828808",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-05T12:31:44+00:00",
+      "body": ""
+    },
+    {
+      "id": "3756829823",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-05T12:32:00+00:00",
+      "body": ""
+    },
+    {
+      "id": "3757667214",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-05T15:01:36+00:00",
+      "body": "Tested locally, submitting the for works and the success message is displayed correctly."
+    },
+    {
+      "id": "3765644767",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-07T00:05:06+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "601f322d51ca7ec07255c4aff350cc46f0c822df",
+      "message": "fix: show user edit modal before HTMX request to prevent targetError\n\nThe Edit User modal was hidden when HTMX tried to swap content into\n#user-edit-modal-content, causing htmx:targetError console errors.\n\nChanges:\n- Add hx-on::before-request to Edit button to show modal synchronously\n- Remove global htmx:afterRequest listener that showed modal after request\n- Remove hx-target from form since content swaps into modal while visible\n\nThe modal is now visible before HTMX requests, preventing targetError.\n\nCloses #2693\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-06T23:37:14+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 3,
+  "deletions": 11,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:10.129906",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:10.130818",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2701,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2701.json"
+  }
+}

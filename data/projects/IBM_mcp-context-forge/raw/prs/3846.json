@@ -1,0 +1,167 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3846,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3846"
+  },
+  "metadata": {
+    "title": "feat(plugin): add tool call anomaly detection plugin",
+    "state": "open",
+    "created_at": "2026-03-24T20:20:53+00:00",
+    "updated_at": "2026-04-14T08:37:37+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "anujshrivastava15",
+    "labels": [
+      "enhancement",
+      "security",
+      "plugins",
+      "COULD"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": []
+  },
+  "description": "# 🧱 New Plugin\n\n## 🔗 Closes\n\nCloses #3845\n\n## 🚀 Summary\n\nAdd a tool call anomaly detection plugin that learns per-user tool-calling baselines and flags behavioral deviations: burst invocations, novel tool access, unusual frequency patterns, and off-hours activity. Runs on `tool_pre_invoke` and `tool_post_invoke` hooks with zero external dependencies.\n\n## 🧪 Checks\n\n- [ ] Plugin was [bootstrapped with the CLI](https://ibm.github.io/mcp-context-forge/using/plugins/lifecycle/) (native or external template)\n- [x] Unit tests created for the new plugin\n- [ ] `make lint plugins` passes\n- [ ] `make test` passes\n- [ ] CHANGELOG updated (if user-facing)\n- [x] README documentation was created for the plugin\n- [ ] New plugin added to the [documentation](https://ibm.github.io/mcp-context-forge/using/plugins/plugins/) linking to the README above\n",
+  "comments": [
+    {
+      "id": "2984079651",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:27:17+00:00",
+      "body": "Per-user baseline memory is only bounded for `call_history`; `known_tools`, `known_arg_signatures`, `tool_counts`, and even `_baselines` itself can grow without limit as new users/tools/arg-shapes appear. This can lead to unbounded memory growth under long-running workloads or adversarial tool names. Consider adding eviction (TTL/LRU), maximum tracked users, and/or capping per-user distinct tools/arg signatures when `max_history_per_user` is exceeded."
+    },
+    {
+      "id": "2984079686",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:27:18+00:00",
+      "body": "The README states `tool_post_invoke` \"records the call into the baseline\", but the implementation only reads `anomaly_meta` from context and returns it; baseline recording happens in `tool_pre_invoke`. Please update the README to match actual behavior, or update `tool_post_invoke` to perform the recording if that's the intended design.\n```suggestion\n- `tool_pre_invoke` — Scores the incoming call against the user's baseline, updates the baseline, and may warn or block above threshold\n- `tool_post_invoke` — Reads anomaly metadata from context and enriches the tool response with risk scores and related fields\n```"
+    },
+    {
+      "id": "2984079712",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:27:18+00:00",
+      "body": "The README lists metadata fields (`anomaly_signals`, `anomaly_action`) that the plugin never sets, and the plugin instead emits separate keys (`anomaly_novelty`, `anomaly_burst`, `anomaly_frequency`, etc.). Please update the README to match the emitted metadata, or update the plugin to emit the documented fields.\n```suggestion\n- `anomaly_novelty` — Novelty signal score contributing to the composite risk\n- `anomaly_burst` — Burst-rate signal score contributing to the composite risk\n- `anomaly_frequency` — Frequency-pattern signal score contributing to the composite risk\n- `anomaly_off_hours` — Whether an off-hours bonus was applied when scoring\n```"
+    },
+    {
+      "id": "2984079737",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:27:18+00:00",
+      "body": "This configuration comment implies that setting `mode: \"enforce\"` is sufficient to block, but the plugin only blocks when `action` is set to `\"block\"` *and* the framework mode is enforce (permissive mode will log and continue). Please clarify the comment (and/or set `action: \"block\"` in the enforce example) to avoid misconfiguration."
+    },
+    {
+      "id": "2984079760",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:27:19+00:00",
+      "body": "`test_off_hours_bonus` depends on the real current UTC hour (`_is_off_hours()` uses `datetime.now(timezone.utc)`), so it will fail when tests run at 23:xx UTC because `off_hours_end=23` makes hour 23 *not* off-hours. Please mock the clock (e.g., patch `datetime.datetime.now` or refactor the plugin to use an injectable time source) so the test is deterministic."
+    },
+    {
+      "id": "2984079769",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:27:19+00:00",
+      "body": "The plugin records the call into the baseline (`_record_call`) before deciding to block. If a call is blocked, adding it to `known_tools`/signatures can reduce novelty risk for subsequent attempts and effectively lets a blocked attempt “train” the baseline. Consider recording only after allow/warn, or recording blocked calls separately without promoting them into the baseline used for novelty scoring."
+    },
+    {
+      "id": "2984079788",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:27:19+00:00",
+      "body": "`math` and several typing imports (`Optional`, `Tuple`) are unused in this module and will fail linting. Please remove unused imports or use them where intended.\n```suggestion\nimport time\nfrom collections import defaultdict\nfrom typing import Any, Dict, List, Set\n```"
+    },
+    {
+      "id": "2984079810",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:27:19+00:00",
+      "body": "The \"Frequency\" signal description says \"called significantly more than its historical average\", but `_score_frequency` flags tools that are *rarely* used (`tool_fraction < 0.01`). Please align the README wording with the implemented heuristic or adjust the scoring logic to match the documented behavior.\n```suggestion\n- **Frequency** — Tool called significantly less than its historical average (unusually rare usage)\n```"
+    },
+    {
+      "id": "2984079825",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:27:19+00:00",
+      "body": "`patch` and `AnomalyDetectionConfig` are imported but never used in this test module, which will fail linting. Please remove unused imports or use `patch` to make the time-based tests deterministic (see off-hours test below)."
+    },
+    {
+      "id": "2984202751",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:52:11+00:00",
+      "body": "`action` is a free-form string and there’s no validation that `warn_threshold <= block_threshold`. A typo (e.g., \"blok\") would silently disable blocking, and inverted thresholds can lead to confusing behavior. Consider using a `Literal[\"warn\",\"block\"]`/Enum for `action` and adding a Pydantic validator to enforce sensible threshold ordering."
+    },
+    {
+      "id": "2984202775",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:52:11+00:00",
+      "body": "Config comments imply that setting `mode: \"enforce\"` is sufficient to block, but the plugin only returns `continue_processing=False` when `config.action == \"block\"` as well. As written, switching to enforce while leaving `action: \"warn\"` will still never block. Consider clarifying this in the inline comment (or simplifying by deriving block/warn solely from `mode`)."
+    },
+    {
+      "id": "2984202785",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:52:11+00:00",
+      "body": "In `test_history_pruned`, `ctx = _make_context()` is assigned but never used (the loop passes a fresh `_make_context()` each time). Removing the unused variable avoids lint warnings and keeps the test focused."
+    },
+    {
+      "id": "2984202801",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:52:11+00:00",
+      "body": "`_is_off_hours()` is called twice for the same invocation (once in `_composite_score` and again when populating `meta`). Besides extra work, this can theoretically yield inconsistent `anomaly_off_hours` vs the score at an hour boundary. Compute the off-hours boolean once per call and reuse it for both scoring and metadata."
+    },
+    {
+      "id": "2984202818",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:52:12+00:00",
+      "body": "Baselines are keyed only by `user_id` and stored on the plugin instance, which is shared across requests. In a multi-tenant deployment this can mix behavior across tenants (same email/sub in different tenants), and concurrent requests for the same user can interleave updates to `_baselines`/`_UserBaseline` without synchronization. Consider scoping the baseline key by `(tenant_id, user_id)` (and possibly `server_id`) and using an `asyncio.Lock` (global or per-user) around baseline mutations."
+    },
+    {
+      "id": "2984202831",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:52:12+00:00",
+      "body": "`test_off_hours_bonus` is time-dependent: `off_hours_start=0, off_hours_end=23` is not actually “always off-hours” (UTC hour 23 will be in-hours), so this test can fail depending on when it runs. Make the test deterministic by fixing the current UTC hour (e.g., patching the clock used by `_is_off_hours`) or by refactoring the plugin to accept an injectable time provider for off-hours checks.\n```suggestion\n        # Patch the off-hours check to make the test independent of the actual current time.\n        with patch.object(ToolCallAnomalyDetectionPlugin, \"_is_off_hours\", return_value=True):\n            plugin = ToolCallAnomalyDetectionPlugin(\n                _make_config(\n                    learning_window_seconds=0,\n                    off_hours_start=0,\n                    off_hours_end=23,  # configuration under test\n                    off_hours_score_bonus=0.15,\n                )\n            )\n            baseline = plugin._get_baseline(\"alice@example.com\")\n            baseline.first_seen = time.time() - 7200\n            baseline.known_tools.add(\"db_query\")\n            baseline.known_arg_signatures[\"db_query\"].add(frozenset([\"query\"]))\n            baseline.tool_counts[\"db_query\"] = 50\n\n            ctx = _make_context()\n            result = await plugin.tool_pre_invoke(_pre_payload(\"db_query\", {\"query\": \"x\"}), ctx)\n\n            assert result.metadata[\"anomaly_off_hours\"] is True\n```"
+    },
+    {
+      "id": "2984202854",
+      "author": "Copilot",
+      "created_at": "2026-03-24T20:52:12+00:00",
+      "body": "Call recording happens unconditionally before the block decision, so even calls that get blocked will be added to the user’s baseline. This can “teach” the baseline about malicious activity and reduce detection quality over time. Consider only recording after deciding to allow/warn, and skip recording when returning `continue_processing=False`."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4002081912",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-24T20:27:20+00:00",
+      "body": "## Pull request overview\n\nAdds a new security-focused plugin to detect anomalous MCP tool-calling behavior by learning per-user baselines and scoring deviations, and wires it into the default plugin configuration alongside unit tests and plugin documentation.\n\n**Changes:**\n- Introduces `ToolCallAnomalyDetectionPlugin` with per-user baseline learning and anomaly scoring on `tool_pre_invoke`, plus metadata enrichment on `tool_post_invoke`.\n- Adds unit tests for learning/detection behavior, identity extraction, and pruning.\n- Adds plugin manifest/README and registers the plugin in `plugins/config.yaml` (disabled by default).\n\n### Reviewed changes\n\nCopilot reviewed 5 out of 5 changed files in this pull request and generated 9 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `plugins/tool_call_anomaly_detection/tool_call_anomaly_detection.py` | New plugin implementation for baseline learning + anomaly scoring and (optional) blocking. |\r\n| `tests/unit/plugins/test_tool_call_anomaly_detection.py` | Unit tests covering learning vs detection, burst/novelty/off-hours, identity extraction, pruning. |\r\n| `plugins/tool_call_anomaly_detection/plugin-manifest.yaml` | Plugin manifest with hooks and default configuration. |\r\n| `plugins/tool_call_anomaly_detection/README.md` | Plugin usage/config documentation and described signals/metadata. |\r\n| `plugins/config.yaml` | Registers the new plugin in the default plugin list (disabled). |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "4002219927",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-24T20:52:12+00:00",
+      "body": "## Pull request overview\n\nCopilot reviewed 6 out of 6 changed files in this pull request and generated 7 comments.\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6ed6e0f75b4da1a2811cdc087168446903f0893a",
+      "message": "feat(plugin): add tool call anomaly detection plugin\n\nAdd a new security plugin that learns per-user tool-calling baselines\nand flags behavioral anomalies: burst invocations, novel tool access,\nunusual frequency patterns, and off-hours activity.\n\nCloses #3845\n\nSigned-off-by: Anuj Shrivastava <ashrivastava@ibm.com>",
+      "author": "Anuj Shrivastava",
+      "date": "2026-03-24T20:19:27+00:00"
+    },
+    {
+      "sha": "3041015630944900370fc7a98829db7922d6cd94",
+      "message": "fix(plugin): address review feedback for anomaly detection plugin\n\n- Don't record blocked calls into baseline (prevents training on malicious activity)\n- Compute _is_off_hours() once per call (avoids inconsistency at hour boundary)\n- Use Literal['warn','block'] for action config with threshold ordering validator\n- Mock _is_off_hours in test for deterministic off-hours coverage\n- Fix README: correct metadata field names, hook descriptions, frequency signal\n- Clarify config.yaml comment on mode vs action interaction\n- Remove unused imports and variables in tests\n- Add CHANGELOG entry under [Unreleased]\n- Add plugin to docs site Security & Safety catalog\n\nSigned-off-by: Anuj Shrivastava <ashrivastava@ibm.com>",
+      "author": "Anuj Shrivastava",
+      "date": "2026-04-05T21:54:10+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 731,
+  "deletions": 9,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:21.529890",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:21.531888",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3846,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3846.json"
+  }
+}

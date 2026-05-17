@@ -1,0 +1,137 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3331,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3331"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Preserve tab, team_id, and proxy prefix across admin mutations",
+    "state": "closed",
+    "created_at": "2026-02-27T17:10:03+00:00",
+    "updated_at": "2026-03-07T11:03:48+00:00",
+    "closed_at": "2026-02-27T22:06:04+00:00",
+    "merged_at": "2026-02-27T22:06:04+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "ui",
+      "ica",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\n\n## 📌 Summary\n\nFixes admin UI losing tab context (`#fragment`), `team_id`, and proxy prefix after add/edit/delete/toggle operations when embedded in an iframe behind a server-side proxy.\n\nCloses #3321, Closes #3324\n\n## 🔁 Reproduction Steps\n\n1. Embed admin UI in an iframe via proxy route (e.g. `/api/proxy/mcp/admin?team_id=...#gateways`)\n2. Perform any mutation (add/edit/delete/toggle a gateway, server, tool, etc.)\n3. **Before fix:** URL loses proxy prefix, `team_id`, `include_inactive`, and/or `#fragment` — user lands on wrong tab with wrong scope\n4. **After fix:** All URL context is preserved\n\n## 🐞 Root Cause\n\nTwo independent issues:\n\n1. **Add/edit handlers** (#3324): Used `window.ROOT_PATH` to build redirect URLs. In proxy-embedded deployments, `ROOT_PATH` is empty (ASGI `root_path` not forwarded), so navigation went to `/admin` instead of `/proxy/mcp/admin`.\n\n2. **Delete/toggle handlers** (#3321): Used native `form.submit()` which triggered 303 redirects. The browser followed the redirect server-side through the proxy, losing the iframe's URL context (fragment, query params, proxy prefix).\n\n## 💡 Fix Description\n\n1. **`_navigateAdmin()` helper** — New proxy-aware navigation function that derives the admin base from `window.location.pathname` (finding `/admin` and preserving everything before it as the proxy prefix) rather than relying on `window.ROOT_PATH`.\n\n2. **All 15 add/edit success handlers** converted from `window.location.href = \\`\\${window.ROOT_PATH}/admin...#tab\\`` to `_navigateAdmin(fragment, searchParams)`.\n\n3. **`handleToggleSubmit` converted to `fetch()`** with `redirect: 'manual'` so the browser doesn't follow the 303 redirect. After the mutation succeeds, navigates via `_navigateAdmin()`.\n\n4. **`include_inactive` preservation** — `_navigateAdmin()` carries `include_inactive=true` when the show-inactive checkbox is checked, and omits it otherwise (no injection of params that weren't originally present).\n\n### Handlers converted (15 total)\n- **Add:** gateways, servers, tools, resources, prompts, A2A agents, gRPC services\n- **Edit:** gateways, servers, tools, resources, prompts, A2A agents\n- **Toggle/delete:** `handleToggleSubmit` (all entity types)\n\n## 🧪 Verification\n\n17 new Playwright regression tests across 3 test classes:\n\n| Class | Tests | Coverage |\n|-------|-------|----------|\n| `TestAdminUrlContextPreservation` | +4 | `include_inactive` round-trips; single-param no-bleed |\n| `TestAdminProxyUrlContext` | +6 | Proxy prefix `/proxy/mcp` survives add/edit/toggle/delete |\n| `TestAdminIframeContext` | +7 | Same guarantees inside an `<iframe>` with proxy routing |\n\nProxy simulation uses `page.route()` to intercept `/proxy/mcp/**` requests. Iframe tests build an inline host page with `page.set_content()` and strip `X-Frame-Options` headers.\n\n## 📐 MCP Compliance (if relevant)\n- [x] No MCP protocol changes — UI-only fix\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted\n- [x] No secrets/credentials committed\n- [x] Regression tests added\n- [x] Works in direct, proxy, and iframe-embedded deployments",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3869061026",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-27T20:59:42+00:00",
+      "body": "Reviewed and approved. All code changes are sound — _navigateAdmin() correctly derives proxy prefix, handleToggleSubmit fetch conversion preserves CSRF/auth, all 15 call sites converted consistently, no security issues. Added review fixes: lastIndexOf for robustness, correct test selectors, DOM-click edit tests, registered pytest markers, and direct-mode edit test for full mutation coverage."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "33bc8a87f9b2ebeafda4c2c0c74456f6707ceca0",
+      "message": "feat(ui): add _navigateAdmin() proxy-aware helper and Playwright test scaffold\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T15:42:59+00:00"
+    },
+    {
+      "sha": "d476dec1827feaa46c9dc766d05b91e9eb433db2",
+      "message": "fix(ui): use _navigateAdmin() in add/edit handlers to preserve proxy prefix\n\nReplaces all 13 occurrences of window.ROOT_PATH/admin#fragment with\n_navigateAdmin() calls. Preserves team_id and tab context when the admin\nUI is embedded behind a proxy that does not forward ASGI root_path.\n\nCloses #3324\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T15:50:32+00:00"
+    },
+    {
+      "sha": "8c3c658fd1dc1f63152522fbfbcaa35fd0693fba",
+      "message": "fix(ui): convert handleToggleSubmit to fetch() to prevent 303 redirect context loss\n\nReplaces form.submit() with async fetch(redirect:'manual') so the\nbrowser never follows the 303 redirect to the backend-direct URL.\nAfter the mutation, _navigateAdmin() navigates to the correct proxy-\nscoped URL preserving team_id and tab fragment.\n\nUpdates test assertion to reflect the new inline CSRF injection via\nFormData.set() rather than the injectCsrfTokenIntoForm() DOM helper.\n\nCloses #3321\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T15:53:11+00:00"
+    },
+    {
+      "sha": "6c1be6c2256db9045fa4256eda6648964a6ca338",
+      "message": "test(playwright): add include_inactive + single-param URL preservation tests\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T16:25:41+00:00"
+    },
+    {
+      "sha": "d025dd15e39b3e68555760ff38c7a26f29073525",
+      "message": "test(playwright): fix dialog assertion and add cleanup to gateway add/delete tests\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T16:35:03+00:00"
+    },
+    {
+      "sha": "2c8d128055d6783218940de0156458b4df94879c",
+      "message": "test(playwright): add proxy-prefix URL context tests for #3321/#3324\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T16:39:05+00:00"
+    },
+    {
+      "sha": "30b577c276fb8bf88e0ec6e943fe3a1a408589c8",
+      "message": "test(playwright): fix route pattern reuse, dialog once, and toggle include_inactive assertion\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T16:49:04+00:00"
+    },
+    {
+      "sha": "2b51d98ed92ad302e671748981661227ae41c3ec",
+      "message": "test(playwright): add iframe + proxy URL context tests for #3321/#3324\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T17:06:04+00:00"
+    },
+    {
+      "sha": "69ca18d3c016872563ffc4674bba533f83cf61c8",
+      "message": "fix(ui): remove unused injectCsrfTokenIntoForm after fetch() conversion\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T17:12:22+00:00"
+    },
+    {
+      "sha": "da7cb15f76e4e9a371aa21809ae1e1ff2177ca6b",
+      "message": "fix test\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T17:20:31+00:00"
+    },
+    {
+      "sha": "49ee4495500160dbab67a69360a921cfae586584",
+      "message": "consolidate tests\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T18:00:21+00:00"
+    },
+    {
+      "sha": "34d365c25941a4c6371cc8085d25fe91900e1bb8",
+      "message": "fix(ui): harden _navigateAdmin and stabilize Playwright tests\n\n- Use lastIndexOf(\"/admin\") instead of indexOf to avoid false matches\n  on path segments like /administrator in proxy prefix detection.\n- Register regression, proxy, iframe pytest markers in pyproject.toml\n  to suppress PytestUnknownMarkWarning.\n- Wait for editGateway global to be defined before calling it in proxy\n  and iframe edit tests (admin.js is 1.2 MB, networkidle can fire\n  before script execution completes).\n- Wrap iframe proxy route handler in try/except to prevent\n  \"Route is already handled\" errors during teardown.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T19:35:02+00:00"
+    },
+    {
+      "sha": "531ac4f6a9acc6fd212f60edf92b014235faa8ff",
+      "message": "test(playwright): add direct-mode edit gateway test for full mutation coverage\n\nAdds test_edit_gateway_preserves_gateways_fragment_and_team_id to\nTestAdminUrlContextPreservation so the direct (non-proxy) class covers\nall four mutation types: add, edit, toggle, and delete.\n\nCloses coverage gap identified during review.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T20:10:45+00:00"
+    },
+    {
+      "sha": "9203c5f63428dde9e6a95e3d3627e7c3cf885352",
+      "message": "fix(test): correct form selectors and use DOM clicks for edit tests\n\n- Fix _fill_add_gateway_form selectors: target #add-gateway-form\n  #mcp-server-name / #mcp-server-url (actual element IDs) instead of\n  #gateway-name / input[id*='gateway'] which matched the hidden edit\n  modal and caused 60s timeouts on fill().\n- Replace page.evaluate(\"editGateway(...)\") with DOM button click\n  in all 3 edit tests (direct, proxy, iframe). The 1.2 MB admin.js\n  may not finish executing before networkidle fires, making the\n  global function unavailable for evaluate(). Clicking the edit\n  button via locator waits naturally for the element to be\n  actionable.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T20:58:43+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 925,
+  "deletions": 81,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:57.975430",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:57.976321",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3331,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3331.json"
+  }
+}

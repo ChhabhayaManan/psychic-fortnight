@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3544,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3544"
+  },
+  "metadata": {
+    "title": "fix(api): query raw DbGateway in admin_test_gateway to avoid decode_auth crash on masked auth_value",
+    "state": "closed",
+    "created_at": "2026-03-08T23:04:05+00:00",
+    "updated_at": "2026-03-09T01:51:36+00:00",
+    "closed_at": "2026-03-09T01:42:35+00:00",
+    "merged_at": "2026-03-09T01:42:35+00:00",
+    "author": "omorros",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "  ## 🔗 Related Issue                                                                                                      Closes #3539\r\n                                                                                                                         \r\n  ---\r\n\r\n  ## 📝 Summary\r\n  `admin_test_gateway` crashed with `ValueError: Nonce must be between 8 and 128 bytes` because it called `decode_auth()`\r\n   on a masked `auth_value` (`\"*****\"`) returned by `get_first_gateway_by_url()`. This PR queries the raw `DbGateway` ORM\r\n   object directly and guards the `decode_auth` call with an explicit `auth_type` check, fixing the crash for all        \r\n  gateways (with and without auth).\r\n\r\n  ---\r\n\r\n  ## 🏷️ Type of Change\r\n  - [x] Bug fix\r\n  - [ ] Feature / Enhancement\r\n  - [ ] Documentation\r\n  - [ ] Refactor\r\n  - [ ] Chore (deps, CI, tooling)\r\n  - [ ] Other (describe below)\r\n\r\n  ---\r\n\r\n  ## 🧪 Verification\r\n\r\n  | Check                     | Command         | Status |\r\n  |---------------------------|-----------------|--------|\r\n  | Lint suite                | `make lint`     | ✅ No new issues (pre-existing black/ruff warnings on upstream main) | \r\n  | Unit tests                | `make test`     | ✅ 1001 passed, 4 pre-existing failures (TestPaginationSwapStyle) |    \r\n  | Coverage ≥ 80%            | `make coverage` | ✅ 97% on mcpgateway/admin.py |\r\n\r\n  ---\r\n\r\n  ## ✅ Checklist\r\n  - [x] Code formatted (`make black isort pre-commit`)\r\n  - [x] Tests added/updated for changes\r\n  - [ ] Documentation updated (if applicable)\r\n  - [x] No secrets or credentials committed\r\n\r\n  ---\r\n\r\n  ## 📓 Notes (optional)\r\n  **Root cause:** `get_first_gateway_by_url()` returns a `GatewayRead.masked()` where `auth_value=\"*****\"`. Passing that \r\n  to `decode_auth()` base64-decodes it to a 3-byte payload, then AES-GCM fails extracting a 12-byte nonce.\r\n\r\n  **Fix:**\r\n  1. Replace `gateway_service.get_first_gateway_by_url()` with a direct `select(DbGateway)` query to get the unmasked    \r\n  auth value\r\n  2. Replace the catch-all `else` with `elif gateway.auth_type in (\"basic\", \"bearer\", \"authheaders\")` so gateways with no\r\n   auth skip decryption entirely\r\n  3. Handle both `dict` and `str` `auth_value` formats from the raw DB object\r\n\r\n  The 4 `TestPaginationSwapStyle` failures are pre-existing on upstream main and unrelated to this change.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3912334601",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-09T00:51:36+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0fdc8219847c4bfc247ac626405f2c583be256b6",
+      "message": "fix(api): query raw DbGateway in admin_test_gateway to avoid decode_auth crash on masked auth_value\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>",
+      "author": "Oriol Morros Vilaseca",
+      "date": "2026-03-08T22:41:42+00:00"
+    },
+    {
+      "sha": "020b61ac3387e95f46e23b58ca65741d500c102d",
+      "message": "test: add differential coverage for basic/bearer/authheaders auth branch in admin_test_gateway\n\nCover the three new code paths introduced by the decode_auth fix:\n- dict auth_value (raw DbGateway JSON) → headers.update directly\n- str auth_value → decode_auth fallback\n- auth_type=None gateway → no auth headers added\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T00:15:54+00:00"
+    },
+    {
+      "sha": "62831e0037e7c3b256c3a564a25b18808c0fe122",
+      "message": "fix: restore enabled filter in gateway lookup and add regression tests\n\nAddress Codex review findings:\n- Restore DbGateway.enabled filter that was dropped when replacing\n  get_first_gateway_by_url() with a direct query, preventing disabled\n  gateways from being matched for credential injection.\n- Add test for header merge behavior: caller-supplied headers are\n  preserved and stored gateway auth takes precedence.\n- Add test verifying the enabled filter is present in the compiled query.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T00:36:26+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 243,
+  "deletions": 11,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:48.734784",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:48.736086",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3544,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3544.json"
+  }
+}

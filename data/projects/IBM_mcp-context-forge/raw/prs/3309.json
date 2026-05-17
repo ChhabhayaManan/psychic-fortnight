@@ -1,0 +1,109 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3309,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3309"
+  },
+  "metadata": {
+    "title": "[FIX][AUTH]: Cross-replica cache invalidation for auth caches",
+    "state": "closed",
+    "created_at": "2026-02-27T09:35:45+00:00",
+    "updated_at": "2026-03-08T19:51:15+00:00",
+    "closed_at": "2026-03-08T19:51:13+00:00",
+    "merged_at": "2026-03-08T19:51:13+00:00",
+    "author": "marekdano",
+    "labels": [
+      "bug",
+      "security",
+      "MUST",
+      "release-fix",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n---\r\n\r\n## 📌 Summary\r\n\r\nAuthCache published invalidation messages to `mcpgw:auth:invalidate`, but `CacheInvalidationSubscriber` only listened on `mcpgw:cache:invalidate`. In multi-replica deployments, when one replica invalidated auth data (e.g., after a role change or token revocation), other replicas never received the message and continued serving stale in-memory auth caches.\r\n\r\n## 💡 Fix Description\r\n\r\n1. Subscribe to both channels — Added `_channels` list containing both `mcpgw:cache:invalidate` and `mcpgw:auth:invalidate`. Updated `start()` to subscribe to all channels via await `self._pubsub.subscribe(*self._channels)` and `stop()` to unsubscribe from all.\r\n2. Handle auth invalidation messages — Added 7 new message handlers in `_process_invalidation()`:\r\n    - `user:{email}` — clears user cache, context cache, and team cache entries for the user\r\n    - `revoke:{jti}` — adds JTI to revoked set, clears revocation cache and matching context cache entries\r\n    - `team:{email}` — clears team cache and context cache for the user\r\n    - `role:{email}:{team_id}` — clears specific role cache entry\r\n    - `team_roles:{team_id}` — clears all role cache entries for a team\r\n    - `teams:{email}` — clears teams list cache entries for the user\r\n    - `membership:{email}` — clears team membership cache entries for the user\r\n\r\n  The startswith check ordering ensures team_roles: and teams: are matched before team:.\r\n\r\n###  Tests: `tests/unit/mcpgateway/cache/test_cache_invalidation_subscriber.py`\r\n\r\n  - Updated `test_subscriber_initialization` to assert `_channels` includes both channels\r\n  - Fixed `FakePubSub.subscribe/unsubscribe` signatures to accept `*_channels` (varargs)\r\n  - Added `create_mock_auth_cache()` helper\r\n  - Added `TestAuthCacheInvalidationSubscriber` class with 11 tests covering all auth invalidation message types, channel subscription verification, and an end-to-end regression test\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |     ✅   |\r\n| Coverage ≥ 80 %                       | `make coverage`      |   ✅     |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3870953065",
+      "author": "jonpspri",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-01T00:41:50+00:00",
+      "body": "## Review: Approve\n\nReviewed the full diff (6 commits after rebase onto main), ran all linters and tests.\n\n### What was checked\n\n| Check | Result |\n|---|---|\n| Black / isort | Clean |\n| flake8 | Clean |\n| pylint | 10.00/10 |\n| bandit | 0 issues |\n| Unit tests (49) | All pass |\n\n### Assessment\n\n**Core fix is correct.** `AuthCache` publishes to `mcpgw:auth:invalidate` but the subscriber only listened on `mcpgw:cache:invalidate` — the channel mismatch meant auth invalidations never propagated across replicas. Subscribing to both channels and adding the 7 auth message handlers resolves the gap.\n\n**Security:**\n- Channel-origin guard ensures auth-prefixed messages are only accepted from `mcpgw:auth:invalidate`, preventing spoofing via the cache channel.\n- Final commit closes a subtle bypass where `channel=\"\"` (empty/falsy) would short-circuit the guard — now rejects unless channel is exactly `mcpgw:auth:invalidate`.\n- `_MAX_REVOKED_JTIS` cap (100K) prevents unbounded memory growth from pubsub flooding.\n\n**Correctness:**\n- All 7 message types published by `auth_cache` (`user:`, `revoke:`, `team:`, `role:`, `team_roles:`, `teams:`, `membership:`) have matching handlers.\n- `_AUTH_PREFIXES` tuple orders `team_roles:` and `teams:` before `team:` to prevent prefix collision in `startswith()`.\n- `threading.Lock` usage in sync `_process_auth_invalidation` called from async context is safe — only fast dict ops, no await while held.\n\n**Test coverage:**\n- 11 new tests covering all 7 handler types, channel guard deny/accept paths, `_MAX_REVOKED_JTIS` cap, prefix collision regressions, empty identifiers, and identifiers with colons.\n- End-to-end cross-replica regression test included."
+    },
+    {
+      "id": "3911886955",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-08T18:49:43+00:00",
+      "body": "## Review: Approve\n\nRebased onto current main (clean, no conflicts), reviewed the full implementation, ran linting, tests, and verified on a live 3-replica deployment with Redis.\n\n### Verification\n\n| Check | Result |\n|---|---|\n| Black / isort / flake8 / bandit | Clean |\n| Unit tests (52, up from 49) | All pass |\n| Full cache module tests (440) | All pass |\n| Live deployment (3 replicas + Redis + nginx LB) | All endpoints healthy |\n| Redis pubsub `mcpgw:auth:invalidate` subscribers | 72 (matches `mcpgw:cache:invalidate`) |\n| All 7 auth invalidation message types via Redis | 72 subscribers received each |\n| Channel-origin guard (auth msgs on wrong channel) | Correctly rejected |\n| Admin UI (login, dashboard, tools, tokens) | Working |\n\n### Changes made during review (2 commits)\n\n**1. `test: add listener-path regression tests for channel forwarding`**\n\nAdded 3 tests that exercise the full `_listen_loop` → `_process_invalidation` path with channel data from fake pubsub messages, closing a coverage gap identified during review:\n\n- `test_listen_loop_forwards_channel_to_process_invalidation` — verifies channel kwarg is forwarded from pubsub message\n- `test_listen_loop_auth_message_evicts_cache_end_to_end` — full path from pubsub message through auth cache eviction\n- `test_listen_loop_auth_message_rejected_on_wrong_channel_end_to_end` — deny-path proving channel guard works through the listener\n\nAlso fixed `_MAX_REVOKED_JTIS` docstring to accurately describe the reconciliation path (Redis L2 fallback on L1 miss via `is_token_revoked()` / `get_auth_context()`, not the unused `sync_revoked_tokens()` method).\n\n**2. `refactor: clarify auth dispatch comment and test names`**\n\nThe comment \"Order matters: team_roles/teams must be checked before team\" was misleading — there is no actual `startswith()` prefix collision between `teams:`, `team_roles:`, and `team:` (the 5th character differs: `s`/`_` vs `:`). Reworded the comment and renamed two test methods from `prefix_collision` to `dispatches_to_correct_handler`.\n\n### Assessment\n\n- **Core fix is correct.** All 7 publish calls in `auth_cache.py` have matching handlers that replicate the exact L1 eviction logic.\n- **Security is sound.** Channel-origin guard rejects auth messages on wrong channel; empty/missing channel fails closed; `_MAX_REVOKED_JTIS` caps memory growth.\n- **Thread safety matches existing patterns.** Short lock scopes with no `await` under lock.\n- **Test coverage is comprehensive.** 52 tests including listener-path, channel guard deny/accept, cap enforcement, dispatch correctness, edge cases, and end-to-end regression.\n\n### Note for follow-up\n\n`invalidate_team()` in `auth_cache.py:508` does `_team_cache.pop(email, None)` with a bare email key, but production code writes `_team_cache` keys as `f\"{user_email}:{sorted_teams}\"`. This means the `pop` never matches a real entry. This is pre-existing behavior (not introduced by this PR) and the subscriber correctly mirrors it. Worth a separate fix."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c3ed03915fcb4ff050cfa47644420fa98d93d3cf",
+      "message": "fix: cross-replica cache invalidation for auth caches\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-27T09:27:25+00:00"
+    },
+    {
+      "sha": "bf6c408000c7ffa8baee89c45e2d0398906bc696",
+      "message": "refactor: extract auth invalidation into helper and fix formatting\n\n- Extract _process_auth_invalidation() from _process_invalidation()\n  to reduce method complexity (pylint too-many-statements/locals)\n- Add _evict_keys() static helper to deduplicate key-eviction loops\n- Remove dead _channel backward-compat attribute\n- Run Black on test file to fix pre-existing formatting violations\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-28T23:26:05+00:00"
+    },
+    {
+      "sha": "40f7ae27ecad62662571d56477653b82d7175a45",
+      "message": "fix: add missing docstring params in _evict_keys\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-28T23:36:24+00:00"
+    },
+    {
+      "sha": "b1b14d7581c41f33494ba36101cac15bfccd0b37",
+      "message": "fix: harden cross-replica revoke handler and improve test coverage\n\n- Cap _revoked_jtis at 100k entries to prevent unbounded memory growth\n  from compromised Redis pubsub channels (DoS mitigation)\n- Fix FakePubSub.subscribe signatures in two exception-path tests to\n  accept varargs, matching the production *self._channels call\n- Add prefix-collision regression tests proving teams:/team_roles:\n  messages don't fall through to the team: handler\n- Add edge-case tests for empty identifiers, colon-containing\n  identifiers, and unusual email formats\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-28T23:55:19+00:00"
+    },
+    {
+      "sha": "4ea086f42d9551c4c9de18ff03b4d83c96f7fd77",
+      "message": "fix: enforce channel-origin guard on auth invalidation messages\n\nAuth-prefixed invalidation messages (user:, revoke:, team:, etc.) are\nnow only accepted when they arrive on the mcpgw:auth:invalidate channel.\nMessages with auth prefixes on other channels are logged and ignored,\npreventing cross-channel confusion.\n\nAlso fixes the _MAX_REVOKED_JTIS docstring to reference the correct\nmethod name (_load_revoked_jtis in auth_cache).\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-01T00:19:12+00:00"
+    },
+    {
+      "sha": "bf7f6ef74a5e93c12838759d195abc7593f1532c",
+      "message": "fix: close channel-guard bypass for empty channel in auth invalidation\n\nThe previous guard `if channel and channel != \"mcpgw:auth:invalidate\"`\nshort-circuited to False when channel was empty, allowing auth\nmessages to be processed without channel verification. Changed to\n`if channel != \"mcpgw:auth:invalidate\"` so auth messages are only\naccepted from the correct channel regardless of how the method is\ncalled.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-01T00:41:15+00:00"
+    },
+    {
+      "sha": "6841e6c44133b651438eddcd4d2a214992366ef0",
+      "message": "test: add listener-path regression tests for channel forwarding\n\nAdd 3 tests that exercise the full _listen_loop -> _process_invalidation\npath with channel data from fake pubsub messages:\n\n- test_listen_loop_forwards_channel_to_process_invalidation: verifies\n  channel kwarg is forwarded from pubsub message to _process_invalidation\n- test_listen_loop_auth_message_evicts_cache_end_to_end: full path from\n  pubsub message through auth cache eviction\n- test_listen_loop_auth_message_rejected_on_wrong_channel_end_to_end:\n  deny-path proving channel guard works through the listener\n\nAlso fixes _MAX_REVOKED_JTIS docstring to accurately describe the\nreconciliation path (Redis L2 fallback on L1 miss, not the unused\nsync_revoked_tokens method).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T18:20:28+00:00"
+    },
+    {
+      "sha": "423a78f61da4db8d970f7bcee5a0df6ad51427ae",
+      "message": "refactor: clarify auth dispatch comment and test names\n\nThe if/elif chain comment said \"Order matters: team_roles/teams must be\nchecked before team\" but there is no actual startswith() prefix collision\nbetween these prefixes (teams: != team:, team_roles: != team:).  Reword\nthe comment to describe correct dispatch and rename the two tests from\n\"prefix_collision\" to \"dispatches_to_correct_handler\" so they describe\nwhat they actually verify.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T18:41:40+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 685,
+  "deletions": 40,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:49.340361",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:49.342037",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3309,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3309.json"
+  }
+}

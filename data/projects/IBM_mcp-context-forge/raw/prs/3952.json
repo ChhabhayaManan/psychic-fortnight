@@ -1,0 +1,110 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3952,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3952"
+  },
+  "metadata": {
+    "title": "fix: session pool resource exhaustion",
+    "state": "closed",
+    "created_at": "2026-03-31T15:15:56+00:00",
+    "updated_at": "2026-04-06T13:11:19+00:00",
+    "closed_at": "2026-04-06T13:11:17+00:00",
+    "merged_at": "2026-04-06T13:11:17+00:00",
+    "author": "marekdano",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3777\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes session pool resource exhaustion by implementing global session caps and JWT identity extraction to prevent bucket explosion from rotating tokens.\r\n\r\n**Problem:** The session pool could create unbounded connections due to exponential bucket growth:\r\n```\r\nmax_connections = num_users × num_servers × num_transports × num_token_rotations × MAX_PER_KEY\r\n```\r\n\r\nExample blast radius: 10 users × 3 servers × 2 transports × 32 token rotations × 200 sessions = **384,000 open connections**\r\n\r\n**Solution:** Multi-layered mitigation:\r\n1. **Global caps**: `MCP_SESSION_POOL_MAX_TOTAL_KEYS` and `MCP_SESSION_POOL_MAX_TOTAL_SESSIONS` to hard-limit resource usage\r\n2. **JWT identity extraction**: `MCP_SESSION_POOL_JWT_IDENTITY_EXTRACTION` extracts stable user ID (`sub`/`email`/`user_id`) to eliminate token rotation factor\r\n3. **Safer defaults**: Reduced `MAX_PER_KEY` from 200 to 10\r\n4. **Security hardening**: Token oversight endpoints now require un-narrowed admin access\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🔧 Changes\r\n\r\n### Core Session Pool (`mcpgateway/services/mcp_session_pool.py`)\r\n- ✅ Enforce `max_total_keys` limit in `_get_or_create_pool()` - raises `RuntimeError` when exceeded\r\n- ✅ Enforce `max_total_sessions` limit in `acquire()` - raises `asyncio.TimeoutError` when exceeded  \r\n- ✅ Emit warning at 80% capacity threshold\r\n- ✅ Convert pool key limit errors to user-friendly timeout errors\r\n- ✅ Updated stats to include `total_active_sessions`, `max_total_keys`, `max_total_sessions`\r\n\r\n### Configuration (`mcpgateway/config.py`)\r\n- ✅ `MCP_SESSION_POOL_MAX_TOTAL_KEYS`: Global cap on pool keys (default 0 = unlimited)\r\n- ✅ `MCP_SESSION_POOL_MAX_TOTAL_SESSIONS`: Global cap on active sessions (default 0 = unlimited, soft cap)\r\n- ✅ `MCP_SESSION_POOL_JWT_IDENTITY_EXTRACTION`: Extract stable user ID from JWT to prevent bucket explosion\r\n\r\n### JWT Identity Extraction (`mcpgateway/main.py`)\r\n- ✅ New `_create_jwt_identity_extractor()` function decodes JWT without signature verification\r\n- ✅ Extracts stable user ID from `sub`, `email`, or `user_id` claims\r\n- ✅ Prevents bucket explosion when using short-lived JWTs with rotating `jti`/`exp`/`iat`\r\n- ✅ Integrated into session pool initialization when enabled\r\n\r\n### Security Hardening (`mcpgateway/routers/tokens.py`)\r\n- ✅ Token oversight endpoints (`list_all_tokens`, `admin_revoke_token`) now require un-narrowed admin access\r\n- ✅ Blocks narrowed/public-only admin sessions (`token_teams != None`) from token management\r\n- ✅ Prevents API tokens with team-scoped admin privileges from enumerating/managing tokens outside their scope\r\n\r\n### RBAC Layer Separation\r\n- ✅ Removed `token_teams` parameter from RBAC permission checks (`mcpgateway/middleware/rbac.py`, `mcpgateway/services/permission_service.py`)\r\n- ✅ Clarified that token-level narrowing (Layer 1) is enforced separately via data filtering\r\n- ✅ High-risk endpoints enforce their own narrowing guards where required\r\n\r\n### Docker Compose (`docker-compose.yml`)\r\n- ✅ Reduced default `MCP_SESSION_POOL_MAX_PER_KEY` from 200 to 10 (safer default)\r\n- ✅ Added extensive documentation about blast radius calculation\r\n- ✅ Documented mitigation strategies with recommended starting values\r\n\r\n### Test Coverage (`tests/unit/mcpgateway/services/test_mcp_session_pool_coverage.py`)\r\n- ✅ `TestMaxTotalKeysLimit`: Tests RuntimeError enforcement and conversion to TimeoutError\r\n- ✅ `TestMaxTotalSessionsLimit`: Tests soft cap enforcement and session reuse after release\r\n- ✅ `TestJwtIdentityExtractorNone`: Tests fallback behavior when JWT extraction fails\r\n- ✅ Tests for 80% warning threshold emission\r\n- ✅ +225 lines of new test coverage\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅     |\r\n| Coverage ≥ 80%            | `make coverage` | ✅     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (docker-compose.yml comments)\r\n- [x] No secrets or credentials committed\r\n- [x] Signed commits (DCO)\r\n\r\n---\r\n\r\n## 📓 Mitigation Strategies\r\n\r\nOperators should configure based on expected load:\r\n\r\n**Strategy 1: JWT Identity Extraction (Recommended)**\r\n```bash\r\nMCP_SESSION_POOL_JWT_IDENTITY_EXTRACTION=true\r\nMCP_SESSION_POOL_MAX_PER_KEY=20\r\n```\r\nEliminates token rotation factor, allows higher per-key limits.\r\n\r\n**Strategy 2: Global Caps**\r\n```bash\r\nMCP_SESSION_POOL_MAX_TOTAL_KEYS=1000\r\nMCP_SESSION_POOL_MAX_TOTAL_SESSIONS=5000\r\nMCP_SESSION_POOL_MAX_PER_KEY=10\r\n```\r\nHard limits prevent unbounded growth.\r\n\r\n**Strategy 3: Conservative Defaults (Current)**\r\n```bash\r\nMCP_SESSION_POOL_MAX_PER_KEY=10\r\n# Global caps disabled (0 = unlimited)\r\n```\r\nSafe for small deployments, requires manual tuning for scale.\r\n\r\n---\r\n\r\n## 🔄 Backward Compatibility\r\n\r\n✅ **Fully backward compatible** - all new limits default to 0 (unlimited) to preserve existing behavior. Operators must explicitly configure limits based on their deployment scale.\r\n\r\n---\r\n\r\n## 📊 Impact\r\n\r\n- **Files changed**: 13 files (+650 lines, -55 lines)\r\n- **Test coverage**: +225 lines of comprehensive test coverage\r\n- **Breaking changes**: None\r\n- **Migration required**: No (opt-in configuration)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4038509384",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-31T16:11:12+00:00",
+      "body": "Thanks @marekdano for the PR. \nPlease implement following findings \n**Status:** ⚠️ Partial — 3 findings addressed in code, but a startup crash from missing `init_mcp_session_pool` parameters prevents deployment.\n \n| Finding | Status | Notes |\n|---|---|---|\n| **Finding 1 — Global cap** | ✅ Done | `max_total_keys` and `max_total_sessions` added to `MCPSessionPool.__init__` with enforcement in `_get_or_create_pool()` and `acquire()`. However, `init_mcp_session_pool()` does not accept or forward these params → they're silently ineffective (actually crashes at startup, see Bug #2 below). |\n| **Finding 2 — Safer defaults** | ✅ Done | `MAX_PER_KEY` reduced from `200` to `10` in `docker-compose.yml` with extensive blast-radius documentation. |\n| **Finding 3 — JWT identity extractor** | ✅ Done | `_create_jwt_identity_extractor()` implemented and wired into `lifespan`. Blocked by the same startup crash. |\n \n---\n \n## 🔴 Critical Bugs\n \n### Bug 1 — `NameError` in `check_permission()` breaks all RBAC checks\n \n**File:** `permission_service.py:127, 137` | **Severity:** Critical | **CWE:** [CWE-755](https://cwe.mitre.org/data/definitions/755.html)\n \n`token_teams` was removed from the `check_permission()` signature but is still referenced in the function body. This causes a `NameError` on every call, making every RBAC-protected endpoint return `403`. The application fails closed, but is entirely non-functional.\n \n---\n \n### Bug 2 — `TypeError` at startup crashes the application\n \n**File:** `mcp_session_pool.py:2115–2132` | **Severity:** Critical | **CWE:** [CWE-453](https://cwe.mitre.org/data/definitions/453.html)\n \n`init_mcp_session_pool()` is missing the `max_total_keys` and `max_total_sessions` parameters. When `main.py` passes them at startup, a `TypeError` is raised and the application fails to boot entirely.\n \n---\n \n## ⚠️ Medium / Low Findings\n \n### Finding 3 — JWT decoded without signature verification\n \n**File:** `main.py:1539` | **Severity:** Medium | **CWE:** [CWE-345](https://cwe.mitre.org/data/definitions/345.html)\n \nJWT is decoded without signature verification. This is acceptable for session pool bucketing (not a security boundary), but crafted JWTs could influence pool key selection. Add a defensive comment or restrict to JWT-authenticated requests only.\n \n---\n \n### Finding 4 — Dead code: duplicate narrowed-admin guards\n \n**File:** `tokens.py:557–559, 654–657` | **Severity:** Low | **CWE:** [CWE-561](https://cwe.mitre.org/data/definitions/561.html)\n \nDuplicate narrowed-admin guards — the second check is dead code. The first guard at `L555`/`L651` already catches `token_teams is not None`. Test assertions will match the wrong error message.\n \n---\n \n### Finding 5 — `RuntimeError` masked as `asyncio.TimeoutError`\n \n**File:** `mcp_session_pool.py:840` | **Severity:** Low | **CWE:** [CWE-390](https://cwe.mitre.org/data/definitions/390.html)\n \n`RuntimeError` is converted to `asyncio.TimeoutError`, masking capacity exhaustion as a timeout in monitoring.\n \n---\n \n## Invariant Violations\n \n- **Two-layer model broken:** Layer 2 (`check_permission`) is entirely non-functional due to the `NameError` (Bug 1). Even after a fix, removing `token_teams` from Layer 2 means public-only admin tokens get an admin bypass — this contradicts the security comment at `permission_service.py:124–126`. Either fully remove the dead `token_teams` logic from the body, or re-add the parameter.\n \n- **Deny-path gap:** No integration test calls `check_permission()` without mocking, so the `NameError` is hidden. The existing test mocks the service, concealing this bug entirely.\n \n---\n \n## Redundant Code to Remove\n \n| # | File | Line(s) | Type | Description | Suggestion |\n|---|---|---|---|---|---|\n| 1 | `tokens.py` | 557–560 | Dead code | Second narrowed-admin guard after first guard already catches same condition | Remove lines 557–560 |\n| 2 | `tokens.py` | 654–657 | Dead code | Same duplicate guard in `admin_revoke_token` | Remove lines 654–657 |\n| 3 | `permission_service.py` | 124–137 | Unreachable / broken | `token_teams` logic references undefined variable; if fixed by removing, the whole block is dead code since no caller passes `token_teams` anymore | Either remove the block or re-add parameter forwarding |\n| 4 | `test_main_extended.py` | 228–229 | Broken structure | `TestConditionalPaths` emptied to just `pass`; its methods are now accidentally inside `TestJwtIdentityExtractor` | Restore `TestConditionalPaths` body properly |"
+    },
+    {
+      "id": "4050441233",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-02T12:49:51+00:00",
+      "body": "Thanks @marekdano for the contribution! Please implement the following two changes:\r\n\r\n---\r\n\r\n### 1. Enable JWT identity extraction (`MCP_SESSION_POOL_JWT_IDENTITY_EXTRACTION=true`) Default. This is the most impactful change.\r\n\r\n---\r\n\r\n### 2. Incorrect use of built-in `callable` instead of `Callable` from `typing`\r\n\r\n#### Location\r\n`main.py`, line `1519`\r\n\r\n#### Current Code\r\n```python\r\ndef _create_jwt_identity_extractor() -> callable:\r\n```\r\n\r\n#### Problem\r\nUses the lowercase built-in `callable` instead of the proper `Callable` type from the `typing` module.\r\n\r\n#### Correct Fix\r\n\r\n1. Add `Callable` to the imports from `typing` on line ~42:\r\n```python\r\n    from typing import Callable\r\n```\r\n\r\n2. Update line `1519` to:\r\n```python\r\n    def _create_jwt_identity_extractor() -> Callable[[dict], Optional[str]]:\r\n```"
+    },
+    {
+      "id": "4061998330",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-06T12:37:07+00:00",
+      "body": "Thanks @marekdano for a solid contribution — the blast-radius analysis in the PR description is excellent and the multi-layered mitigation approach is well-thought-out. I've rebased this onto main and made a few fixes on top (commit `11488dc65`). Here's what I changed and why:\n\n## Changes made during review\n\n### 1. Restored `token_teams` forwarding in `PermissionChecker.has_permission()` (`rbac.py`)\n\nThe PR removed `token_teams` from `has_permission()` but left it in `has_any_permission()` and the `@require_permission` decorator. This created an inconsistency: a public-only admin token (`token_teams=[]`) going through the RPC path (`main.py:1013` via `PermissionChecker.has_permission`) would bypass the admin bypass suppression in `check_permission()`, since `token_teams` would default to `None` (unrestricted).\n\nThe `@require_permission` decorator still passes `token_teams` at lines 749/764, so the two-layer model was already being enforced for HTTP endpoints — just not for the `PermissionChecker` manual path. Restored the parameter to keep all paths consistent.\n\nAlso restored the corresponding tests in `test_rbac.py` and `test_permission_service.py` that verify public-only tokens suppress admin bypass.\n\n### 2. Guarded `release()` against `RuntimeError` from `_get_or_create_pool()` (`mcp_session_pool.py`)\n\n`release()` calls `_get_or_create_pool()` in two places (lines 1034, 1065). If `max_total_keys` is configured and the pool key was evicted while a session was checked out, `_get_or_create_pool` raises `RuntimeError` — which would leak the session and semaphore slot. Added `try/except RuntimeError` to gracefully discard the session and close it instead. Added test coverage for this path.\n\n### 3. Fixed Bearer prefix stripping (`main.py`)\n\n`str.replace(\"Bearer \", \"\")` replaces *all* occurrences, not just the prefix. Switched to `startswith()` + slice, which is the standard approach and handles edge cases correctly.\n\n### 4. Fixed mixed types in metrics (`mcp_session_pool.py`)\n\n`max_total_keys` and `max_total_sessions` in `get_metrics()` returned `int` or `\"unlimited\"` string depending on the value. Consumers expecting a consistent type (JSON schema validation, Prometheus exporters) would break. Changed to always return `int` (0 = unlimited), consistent with the config semantics.\n\n### 5. Removed orphaned test methods from `TestJwtIdentityExtractor` (`test_main_extended.py`)\n\nFive methods from `TestConditionalPaths` (which exists on `main`) were accidentally duplicated inside `TestJwtIdentityExtractor` — an orphaned docstring `\"\"\"Test conditional code paths...\"\"\"` at line 451 without a `class` statement caused the methods to become part of the wrong class. The `test_client`/`auth_headers` fixtures wouldn't resolve correctly under `TestJwtIdentityExtractor`. Removed the duplicates; the originals in `TestConditionalPaths` are untouched.\n\n### 6. Added missing assertion in `test_jwt_identity_extractor_exception_falls_back`\n\nThe test computed `identity_hash` but had no `assert` — it passed vacuously. Added `assert identity_hash != \"anonymous\"` and `await pool.close_all()` for cleanup.\n\n## Everything else looks good\n\n- Token router security split (separate `is_admin` + `token_teams` checks) — correct and improves error messages\n- JWT decode without verification — acceptable for pool bucketing with good security comment\n- Thread safety / lock analysis — correct asyncio.Lock usage, no deadlock risk\n- `identity_extractor` integration — proper fallback chain in `_compute_identity_hash`\n- Global caps with soft-cap TOCTOU documented accurately\n- `init_mcp_session_pool` keyword-only `*` — good API hygiene\n- Test coverage is comprehensive across all new code paths\n\nAll 1457 affected tests passing."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a059c43f8779f7d5e65eb5055f0828f9d73c5c54",
+      "message": "fix: session pool resource exhaustion\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-31T14:59:57+00:00"
+    },
+    {
+      "sha": "ba6292b8dce36b194ea685553ed79313684a4c27",
+      "message": "fix: lint issue\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-31T15:15:43+00:00"
+    },
+    {
+      "sha": "e582d08cdd10e87c2cf70ce3e0948fd474ab510c",
+      "message": "fix: reported bugs by reviewer\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-31T17:18:56+00:00"
+    },
+    {
+      "sha": "05bd749a2da78eca73a7c9178ed23c578088b5ef",
+      "message": "fix: lint and test coverage issues\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-31T17:51:37+00:00"
+    },
+    {
+      "sha": "47efa5d0bec9e28247dae2916e0435043e4ae401",
+      "message": "fix: lint issue\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-31T18:28:24+00:00"
+    },
+    {
+      "sha": "cb4886b989f2c8e208fe51524ff892d8ce715fd1",
+      "message": "fix: enable JWT identity extraction by default, replace callable by Callable from typing\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-02T13:45:08+00:00"
+    },
+    {
+      "sha": "3c0864eeca559a453df18bbf158c4115d7603b3e",
+      "message": "fix: address review findings for session pool resource exhaustion\n\n- Restore token_teams forwarding in PermissionChecker.has_permission()\n  to prevent privilege escalation for public-only admin tokens via RPC\n  path (consistent with has_any_permission and @require_permission)\n- Guard release() against RuntimeError from _get_or_create_pool() when\n  max_total_keys limit is hit for a previously-evicted pool key\n- Fix Bearer prefix stripping to use startswith() instead of replace()\n- Use consistent int type for max_total_keys/max_total_sessions metrics\n- Remove orphaned TestConditionalPaths methods from TestJwtIdentityExtractor\n- Add missing assertion in test_jwt_identity_extractor_exception_falls_back\n- Add test for release() graceful handling under max_total_keys limit\n- Restore test coverage for public-only token admin bypass suppression\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-06T10:47:15+00:00"
+    },
+    {
+      "sha": "57914fa0fb54ce9fc79bd8fd32aab7078027ae84",
+      "message": "chore: update .secrets.baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-06T12:54:12+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 19991,
+  "deletions": 2950,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:57.053801",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:57.054749",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3952,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3952.json"
+  }
+}

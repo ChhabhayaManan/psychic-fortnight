@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4242,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4242"
+  },
+  "metadata": {
+    "title": "fix(ci): use check-runs API and peel annotated tags in docker-release…",
+    "state": "closed",
+    "created_at": "2026-04-16T09:05:45+00:00",
+    "updated_at": "2026-04-16T13:42:28+00:00",
+    "closed_at": "2026-04-16T13:42:28+00:00",
+    "merged_at": "2026-04-16T13:42:28+00:00",
+    "author": "omorros",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "  ## 🔗 Related Issue\r\n  Closes #4200\r\n\r\n  ---\r\n\r\n  ## 📝 Summary\r\n  `docker-release.yml` has failed on every release tag (v1.0.0-RC1/RC2/RC-3) at the `Verify commit checks passed` step. Two underlying bugs:\r\n\r\n  1. The step queries the legacy `/commits/{sha}/status` endpoint, which only aggregates the old commit-statuses API (Travis/Jenkins webhooks). This repo\r\n  publishes GitHub Actions check-runs instead, so the endpoint returns `{\"state\":\"pending\",\"statuses\":[]}` and the step aborts on every release.\r\n  2. `Step 1` resolved `refs/tags/$TAG` via `git ls-remote --refs`, which for annotated tags returns the tag-object SHA (e.g. `f606247c…`), not the commit\r\n  SHA (`a02a04bce…`). Downstream steps would then try to re-tag an image that doesn't exist.\r\n\r\n  This PR:\r\n  - Peels annotated tags with `refs/tags/$TAG^{}` (with lightweight-tag and `target_commitish` fallbacks).\r\n  - Replaces the legacy status endpoint with `/commits/{sha}/check-runs?per_page=100`.\r\n  - Only blocks on *completed* check-runs whose conclusion is not `success`, `skipped`, or `neutral`. In-progress runs are ignored so this workflow's own\r\n  `tag-and-push` check-run does not self-reference.\r\n  - Guards against missing `.check_runs` in the response and against commits with zero CI evidence.\r\n  - Narrows the job permission from `statuses: read` to `checks: read` (required by the new API).\r\n\r\n  Verified live against the real upstream API: annotated tag `v1.0.0-RC-3` now peels to commit `a02a04bce…`, the legacy status endpoint reproduces\r\n  `state=pending, 0 statuses`, and the check-runs endpoint returns the expected 51 runs for that commit.\r\n\r\n  ---\r\n\r\n  ## 🏷️  Type of Change\r\n  - [x] Bug fix\r\n  - [ ] Feature / Enhancement\r\n  - [ ] Documentation\r\n  - [ ] Refactor\r\n  - [ ] Chore (deps, CI, tooling)\r\n  - [ ] Other (describe below)\r\n\r\n  ---\r\n\r\n  ## 🧪 Verification\r\n\r\n  | Check                     | Command         | Status |\r\n  |---------------------------|-----------------|--------|\r\n  | Lint suite                | `make lint`     | ✅ yamllint + actionlint (via `rhysd/actionlint` Docker image) + zizmor (via `ghcr.io/zizmorcore/zizmor`)\r\n   all pass on the modified workflow; zizmor finding count matches `origin/main` baseline (0 new findings). `make` is not available in my local env, so\r\n  tools were invoked directly with the same configs the Makefile uses. |\r\n  | Unit tests                | `make test`     | ➖ N/A — workflow-only change, no Python/Rust code touched. |\r\n  | Coverage ≥ 80%            | `make coverage` | ➖ N/A — workflow-only change. |\r\n\r\n  Additional end-to-end verification of the modified bash under `set -euo pipefail` with real `jq` against the live GitHub API:\r\n\r\n  - Annotated tag `v1.0.0-RC-3` → Step 1 peels `f606247c…` to commit `a02a04bce…`; Step 2 correctly blocks (commit has genuine failed check-runs).\r\n  - Lightweight tag `v1.0.0-RC1` → Step 1 falls back to `bc42bbb2…`; Step 2 correctly blocks.\r\n  - `origin/main` HEAD (all green) → Step 2 passes (36/36 completed check-runs).\r\n  - Non-existent SHA `0000…0000` → Step 2 aborts cleanly with the API's \"No commit found for SHA\" message (no crash, no false green).\r\n\r\n  ---\r\n\r\n  ## ✅ Checklist\r\n  - [x] Code formatted (`make black isort pre-commit`)\r\n  - [ ] Tests added/updated for changes\r\n  - [x] Documentation updated (if applicable)\r\n  - [x] No secrets or credentials committed\r\n\r\n  ---\r\n\r\n  ## 📓 Notes (optional)\r\n  - Workflow files have no unit tests in this repo, so the \"tests added/updated\" box is intentionally unchecked; the change is validated by yamllint,\r\n  actionlint, zizmor, and an end-to-end bash simulation against the live GitHub API (described above).\r\n  - Historical RC1/RC2/RC-3 runs remain red per the issue's acceptance criteria — this is a forward fix.\r\n  - The 2 pre-existing HIGH zizmor template-injection findings on lines `${{ github.event.release.tag_name }}` and `${{\r\n  github.event.release.target_commitish }}` are untouched by this PR (they exist identically in `origin/main`) and are out of scope for #4200; worth\r\n  tracking as a separate hardening issue if desired.\r\n\r\n  A few honesty flags on the boxes I checked:\r\n  - \"Code formatted\": checked because yamllint is clean; make black isort pre-commit targets apply to Python and weren't run (N/A for a YAML-only change).\r\n  - \"Documentation updated\": checked because the inline workflow comments were updated to reflect the new behavior. If the repo uses \"documentation\" to\r\n  mean only docs/, uncheck it.\r\n  - \"Tests added/updated\": intentionally unchecked — noted in the notes section.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "f52f0916f60cd34cc7c8a9c7142600fc8d6e501f",
+      "message": "fix(ci): use check-runs API and peel annotated tags in docker-release (#4200)\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>",
+      "author": "Oriol Morros Vilaseca",
+      "date": "2026-04-16T09:02:01+00:00"
+    },
+    {
+      "sha": "7f7fd42eab505ced0b784988143b198c0bf7b30e",
+      "message": "fix(ci): harden docker-release against injection, stale runs, and silent failures\n\n- Move github.event inputs and secrets to env: bindings in all steps\n  to prevent shell injection (Steps 1, 2, 5, 6)\n- Validate resolved SHA is a 40-char hex hash, not a branch name\n- Use GITHUB_RUN_ID in details_url for self-exclusion instead of\n  GITHUB_JOB name matching (stable across job renames)\n- Deduplicate check-runs by name, keeping only the latest attempt\n  so reruns of failed jobs are evaluated by their newest result\n- Block on pending/queued check-runs so releases cannot proceed\n  before all CI finishes\n- Capture HTTP status from check-runs API; handle curl network errors\n- Add pagination guard (total_count vs returned array length)\n- Validate jq integer outputs before bash arithmetic\n- Validate GH_TOKEN is non-empty before API calls\n- Fix workflow_dispatch trigger (was dead code due to if: condition)\n- Update file header to reflect workflow_dispatch and active verification\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-16T13:24:10+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 139,
+  "deletions": 29,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:14.882025",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:14.883220",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4242,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4242.json"
+  }
+}

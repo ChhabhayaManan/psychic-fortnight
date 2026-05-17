@@ -1,0 +1,123 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3764,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3764"
+  },
+  "metadata": {
+    "title": "fix: tighten secrets detection coverage and add focused benchmarking",
+    "state": "closed",
+    "created_at": "2026-03-20T13:18:53+00:00",
+    "updated_at": "2026-03-28T20:43:32+00:00",
+    "closed_at": "2026-03-28T20:43:30+00:00",
+    "merged_at": "2026-03-28T20:43:30+00:00",
+    "author": "lucarlig",
+    "labels": [
+      "enhancement",
+      "security",
+      "rust",
+      "plugins",
+      "wxo",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "dima-zakharov"
+    ]
+  },
+  "description": "## Summary\n\nThis updates secret handling so secret-like values are owned by the dedicated secrets detection plugin instead of the PII filter, strengthens provider-specific secret coverage, improves Rust plugin logging, adds a focused Rust-vs-Python benchmarking workflow for the secrets detector, and documents the broader intrinsic-shape heuristics that can still catch longer secret-like values.\n\n## What changed\n\n- enabled `SecretsDetection` in `plugins/config.yaml`\n- removed AWS and API-key secret handling from the PII filter in both Python and Rust so those patterns are only handled by secrets detection\n- improved secrets detection coverage with stronger provider-specific patterns, including GitHub tokens and Stripe secret keys\n- kept broader generic API-key heuristics opt-in and documented their false-positive tradeoffs, detection limits, and the fact that longer intrinsic-shape heuristics such as `base64_24` can still catch assignment-style values when the value itself looks secret-like\n- preserved safe defaults when operators provide a partial `enabled:` map so omitted heuristics do not silently turn back on\n- added Rust-side logging for the secrets detection plugin via `pyo3_log`\n- improved Python fallback logging so Rust scan failures preserve full exception context\n- added a focused Locust scenario for secret detection at `tests/loadtest/locustfile_secret_detection.py`\n- added `make load-test-secret-detection-compare` and `tests/loadtest/run_secret_detection_compare.sh` to compare the Rust-backed and forced Python fallback paths on the same focused workload\n- added targeted `gitleaks:allow` annotations to intentional secret-shaped test fixtures in the Python and Rust secrets detection tests and the focused secret-detection Locust file so secret scanning stays clean without changing detector behavior\n- updated secrets detection and PII filter docs to clarify ownership, warnings, capabilities, and limits\n\n## Validation\n\n- `uv run pytest tests/unit/plugins/test_secrets_detection.py`\n- `cargo test` in `plugins_rust/secrets_detection`\n- `cargo test` in `plugins_rust/pii_filter`\n- `make rust-check`\n- focused `gitleaks detect --no-git` scans for `tests/unit/plugins/test_secrets_detection.py`, `plugins_rust/secrets_detection/src`, and `tests/loadtest/locustfile_secret_detection.py`\n- `make test`\n- live `/rpc` verification against the compose UI stack with the Rust plugin enabled for blocking and redaction scenarios\n\n## End-to-End Benchmark\n\nFocused secret-detection benchmark using the new Locust scenario against the full compose stack:\n\n- aggregate throughput: Rust `252.32 RPS` vs Python `236.70 RPS` (`+6.2%`)\n- aggregate average latency: Rust `333.33 ms` vs Python `358.22 ms` (`-7.5%`)\n- aggregate p95 latency: Rust `520 ms` vs Python `580 ms` (`-11.5%`)\n- aggregate p99 latency: Rust `590 ms` vs Python `760 ms` (`-28.8%`)\n\nPer-request-type improvements from the same focused run:\n\n- clean prompt requests: Rust `125.44 RPS` vs Python `118.04 RPS`\n- secret-blocked prompt requests: Rust `126.88 RPS` vs Python `118.65 RPS`\n\nCloses #3741\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3997800652",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-24T09:57:15+00:00",
+      "body": "Looks good"
+    },
+    {
+      "id": "4012815208",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-26T10:08:18+00:00",
+      "body": "all blocking issues resolved. Broad heuristics like generic_api_key_assignment are properly disabled by default with clear warnings when enabled.\nRecommendation\nReady to merge"
+    },
+    {
+      "id": "4025946082",
+      "author": "jonpspri",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-28T19:36:28+00:00",
+      "body": "## Review Summary\n\nClean separation of concerns — secret-style credential detection (AWS keys, API keys) is properly moved from the PII filter into the dedicated `secrets_detection` plugin. New provider-specific patterns (GitHub tokens, Stripe secret keys, generic API key assignment) are well-tested with both positive and negative cases across Python and Rust.\n\n## Key Positives\n\n- **Secure defaults**: `is_enabled()` now defaults to `false` (was `true`), and all broad heuristic patterns (`jwt_like`, `hex_secret_32`, `base64_24`, `generic_api_key_assignment`) default to disabled in code — matching the documented opt-in behavior. Production `config.yaml` explicitly enables the ones needed.\n- **Config merging**: The `_merge_enabled_patterns` field validator prevents partial YAML configs from silently enabling broad heuristics.\n- **Python/Rust parity**: All 11 patterns and their defaults are in sync across both implementations.\n- **Test coverage**: 221 Python tests and 59 Rust secrets_detection tests pass, covering new patterns, config edge cases, Rust log bridge, fallback exception logging, and broad-pattern warnings.\n- **Rust logging**: `pyo3-log` bridge gives operators visibility into Rust-side scan behavior without separate log infrastructure.\n\n## Minor Notes (non-blocking)\n\n- The e2e test changes (`test_mcp_session_isolation.py`, `test_mcp_access_matrix.py`, `mcp_test_helpers.py`, `fuzz/conftest.py`) are tangential to secrets detection — consider splitting in future PRs for cleaner history.\n- Linters (`ruff`, `bandit`, `cargo test`, `bash -n`) all clean on changed files."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "26699faeaffbed8ccf494f1577d4eb17e7b2ca26",
+      "message": "fix: tighten secrets detection coverage\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-20T11:26:22+00:00"
+    },
+    {
+      "sha": "a6fd38ff4858ea2a0e7b299f41f8bf9e5061dff5",
+      "message": "fix: avoid codeql parser edge case in pre-commit lite config\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-20T13:48:07+00:00"
+    },
+    {
+      "sha": "48066e750f147c47b09ac431a757a5d6fdd8d99f",
+      "message": "fix: preserve safe defaults in secrets detection config\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-23T11:31:28+00:00"
+    },
+    {
+      "sha": "69e4fa7f81f19aac7817681836bb4ca4898b0f08",
+      "message": "docs: clarify broader secrets heuristic coverage\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-23T12:30:29+00:00"
+    },
+    {
+      "sha": "a909971d6e53c921398f7d07d95e5282ab037aec",
+      "message": "chore: restore pre-commit lite comments after rebase\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-24T09:20:35+00:00"
+    },
+    {
+      "sha": "3c5397fc50cb257037a63ed030dc76bdc70676e4",
+      "message": "fix: restore detect-secrets flow and align secret coverage\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-27T14:51:15+00:00"
+    },
+    {
+      "sha": "44d5323ae58724d127873659200da6510f5f168b",
+      "message": "fix: stabilize secrets detection pre-commit coverage\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-27T15:21:31+00:00"
+    },
+    {
+      "sha": "08a8dceb1e043a70b55b843870d6873d354398e2",
+      "message": "fix: unify is_enabled default and align config with code changes\n\nThe detection and redaction paths in the Python secrets plugin used\ndifferent defaults for unknown patterns (False vs True), which could\ncause redaction of patterns that were never detected.  Extract an\nis_enabled() method on both the Python and Rust config classes so the\nsafe default (disabled) is defined in exactly one place.\n\nAlso commits config.yaml changes that align with the code:\n- remove stale detect_aws_keys / detect_api_keys from PII filter config\n- set SecretsDetection mode to disabled (opt-in, not enforced by default)\n- default unknown patterns to disabled in Rust scanner\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-28T17:34:40+00:00"
+    },
+    {
+      "sha": "8ad9c32a8cecf2575159c857d9e99b6425c9b783",
+      "message": "docs: add make rust-check to pre-commit quality checklists\n\nCLAUDE.md and DEVELOPING.md only listed Python linters in their\n\"before committing\" sections. Add make rust-check so developers\nand AI agents run clippy -D warnings before pushing Rust changes.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-28T19:56:18+00:00"
+    }
+  ],
+  "files_changed": 31,
+  "additions": 1243,
+  "deletions": 487,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:04.400479",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:04.402548",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3764,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3764.json"
+  }
+}

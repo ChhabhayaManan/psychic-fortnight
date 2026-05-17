@@ -1,0 +1,87 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3574,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3574"
+  },
+  "metadata": {
+    "title": "fix(visibility): prevent auto-refresh from overriding tool/prompt/resource visibility",
+    "state": "closed",
+    "created_at": "2026-03-10T05:50:43+00:00",
+    "updated_at": "2026-03-11T08:28:08+00:00",
+    "closed_at": "2026-03-11T08:28:06+00:00",
+    "merged_at": "2026-03-11T08:28:06+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "bug"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3530\r\n\r\n## 📌 Summary\r\nFixed a bug where the `AUTO_REFRESH_SERVERS=true` configuration overrides the granular visibility settings of individual tools, resources, and prompts. Previously, during a server auto-refresh, any explicitly configured \"Private\" or \"Team\" items would automatically be changed to match the parent Gateway's visibility (e.g., \"Public\"). This fix ensures that background sync operations preserve existing visibility configurations while still allowing manual UI/API updates to propagate visibility changes correctly.\r\n\r\n## 🔁 Reproduction Steps\r\n1. Create and configure an MCP Gateway with \"Public\" visibility.\r\n2. Allow the Gateway to perform its initial sync so that its tools default to \"Public\".\r\n3. Manually update one of the synced tools to have \"Private\" visibility.\r\n4. Trigger a background auto-refresh for the Gateway (e.g., via `AUTO_REFRESH_SERVERS=true` or a health check).\r\n5. **Observed Bug:** The tool's visibility is changed back to \"Public\".\r\n6. **Expected Behavior:** The tool remains \"Private\".\r\n\r\n## 🐞 Root Cause\r\nThe `_update_or_create_tools`, `_update_or_create_resources`, and `_update_or_create_prompts` helper methods in `mcpgateway/services/gateway_service.py` contained logic that unconditionally applied `existing_item.visibility = gateway.visibility` during the synchronization process. The methods did not differentiate between an automatic background refresh and a manual update triggered by a user.\r\n\r\n## 💡 Fix Description\r\nThe `_update_or_create_tools`, `_update_or_create_resources`, and `_update_or_create_prompts` helper methods in `mcpgateway/services/gateway_service.py` contained logic that unconditionally applied `existing_item.visibility = gateway.visibility` during the synchronization process. The methods did not differentiate between an automatic background refresh and a manual update triggered by a user.\r\n## 💡 Fix Description\r\nUpdated the synchronization logic across tools, resources, and prompts to conditionally evaluate visibility changes based on the operation's context. \r\n- Introduced a `should_update_visibility = created_via == \"update\"` condition.\r\n- The item's `visibility` attribute is now explicitly excluded from the `fields_to_update` conditions and field assignment blocks unless the sync is triggered by a manual update (`\"update\"`). \r\n- Added comprehensive unit tests `test_update_visibility_logic` and updated removal scenarios) in `test_gateway_service_extended.py` to assert that visibility correctly inherits during manual updates but is preserved during `auto_refresh`, `health_check`, and `rediscovery` contexts.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |   ✅     |\r\n| Unit tests                            | `make test`          |     ✅   |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3927735814",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-11T08:21:07+00:00",
+      "body": "Approved. The core fix is correct and I've added three commits addressing a pre-existing bug (_create_db_tool hardcoding visibility), a correctness issue (unrelated gateway edits overwriting per-item visibility), and formatting. All verified against live deployment and 4958 unit tests pass."
+    },
+    {
+      "id": "3927736221",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-11T08:21:12+00:00",
+      "body": "Approved. The core fix is correct and I've added three commits addressing a pre-existing bug (_create_db_tool hardcoding visibility), a correctness issue (unrelated gateway edits overwriting per-item visibility), and formatting. All verified against live deployment and 4958 unit tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ffa09ca5a95fb6fe26484e843b20a65e683e9eb8",
+      "message": "restrict visibility change with auto refresh\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-10T05:38:48+00:00"
+    },
+    {
+      "sha": "54497aea0b0310227b6ee96d64e127315eabaa17",
+      "message": "linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-10T05:43:49+00:00"
+    },
+    {
+      "sha": "702b7cea8fc27cf752b3fc3d3908453828325ee9",
+      "message": "fix: formatting cleanup in test_gateway_service_extended.py\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T07:34:15+00:00"
+    },
+    {
+      "sha": "d35759856ac16c3120339d791db38a95d301d389",
+      "message": "fix(visibility): new tools inherit gateway visibility instead of hardcoded 'public'\n\n_create_db_tool() hardcoded visibility=\"public\" for all newly discovered\ntools, while resources and prompts correctly used gateway.visibility.\nThis caused new tools on team-scoped or private gateways to be created\nwith public visibility, breaking team isolation.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T07:41:23+00:00"
+    },
+    {
+      "sha": "20dee56ee08903876d582db864b2fe434efd3521",
+      "message": "fix(visibility): use explicit update_visibility flag instead of created_via check\n\nThe previous check `should_update_visibility = created_via == \"update\"` was\ntoo broad: any gateway edit (e.g. description change) would trigger\nvisibility propagation to all linked tools/resources/prompts, overwriting\nper-item customizations.\n\nReplace with an explicit `update_visibility: bool` parameter on the three\nsync helpers, set to True only when the user actually changed the gateway's\nvisibility in the request (`gateway_update.visibility is not None`).  This\naligns the helper-level gate with the direct propagation logic at lines\n1902-1912 which already checks the same condition.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T08:14:43+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 171,
+  "deletions": 26,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:58.771906",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:58.772788",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3574,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3574.json"
+  }
+}

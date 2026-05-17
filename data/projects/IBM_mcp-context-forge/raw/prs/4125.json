@@ -1,0 +1,238 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4125,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4125"
+  },
+  "metadata": {
+    "title": " feat: add HCS-14 UAID support for A2A agents",
+    "state": "closed",
+    "created_at": "2026-04-10T12:01:11+00:00",
+    "updated_at": "2026-04-18T18:31:43+00:00",
+    "closed_at": "2026-04-18T18:31:40+00:00",
+    "merged_at": "2026-04-18T18:31:40+00:00",
+    "author": "rakdutta",
+    "labels": [
+      "a2a"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": " Implements HCS-14 Universal Agent ID (UAID) support for A2A agents with complete backend + frontend integration, enabling zero-config cross-gateway routing without manual peer configuration.                                                    \r\n                                                                                                                                                                                                                                                    \r\n  Architecture: Uses UUID as primary key with UAID in a separate nullable field. This provides optimal database performance (fixed 36-char indexes), clean URL routing (/admin/a2a/{uuid}), and backward compatibility with existing UUID-only      \r\n  agents. UAID is stored separately for cross-gateway routing metadata when needed, avoiding the complexity and performance overhead of String(512) primary keys with special characters.                                                           \r\n                                                                                                                                                                                                                                                    \r\n  What Changed               \r\n\r\n  Backend (Core Implementation)                                                                                                                                                                                                                     \r\n   \r\n  - Database: Added uaid, uaid_registry, uaid_proto, uaid_native_id columns to a2a_agents table                                                                                                                                                     \r\n  - UAID Utilities (mcpgateway/utils/uaid.py): Parsing, validation, SHA-384+Base58 generation\r\n  - Service Layer (mcpgateway/services/a2a_service.py):                                                                                                                                                                                             \r\n    - invoke_agent() supports both UUID and UAID formats with automatic routing                                                                                                                                                                     \r\n    - Cross-gateway routing with endpoint allowlist validation                                                                                                                                                                                      \r\n    - Authentication forwarding and audit logging                                                                                                                                                                                                   \r\n  - Schemas: Added UAID generation fields to A2AAgentCreate, metadata to A2AAgentRead                                                                                                                                                               \r\n  - Migration: Idempotent Alembic migration supporting PostgreSQL and SQLite                                                                                                                                                                        \r\n  - Configuration: UAID_ALLOWED_DOMAINS security setting, base58>=2.1.1 dependency                                                                                                                                                                  \r\n                                                                                                                                                                                                                                                    \r\n  Admin UI (Complete Integration)                                                                                                                                                                                                                   \r\n                                                                                                                                                                                                                                                    \r\n  - Create Form: UAID generation checkbox with registry/protocol configuration                                                                                                                                                                      \r\n  - Edit Form: Shows existing UAID as read-only (immutable once generated), allows adding UAID to UUID-only agents\r\n  - Agents Table: Visual badges distinguish UAID vs UUID agents                                                                                                                                                                                     \r\n  - View Modal: Dedicated UAID metadata section showing full UAID, registry, protocol, and native ID                                                                                                                                                \r\n  - JavaScript: Toggle logic for conditional field visibility (mcpgateway/admin_ui/a2aAgents.js)                                                                                                                                                    \r\n                                                                                                                                                                                                                                                    \r\n  UAID Format                                                                                                                                                                                                                                       \r\n                                                                                                                                                                                                                                                    \r\n  uaid:aid:{base58-sha384-hash};uid=0;registry=context-forge;proto=a2a;nativeId=agent.example.com\r\n                                                                                                                                                                                                                                                    \r\n  Key Features\r\n                                                                                                                                                                                                                                                    \r\n  - ✅ Zero-config routing: UAIDs embed endpoint/protocol for direct cross-gateway calls                                                                                                                                                            \r\n  - ✅ Full UI support: Create, edit, and view UAID agents via Admin UI\r\n  - ✅ Backward compatible: Existing UUID-based agents work unchanged                                                                                                                                                                               \r\n  - ✅ Protocol agnostic: Supports A2A, MCP, REST, gRPC                                                                                                                                                                                             \r\n  - ✅ Deterministic: Same metadata = same UAID (useful for distributed systems)                                                                                                                                                                    \r\n  - ✅ Secure: Endpoint allowlist validation, authentication forwarding, audit logging                                                                                                                                                              \r\n  - ✅ Immutable: UAID cannot be changed once generated (enforced in UI and backend)                                                                                                                                                                \r\n                                                                                                                                                                                                                                                    \r\n---------\r\n🔒 Security - Known Limitations                                                                                                                                                                                                                   \r\n                                                                                                                                                                                                                                                    \r\n  ⚠️  To be addressed in follow-up PR:                                                                                                                                                                                                               \r\n  Issue https://github.com/IBM/mcp-context-forge/issues/4236\r\n  1. Cross-Gateway Authentication Gap                                                                                                                                                                                                               \r\n                             \r\n  - Cross-gateway calls do NOT forward authentication                                                                                                                                                                                               \r\n  - Remote gateways receive unauthenticated requests\r\n  - Mitigation: Remote gateways MUST enforce AUTH_REQUIRED=true                                                                                                                                                                                     \r\n  - Roadmap: Bearer token forwarding, mTLS, gateway registry                                                                                                                                                                                        \r\n                                                                                                                                                                                                                                                    \r\n  2. Domain Allowlist Default                                                                                                                                                                                                                       \r\n                                                                                                                                                                                                                                                    \r\n  - UAID_ALLOWED_DOMAINS defaults to empty (fail-open = allow all domains)                                                                                                                                                                          \r\n  - Mitigation: Configure allowlist in production:\r\n  UAID_ALLOWED_DOMAINS=[\"trusted-gateway.example.com\"]                                                                                                                                                                                              \r\n  - Roadmap: Change default to fail-closed, add startup warnings                                                                                                                                                                                    \r\n                                                                                                                                                                                                                                                    \r\n  Security features implemented:                                                                                                                                                                                                                    \r\n  - ✅ SSRF protection (7 tests)                                                                                                                                                                                                                    \r\n  - ✅ Domain allowlist validation (5 tests)                                                                                                                                                                                                        \r\n  - ✅ DoS protection + immutability enforcement\r\n                                                                                                                                                                                                                                                    \r\n  See .env.example lines 85-125 for detailed security documentation.    \r\n------------ \r\n Testing                    \r\n                                                                                                                                                                                                                                                    \r\n  - 31 unit tests for UAID parsing, generation, and validation (tests/unit/mcpgateway/utils/test_uaid.py)                                                                                                                                           \r\n  - Extended A2A service tests for UAID routing scenarios (tests/unit/mcpgateway/services/test_a2a_service.py)\r\n  - 9 new Playwright tests for Admin UI UAID functionality:                                                                                                                                                                                         \r\n    - Checkbox visibility and toggle behavior                                                                                                                                                                                                       \r\n    - Protocol dropdown options and default values                                                                                                                                                                                                  \r\n    - Create agent with UAID generation                                                                                                                                                                                                             \r\n    - Edit agent with/without UAID (immutability enforcement)                                                                                                                                                                                       \r\n    - Visual badge display\r\n  - All 147 existing A2A tests pass                                                                                                                                                                                                                 \r\n  - Migration tested on fresh and existing databases                                                                                                                                                                                                \r\n  - Pylint: 10.00/10\r\n                                                                                                                                                                                                                                                    \r\n  Example: Creating Agent with UAID\r\n                                                                                                                                                                                                                                                    \r\n  curl -X 'POST' \\           \r\n    'http://localhost:4444/a2a/' \\                                                                                                                                                                                                                  \r\n    -H 'accept: application/json' \\\r\n    -H 'Authorization: Bearer $TOKEN' \\                                                                                                                                                                                                             \r\n    -H 'Content-Type: application/json' \\                                                                                                                                                                                                           \r\n    -d '{\r\n      \"agent\": {                                                                                                                                                                                                                                    \r\n        \"name\": \"UAID Test Agent\",                                                                                                                                                                                                                  \r\n        \"slug\": \"uaid-test-agent\",\r\n        \"description\": \"Agent with self-describing UAID\",                                                                                                                                                                                           \r\n        \"endpoint_url\": \"https://agent.example.com/api/v1/agent\",\r\n        \"agent_type\": \"custom\",                                                                                                                                                                                                                     \r\n        \"protocol_version\": \"1.0\",\r\n        \"auth_type\": \"bearer\",                                                                                                                                                                                                                      \r\n        \"auth_token\": \"test-token-456\",\r\n        \"generate_uaid\": true,                                                                                                                                                                                                                      \r\n        \"uaid_registry\": \"context-forge\",\r\n        \"uaid_protocol\": \"a2a\"                                                                                                                                                                                                                      \r\n      },                     \r\n      \"team_id\": null,                                                                                                                                                                                                                              \r\n      \"visibility\": \"public\" \r\n    }'                                                                                                                                                                                                                                              \r\n   \r\n  References                                                                                                                                                                                                                                        \r\n                             \r\n  - HCS-14 Standard: https://hol.org/docs/standards\r\n  - Security docs: .env.example lines 85-125, mcpgateway/services/a2a_service.py:1850-1896\r\n  - Closes #3956",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "fa65c5cd59a07b36e5d7fc53a13eff715508f48f",
+      "message": "add HCS-14 UAID support for A2A agents\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-10T11:48:59+00:00"
+    },
+    {
+      "sha": "6a45fcbaed0b3bc346a7b5d816a57dc2fa40fa44",
+      "message": "migration\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-10T11:56:14+00:00"
+    },
+    {
+      "sha": "d524fc6a65d5928bed6270d3eeccff38025d9523",
+      "message": "lint error fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-10T13:22:43+00:00"
+    },
+    {
+      "sha": "f02a2a0791487c645d8171ad1639db81123bce41",
+      "message": "test case fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-10T13:34:32+00:00"
+    },
+    {
+      "sha": "12cde52f8aebc2dff865e25105d98cfd4573d2dd",
+      "message": "pyporject.toml\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-13T06:03:03+00:00"
+    },
+    {
+      "sha": "ea354823dee48f707fcc0081f0800a821b21cd52",
+      "message": "test coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-13T06:47:04+00:00"
+    },
+    {
+      "sha": "bd4db3da7721a66a81859080ee05ad4fbc219320",
+      "message": "feat: add base58 dependency and UAID routing config\n  - Add base58>=2.1.1 dependency for UAID generation support\n  - Add uaid_allowed_domains config setting for cross-gateway routing security\n  - Document UAID_ALLOWED_DOMAINS in .env.example\n  Related to #3956\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-13T06:53:03+00:00"
+    },
+    {
+      "sha": "31c91278c3f2ee2ffc490f8efb2b1a21343d7e10",
+      "message": "a2a_agent_id column size change\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-13T11:11:53+00:00"
+    },
+    {
+      "sha": "1da4035a26a4fa88035d4801de779b560392142e",
+      "message": "feat: add UAID support to Admin UI\n  - Add UAID generation checkbox to create/edit A2A agent forms\n  - Add UAID registry and protocol configuration fields\n  - Display UAID vs UUID badge in agents table\n  - Show UAID metadata section in agent view modal\n  - Add JavaScript toggle logic for UAID fields\n  - Update form population for editing UAID agents\n  - Rebuild UI bundle with UAID changes\n  Completes HCS-14 UAID feature with full UI support.\n  Related to #3956\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-13T11:56:28+00:00"
+    },
+    {
+      "sha": "db58a4f9210a35bac4c2d60c30a9f417a6697839",
+      "message": "uaid ui change\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-13T12:15:37+00:00"
+    },
+    {
+      "sha": "b0379c3cc6aaabda2fbd338c4c1bff4c03074840",
+      "message": "revert id column length\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-13T12:32:27+00:00"
+    },
+    {
+      "sha": "b681767b74691086f88487bd21ad91bd7f4c5178",
+      "message": "uaid in admin ui create form\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-13T12:54:59+00:00"
+    },
+    {
+      "sha": "1e8d8c44b459225b75d4f8e847fd1a3342356822",
+      "message": "edit form UAID\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-13T13:02:39+00:00"
+    },
+    {
+      "sha": "e84592febee6e3e1b0c25180b341764699b9769f",
+      "message": "test\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-13T13:21:44+00:00"
+    },
+    {
+      "sha": "3acfd6a002e4500ad28c2f58a0c2e5516948a70c",
+      "message": "length change\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-14T05:57:37+00:00"
+    },
+    {
+      "sha": "0de88864baf969cd6d6c7481fc1e70241d274c2d",
+      "message": "Add security documentation for UAID-based cross-gateway routing feature\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-14T06:18:27+00:00"
+    },
+    {
+      "sha": "181d21cd8e6227fc77fffbf9240481069d7c8a05",
+      "message": "documentation\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-14T06:24:05+00:00"
+    },
+    {
+      "sha": "2a18f09eb0b786cbbf11deaed31d015e00fa4f0e",
+      "message": "test case\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-14T06:39:15+00:00"
+    },
+    {
+      "sha": "3fd7ed86f6fda8756943547c2e638cbb954bd397",
+      "message": "test: Add coverage for UAID cross-gateway routing edge cases\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-14T10:58:47+00:00"
+    },
+    {
+      "sha": "a992138804af1125a257762a9a750f1ec6bc90a3",
+      "message": "alembic head\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-14T11:55:53+00:00"
+    },
+    {
+      "sha": "ecd5c7b59a75413d991547b4ab734ac3025e35b1",
+      "message": "test coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T04:54:00+00:00"
+    },
+    {
+      "sha": "78ad85cd1b7ea8cbde92361541fd57364f03306a",
+      "message": "base58 and its deps resolved\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T04:55:53+00:00"
+    },
+    {
+      "sha": "4c46bf9385ca05a072757d8f7c1bc00c9facd322",
+      "message": "security: fix SSRF and domain allowlist bypass in UAID cross-gateway routing\n\nFixes two critical security vulnerabilities in UAID-based cross-gateway routing:\n\n1. Domain Allowlist Bypass (CVE-level)\n   - Previous: endpoint.endswith(d) allowed \"evilexample.com\" to bypass \"example.com\" allowlist\n   - Fixed: Require exact match OR proper subdomain prefix (.example.com)\n   - Now correctly blocks: \"evilexample.com\", \"notexample.com\"\n   - Still allows: \"gateway.example.com\", \"example.com\", \"sub.gateway.example.com\"\n\n2. SSRF Injection via nativeId (CVE-level)\n   - Previous: nativeId field directly interpolated into URL without validation\n   - Attack vectors blocked:\n     * Protocol injection: file:///etc/passwd, gopher://internal\n     * User-info bypass: evil@127.0.0.1 (routes to internal IP)\n     * Path injection: gateway.com/admin (access internal endpoints)\n   - Legitimate ports still allowed: gateway.example.com:8443\n\nSecurity validations added before URL construction:\n- Reject protocol prefixes (://)\n- Reject @ character (user-info bypass)\n- Reject path components (/)\n- Validate hostname format via urlparse\n- Extract domain from endpoint:port for allowlist checking\n\nTest coverage (8 new tests):\n- test_invoke_remote_agent_domain_allowlist_bypass_attack\n- test_invoke_remote_agent_domain_allowlist_subdomain_valid\n- test_invoke_remote_agent_domain_allowlist_exact_match\n- test_invoke_remote_agent_ssrf_protocol_injection\n- test_invoke_remote_agent_ssrf_userinfo_bypass\n- test_invoke_remote_agent_ssrf_path_injection\n- test_invoke_remote_agent_ssrf_internal_ip (documents behavior)\n- test_invoke_remote_agent_port_allowed\n\nRelated: #3956\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T05:22:17+00:00"
+    },
+    {
+      "sha": "e3e035785d4a2772fbb61870479871f359b878d0",
+      "message": "style: apply black and isort formatting to schemas and UAID tests\n\n- black: Fix line length in PluginPolicyItem config field description\n- isort: Move First-Party imports to correct section in test files\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T05:22:29+00:00"
+    },
+    {
+      "sha": "17eb37fa8253b4716bf7134c305af23fcdb7bb84",
+      "message": "security\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T05:36:09+00:00"
+    },
+    {
+      "sha": "3ba7c8e8c4895b0856b83de6d37b373e08629cdb",
+      "message": "uaid split\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T05:44:59+00:00"
+    },
+    {
+      "sha": "e3a73c199b9055cf54ebdb4d5b1ffa1fe882d6a7",
+      "message": "ruff\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T06:01:52+00:00"
+    },
+    {
+      "sha": "7629ec96ec8e6c897613458a214bcc57a391b965",
+      "message": "test cases\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T06:16:06+00:00"
+    },
+    {
+      "sha": "704145821c5ccb5c4920a28e56e0bb7706959220",
+      "message": "security test cases\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T06:19:55+00:00"
+    },
+    {
+      "sha": "b62fc4eda82ff734803c04651ca8364305c6044b",
+      "message": "varibale correct\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T06:26:42+00:00"
+    },
+    {
+      "sha": "32594270e69a2b8f12085698421096295aa7ebe0",
+      "message": "ruff\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-16T06:46:25+00:00"
+    },
+    {
+      "sha": "9fedccf7fb09d73da086935f4f21a033757b3ea5",
+      "message": "rebase fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-17T05:31:20+00:00"
+    },
+    {
+      "sha": "6d36d3027bf84592922deb1c48e3d646fdfe209f",
+      "message": "feat(a2a): A2A-1.0 UAID path in Rust sidecar + federation-loop guard\n\nSplits UAID cross-gateway routing between the two runtimes by intent:\nthe Python gateway keeps the ContextForge-to-ContextForge federation\nshape (target `/a2a/{uaid}/invoke` on a peer CF gateway), and the Rust\na2a_runtime gets a first-class A2A-1.0-compliant path that POSTs the\noriginal JSON-RPC 2.0 body directly to the agent URL encoded in the\nUAID's `nativeId`. The two paths are intentionally not reverse-compatible.\n\nKey pieces:\n\n- `crates/a2a_runtime/src/uaid.rs` (new): HCS-14 parser with SSRF\n  rejection (user-info, path injection, unsupported scheme),\n  case-insensitive domain allowlist (exact or `.suffix`), DoS length\n  cap, sealed `RoutingTarget` with private fields and a `Proto` enum\n  (`FromStr` + exhaustiveness test), stable `UaidError::code()` for\n  structured logs.\n- `crates/a2a_runtime/src/server.rs`: UAID dispatch in\n  `handle_a2a_invoke` with local-resolve-first and cross-gateway\n  fall-through; SSE proxy (`handle_uaid_cross_gateway_streaming`)\n  with Last-Event-ID replay and a bounded JSON fallback that enforces\n  `max_response_body_bytes` via a streaming `read_bounded_body` helper\n  (per-chunk + cumulative cap); startup validation and rate-limited\n  warning for an empty allowlist; explicit one-time security warning\n  for the unforwarded-auth tradeoff.\n- `mcpgateway/main.py` + `mcpgateway/services/a2a_service.py`: kind-\n  dispatch resolve (name/id/uaid) with 403 for visibility-denial so\n  the sidecar can distinguish hidden-from-absent; URL-encoded UAID in\n  the CF-federation target path; dropped redundant `agent_id` body\n  field; structured error logging without leaking 5xx internals.\n\nFederation-loop prevention covers both A->B->A and self-referential\n`endpoint_url` loops:\n\n- `X-Contextforge-UAID-Hop: N` counter replaces the earlier binary\n  marker. Every outbound (cross-gateway, local-agent, and the\n  backward-compat `POST /invoke`) stamps `N+1`; every inbound rejects\n  at `uaid_max_federation_hops` (default 5).\n- Strict parser with byte-identical rules in both runtimes: pure\n  ASCII digits only (no Unicode digits), no whitespace on single\n  values, saturating at `2**31 - 1`; RFC 7230 section 3.2.2 coalesced\n  form `\"0, 10\"` parses each element with OWS trim and takes the max\n  so smuggled low values can't mask a real high value.\n- Max-of-variants defense against header-case smuggling: `HashMap`\n  iteration order can't be used to select a low value paired with a\n  high one, and axum's multi-valued `HeaderMap` is drained via\n  `get_all` + max.\n- Named-agent paths translate resolve's 403 to 404 at the axum edge\n  so private-agent existence never leaks through the status code or\n  the error text (`map_agent_resolve_err` helper).\n\nConfig additions:\n\n- Python `uaid_allowed_domains` (list), `uaid_max_length` (2048),\n  `uaid_max_federation_hops` (default 5).\n- Rust `A2A_RUST_UAID_ALLOWED_DOMAINS`, `A2A_RUST_UAID_MAX_LENGTH`,\n  `A2A_RUST_UAID_MAX_FEDERATION_HOPS` (same defaults).\n\nTests:\n\n- Python unit/integration: kind-dispatch resolve (uaid/id/name fall-\n  back), parse_hop_count parametric cases including Unicode digits,\n  whitespace, overflow, coalesced RFC 7230 form and smuggling, local-\n  agent hop stamping on `_execute_agent_request`, 3-hop chain locking\n  in the stamp-N+1 vs reject-at-max contract, TestClient-level\n  `/a2a/{agent_name}/invoke` header plumbing.\n- Rust integration: 12+ UAID dispatch tests (local hit, cross-gateway\n  forward, streaming SSE proxy, body-size cap on chunked responses,\n  per-chunk cap, hop-limit at max for UAID and plain names,\n  multi-variant smuggling, coalesced header, 403->404 on named paths,\n  case-insensitive `/invoke` hop guard).\n- Rust uaid.rs: 16 unit tests covering parse/validate/SSRF/allowlist\n  round-trip plus `Proto` exhaustiveness and `UaidError::code()`\n  stability contracts.\n\nCloses #3956\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-17T18:50:38+00:00"
+    }
+  ],
+  "files_changed": 35,
+  "additions": 9222,
+  "deletions": 120,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:49.372743",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:49.373531",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4125,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4125.json"
+  }
+}

@@ -1,0 +1,170 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2816,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2816"
+  },
+  "metadata": {
+    "title": "Add Lightweight Docker Compose Configuration for Local Load Testing and Monitoring",
+    "state": "closed",
+    "created_at": "2026-02-10T16:30:57+00:00",
+    "updated_at": "2026-02-14T04:01:17+00:00",
+    "closed_at": "2026-02-13T12:35:14+00:00",
+    "merged_at": "2026-02-13T12:35:13+00:00",
+    "author": "Lang-Akshay",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "### Summary\r\n\r\nIntroduces a resource-optimized Docker Compose configuration (`docker-compose-lite.yml`) that enables developers to run load tests locally on resource-constrained environments like Colima or Docker Desktop (10 CPU / 18GB).\r\n\r\n### Target Issue: \r\n#2815 \r\n\r\n### Problem\r\n\r\nThe original `docker-compose.yml` reserves 12 CPUs and 12GB memory (120% of a typical 10 CPU local setup), causing Docker scheduler failures when attempting to run load tests and monitoring locally.\r\n\r\n### Quick Test\r\n\r\n```bash\r\n# Step-1: (Skip if you are using linux running docker engine)\r\n# Start Colima with appropriate resources\r\ncolima start --cpu 10 --memory 18\r\n\r\n# Step-2:\r\n# Build and run lite stack\r\nmake docker-prod\r\nmake compose-lite-down && make compose-lite-up\r\n# Access: http://localhost:8080\r\n\r\n# Add monitoring (optional)\r\nmake monitoring-lite-down && make monitoring-lite-up\r\n# Access: http://localhost:3000\r\n\r\n# Run load test\r\nmake load-test-ui\r\n# Access: http://localhost:8089\r\n```\r\n\r\n### Solution\r\n\r\nCreated a \"lite\" stack with optimized resource allocations:\r\n\r\n| Configuration               | CPU Reserved     | Memory Reserved | Status  |\r\n| --------------------------- | ---------------- | --------------- | ------- |\r\n| **compose-lite-up**   | 6.75 CPU (67.5%) | 8.125GB (45%)   | ✅ SAFE |\r\n| **+ monitoring-lite** | 8.75 CPU (87.5%) | 9.625GB (53%)   | ✅ SAFE |\r\n---\r\n#### Key Changes\r\n\r\n**GATEWAY -> New `compose-lite-up` & `compose-lite-down` profile:**\r\n\r\n- Reduced replicas: 3 → 2\r\n- CPU limit: 8 → 3.5 CPUs per replica\r\n- CPU reservation: 4 → 2 CPUs per replica\r\n- Memory limit: 8GB → 3GB per replica\r\n- Memory reservation: 4GB → 2.5GB per replica\r\n- **Result:** 71% CPU reduction, 75% memory reduction\r\n**Included:**\r\n\r\n- ✅ Nginx (caching proxy)\r\n- ✅ Gateway (2 replicas)\r\n- ✅ PostgreSQL 18\r\n- ✅ PgBouncer (connection pooler)\r\n- ✅ Redis (cache)\r\n\r\n---\r\n**MONITORING -> New `monitoring-lite-up` & `monitoring-lite-down` profile:**\r\n\r\n- Includes: Prometheus, Grafana, Loki, Tempo, Promtail, cAdvisor, all exporters\r\n- Excludes: pgAdmin (0.5 CPU), redis_commander (0.25 CPU)\r\n- **Savings:** 0.75 CPU / 384MB by excluding admin UIs\r\n**Included:**\r\n\r\n- ✅ Prometheus (metrics collection)\r\n- ✅ Grafana (dashboards)\r\n- ✅ Loki (log aggregation)\r\n- ✅ Tempo (distributed tracing)\r\n- ✅ Promtail (log shipper)\r\n- ✅ postgres_exporter (DB metrics)\r\n- ✅ redis_exporter (cache metrics)\r\n- ✅ pgbouncer_exporter (pool metrics)\r\n- ✅ nginx_exporter (proxy metrics)\r\n- ✅ cAdvisor (container metrics)\r\n\r\n **Excluded (vs. monitoring profile):**\r\n\r\n  - ❌ pgAdmin (0.5 CPU / 256MB) - Disabled for Colima\r\n  - ❌ redis_commander (0.25 CPU / 128MB) - Disabled for Colima\r\n\r\n---\r\n**New Makefile targets:**\r\n\r\n- `make compose-lite-up` / `make compose-lite-down`\r\n- `make monitoring-lite-up` / `make monitoring-lite-down`\r\n\r\n### Validation\r\n\r\nTested with Locust load testing:\r\n\r\n- **Configuration:** 800 concurrent users, 100 ramp-up rate, 10-minute duration\r\n- **Results:** 400-500 RPS, ~0% failure rate\r\n\r\n### Files Changed\r\n\r\n- `docker-compose.override.lite.yml` — New docker override file with lightweight 2-replica stack with monitoring-lite profile\r\n- `Makefile` — Added compose-lite-up/down and monitoring-lite-up/down targets\r\n- `docs/docs/testing/LocalTest.md` — Documentation for local load testing setup\r\n\r\nCloses #2815 ",
+  "comments": [
+    {
+      "id": "2798311912",
+      "author": "brian-hussey",
+      "created_at": "2026-02-12T11:20:39+00:00",
+      "body": "This file doesn't need to exist in this workflow any more, right?\nDelete it if not, we should just be relying on the single `docker-compose.yml` file plus overrides"
+    },
+    {
+      "id": "2798410376",
+      "author": "brian-hussey",
+      "created_at": "2026-02-12T11:43:20+00:00",
+      "body": "We can leave this out of the documentation and add it to the PR itself if not already there."
+    },
+    {
+      "id": "2798487024",
+      "author": "brian-hussey",
+      "created_at": "2026-02-12T12:00:44+00:00",
+      "body": "Are these correct at port 8080 or should they be changed to check on port 3000 so it can run at the same time as the compose-lite-up version on port 8080?\nOr should we be checking the various ports for the different services we use for monitoring?"
+    },
+    {
+      "id": "2798574323",
+      "author": "Lang-Akshay",
+      "created_at": "2026-02-12T12:17:27+00:00",
+      "body": "Thanks for noticing this, I forgot to delete this after adding the override file."
+    },
+    {
+      "id": "2798606445",
+      "author": "Lang-Akshay",
+      "created_at": "2026-02-12T12:23:59+00:00",
+      "body": "## Following ports are correct \r\n- nginx reverse proxy is on http://localhost:8080 -> gateway\r\n- grafana monitoring is on http://localhost:3000\r\n- loadtesting is on http://localhost:8089\r\nCode is replicating `monitoring-up` implementation of ports with addition of resource constrains from the override file."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3790380783",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-02-12T11:26:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "3790493021",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-02-12T11:43:29+00:00",
+      "body": ""
+    },
+    {
+      "id": "3790578512",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-02-12T12:01:58+00:00",
+      "body": ""
+    },
+    {
+      "id": "3790680974",
+      "author": "Lang-Akshay",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-12T12:17:27+00:00",
+      "body": ""
+    },
+    {
+      "id": "3790716370",
+      "author": "Lang-Akshay",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-12T12:23:59+00:00",
+      "body": ""
+    },
+    {
+      "id": "3791877534",
+      "author": "brian-hussey",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-12T15:57:04+00:00",
+      "body": "This looks good.\nI tested functionality, structure.\n"
+    },
+    {
+      "id": "3797032135",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-13T12:34:41+00:00",
+      "body": "## Review Summary\n\nSolid contribution — the Docker Compose override approach is the correct pattern for environment-specific resource tuning.\n\n### What was fixed during review\n\nTwo commits added on top of the original 5:\n\n**Consistency fixes (`6a004f33`):**\n- Replaced hardcoded `docker compose` with `$(COMPOSE_CMD)` / `$(COMPOSE_CMD_MONITOR)` for podman compatibility\n- Added missing `# help:` entries for all 4 new lite targets\n- Added `monitoring-lite-up/down` to `.PHONY` declarations\n- Added missing Grafana user preferences `curl` in `monitoring-lite-up` (matching `monitoring-up`)\n- Fixed wrong filename references in LocalTest.md (`docker-compose-lite.yml` → `docker-compose.override.lite.yml`)\n\n**Docs and correctness fixes (`75f83b73`):**\n- Restored `.pages` YAML indentation to match project convention (2-space indent, consistent with 30+ other `.pages` files)\n- Fixed Redis resource table — original values were wrong (CPU limit is 2 not 1.5, memory reservation is 1G not 1.5G), added missing CPU reservation row\n- Removed port 8080 preflight check from `monitoring-lite-up` — the documented workflow runs `compose-lite-up` first so nginx is already bound, causing a false positive\n\n### Verified\n\n- Docker Compose override merges correctly (array replacement semantics for profiles works as intended)\n- All 10/12 monitoring services get `monitoring-lite` profile; pgAdmin and redis_commander correctly excluded\n- Resource math: core = 6.75 CPU reserved, +monitoring = 8.75 CPU — both safe for 10 CPU host\n- No security issues introduced\n- Load test results validate claims (400-500 RPS, ~0% failure at 800 users)"
+    },
+    {
+      "id": "3797033085",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-13T12:34:52+00:00",
+      "body": "## Review Summary\n\nSolid contribution -- the Docker Compose override approach is the correct pattern for environment-specific resource tuning.\n\n### What was fixed during review\n\nTwo commits added on top of the original 5:\n\n**Consistency fixes (6a004f33):**\n- Replaced hardcoded docker compose with COMPOSE_CMD / COMPOSE_CMD_MONITOR for podman compatibility\n- Added missing help entries for all 4 new lite targets\n- Added monitoring-lite-up/down to .PHONY declarations\n- Added missing Grafana user preferences curl in monitoring-lite-up (matching monitoring-up)\n- Fixed wrong filename references in LocalTest.md (docker-compose-lite.yml -> docker-compose.override.lite.yml)\n\n**Docs and correctness fixes (75f83b73):**\n- Restored .pages YAML indentation to match project convention (2-space indent, consistent with 30+ other .pages files)\n- Fixed Redis resource table -- original values were wrong (CPU limit is 2 not 1.5, memory reservation is 1G not 1.5G), added missing CPU reservation row\n- Removed port 8080 preflight check from monitoring-lite-up -- the documented workflow runs compose-lite-up first so nginx is already bound, causing a false positive\n\n### Verified\n\n- Docker Compose override merges correctly (array replacement semantics for profiles works as intended)\n- All 10/12 monitoring services get monitoring-lite profile; pgAdmin and redis_commander correctly excluded\n- Resource math: core = 6.75 CPU reserved, +monitoring = 8.75 CPU -- both safe for 10 CPU host\n- No security issues introduced\n- Load test results validate claims (400-500 RPS, ~0% failure at 800 users)"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "3daa162b4ab812a7b240b1ecbe7fe4bea2b69a7b",
+      "message": "feat: add lightweight local load testing and monitoring setup\n\nAdd docker-compose-lite.yml and Makefile targets for local development\nenvironments with limited resources (10 CPU / 18GB memory).\n\nChanges:\n- docker-compose-lite.yml: 2-replica gateway stack with reduced resource limits\n- Makefile: compose-lite-up/down, monitoring-lite-up/down, load-test-ui targets\n- LocalTest.md: Documentation for lite setup and resource allocation\n\nResource optimization:\n- Gateway: 3→2 replicas, 8→3.5 CPU limit, 8→3GB memory limit per replica\n- Core services: 6.75 CPU / 8.125GB reserved (vs 12 CPU / 12GB original)\n- With monitoring: 8.75 CPU / 9.625GB reserved\n- Excludes pgAdmin/redis_commander to save 0.75 CPU / 384MB\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-10T16:20:43+00:00"
+    },
+    {
+      "sha": "3cc0230c9e8ae96d9a67c91a2540fb8c48d8c93e",
+      "message": "fixup:formatting\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-10T16:56:14+00:00"
+    },
+    {
+      "sha": "8a3d98ef2e1585e9d19b2e3869824e53be238e96",
+      "message": "feat: enhance local load testing setup with resource-optimized configurations and override file for easy maintenance and documentation\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-11T17:06:16+00:00"
+    },
+    {
+      "sha": "dd30b256cd05fee715b19c0b136e1356e33d9b95",
+      "message": "feat: add resource limits and reservations for monitoring services in lite configuration\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-11T18:30:51+00:00"
+    },
+    {
+      "sha": "79e6ee8d191d3b314e74f1f2df34e6749833f210",
+      "message": "docs: update LocalTest.md to remove redundant file modification details for lite setup\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-12T12:30:10+00:00"
+    },
+    {
+      "sha": "6a004f3375047830c576276f1f3ecc62f1e3236f",
+      "message": "fix: improve lite compose targets consistency and documentation\n\n- Use $(COMPOSE_CMD) and $(COMPOSE_CMD_MONITOR) variables instead of\n  hardcoded 'docker compose' for podman compatibility\n- Add missing # help: entries for compose-lite-up/down and\n  monitoring-lite-up/down targets\n- Add monitoring-lite-up/down to .PHONY declarations\n- Add missing Grafana user preferences curl in monitoring-lite-up\n  (matching monitoring-up behavior)\n- Fix wrong filename references in LocalTest.md\n  (docker-compose-lite.yml -> docker-compose.override.lite.yml)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T12:30:57+00:00"
+    },
+    {
+      "sha": "75f83b73fb1bb834f0edaad006f11b4b3c8f3ecd",
+      "message": "fix: restore .pages indentation, correct Redis docs, remove port check\n\n- Restore .pages YAML indentation to match project convention (2-space\n  indented list under nav:) consistent with all other .pages files\n- Fix Redis resource table: original values were wrong (CPU limit 2 not\n  1.5, memory reservation 1G not 1.5G), add missing CPU reservation row\n- Remove port 8080 preflight check from monitoring-lite-up since the\n  documented workflow runs compose-lite-up first (nginx already bound)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T12:32:46+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 477,
+  "deletions": 4,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:30.036503",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:30.038254",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2816,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2816.json"
+  }
+}

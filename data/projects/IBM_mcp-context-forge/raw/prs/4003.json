@@ -1,0 +1,79 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4003,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4003"
+  },
+  "metadata": {
+    "title": "Benchmark docker compose deployment fix",
+    "state": "closed",
+    "created_at": "2026-04-02T14:41:33+00:00",
+    "updated_at": "2026-04-04T21:41:23+00:00",
+    "closed_at": "2026-04-04T21:41:23+00:00",
+    "merged_at": null,
+    "author": "dima-zakharov",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n-->\r\n\r\n## 🔗 Related Issue\r\nThe deployment and benchmark creates situation when tools not found:\r\n```\r\nmake testing-rebuild-rust-full\r\n```\r\nAs a result of this one cannot test with `make benchmark-mcp-tools`\r\n\r\n\r\n---\r\n\r\n## 📝 Summary\r\nThe PR fixes the gateway deployment issue, the tools list is empty when deployed with : `make testing-up-rust-full`\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4051907111",
+      "author": "madhu-mohan-jaishankar",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-02T16:52:32+00:00",
+      "body": "This fix correctly addresses the stale cache issue after gateway registration by invalidating the registry and tool lookup caches immediately after db.flush().\n\nLGTM"
+    },
+    {
+      "id": "4055140769",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-03T10:11:37+00:00",
+      "body": "Thanks you @dima-zakharov for the PR. Please implement following changes. \n## Finding #1: Race Condition in Cache Invalidation (CWE-362)\n### Problem\n\nCache invalidation broadcasts fire before the database transaction commits in `register_gateway()`. Other workers receiving the invalidation signal may query the DB before the commit completes, potentially caching empty/stale data.\n\n**Current Flow:**\n\n1. `db.flush()` — writes to DB (uncommitted)\n2. Cache invalidation + Redis broadcast (lines 485–495)\n3. Return to caller\n4. `db.commit()` happens later in `get_db()` dependency\n\n> [!CAUTION]\n> **Impact:** Workers can cache stale data during the window between invalidation broadcast and commit.\n\n### Solution\n\nMove cache invalidation to occur after `db.commit()`, matching the pattern already used in `update_gateway()` (lines 1634–1646). Either:\n\n- Add explicit `db.commit()` before invalidation in `register_gateway()`\n- Use post-commit hooks/events to trigger invalidation\n\n---\n\n## Finding #2: Unconditional Expensive Cache Operations (CWE-400)\n### Problem\n\n`invalidate_gateway()` is called unconditionally on every gateway registration, even when the gateway has zero tools. This triggers O(N) Redis operations (key scans + pub/sub broadcast) unnecessarily.\n\n> [!CAUTION]\n> **Impact:**\n> - Wasted resources on empty gateways\n> - No rate limiting on `POST /gateways`\n> - Potential thundering herd on Redis pub/sub channel\n\n### Solution\n\nQuick fix: Only call `invalidate_gateway()` when tools exist:\n\n```python\nif tools:\n    await tool_lookup_cache.invalidate_gateway(str(db_gateway.id))\n```\n\nAdditional improvements:\n\n- Add rate limiting to gateway registration endpoint\n- Optimize `invalidate_gateway()` to check for cached data before scanning\n- Consider lazy invalidation strategies\n\n## Add tests for this "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "9bf2d05effa39b61dca608ebfa41f34365debf0b",
+      "message": "fix benchmark\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-03-31T19:38:59+00:00"
+    },
+    {
+      "sha": "e4fc008dc6c92dd518cf00477b36edfc6e8df0a6",
+      "message": "Merge remote-tracking branch 'origin/main' into fix-benchmark2",
+      "author": "Dmitry Zakharov",
+      "date": "2026-04-02T14:17:48+00:00"
+    },
+    {
+      "sha": "65d22255894a7c604bd1fdbcd3367d7900b50151",
+      "message": "Merge branch 'main' into fix-benchmark2",
+      "author": "dima-zakharov",
+      "date": "2026-04-02T14:57:21+00:00"
+    },
+    {
+      "sha": "e2b6d927cdde08d228087e9f4ebca9f8fe572ea6",
+      "message": "shorten comments\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-04-02T15:27:56+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 13,
+  "deletions": 0,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:07:08.609569",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:08.610229",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4003,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4003.json"
+  }
+}

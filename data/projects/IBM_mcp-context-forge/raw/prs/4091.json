@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4091,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4091"
+  },
+  "metadata": {
+    "title": "feat(tools): Elicitation pass-through implementation with session routing and observability",
+    "state": "closed",
+    "created_at": "2026-04-08T14:01:09+00:00",
+    "updated_at": "2026-04-26T09:11:07+00:00",
+    "closed_at": "2026-04-26T09:11:07+00:00",
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "enhancement",
+      "wxo",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #1985\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR implements complete MCP elicitation pass-through functionality per the [MCP 2025-06-18 specification](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation), enabling MCP servers to request structured user input during tool execution with proper session routing in multi-user deployments.\r\n\r\n**Key capabilities:**\r\n- MCP servers can issue `elicitation/create` requests during tool execution\r\n- Gateway forwards requests to the correct originating client session\r\n- Client responses are returned upstream to the server\r\n- Session correlation works correctly in multi-user environments\r\n- Full observability with structured logging and Prometheus metrics\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Feature / Enhancement\r\n- [ ] Bug fix\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass (1 pre-existing issue in observability.py) |\r\n| Unit tests                | `make test`     | ✅ 17,030 passed, 704 skipped, 2 xfailed |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ (13 new integration tests added) |\r\n\r\n**Test Results:**\r\n- All 13 elicitation integration tests passing\r\n- Covers all 4 user stories (US-1 through US-4)\r\n- Multi-user routing, timeout handling, capability enforcement verified\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Implementation Details\r\n\r\n### Architecture\r\n\r\n```mermaid\r\nsequenceDiagram\r\n    participant Client as MCP Client (User A)\r\n    participant Gateway\r\n    participant Registry as ToolCallRegistry\r\n    participant Server as MCP Server\r\n\r\n    Client->>Gateway: tools/call \"delete_files\"\r\n    Gateway->>Registry: Store mapping: call-456 -> sess-123\r\n    Gateway->>Server: Execute tool\r\n    \r\n    Server->>Gateway: elicitation/create\r\n    Gateway->>Registry: Lookup session for call-456\r\n    Gateway->>Client: Forward to sess-123 only\r\n    \r\n    Client->>Gateway: Elicitation response (action: \"accept\")\r\n    Gateway->>Server: ElicitResult\r\n    Server->>Gateway: Tool result\r\n    Gateway->>Client: Tool response\r\n```\r\n\r\n### New Components\r\n\r\n1. **ToolCallRegistry** (`mcpgateway/cache/tool_call_registry.py`)\r\n   - Maps `tool_call_id → downstream_session_id` for session correlation\r\n   - Thread-safe concurrent access with automatic cleanup\r\n   - Lifecycle managed in application startup/shutdown\r\n\r\n2. **Elicitation Callback** (`mcpgateway/services/tool_service.py`)\r\n   - Custom callback in `_create_elicitation_callback_for_tool_invocation()`\r\n   - Integrated in both SSE and Streamable HTTP transport paths\r\n   - Uses `ElicitationService` to forward requests to correct client\r\n\r\n3. **Capability Enforcement**\r\n   - Checks `session.capabilities.elicitation` before forwarding\r\n   - Returns `-32601` error if client lacks capability\r\n   - Clear error messages for debugging\r\n\r\n4. **Structured Logging**\r\n   - 5 lifecycle events: `created`, `delivered`, `completed`, `timeout`, `error`\r\n   - Full context: request_id, sessions, message, duration\r\n\r\n5. **Prometheus Metrics**\r\n   - `elicitation_requests_total` - Counter\r\n   - `elicitation_completed_total` - Counter (by action)\r\n   - `elicitation_timeout_total` - Counter\r\n   - `elicitation_duration_seconds` - Histogram\r\n\r\n### Modified Files\r\n\r\n| File | Changes | Lines |\r\n|------|---------|-------|\r\n| `mcpgateway/cache/tool_call_registry.py` | **NEW** - Session mapping registry | +183 |\r\n| `tests/integration/test_elicitation_passthrough.py` | **NEW** - 13 integration tests | +595 |\r\n| `tests/integration/test_elicitation_callback_coverage.py` | **NEW** - 8 coverage tests | +268 |\r\n| `tests/unit/test_tool_call_registry_coverage.py` | **NEW** - 13 unit tests | +227 |\r\n| `mcpgateway/services/tool_service.py` | Elicitation callback integration + linting fixes | +152 |\r\n| `mcpgateway/services/elicitation_service.py` | Structured logging | +3 |\r\n| `mcpgateway/services/metrics.py` | Prometheus metrics + import fix | +5 |\r\n| `mcpgateway/transports/streamablehttp_transport.py` | Elicitation support functions | +65 |\r\n| `mcpgateway/main.py` | Registry lifecycle management | +18 |\r\n\r\n### Configuration\r\n\r\nExisting settings in `mcpgateway/config.py` (no new env vars required):\r\n```bash\r\nELICITATION_TIMEOUT=60              # Default timeout in seconds\r\nELICITATION_MAX_CONCURRENT=100      # Max concurrent elicitations\r\nELICITATION_CLEANUP_INTERVAL=300    # Cleanup interval in seconds\r\n```\r\n\r\n### Test Coverage\r\n\r\n**13 comprehensive integration tests** covering:\r\n- ✅ US-1: MCP Server - Request User Input During Tool Execution\r\n- ✅ US-2: Gateway - Route Elicitation to Correct Session\r\n- ✅ US-3: Client - Advertise Elicitation Capability\r\n- ✅ US-4: Operator - Monitor Elicitation Events\r\n\r\n**Test scenarios:**\r\n- End-to-end elicitation flow with user confirmation\r\n- Multi-user session routing (correct isolation)\r\n- Timeout handling\r\n- Capability enforcement (reject if not advertised)\r\n- Callback creation with valid/invalid sessions\r\n- Schema validation (primitive types only)\r\n- Concurrent elicitation handling\r\n- Metrics emission verification\r\n\r\n### Design Decisions\r\n\r\n1. **Session Mapping Strategy**: Used dedicated `ToolCallRegistry` instead of extending `SessionRegistry` to maintain separation of concerns and avoid circular dependencies.\r\n\r\n2. **Callback Integration**: Implemented callback at tool invocation time (not transport layer) to ensure proper context and correlation regardless of transport type.\r\n\r\n3. **Fail-Closed Security**: If session mapping is missing or capability check fails, return clear error to server rather than attempting broadcast or fallback.\r\n\r\n4. **Structured Logging**: Emit events at key lifecycle points (created, delivered, completed, timeout, error) with full context for debugging and audit trails.\r\n\r\n5. **Metrics Granularity**: Track both success/failure counts and latency distribution to enable SLO monitoring and performance analysis.\r\n\r\n---\r\n\r\n## 📚 References\r\n\r\n- [MCP Elicitation Spec (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation)\r\n- [MCP Notifications Spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/notifications)\r\n- Original feature specification: Issue #1985",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "08232aca223029ce1c1313bb59f5ca338c56a623",
+      "message": "feat: complete elicitation pass-through implementation with session routing and observability\n\n- Add tool_call_registry for mapping tool calls to originating sessions\n- Implement elicitation callback in tool_service for SSE and Streamable HTTP\n- Add session capability enforcement before forwarding elicitation requests\n- Integrate structured logging for elicitation lifecycle events\n- Add Prometheus metrics (requests, completions, timeouts, duration)\n- Add comprehensive integration tests (13 tests covering all user stories)\n- Initialize tool_call_registry in application lifespan\n- Fix linting issues (trailing whitespace, blank lines)\n\nCloses #1985\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-08T13:49:37+00:00"
+    },
+    {
+      "sha": "4d44d37aea3aeff3617f0c051ef031222d4ec774",
+      "message": "Merge branch 'main' into 1985-feature-elicitation-pass-through-and-logging",
+      "author": "Bogdan-Marius Cătănuș",
+      "date": "2026-04-08T14:11:17+00:00"
+    },
+    {
+      "sha": "c29a9695f249036c79b9475c8feed9ddc8ed3fc5",
+      "message": "fix: resolve linter and coverage issues for elicitation feature\n\n- Fixed import grouping in metrics.py (moved Histogram to top-level imports)\n- Fixed malformed docstring in tool_service.py capability_error_callback\n- Used params.message in logging to satisfy unused argument check\n- Added comprehensive test coverage for elicitation callbacks\n- Added unit tests for ToolCallRegistry to improve coverage\n- Tests cover error paths, timeout handling, and edge cases\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-08T15:02:33+00:00"
+    },
+    {
+      "sha": "9ea81aff64290790667835bc0f29394a6b511707",
+      "message": "Merge branch 'main' into 1985-feature-elicitation-pass-through-and-logging",
+      "author": "Bogdan-Marius Cătănuș",
+      "date": "2026-04-15T07:47:28+00:00"
+    },
+    {
+      "sha": "5dbf5520272ec932d4b78e359898aa45cc430feb",
+      "message": "test: improve diff-cover coverage for changed lines\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-15T08:25:09+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 1915,
+  "deletions": 57,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:37.123907",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:37.125623",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4091,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4091.json"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4713,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4713"
+  },
+  "metadata": {
+    "title": "fix: preserve timeout message through BaseExceptionGroup unwrapping",
+    "state": "open",
+    "created_at": "2026-05-12T07:23:58+00:00",
+    "updated_at": "2026-05-13T06:09:15+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nWhen a tool invocation times out via StreamableHTTP or SSE transport, the error\r\nresponse returned to the client contains an empty message (`\"Tool invocation failed: \"`).\r\nThe descriptive timeout message is generated correctly but lost during exception\r\npropagation through Python 3.11+ `BaseExceptionGroup` wrapping.\r\n\r\n## 🔗 Related Issue\r\n\r\nCloses: #2782\r\n\r\n## 🔁 Reproduction Steps\r\n\r\nSee [#2781](https://github.com/IBM/mcp-context-forge/issues/2781) and [#2782](https://github.com/IBM/mcp-context-forge/issues/2782).\r\n\r\n1. Register an MCP server reachable via StreamableHTTP or SSE transport.\r\n2. Set a short `tool_timeout` so the tool times out reliably.\r\n3. Invoke the tool — the client receives `\"Tool invocation failed: \"` (empty message).\r\n\r\n## 🐞 Root Cause\r\n\r\n`tool_service.py` raises `ToolTimeoutError(\"Tool invocation timed out after {N}s\")`\r\ninside nested `async with` context managers (`streamablehttp_client`, `ClientSession`).\r\nDuring `__aexit__` cleanup the MCP SDK's internal `TaskGroup` may raise additional\r\nexceptions from cancelled tasks, causing Python 3.11+ to wrap everything in a\r\n`BaseExceptionGroup`.\r\n\r\nIn the outer `invoke_tool` handler:\r\n\r\n1. `except ToolTimeoutError` does not match a `BaseExceptionGroup` containing a `ToolTimeoutError`.\r\n2. Falls through to `except BaseException`.\r\n3. The unwrapping loop (`exceptions[0]`) finds the bare `asyncio.TimeoutError` — which carries no message.\r\n4. `str(asyncio.TimeoutError())` → `\"\"` → the client sees an empty error message.\r\n\r\nThe same silent-message loss affected the structured logger in the SSE and\r\nStreamableHTTP inner handlers (logged `error_message: \"\"` instead of the timeout\r\ndescription).\r\n\r\n## 💡 Fix Description\r\n\r\nAfter unwrapping the `BaseExceptionGroup` root cause, add a fallback that\r\nre-attaches the descriptive timeout message whenever the root cause is a bare\r\n`TimeoutError` / `asyncio.TimeoutError` with an empty string representation:\r\n\r\n```python\r\nerror_message = str(root_cause)\r\n# Preserve timeout context when message is lost during ExceptionGroup wrapping\r\nif not error_message and isinstance(root_cause, (TimeoutError, asyncio.TimeoutError)):\r\n    error_message = f\"Tool invocation timed out after {effective_timeout}s\"\r\n```\r\n\r\nApplied to three locations:\r\n\r\n| File | Line | Path | Variable |\r\n|---|---|---|---|\r\n| `tool_service.py` | ~5457 | SSE inner handler | `root_cause_message` (logging) |\r\n| `tool_service.py` | ~5647 | StreamableHTTP inner handler | `root_cause_message` (logging) |\r\n| `tool_service.py` | ~5961 | Outer `invoke_tool` handler | `error_message` (returned to client) |\r\n\r\nThe fallback is only triggered when the message is empty **and** the root cause\r\nis a `TimeoutError` subclass, so normal non-timeout errors are completely\r\nunaffected.\r\n\r\n## 🧪 Verification\r\n\r\nA regression test was added to `tests/unit/mcpgateway/services/test_tool_service.py`:\r\n\r\n```\r\ntest_invoke_tool_timeout_message_preserved_through_exception_group\r\n```\r\n\r\nIt constructs a nested `ExceptionGroup(ExceptionGroup(TimeoutError()))`, asserts the raised\r\n`ToolInvocationError` contains `\"timed out after\"`, and verifies the metrics buffer records\r\nthe correct non-empty `error_message`.\r\n\r\n| Check                             | Command             |    Status     |\r\n|-----------------------------------|---------------------|---------------|\r\n| Lint suite                        | `make lint`         |    Passed     |\r\n| Unit tests                        | `make test`         |    Passed     |\r\n| Coverage ≥ 90 %                   | `make coverage`     |    Passed     |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Regression test added (`test_invoke_tool_timeout_message_preserved_through_exception_group`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "28717505b885c91e567d17addab4986581b9e374",
+      "message": "fix(tool-service): preserve timeout message through BaseExceptionGroup unwrapping\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-05-11T07:11:30+00:00"
+    },
+    {
+      "sha": "03755baa39f9caa1abe3e31296637d1c1d4b0980",
+      "message": "test(tool-service): add parametrized coverage for SSE/StreamableHTTP timeout ExceptionGroup fallback\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-05-13T05:56:54+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 130,
+  "deletions": 9,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:28.508590",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:28.509652",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4713,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4713.json"
+  }
+}

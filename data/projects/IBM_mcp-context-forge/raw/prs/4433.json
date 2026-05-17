@@ -1,0 +1,61 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4433,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4433"
+  },
+  "metadata": {
+    "title": "fix(metrics): split metrics flush into separate transactions to prevent FK violation rollbacks",
+    "state": "closed",
+    "created_at": "2026-04-24T12:04:15+00:00",
+    "updated_at": "2026-04-26T15:49:25+00:00",
+    "closed_at": "2026-04-26T15:49:24+00:00",
+    "merged_at": "2026-04-26T15:49:24+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "bug",
+      "observability",
+      "MUST",
+      "db"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4420\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixed a critical bug in `MetricsBufferService._flush_to_db()` where FK violations on one metric type would roll back all buffered metrics in the batch, causing data loss.\r\n\r\n**Problem**: The method used a single transaction to bulk-insert tool, resource, prompt, and A2A metrics. When a tool/resource/prompt/agent was deleted between buffering and flushing (common in E2E tests and production gateway sync), the INSERT would fail with an `IntegrityError` on the FK constraint, rolling back **all** metrics in the batch—including unrelated ones.\r\n\r\n**Solution**: Split the flush operation into 5 independent transactions (one per metric type), matching the existing server metrics pattern. Now FK violations only affect the specific metric type that failed, preserving all other buffered metrics.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Changes Made\r\n\r\n**1. `mcpgateway/services/metrics_buffer_service.py` (lines 590-681)**\r\n- Split single transaction into 5 separate transactions:\r\n  - Tool metrics (lines 590-611)\r\n  - Resource metrics (lines 613-634)\r\n  - Prompt metrics (lines 636-657)\r\n  - A2A agent metrics (lines 659-681)\r\n  - Server metrics (lines 683-704) - already separate\r\n- Each transaction has independent error handling with descriptive logging\r\n- Added explanatory comments for each transaction block\r\n\r\n**2. `tests/unit/mcpgateway/services/test_metrics_buffer_service.py`**\r\n- Added `test_flush_to_db_prompt_metrics_exception_is_logged` (line 961)\r\n- Added `test_flush_to_db_a2a_agent_metrics_exception_is_logged` (line 1001)\r\n- Updated `test_flush_to_db_writes_all_metric_types` to expect 5 transactions instead of 2\r\n\r\n### Impact\r\n\r\n- **E2E tests**: No longer lose metrics when tools are deleted during cleanup\r\n- **Production**: Gateway sync can safely remove stale entities without losing observability data\r\n- **Performance**: Minimal impact - 5 small transactions vs 1 large transaction\r\n- **Observability**: Better error visibility with specific log messages per metric type",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "7d7a7d7d262cd391c0b280dfcde749e7f221de5c",
+      "message": "fix: split metrics flush into separate transactions to prevent FK violation rollbacks\n\nSplit MetricsBufferService._flush_to_db() into 5 independent transactions\n(tool, resource, prompt, A2A, server) to prevent FK violations on one metric\ntype from rolling back unrelated metrics. This matches the existing server\nmetrics pattern and implements best-effort observability writes.\n\n- Each metric type now has its own try-catch block with independent session\n- FK violations (e.g., deleted tool_id) only affect that specific metric type\n- Added tests for prompt and A2A agent exception handlers\n- All 58 tests pass with 95%+ coverage\n\nFixes issue where tools/resources deleted between buffering and flushing\nwould cause IntegrityError and lose all buffered metrics in the batch.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-24T11:59:36+00:00"
+    },
+    {
+      "sha": "4285744420a0405a8a73d93345c6c85bf9749481",
+      "message": "improve testing coverage\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-24T13:25:12+00:00"
+    },
+    {
+      "sha": "7710061e10e097f5be493ba9a19e4258a41a469f",
+      "message": "refactor(metrics): drop redundant commits, add isolation regression\n\nFollow-ups to #4420's split-flush fix:\n\n1. Remove the explicit `db.commit()` from every `with fresh_db_session()`\n   block in `metrics_buffer_service.py` - the five batch flushes in\n   `_flush_to_db` and the eight `_write_*_immediately` fallbacks.\n   `fresh_db_session()` is built on `get_db()` (db.py:5808-5845), which\n   already commits on successful context exit and rolls back on\n   exception, so the explicit calls were redundant and inconsistent\n   with how every other `fresh_db_session()` caller in the codebase uses\n   it (auth.py, middleware/rbac.py, middleware/token_usage_middleware.py).\n\n2. Add the missing regression test for the actual bug:\n   `test_flush_to_db_isolates_failed_metric_type` exercises all five\n   metric types together with one (Tool) raising `IntegrityError` and\n   asserts the other four still commit. Existing exception tests prove\n   that an exception is logged and doesn't crash the process, but none\n   verified the cross-type isolation property that is the whole point\n   of the fix - so a future refactor that re-grouped two metric types\n   into a shared transaction would not have been caught.\n\n3. Add `test_flush_to_db_server_metrics_exception_is_logged` for\n   symmetry with the four other per-type exception tests.\n\n4. Hoist the per-type isolation rationale into `_flush_to_db`'s\n   docstring so the design constraint is visible from the method's\n   IDE tooltip, not just to readers of the body.\n\nThe four `DummySession`/`DummyContext` mocks\n(`test_flush_to_db_writes_batches`, `test_flush_to_db_writes_all_metric_types`,\nthe new `test_flush_to_db_isolates_failed_metric_type`,\n`test_a2a_metric_with_duration_immediate_write`) and the\n`_make_session_context` helper now commit on `__exit__` to faithfully\nmirror `get_db()`'s contract, so removing the explicit commits in\nproduction code does not break the tests' commit assertions.\n\nAll 62 tests in the file pass; the broader services unit suite (6272\ntests) is also green.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T13:32:24+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 309,
+  "deletions": 41,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:08.775423",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:08.775842",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4433,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4433.json"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3556,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3556"
+  },
+  "metadata": {
+    "title": "fix(charts): fix ingress template YAML rendering for gateway and fast-time",
+    "state": "closed",
+    "created_at": "2026-03-09T13:19:12+00:00",
+    "updated_at": "2026-03-09T13:29:43+00:00",
+    "closed_at": "2026-03-09T13:29:41+00:00",
+    "merged_at": "2026-03-09T13:29:41+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nFix a pre-existing bug where the gateway ingress (`mcp-stack-ingress`) was never created in the cluster, and disable TLS on the fast-time ingress for minikube.\n\n## Root Cause\n\nThe `ingress.yaml` Helm template had whitespace control bugs (`{{-` / `-}}`) that ate newlines around the YAML document separator (`---`), causing:\n\n1. **Gateway ingress missing**: `number: 80---` rendered on one line — Kubernetes silently rejected the malformed YAML, so `mcp-stack-ingress` was never created despite being in the Helm manifest.\n\n2. **Fast-time ingress only**: `mcp-stack-fast-time-ingress` worked because it was the second document and its `apiVersion` line wasn't affected.\n\n## Fix\n\n- `{{- end }}` → `{{ end -}}` — preserve the newline before `---` so the gateway document ends cleanly\n- `{{- if ...` → `{{ if ...` — preserve whitespace between the two ingress documents\n- `{{- $fastTimeTlsSecretName ... -}}` → remove trailing `-` — preserve newline before `---`\n- Disable `mcpFastTimeServer.ingress.tls` in `values-minikube.yaml` to prevent 308 redirects\n\n## Tested\n\n```\n$ kubectl get ingress -n mcp-private\nNAME                          CLASS   HOSTS           ADDRESS        PORTS   AGE\nmcp-stack-fast-time-ingress   nginx   gateway.local   192.168.49.2   80      46s\nmcp-stack-ingress             nginx   gateway.local   192.168.49.2   80      46s\n\n$ curl -s -H \"Host: gateway.local\" http://192.168.49.2/health\n{\"status\":\"healthy\"}\n\n$ curl -s -o /dev/null -w \"%{http_code}\" -H \"Host: gateway.local\" http://192.168.49.2/tools\n401\n\n$ # Tool invocation via ingress\n$ curl -s -X POST http://192.168.49.2/rpc ...\n  get-system-time: 2026-03-09T13:18:21Z  isError=False\n\n$ # SSE transport via ingress\n  SSE endpoint event: received\n```\n\nBoth production (TLS enabled) and minikube (TLS disabled) template rendering verified via `helm template`.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "0fbb4df27a82e1e68e7570334db9e9eae7443c9a",
+      "message": "fix(charts): fix ingress template YAML rendering and disable TLS for minikube\n\nThe gateway ingress was never created in the cluster due to two\nwhitespace bugs in the Helm template:\n\n1. {{- end -}} on the gateway section ate the newline before the\n   YAML document separator (---), causing it to render as\n   \"number: 80---\" on a single line — invalid YAML that Kubernetes\n   silently ignored.\n\n2. {{- if on the fast-time section ate remaining whitespace,\n   merging both ingress documents into one malformed resource.\n\nFix: use {{ end -}} and {{ if ... }} (no leading dash) to preserve\nthe newlines needed for valid YAML document separation.\n\nAlso disable TLS on the fast-time ingress in values-minikube.yaml\nto prevent 308 redirects to non-existent HTTPS endpoints.\n\nTested: both mcp-stack-ingress (gateway at /) and\nmcp-stack-fast-time-ingress (/fast-time) now render correctly and\nare accessible via minikube ingress on port 80.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T13:18:41+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 11,
+  "deletions": 5,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:51.779930",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:51.783661",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3556,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3556.json"
+  }
+}

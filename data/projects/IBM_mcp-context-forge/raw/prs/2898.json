@@ -1,0 +1,61 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2898,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2898"
+  },
+  "metadata": {
+    "title": "Enforce Token Expiration Policy via REQUIRE_TOKEN_EXPIRATION Setting",
+    "state": "closed",
+    "created_at": "2026-02-13T07:08:11+00:00",
+    "updated_at": "2026-02-15T12:21:48+00:00",
+    "closed_at": "2026-02-15T11:42:16+00:00",
+    "merged_at": "2026-02-15T11:42:16+00:00",
+    "author": "rakdutta",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "closes issue #2836 \r\n\r\nThis PR introduces support for enforcing a server policy that requires API tokens to have an expiration date. The enforcement is implemented at the service layer, reflected in the Admin UI, and covered with unit tests to ensure consistent behavior.\r\n\r\n---\r\n\r\n### **Key Changes**\r\n\r\n#### **Backend Enforcement**\r\n\r\n* Added validation to block token creation when expiration is required but not provided.\r\n* Validation checks `REQUIRE_TOKEN_EXPIRATION` before allowing token creation.\r\n* Clear error message is returned when policy is violated.\r\n\r\n**Files Updated**\r\n\r\n* `token_catalog_service.py`\r\n\r\n---\r\n\r\n#### **Admin UI Enhancements**\r\n\r\n* Added visual indicator (*) when expiration is required.\r\n* Made the \"Expires In (Days)\" field conditionally mandatory.\r\n* Added helper text explaining expiration policy.\r\n\r\n**Files Updated**\r\n\r\n* `admin.html`\r\n\r\n---\r\n\r\n#### **Configuration Exposure**\r\n\r\n* Exposed `require_token_expiration` setting through admin API.\r\n* Allows UI to dynamically adjust behavior based on server configuration.\r\n\r\n**Files Updated**\r\n\r\n* `admin.py`\r\n\r\n---\r\n\r\n### **Behavior Scenarios**\r\n\r\n* **REQUIRE_TOKEN_EXPIRATION = false**\r\n\r\n  * Tokens can be created without expiration.\r\n\r\n* **REQUIRE_TOKEN_EXPIRATION = true**\r\n\r\n  * Token creation fails if expiration is missing.\r\n  * Clear validation error is returned.\r\n\r\n---\r\n\r\n### **Testing**\r\n\r\n* Updated existing tests to include expiration where required.\r\n* Added new test cases covering:\r\n\r\n  * Policy enabled/disabled scenarios\r\n  * Tokens with and without expiration\r\n  * Team and scoped token validation\r\n  * Edge cases\r\n\r\n---\r\n\r\n### **Impact**\r\n\r\n* Prevents creation of tokens without expiration when policy requires it.\r\n* Improves UI clarity for admins.\r\n* Ensures consistent enforcement across backend and frontend.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3796262804",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T09:57:09+00:00",
+      "body": "Thanks for this PR, @rakdutta. The enforcement logic is correct and test coverage is thorough (15 new test cases covering enabled/disabled x various expiry scenarios).\n\n**Negative `expires_in_days` is not guarded**\nA value like `expires_in_days=-1` is truthy, so it passes the `if expires_in_days:` gate and produces `expires_at` in the past. The new check sees `expires_at` is not None and allows it. The UI's `min=\"1\"` is the only defense; the API endpoint is unprotected. Consider adding a server-side `if expires_in_days is not None and expires_in_days < 1: raise ValueError(...)` guard.\n\n**HTML diff is ~95% formatter noise**\nConsider splitting the Prettier/formatting pass into a separate commit to make the functional changes (~20 lines) reviewable independently.\n\n**Good:** Enforcement is correctly centralized in `TokenCatalogService.create_token`. Both API endpoints delegate to it, and session tokens (which use `create_jwt_token()` directly) are unaffected since they always include expiration. No migration needed — this is a runtime config setting."
+    },
+    {
+      "id": "3801814524",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-14T13:05:31+00:00",
+      "body": "LGTM. Rebased, cleaned up, and verified — all tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "4f52530e9edce0528f3e288f0d0d1c1594280475",
+      "message": "feat: enforce token expiration policy via REQUIRE_TOKEN_EXPIRATION setting\n\nEnforce the existing REQUIRE_TOKEN_EXPIRATION config setting at\ntoken creation time. Previously the setting only validated incoming\ntokens but allowed creation of tokens without expiration.\n\n- Add validation in TokenCatalogService.create_token() to reject\n  tokens without expiration when REQUIRE_TOKEN_EXPIRATION=true\n- Pass require_token_expiration flag to admin UI template context\n- Add conditional required field indicator and helper text in the\n  token creation form\n- Update existing tests to provide expires_in_days where needed\n- Add new test cases covering policy enabled/disabled scenarios,\n  team tokens, and edge cases (zero expiry days)\n\nCloses #2836\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "rakdutta",
+      "date": "2026-02-14T12:52:32+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 134,
+  "deletions": 15,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:09.953802",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:09.955014",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2898,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2898.json"
+  }
+}

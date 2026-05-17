@@ -1,0 +1,99 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4260,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4260"
+  },
+  "metadata": {
+    "title": "fix(ui): A2A agent list now refreshes correctly after deletion",
+    "state": "closed",
+    "created_at": "2026-04-17T06:40:30+00:00",
+    "updated_at": "2026-05-09T22:16:14+00:00",
+    "closed_at": "2026-05-09T22:16:12+00:00",
+    "merged_at": "2026-05-09T22:16:12+00:00",
+    "author": "rakdutta",
+    "labels": [
+      "bug",
+      "a2a",
+      "ui",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "                                                                                                              \r\n The A2A agent list was not refreshing properly after deleting an agent. The UI was attempting to refresh using a hardcoded path pattern (${type}/partial) and target selector (#${type}-table), which didn't match the actual A2A agent panel     \r\n  configuration (a2a/partial path and #agents-table target).                                                                                                                                                                                        \r\n   \r\n  Root cause: The refresh logic in formHandlers.js used string interpolation instead of consulting the centralized PANEL_SEARCH_CONFIG, causing mismatches for any entity type whose path/selector didn't follow the assumed pattern.               \r\n                             \r\n  Solution                                                                                                                                                                                                                                          \r\n                             \r\n  Refactored handleToggleSubmit in formHandlers.js to use PANEL_SEARCH_CONFIG as the single source of truth for partial URLs and target selectors. This ensures correct refresh behavior for all panel types.                                       \r\n   \r\n  Changes                                                                                                                                                                                                                                           \r\n                             \r\n  - mcpgateway/admin_ui/constants.js:                                                                                                                                                                                                               \r\n    - Added servers entry to PANEL_SEARCH_CONFIG (was missing, causing potential refresh issues for virtual servers)\r\n    - Added documentation warning that all entity types used with delete/toggle operations must be registered                                                                                                                                       \r\n  - mcpgateway/admin_ui/formHandlers.js:                                                                                                                                                                                                            \r\n    - Renamed handleToggleSubmit → handleFormSubmitAndRefresh (kept legacy alias for compatibility)                                                                                                                                                 \r\n    - Use PANEL_SEARCH_CONFIG to retrieve partialPath and targetSelector instead of hardcoded patterns                                                                                                                                              \r\n    - Added ENTITY_DISPLAY_NAMES map for better confirmation dialog messages (singular names)                                                                                                                                                       \r\n    - Added validation that throws descriptive error if entity type not registered in config                                                                                                                                                        \r\n    - Enhanced refresh to preserve search query, tag filters, and pagination state                                                                                                                                                                  \r\n  - tests/unit/js/formHandlers.test.js:                                                                                                                                                                                                             \r\n    - Added test verifying A2A agents use correct a2a/partial path and #agents-table selector                                                                                                                                                       \r\n    - Added test verifying catalog/servers use correct servers/partial path and #servers-table selector                                                                                                                                             \r\n    - Added test verifying error thrown when PANEL_SEARCH_CONFIG missing for a type                                                                                                                                                                 \r\n    - Updated existing tests to use plural entity type keys (aligns with config)                                                                                                                                                                    \r\n                                                                                                                                                                                                                                                    \r\n  Testing                                                                                                                                                                                                                                           \r\n                                                                                                                                                                                                                                                    \r\n  - ✅ Unit tests pass (4 new test cases)                                                                                                                                                                                                           \r\n  - ✅ Manual verification: A2A agent deletion now refreshes list immediately\r\n  - ✅ Manual verification: Server deletion refreshes correctly                                                                                                                                                                                     \r\n                                                                                                                                                                                                                                                    \r\n  Closes #4247       ",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4139643525",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-20T11:51:08+00:00",
+      "body": "### Summary\n\n  The PR correctly fixes the root cause: the old `handleToggleSubmit` used `${type}-table` and `${type}/partial` via string interpolation, which broke for A2A agents since `\"a2a-agents\"` doesn't map to `#a2a-agents-table` (actual: `#agents-table`) or `a2a-agents/partial` (actual:`a2a/partial`). Routing through `PANEL_SEARCH_CONFIG` is the right approach.\n\n###  What's good\n\n  - Core fix is correct — `PANEL_SEARCH_CONFIG[\"a2a-agents\"]` already had the right `partialPath` and `targetSelector`; using it as the source of truth eliminates the mismatch.\n  - Tests are meaningful — the new cases directly verify HTMX is called with the correct path and selector.\n  - `buildTableUrl` integration preserves pagination/search/filter state across deletes, a nice improvement over the original.\n  - Backward compatibility via export `const handleToggleSubmit = handleFormSubmitAndRefresh` is clean.\n  - Validation error thrown for unregistered types sits outside the try-catch, so it surfaces loudly during development.\n\nLGTM 🚀 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a3fa0ddcb3d72e60d74333bd5d4888138bf1f5b8",
+      "message": "fix(ui): A2A agent list now refreshes correctly after deletion\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-17T06:32:24+00:00"
+    },
+    {
+      "sha": "4272f71d289807926af4a498f449172002235755",
+      "message": "delete fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-17T07:10:22+00:00"
+    },
+    {
+      "sha": "9f9ad34e04cfbeb5f6a6386271b9e6b887d1b097",
+      "message": "refactor(ui): make PANEL_SEARCH_CONFIG registration mandatory and update tests to use correct entity types\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-17T07:28:13+00:00"
+    },
+    {
+      "sha": "0761e6a14d1cab47697f1b1b4bb0d926e04ba4e4",
+      "message": "Grammatical Issue Fixed\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-17T09:26:53+00:00"
+    },
+    {
+      "sha": "34492e89860a41f28405c755a4b3219bf70e42fb",
+      "message": " preserve table state on refresh and fix server deletion\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-17T09:57:34+00:00"
+    },
+    {
+      "sha": "3568e2252fe8396ab5a21b639cccc8aa56abc04b",
+      "message": "roots registered\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-17T11:12:11+00:00"
+    },
+    {
+      "sha": "1470574f90d37e309617bd1f54d5f92e5ee551a8",
+      "message": "fix(ui): address council review findings for A2A agent delete refresh\n\n- Add fallbackOnly flag to roots PANEL_SEARCH_CONFIG to prevent HTMX\n  from hitting non-existent /partial endpoint\n- Check fetch response status before proceeding to refresh; treat\n  status 0 as success for opaque redirect responses\n- Move PANEL_SEARCH_CONFIG validation inside try/catch for graceful\n  alert + navigateAdmin fallback on missing config\n- Guard document.getElementById against null search/tag input IDs\n- Add roots display name to ENTITY_DISPLAY_NAMES\n- Preserve search/tag state in catch block fallback navigation\n- Improve test cleanup: delete global mocks in afterEach, mock\n  navigateAdmin for reliable assertions\n- Add tests for roots fallbackOnly, fetch failure, opaque redirect\n  (status 0), and missing config graceful fallback\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T20:25:47+00:00"
+    },
+    {
+      "sha": "923703ac5d0127649ff0d8edf45b91f47f80d48d",
+      "message": "test(ui): fix vitest failures in formHandlers tests\n\nReplace delete global.fetch / delete global.alert in afterEach with\nsafe default mocks. This fixes:\n- vi.spyOn(global, 'fetch') failing when fetch was deleted\n- expect(global.alert) failing when alert was deleted\n- Unhandled ReferenceError when catch block calls alert()\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T20:35:29+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 362,
+  "deletions": 35,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:21.935317",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:21.936331",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4260,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4260.json"
+  }
+}

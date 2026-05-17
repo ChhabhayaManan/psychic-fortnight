@@ -1,0 +1,80 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1957,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1957"
+  },
+  "metadata": {
+    "title": "perf: eager load EmailTeam relationship in Tool model to eliminate N+1 queries",
+    "state": "closed",
+    "created_at": "2026-01-07T18:10:08+00:00",
+    "updated_at": "2026-01-07T21:13:58+00:00",
+    "closed_at": "2026-01-07T21:12:28+00:00",
+    "merged_at": "2026-01-07T21:12:28+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\n- Add `email_team` relationship to the `Tool` model with `lazy=\"joined\"` for automatic eager loading\r\n- Add `team` property on `Tool` that returns the team name from the eagerly-loaded relationship\r\n- Remove manual team name fetching code (`_get_team_name` method) and explicit JOIN queries in `tool_service.py`\r\n\r\nThis simplifies the codebase while improving query efficiency by leveraging SQLAlchemy's relationship eager loading instead of manual queries.\r\n\r\nCloses #1964",
+  "comments": [
+    {
+      "id": "2669602871",
+      "author": "Copilot",
+      "created_at": "2026-01-07T18:17:52+00:00",
+      "body": "The `team` attribute is being set here, but in the new model definition (mcpgateway/db.py:2823-2830), `team` is now a read-only property without a setter. This will raise an AttributeError at runtime when trying to set this value. The mock should set `tool.team_id` and `tool.email_team` instead, or the Tool model needs to be updated with a setter for the `team` property.\n```suggestion\n    tool.team_id = None\n    tool.email_team = None\n```"
+    },
+    {
+      "id": "2669602900",
+      "author": "Copilot",
+      "created_at": "2026-01-07T18:17:52+00:00",
+      "body": "The relationship should include `viewonly=True` parameter since it uses a filtered primaryjoin condition (EmailTeam.is_active == True). Without this, SQLAlchemy may attempt to use this relationship for write operations, which could lead to unexpected behavior. The relationship should be defined as read-only since it includes filtering logic.\n```suggestion\n        lazy=\"joined\",\n        viewonly=True,\n```"
+    },
+    {
+      "id": "2669602923",
+      "author": "Copilot",
+      "created_at": "2026-01-07T18:17:53+00:00",
+      "body": "Using `lazy=\"joined\"` causes SQLAlchemy to automatically add a LEFT OUTER JOIN to email_teams on every Tool query, even when the team name is not needed. This can negatively impact performance, especially for high-traffic operations like tool invocations where only the team_id is required for logging. Consider using `lazy=\"selectin\"` or `lazy=\"select\"` instead, which would only load the team when explicitly accessed. Alternatively, use explicit `joinedload()` options in queries that actually need the team name (like in list_tools).\n```suggestion\n    # Relationship for loading team names (only active teams)\n    email_team: Mapped[Optional[\"EmailTeam\"]] = relationship(\n        \"EmailTeam\",\n        primaryjoin=\"and_(Tool.team_id == EmailTeam.id, EmailTeam.is_active == True)\",\n        foreign_keys=[team_id],\n        lazy=\"selectin\",\n```"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3636218272",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-07T18:17:53+00:00",
+      "body": "## Pull request overview\n\nThis PR refactors the Tool model to use SQLAlchemy relationship-based eager loading for the EmailTeam association, replacing manual team name fetching code throughout the service layer. The changes aim to eliminate N+1 query problems by leveraging SQLAlchemy's built-in eager loading capabilities.\n\n**Key changes:**\n- Added `email_team` relationship on Tool model with `lazy=\"joined\"` for automatic eager loading of active teams\n- Introduced read-only `team` property that returns team name from the eagerly-loaded relationship\n- Removed manual team name queries and the `_get_team_name` method from tool_service.py\n\n### Reviewed changes\n\nCopilot reviewed 3 out of 3 changed files in this pull request and generated 3 comments.\n\n| File | Description |\n| ---- | ----------- |\n| mcpgateway/db.py | Adds `email_team` relationship with eager loading and `team` property to Tool model |\n| mcpgateway/services/tool_service.py | Removes manual team fetching logic and simplifies query code to rely on relationship loading |\n| tests/unit/mcpgateway/services/test_tool_service.py | Updates test mocks to align with new structure and removes now-unused imports |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3636827366",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-07T21:13:49+00:00",
+      "body": "Rebased and refactored"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "1e7d003c026b24fb4c8a6c7fc6968860fd52c644",
+      "message": "perf: eager load EmailTeam relationship in Tool model to eliminate N+1 queries\n\nAdd email_team relationship with lazy=\"joined\" to Tool model, replacing\nmanual team name lookups with a single JOIN query. This eliminates N+1\nquery patterns when fetching tools with their team names.\n\nChanges:\n- Add email_team relationship to Tool class with lazy=\"joined\"\n- Add primaryjoin condition to filter only active teams (is_active == True)\n- Add team property to Tool class for convenient team name access\n- Document the team property in Tool class docstring\n- Remove _get_team_name helper method from tool_service.py\n- Remove manual team_map batch loading in list_tools\n- Remove manual outerjoin/add_columns in list_server_tools and list_tools_for_user\n- Update tests to use new query pattern (.scalars().all())\n- Fix flake8 issues in test file\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jonpspri@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-05T20:48:38+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 106,
+  "deletions": 99,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:55.964661",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:55.966084",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1957,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1957.json"
+  }
+}

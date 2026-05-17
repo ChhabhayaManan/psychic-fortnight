@@ -1,0 +1,101 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3353,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3353"
+  },
+  "metadata": {
+    "title": "refactor(makefile): parameterize target families and add deprecation framework",
+    "state": "closed",
+    "created_at": "2026-03-01T17:06:32+00:00",
+    "updated_at": "2026-03-12T21:16:55+00:00",
+    "closed_at": "2026-03-12T21:16:53+00:00",
+    "merged_at": "2026-03-12T21:16:53+00:00",
+    "author": "jonpspri",
+    "labels": [
+      "chore",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Consolidate near-duplicate Makefile target families into parameterized versions with variables, reducing ~120 lines of boilerplate\n- Add `is_true` and `deprecated_target` helper macros with per-target removal version (`v1.2.0`)\n- Introduce `# deprecated:` tag system that `make help` renders as a highlighted section (dim yellow) at the end of help output\n- Convert impacted targets (`black`, `isort`, `ruff`, `pylint`, `future-proof-ruff`) from `$(VENV_DIR)/bin/<tool>` to `uv run`\n- Update documentation (tuning.md, ADR-025, DEVELOPING.md) to reference new parameterized invocations\n- Add `docker-nuke` target for full container environment cleanup (stops all containers, removes images, volumes, networks, and build cache)\n- Add Claude Code skills for pr-review, pr-risk-scoring, and sprint-plan\n- Update `.gitignore` to track `.claude/skills/` directory\n\n### Targets consolidated\n\n| Family | Before | After | Mechanism |\n|--------|--------|-------|-----------| \n| black / isort | 4 targets | 2 parameterized + 2 deprecated stubs | `CHECK=1` variable |\n| ruff | 4 targets | 1 parameterized + 3 deprecated stubs | `RUFF_MODE=check\\|fix\\|format` |\n| lint-changed/staged/commit | 3 near-identical targets | 3 thin call sites via `lint_git_files` macro | `define/endef` |\n| test-ui-* | 12 targets with repeated boilerplate | 12 thin call sites via `run_playwright_test` macro | `define/endef` |\n| container-run-* | 9 targets | 1 parameterized + 8 deprecated stubs | `CONTAINER_SSL`, `CONTAINER_HOST_NET`, `CONTAINER_JWT`, `CONTAINER_HTTP_SERVER` |\n\n### Deprecated aliases\n\nAll old target names still work but emit a warning with the removal version:\n```\n  ⚠️  WARNING: \"container-run-ssl\" is deprecated. Use \"make container-run CONTAINER_SSL=1\" instead.\n     This alias will be removed in v1.2.0.\n```\n\n`make help` now shows a dedicated deprecated targets section at the bottom.\n\n### New target: `docker-nuke`\n\nDestructive cleanup target that removes ALL containers, images, volumes, networks, and build cache. Includes an interactive confirmation prompt before proceeding.\n\n### Claude Code skills\n\nAdded three reusable skills under `.claude/skills/`:\n- **pr-review** — structured code review for feature branches with rebase, security/correctness checks\n- **pr-risk-scoring** — score open PRs by risk level and generate CSV reports\n- **sprint-plan** — plan sprints based on current project issues\n\n## Test plan\n\n- [ ] `make help` displays deprecated section with yellow highlighting\n- [ ] `make black CHECK=1 TARGET=mcpgateway/` runs dry-run check\n- [ ] `make ruff RUFF_MODE=fix TARGET=mcpgateway/` runs ruff fix\n- [ ] `make black-check` shows deprecation warning then runs correctly\n- [ ] `make ruff-fix` shows deprecation warning then runs correctly\n- [ ] `make lint-quick` works end-to-end (calls parameterized targets internally)\n- [ ] `make lint-fix` works end-to-end\n- [ ] `make container-run-ssl` shows deprecation warning then delegates\n- [ ] `make pylint TARGET=mcpgateway/` runs via `uv run` without venv activation\n- [ ] `make docker-nuke` prompts for confirmation and cleans up when confirmed",
+  "comments": [
+    {
+      "id": "2869504610",
+      "author": "Copilot",
+      "created_at": "2026-03-01T17:14:19+00:00",
+      "body": "The `help` recipe captures `# deprecated:` lines via command substitution (`deprecated=$(...)`). In POSIX shells (incl. bash), command substitution strips/replaces newlines, so multiple deprecated entries will be collapsed into a single space-separated line and the `while read` loop won’t render one target per line. Consider streaming the grep/sed output directly into the loop (and use a separate `grep -q`/status check to decide whether to print the header) to preserve line breaks.\n```suggestion\n\t@if grep -q \"^# deprecated:\" Makefile; then \\\n\t\tprintf '\\n\\033[33m⚠️  DEPRECATED TARGETS (still work, will be removed in stated version)\\033[0m\\n'; \\\n\t\tgrep \"^# deprecated:\" Makefile | sed 's/^# deprecated: //' | while IFS= read -r line; do \\\n```"
+    },
+    {
+      "id": "2869504621",
+      "author": "Copilot",
+      "created_at": "2026-03-01T17:14:19+00:00",
+      "body": "`black` now runs via `uv run` without activating `$(VENV_DIR)` and without `--active`/explicit interpreter selection. The rest of the Makefile’s Python workflows consistently `source $(VENV_DIR)/bin/activate` and use `uv run --active` (e.g., the test targets), and Black/Isort/Ruff/Pylint are in the `dev` dependency group (pyproject.toml), not runtime deps. As written, `make black` may create/use a separate `./.venv` and/or fail because dev tools aren’t present, diverging from the project’s intended venv. Recommend running these tools in the existing `$(VENV_DIR)` environment (or explicitly pointing uv at `$(VENV_DIR)`), so they use the same installed dev dependencies as the rest of the Makefile.\n```suggestion\n\t\techo \"🎨  black --check $(TARGET)...\" && source $(VENV_DIR)/bin/activate && uv run --active black -l 200 --check --diff $(TARGET); \\\n\telse \\\n\t\techo \"🎨  black $(TARGET)...\" && source $(VENV_DIR)/bin/activate && uv run --active black -l 200 $(TARGET); \\\n\tfi\n\nisort: uv                           ## 🔀  Sort imports (CHECK=1 for dry-run)\n\t@if [ -n \"$(call is_true,$(CHECK))\" ]; then \\\n\t\techo \"🔀  isort --check $(TARGET)...\" && source $(VENV_DIR)/bin/activate && uv run --active isort --check-only --diff $(TARGET); \\\n\telse \\\n\t\techo \"🔀  isort $(TARGET)...\" && source $(VENV_DIR)/bin/activate && uv run --active isort $(TARGET); \\\n```"
+    },
+    {
+      "id": "2869504629",
+      "author": "Copilot",
+      "created_at": "2026-03-01T17:14:19+00:00",
+      "body": "The updated `pylint` target drops `PYLINTHOME` (previously pointing at `$(CURDIR)/.pylint-cache`). `.pylint-cache` is explicitly gitignored, which suggests the repo expects pylint’s cache to live there. Without `PYLINTHOME`, pylint will default to a user-level cache location, reducing reproducibility and potentially impacting CI caching/debuggability. Consider restoring `PYLINTHOME` (and any other required env) when invoking pylint.\n```suggestion\n\t@mkdir -p .pylint-cache\n\t@PYLINTHOME=\"$(CURDIR)/.pylint-cache\" uv run pylint -j 0 --fail-on E --fail-under 10 $(TARGET)\n```"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3872773592",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-01T17:14:19+00:00",
+      "body": "## Pull request overview\n\nThis PR refactors the repository’s Makefile target “families” into parameterized targets, adds a deprecation framework (warnings + help output section), and updates docs to match the new invocations—while migrating several Python tooling targets to `uv run`.\n\n**Changes:**\n- Introduces `is_true` / `deprecated_target` helpers and a `# deprecated:` tagging system that `make help` renders as a dedicated deprecated section.\n- Consolidates/parameterizes formatting/lint/container-run/playwright target families, keeping old names as deprecated aliases.\n- Updates contributor and ops documentation to reference the new parameterized `make` invocations.\n\n### Reviewed changes\n\nCopilot reviewed 4 out of 4 changed files in this pull request and generated 3 comments.\n\n| File | Description |\n| ---- | ----------- |\n| `Makefile` | Adds deprecation/help rendering, parameterized targets (black/isort/ruff/container-run/playwright), and deprecated alias stubs. |\n| `docs/docs/manage/tuning.md` | Updates container-run examples to the new `CONTAINER_*` variable style. |\n| `docs/docs/architecture/adr/025-granian-http-server.md` | Updates ADR container-run examples to the new parameterized invocations. |\n| `DEVELOPING.md` | Updates contributor docs for new black/isort/ruff usage variables. |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3916190109",
+      "author": "gandhipratik203",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-09T15:20:19+00:00",
+      "body": "- It could be beneficial to split the echo-delay test server changes (mcp-servers/rust/fast-test-server/src/main.rs and tests/loadtest/locustfile_echo_delay.py) into a separate PR, as they appear unrelated to the Makefile and skills-related updates.\n- That would allow the test infrastructure to merge quickly, while the Makefile and skills changes go through their own review cycle at their own pace."
+    },
+    {
+      "id": "3939812668",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T21:16:04+00:00",
+      "body": "LGTM. Rebased, reviewed, and added differential test coverage for the session pool discard behavior. All 135 session pool coverage tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "4b393286f0a3d3c5acf4eaf118a919770065f940",
+      "message": "refactor(makefile): parameterize target families, add deprecation framework, and unify pytest ignores\n\n- Consolidate black/isort/ruff/container-run/playwright target families into\n  parameterized versions with variables (CHECK=1, RUFF_MODE=, CONTAINER_SSL=1, etc.)\n- Add is_true and deprecated_target helper macros with per-target removal version (v1.2.0)\n- Introduce # deprecated: tag system rendered in make help as highlighted section\n- Fix help recipe to stream grep output directly into while-read loop (preserves newlines)\n- Add PYTEST_IGNORE variable to unify --ignore flags across all pytest targets\n- Convert black/isort/ruff/pylint targets from $(VENV_DIR)/bin/<tool> to uv run\n- Add docker-nuke target for full container environment cleanup\n- Add Claude Code skills for pr-review, pr-risk-scoring, and sprint-plan\n- Revise pr-review skill for conciseness (183 -> 80 lines) and add structured output format\n- Fix playwright debug/update-snapshots targets to use fail mode instead of continue\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-04T19:56:48+00:00"
+    },
+    {
+      "sha": "b582e1f8cbf930c0f2395cc5571d409597f3e7f2",
+      "message": "feat(loadtest): add echo-delay load test, parameterize docker-compose, and evict broken sessions\n\nAdd a Streamable HTTP echo-with-delay Locust test to measure gateway\nthroughput with I/O-bound backends. Parameterize docker-compose for\ngateway replicas, resource limits, worker count, and locustfile\nselection. The fast_test_server echo tool now accepts an optional delay\nparameter. Fix broken session recycling in MCP session pool by evicting\nsessions that encountered transport errors instead of returning them.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-06T19:12:29+00:00"
+    },
+    {
+      "sha": "b2ca0b22684a3240f9ac28400b95180e6f6d5ba9",
+      "message": "test: add differential coverage for session pool discard behavior\n\nCover the release(discard=True) path and context manager error handling\nadded in the session pool eviction fix. Tests verify:\n- Discarded sessions are closed and not returned to pool\n- Semaphore is released on discard (including missing semaphore edge case)\n- Eviction counter increments on discard\n- Context manager passes discard=True on exception, discard=False on success\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T21:08:57+00:00"
+    }
+  ],
+  "files_changed": 18,
+  "additions": 2017,
+  "deletions": 375,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:04.624815",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:04.626637",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3353,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3353.json"
+  }
+}

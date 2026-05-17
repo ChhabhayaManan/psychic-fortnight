@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4679,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4679"
+  },
+  "metadata": {
+    "title": "fix(sso): support IdP-initiated chiclet flow on /auth/sso/login",
+    "state": "open",
+    "created_at": "2026-05-08T16:25:13+00:00",
+    "updated_at": "2026-05-08T16:26:08+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "igor-raits",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# ✨ Feature / Enhancement PR\n\n## 🔗 Epic / Issue\n_Link to the epic or parent issue:_\nCloses #\n\n---\n\n## 🚀 Summary (1-2 sentences)\nMake `/auth/sso/login/{provider_id}` usable as an IdP-initiated chiclet entry point: `redirect_uri` becomes optional (server-built default) and the response is content-negotiated so browsers get a 302 to the IdP while XHR clients keep getting JSON.\n\n---\n\n## 🧪 Checks\n\n- [x] `make lint` passes (`black`, `ruff` clean on the touched file)\n- [ ] `make test` passes\n- [ ] CHANGELOG updated (if user-facing)\n\n---\n\n## 📓 Notes\n\nTwo changes to `mcpgateway/routers/sso.py`:\n\n1. **`redirect_uri` is now optional.** When omitted, it is built from `request.url_for(\"handle_sso_callback\", ...)` so it resolves to this gateway's own `/auth/sso/callback/{provider_id}` on the request origin (honouring `app_root_path` / proxy headers). Skipping the user-input `_validate_redirect_uri` check is safe as long as the request host is itself trustworthy (proxy-normalized in production); that check exists to defend against open redirects on caller-supplied URIs, not server-built ones.\n\n2. **Content-negotiated response.** Browser navigation (`Accept: text/html` without `application/json`) gets a 302 straight to the IdP's authorization URL; XHR clients sending `Accept: application/json` keep getting the `SSOLoginResponse` JSON they parse today. The session-binding cookie is set on the `RedirectResponse` explicitly because returning a `Response` object bypasses the injected `response` parameter.\n\nCombined effect: an Okta app can register\n\n    Login Flow = Redirect to app to initiate login (OIDC Compliant)\n    Login URI  = https://<host>/auth/sso/login/okta\n\nand clicking the chiclet lands the user signed in at `/admin` in one hop. The existing `/admin/login` form path is byte-identical to before.\n\n```mermaid\nsequenceDiagram\n    participant User\n    participant Okta\n    participant Gateway\n    User->>Okta: clicks chiclet\n    Okta->>User: 302 to /auth/sso/login/okta\n    User->>Gateway: GET /auth/sso/login/okta (Accept: text/html)\n    Gateway->>User: 302 to Okta /authorize (cookie set)\n    User->>Okta: /authorize\n    Okta->>User: 302 to /auth/sso/callback/okta?code=...\n    User->>Gateway: GET /auth/sso/callback/okta\n    Gateway->>User: signed in, 302 to /admin\n```",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "04446337563f9c75ad69cf233fcfffc4a7a307e2",
+      "message": "fix(sso): support IdP-initiated chiclet flow on /auth/sso/login\n\nTwo changes to mcpgateway/routers/sso.py so an Okta (or any OIDC\nprovider) IdP-initiated login URL pointed at /auth/sso/login/{provider}\njust works as a chiclet entry point, while the existing SP-initiated\nform on the gateway's login page keeps behaving as before.\n\n1. Make `redirect_uri` optional with a sensible default. When omitted,\n   build it from `request.url_for(\"handle_sso_callback\", ...)` so it\n   resolves to this gateway's own /auth/sso/callback/{provider} on the\n   request origin (honouring app_root_path / proxy headers). Skipping\n   the user-input `_validate_redirect_uri` check is safe as long as the\n   request host is itself trustworthy (proxy-normalized in production);\n   that check exists to defend against open redirects on caller-supplied\n   URIs, not server-built ones.\n\n2. Content-negotiate the response. Browser navigation (Accept: text/html\n   without application/json) gets a 302 straight to the IdP's\n   authorization URL; XHR clients sending Accept: application/json keep\n   getting the SSOLoginResponse JSON they parse today. The\n   session-binding cookie is set on the RedirectResponse explicitly\n   because returning a Response object bypasses the injected \\`response\\`\n   parameter.\n\nCombined effect: an Okta app can register\n\n    Login Flow = Redirect to app to initiate login (OIDC Compliant)\n    Login URI  = https://<host>/auth/sso/login/okta\n\nand clicking the chiclet lands the user signed in at /admin in one hop.\nThe existing /admin/login form path is byte-identical to before.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\nSigned-off-by: Igor Raits <igor.raits@gmail.com>",
+      "author": "Igor Raits",
+      "date": "2026-05-08T15:55:39+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 53,
+  "deletions": 23,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:15.654879",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:15.657075",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4679,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4679.json"
+  }
+}

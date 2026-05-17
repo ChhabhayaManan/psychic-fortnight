@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1927,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1927"
+  },
+  "metadata": {
+    "title": "Move metrics rollup percentile computation to PostgreSQL",
+    "state": "closed",
+    "created_at": "2026-01-06T07:33:10+00:00",
+    "updated_at": "2026-01-13T12:06:46+00:00",
+    "closed_at": "2026-01-13T12:06:44+00:00",
+    "merged_at": "2026-01-13T12:06:44+00:00",
+    "author": "TS0713",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Optimize Hourly Rollups Using PostgreSQL-Native Percentile Computation\r\n### Performance & Stability Improvements\r\n\r\nThis PR addresses issue #1810 by improving the performance, memory efficiency, and concurrency safety of the hourly metrics rollup pipeline.\r\n\r\nWhen running on PostgreSQL, hourly rollups now use database-native percentile functions (percentile_cont) to compute p50 / p95 / p99. This removes unnecessary Python-side computation, reduces CPU overhead, and consolidates rollups into a single grouped aggregation query. For non-Postgres databases, the existing Python-based percentile logic is preserved to maintain compatibility.\r\n\r\nTo prevent high memory usage and potential OOM crashes, aggregation queries now stream results in configurable batches using YIELD_BATCH_SIZE (default: 1000, env-configurable), instead of materializing the full result set in memory. This keeps memory usage predictable and stable under high traffic volumes.\r\n\r\nRollup writes are now fully dialect-aware via _upsert_rollup:\r\n\r\nPostgreSQL and SQLite use native UPSERT semantics.\r\n\r\nOther dialects fall back to a safe Python insert/update flow with explicit race-condition handling.\r\n\r\nThese changes prevent duplicate rows, race conditions, memory spikes, and intermittent rollup failures under concurrent load.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3655449640",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-13T12:06:35+00:00",
+      "body": "Rebased, fixed"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "573ed9f440b06fe5e2b400951954adbeba2058c1",
+      "message": "feat: Move metrics rollup percentile computation to PostgreSQL\n\n- Add PostgreSQL-native percentile_cont for p50/p95/p99 calculations\n- Implement dialect-aware UPSERT with PostgreSQL/SQLite native support\n- Add configurable YIELD_BATCH_SIZE for streaming query results\n- Fallback to Python-based percentile for non-PostgreSQL databases\n- Use savepoint for fallback upsert to avoid full transaction rollback\n- Document new settings in README, Helm chart, and configuration docs\n\nCloses #1810\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-13T10:28:29+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 365,
+  "deletions": 176,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:45.999073",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:46.001670",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1927,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1927.json"
+  }
+}

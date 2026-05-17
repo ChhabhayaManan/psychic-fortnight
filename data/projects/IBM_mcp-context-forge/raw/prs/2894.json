@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2894,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2894"
+  },
+  "metadata": {
+    "title": "fix: allow team-scoped RBAC roles for mutate operations without explicit team_id",
+    "state": "closed",
+    "created_at": "2026-02-12T21:59:50+00:00",
+    "updated_at": "2026-02-13T00:54:24+00:00",
+    "closed_at": "2026-02-13T00:54:23+00:00",
+    "merged_at": "2026-02-13T00:54:23+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "ica"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- RBAC `require_permission` decorator excluded team-scoped roles (e.g. `developer`, `team_admin`, `platform_admin`) when `team_id` could not be derived from the request, causing 403 on create/delete operations\n- Changed the fail-closed mutate logic to use `check_any_team=True` for both read and mutate operations, separating authorization from resource scoping\n- Applied the same fix to `require_any_permission` for consistency\n- Added `team_id` injection to `handleDeleteSubmit()` in admin.js as defense-in-depth\n\n### Root cause\n\n`rbac.py:552-558` had mutate-specific fail-closed logic that proceeded with `team_id=None` when team context couldn't be derived. This caused `_get_user_roles()` to exclude all team-scoped roles with a specific `scope_id`, resulting in 403 for any user whose permissions came from team-scoped role assignments.\n\n### What was affected\n\n- Team developers creating gateways/servers from \"All Teams\" view or via API without `team_id` in body (#2883)\n- Platform admins deleting gateways/servers where the resource had `team_id=NULL` or delete form lacked `team_id` (#2891)\n\n### Why this is safe\n\nThe RBAC check only answers \"does this user have this permission in any team?\" — resource team assignment is enforced downstream by `verify_team_for_user()`, token membership checks, and inline team validation in endpoint logic. Read operations already used `check_any_team=True` without security issues.\n\n### Verified\n\n| Test | Before | After |\n|------|--------|-------|\n| Team dev `POST /gateways` (no team_id) | 403 | RBAC passes |\n| Team dev `POST /servers` (no team_id) | 403 | 201 |\n| Admin `DELETE /gateways/{id}` | 403 | 200 |\n| Admin UI \"All Teams\" → Add Gateway | 403 | RBAC passes |\n| Admin UI → Delete Gateway | 403 | Success |\n| Viewer `POST /gateways` | 403 | 403 (no regression) |\n| Unauthenticated `POST /gateways` | 401 | 401 (no regression) |\n\nCloses #2883\nCloses #2891",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "2bd104cff41c7d1ffd671100413fcbb561ab974c",
+      "message": "fix: allow team-scoped RBAC roles for mutate operations without explicit team_id\n\nThe RBAC `require_permission` decorator's fail-closed mutate logic excluded\nteam-scoped roles when team_id could not be derived from the request. This\ncaused 403 errors for team developers creating gateways/servers and platform\nadmins deleting resources.\n\nThe fix uses `check_any_team=True` for both read and mutate operations when\nno team_id is available, separating authorization (\"does this user have the\npermission?\") from resource scoping (\"which team owns this?\"). Team assignment\nis still enforced downstream by endpoint logic (verify_team_for_user, token\nmembership checks).\n\nAlso adds team_id injection to delete forms in admin.js as defense-in-depth.\n\nCloses #2883\nCloses #2891\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-12T21:59:31+00:00"
+    },
+    {
+      "sha": "39f3396b13c9a60ed536d702ad4c0f4be16cbbd1",
+      "message": "fix: harden bootstrap platform_admin role assignment with DB fallback\n\nIf the platform_admin role creation fails but the role already exists in\nthe DB (e.g. from a previous boot), the assignment was silently skipped\nbecause the role wasn't in the created_roles list. Now falls back to a\nDB lookup. Also improves error messages to mention the downstream impact\n(allow_admin_bypass=False routes returning 403).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-12T22:16:51+00:00"
+    },
+    {
+      "sha": "3072f8eec7425cbbff075651f16d369c66b276eb",
+      "message": "fix: repair invitation acceptance and add E2E RBAC Playwright tests\n\nFix accept_invitation returning bool instead of EmailTeamMember, which\ncaused the router to always return 404 despite memberships being created\nin the DB. Add comprehensive E2E Playwright tests for RBAC permission\nenforcement on admin UI operations (regression tests for #2883 and #2891).\n\nCloses #2883\nCloses #2891\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T00:35:48+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 1137,
+  "deletions": 73,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:06.672045",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:06.675332",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2894,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2894.json"
+  }
+}

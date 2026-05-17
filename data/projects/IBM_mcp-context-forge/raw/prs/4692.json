@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4692,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4692"
+  },
+  "metadata": {
+    "title": "fix: apply OTLP insecure exporter setting",
+    "state": "open",
+    "created_at": "2026-05-10T11:24:12+00:00",
+    "updated_at": "2026-05-12T14:39:02+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "zxyasfas",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "vishu-bh"
+    ]
+  },
+  "description": "## Summary\nFixes #4644.\n\n`OTEL_EXPORTER_OTLP_INSECURE` is defined and documented, but `init_telemetry()` did not pass that setting into OTLP exporter construction. This makes the setting effective for OTLP tracing exporters.\n\n## Reproduction Steps\nConfigure OTLP tracing with `OTEL_EXPORTER_OTLP_INSECURE=true` against a collector that requires insecure transport or skipped TLS verification. The current initialization path builds the exporter with only `endpoint` and `headers`, so the setting is ignored.\n\n## Root Cause\n`mcpgateway/observability.py` intentionally avoided passing `insecure` because not every OTLP exporter constructor supports that exact keyword. As a result, the project-level configuration value was never applied.\n\n## Fix Description\n- Add a small constructor-compatibility helper that inspects exporter kwargs before passing optional settings.\n- Pass `insecure` to gRPC OTLP exporters that support it.\n- For HTTP OTLP exporters, map the project insecure setting to `certificate_file=False` when supported, matching the exporter behavior that uses `certificate_file` as the `requests` TLS verification value.\n- Keep older exporter versions compatible by omitting unsupported kwargs.\n- Add regression coverage for both gRPC and HTTP OTLP initialization paths.\n\n## Verification\n\n| Check | Command | Status |\n|---|---|---|\n| Observability unit tests | `PYTHONUTF8=1 uv run --python 3.12 --no-dev --extra observability --with pytest --with pytest-asyncio pytest tests/unit/mcpgateway/test_observability.py -q` | Passed |\n| Ruff format | `PYTHONUTF8=1 uv run --python 3.12 --no-dev --with ruff ruff format --check mcpgateway/observability.py tests/unit/mcpgateway/test_observability.py` | Passed |\n| Ruff check | `PYTHONUTF8=1 uv run --python 3.12 --no-dev --with ruff ruff check mcpgateway/observability.py tests/unit/mcpgateway/test_observability.py` | Passed |\n| Compile check | `py -3.12 -m py_compile mcpgateway/observability.py tests/unit/mcpgateway/test_observability.py` | Passed |\n\n## MCP Compliance (if relevant)\n- [ ] Matches current MCP spec\n- [ ] No breaking change to MCP clients\n\n## Checklist\n- [x] Code formatted\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4263786581",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-11T12:54:14+00:00",
+      "body": "Thanks @zxyasfas  for picking this up. The direction makes sense, and I like the compatibility-minded approach of checking exporter constructor support before passing newer kwargs.\n\nI found two things that I think need a small follow-up before this is ready:\n\n1. The gRPC path now makes the existing `OTEL_EXPORTER_OTLP_INSECURE` default effective. Since the current config default is `true`, deployments using a scheme-less endpoint like `collector:4317` may change from OpenTelemetry’s secure default to plaintext transport without explicitly opting in. Could we adjust this so insecure transport is only used when explicitly configured?\n\n2. For the HTTP path, `certificate_file=False` does not appear to disable verification with the real OpenTelemetry HTTP exporter. The exporter assigns this via `certificate_file or ...`, so `False` is ignored and verification remains enabled. That means the added fake-exporter test passes, but the real exporter behavior does not actually address the HTTP case. It would be great to update the test to exercise/reflect the real exporter behavior here.\n\nOverall this is close, but because the setting affects TLS/insecure transport behavior, I think we should tighten the default/explicit opt-in behavior and make sure the HTTP test matches the actual exporter implementation before merging."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f7fbcfffbf22870fe887a28e05647cd7837b6493",
+      "message": "fix: apply OTLP insecure exporter setting\n\nSigned-off-by: zxyasfas <3014940258@qq.com>",
+      "author": "zxyasfas",
+      "date": "2026-05-10T11:23:50+00:00"
+    },
+    {
+      "sha": "acdc1041cb4d473f6f588716f1b3bfd8b0953ef2",
+      "message": "fix: preserve OTLP exporter TLS defaults\n\nSigned-off-by: zxyasfas <3014940258@qq.com>",
+      "author": "zxyasfas",
+      "date": "2026-05-11T13:47:57+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 169,
+  "deletions": 8,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:04:21.690372",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:21.690817",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4692,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4692.json"
+  }
+}

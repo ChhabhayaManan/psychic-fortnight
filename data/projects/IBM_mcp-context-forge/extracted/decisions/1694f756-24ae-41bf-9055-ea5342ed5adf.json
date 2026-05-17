@@ -1,0 +1,39 @@
+{
+  "id": "1694f756-24ae-41bf-9055-ea5342ed5adf",
+  "title": "Key auth support for MCP Servers - closes #1580",
+  "summary": "## Summary\r\n\r\nAdd support for API key authentication via URL query parameters for upstream MCP servers that require this method (e.g., Tavily MCP).\r\n\r\nThis feature is disabled by default and requires explicit opt-in due to the inherent security risks of exposing API keys in URLs (CWE-598).\r\n\r\n## Motivation\r\n\r\nSome MCP servers (such as Tavily) require API key authentication via URL query parameters rather than HTTP headers. The existing authentication mechanisms (Basic, Bearer, OAuth, Custom Headers) all work through HTTP headers, making it impossible to connect to these services without this feature.\r\n\r\nCloses #1580\r\n\r\n## Changes\r\n\r\n### Database & Schema\r\n- Add `auth_query_params` JSON column to `gateways` table (Alembic migration)\r\n- Add `auth_query_param_key` and `auth_query_param_value` fields to GatewayCreate/Update schemas\r\n- Add `auth_query_param_key` and `auth_query_param_value_masked` fields to GatewayRead schema\r\n- Add Pydantic validators for feature flag and host allowlist enforcement\r\n\r\n### Configuration\r\n- Add `INSECURE_ALLOW_QUERYPARAM_AUTH` feature flag (default: `false`)\r\n- Add `INSECURE_QUERYPARAM_AUTH_ALLOWED_HOSTS` allowlist (default: `[]`)\r\n- Update `.env.example` with documentation\r\n- Update Helm chart `values.yaml`\r\n\r\n### Services\r\n- **GatewayService**: Handle query_param auth in register/update, apply to SSE/StreamableHTTP connections\r\n- **ToolService**: Decrypt and apply query params to URL during tool invocation\r\n- **ResourceService**: Apply query params to URL during resource fetch\r\n- **ExportService**: Include `auth_query_params` in gateway exports\r\n- **ImportService**: Handle `auth_query_params` in gateway imports\r\n\r\n### Utilities\r\n- Create `mcpgateway/utils/url_auth.py` with:\r\n  - `apply_query_param_auth()`: Append decrypted auth params to URLs\r\n  - `sanitize_url_for_logging()`: Redact sensitive params before logging\r\n  - `STATIC_SENSITIVE_PARAMS`: FrozenSet of known sensitive parameter names\r\n\r\n### Admin UI\r\n- Add \"Query Parameter (INSECURE)\" option to auth type dropdown\r\n- Add security warning banner when selected\r\n- Add input fields for parameter name and API key value\r\n- Handle display of masked values when editing existing gateways\r\n\r\n### Documentation\r\n- Add ADR-035: Query Parameter Authentication for Gateway Peers\r\n- Add usage guide: `docs/docs/using/query-param-auth.md`\r\n- Update README.md with new environment variables\r\n- Update CLAUDE.md with Alembic migration guidance\r\n\r\n## Security Architecture\r\n\r\n```\r\n┌─────────────────────────────────────────────────────────────────┐\r\n│                     Security Controls                           │\r\n├─────────────────────────────────────────────────────────────────┤\r\n│  Layer 1: Feature Flag (INSECURE_ALLOW_QUERYPARAM_AUTH)         │\r\n│           └─ Disabled by default, requires explicit opt-in      │\r\n├─────────────────────────────────────────────────────────────────┤\r\n│  Layer 2: Host Allowlist (INSECURE_QUERYPARAM_AUTH_ALLOWED_HOSTS)│\r\n│           └─ Empty = any host, Non-empty = strict allowlist     │\r\n├─────────────────────────────────────────────────────────────────┤\r\n│  Layer 3: Encrypted Storage (AUTH_ENCRYPTION_SECRET)            │\r\n│           └─ API keys encrypted at rest in database             │\r\n├─────────────────────────────────────────────────────────────────┤\r\n│  Layer 4: Log Sanitization (sanitize_url_for_logging)           │\r\n│           └─ Sensitive params redacted before any logging       │\r\n├─────────────────────────────────────────────────────────────────┤\r\n│  Layer 5: UI Warning                                            │\r\n│           └─ Explicit security warning in Admin UI              │\r\n└─────────────────────────────────────────────────────────────────┘\r\n```\r\n\r\n## Example Usage\r\n\r\n### Enable the Feature\r\n```bash\r\nINSECURE_ALLOW_QUERYPARAM_AUTH=true\r\nINSECURE_QUERYPARAM_AUTH_ALLOWED_HOSTS=[\"mcp.tavily.com\"]\r\n```\r\n\r\n### Register Tavily MCP\r\n```bash\r\ncurl -X POST http://localhost:4444/admin/gateways \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -d '{\r\n    \"name\": \"Tavily Search\",\r\n    \"url\": \"https://mcp.tavily.com\",\r\n    \"transport\": \"sse\",\r\n    \"auth_type\": \"query_param\",\r\n    \"auth_query_param_key\": \"tavilyApiKey\",\r\n    \"auth_query_param_value\": \"tvly-your-api-key\"\r\n  }'\r\n```\r\n\r\n## Testing\r\n\r\n- [x] Unit tests for `url_auth.py` (19 tests)\r\n- [x] All existing tests pass (5182 passed)\r\n- [x] `make pylint` passes (10.00/10)\r\n- [x] `make flake8` passes\r\n- [x] `make bandit` passes\r\n- [x] Alembic migration verified (single head)\r\n\r\n## Checklist\r\n\r\n- [x] Code follows project conventions\r\n- [x] Tests added for new functionality\r\n- [x] Documentation updated (README, ADR, usage guide)\r\n- [x] Environment variables documented in `.env.example`\r\n- [x] Helm chart updated\r\n- [x] Security implications documented\r\n- [x] Commits signed (DCO)",
+  "reasoning": "Some MCP servers (such as Tavily) require API key authentication via URL query parameters rather than HTTP headers. The existing authentication mechanisms (Basic, Bearer, OAuth, Custom Headers) all work through HTTP headers, making it impossible to connect to these services without this feature.\r\n\r\nCloses #1580",
+  "confidence": 0.75,
+  "related_services": [
+    "tvly-your-api-key"
+  ],
+  "contributors": [
+    "crivetimihai"
+  ],
+  "tags": [
+    "rest",
+    "wxo",
+    "database",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "6d11f173-74a8-43d5-86aa-0d31e334413f",
+      "source_type": "pr",
+      "source_id": "2194",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/2194",
+      "contributor": "crivetimihai",
+      "timestamp": "2026-01-19T20:07:03Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2194.json"
+    }
+  ],
+  "timestamp": "2026-01-19T20:07:03Z",
+  "created_at": "2026-05-17T17:24:09.334542",
+  "updated_at": "2026-05-17T17:24:09.334544",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:24:09.335032",
+    "artifact_type": "decisions",
+    "artifact_id": "1694f756-24ae-41bf-9055-ea5342ed5adf"
+  }
+}

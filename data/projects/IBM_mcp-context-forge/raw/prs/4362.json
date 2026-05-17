@@ -1,0 +1,191 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4362,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4362"
+  },
+  "metadata": {
+    "title": "feat(runtime): enhance request validation and size limiting",
+    "state": "closed",
+    "created_at": "2026-04-21T07:08:14+00:00",
+    "updated_at": "2026-04-23T08:53:33+00:00",
+    "closed_at": "2026-04-23T08:53:32+00:00",
+    "merged_at": null,
+    "author": "MohanLaksh",
+    "labels": [
+      "ica",
+      "MUST",
+      "release-fix",
+      "ready"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nAdds comprehensive request validation and resource management controls to the Rust MCP runtime to improve robustness and operational reliability.\n\n## Review Feedback Addressed\n\nAll review findings from PR #4362 have been addressed:\n\n1. ✅ **Missing URL validation in backend functions** - Added validation to `send_transport_to_backend()` and `send_session_delete_to_backend()` \n2. ✅ **DNS_FAIL_CLOSED logic bug** - Fixed to properly handle DNS resolver errors with fail-closed policy\n3. ✅ **UrlValidator env var coupling** - Refactored to accept `RuntimeConfig` parameter instead of reading env vars directly\n4. ✅ **Invalid cargo test command** - Fixed documentation to use `cargo test --all-features`\n5. ✅ **Author attribution** - Standardized to \"Authors: Mihai Criveti\" across all files\n6. ✅ **Supply chain audit** - Added missing notes field to windows-registry trust entry\n\n### Critical Bug Fix\n\nFixed localhost validation false positive where the regex pattern `on\\w+\\s*=` was incorrectly matching query parameters like `session_id=`. Updated to `\\bon\\w+\\s*=` to only match HTML event handlers (onclick=, onerror=) as intended.\n\n## Changes\n\n### URL Validator Module (`url_validator.rs`)\n- Hostname resolution with DNS caching (5-minute TTL)\n- Network filtering with CIDR support\n- Configurable validation rules via RuntimeConfig\n- Localhost allowed by default for development convenience\n- Mock DNS resolver trait for deterministic testing\n- Fail-closed DNS resolution with configurable policy\n\n### Backend Request Validation\n- Applied validation to all backend HTTP requests (19 call sites including transport/session delete)\n- Centralized validation logic via `AppState::validate_backend_url()`\n- Fail-closed security pattern for invalid configurations\n\n### Request Size Controls\n- Configurable body size limits (default 10MB)\n- Applied via Axum `DefaultBodyLimit` layer\n- Returns 413 response for oversized payloads\n\n## Configuration\n\nNew environment variables:\n\n**URL Validation:**\n- `VALIDATION_ENABLED` - Enable/disable validation (default: true)\n- `MAX_URL_LENGTH` - Maximum URL length (default: 2048)\n- `ALLOW_LOCALHOST` - Allow localhost access (default: true)\n- `ALLOW_PRIVATE_NETWORKS` - Allow RFC1918 networks (default: false)\n- `BLOCKED_NETWORKS` - CIDR ranges to filter (comma-separated)\n- `BLOCKED_HOSTS` - Hostname blocklist (comma-separated)\n- `ALLOWED_NETWORKS` - Allowlist specific CIDR ranges (comma-separated)\n- `DNS_FAIL_CLOSED` - Fail closed on DNS errors (default: true)\n\n**Request Size:**\n- `MCP_RUST_MAX_REQUEST_BODY_SIZE_BYTES` - Body size limit (default: 10MB)\n\n## Testing\n\n**Test Coverage:**\n- ✅ 99 unit tests (including URL validator and body size tests)\n- ✅ 57 integration tests\n- ✅ 2 CLI tests\n- ✅ Total: 158 tests passing with `--all-features`\n\n**Quality Checks:**\n- ✅ Formatting clean (`cargo fmt --check`)\n- ✅ Linting clean (`cargo clippy -D warnings`)\n- ✅ Supply chain verification (`cargo vet`)\n- ✅ Release build successful\n- ✅ All pre-commit hooks passed\n\n**Run tests:**\n```bash\ncd crates/mcp_runtime\ncargo test --all-features\n```\n\n## Dependencies Added\n\n- `async-trait 0.1` - DNS resolver abstraction\n- `hickory-resolver 0.25` - DNS resolution with caching\n- `ipnetwork 0.21` - CIDR network filtering\n- `serial_test 3.4` - Test isolation (dev dependency)\n- `tower 0.5` features - Test utilities (dev dependency)\n\nAll new dependencies have cargo-vet exemptions.\n\n## Documentation\n\n- **README.md** - Added Configuration section with examples\n- **DEVELOPING.md** - Fixed invalid test command, added testing guidance\n\n## Key Features\n\n1. **DNS Caching** - 5-minute TTL reduces repeated DNS lookups for performance\n2. **Fail-Closed Security** - Invalid CIDR configuration prevents startup rather than silently ignoring\n3. **Complete Coverage** - All backend HTTP call sites protected with validation\n4. **Development Friendly** - Localhost allowed by default to match backend_rpc_url default (127.0.0.1)\n5. **Comprehensive Testing** - Mock DNS resolver enables deterministic validation tests\n6. **RuntimeConfig Integration** - Centralized configuration instead of scattered env var reads\n\n## Backwards Compatibility\n\n✅ No breaking changes - all validation uses secure defaults\n\n## Related\n\nAddresses: Issue #4110\n\n---\n\n**Ready for re-review. All feedback addressed.**",
+  "comments": [
+    {
+      "id": "3116007581",
+      "author": "dawid-nowak",
+      "created_at": "2026-04-21T08:16:13+00:00",
+      "body": "hardcoded value, should be const variable"
+    },
+    {
+      "id": "3116082742",
+      "author": "dawid-nowak",
+      "created_at": "2026-04-21T08:29:57+00:00",
+      "body": "hardcoded value which, should be const variable shared with runtime.rs"
+    },
+    {
+      "id": "3116095495",
+      "author": "dawid-nowak",
+      "created_at": "2026-04-21T08:32:14+00:00",
+      "body": "why was this changed ??"
+    },
+    {
+      "id": "3117080996",
+      "author": "MohanLaksh",
+      "created_at": "2026-04-21T11:28:27+00:00",
+      "body": "It was added by cargo vet when we ran dependency auditing after adding hickory-resolver = \"0.25.0\" to Cargo.toml. Adding notes here..."
+    },
+    {
+      "id": "3117082724",
+      "author": "MohanLaksh",
+      "created_at": "2026-04-21T11:28:48+00:00",
+      "body": "Changed to const variable"
+    },
+    {
+      "id": "3117085028",
+      "author": "MohanLaksh",
+      "created_at": "2026-04-21T11:29:17+00:00",
+      "body": "Agree and done"
+    },
+    {
+      "id": "3117555438",
+      "author": "lucarlig",
+      "created_at": "2026-04-21T12:56:27+00:00",
+      "body": "please fix the authors"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4146143288",
+      "author": "dawid-nowak",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-21T08:16:13+00:00",
+      "body": ""
+    },
+    {
+      "id": "4146192881",
+      "author": "dawid-nowak",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-21T08:24:59+00:00",
+      "body": "My suggestions for going forward:\r\n1. Split into two independent PRs. One for URL validation and one for body size limiting.\r\n2. Explain when URL validator is supposed to be used ? (Incoming request/outgoing request/something else ?)\r\n3. There is a lot copy-paste in the code around handling URL validation and sending errors. Please re-factor this code.\r\n\r\nAdditionally: \r\n* I am not sure why we need URL validation. My understanding is that this is something that has been configured via our control plane so it should be validated. The HTTP client/reqwest will resolve the url to a hostname and if it can't resolve than we can't make a request anyway.  Also reqwest is using hickory DNS internally so I don't see why we would do the same job twice."
+    },
+    {
+      "id": "4146222082",
+      "author": "dawid-nowak",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-21T08:29:57+00:00",
+      "body": ""
+    },
+    {
+      "id": "4146235458",
+      "author": "dawid-nowak",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-21T08:32:14+00:00",
+      "body": ""
+    },
+    {
+      "id": "4147279139",
+      "author": "MohanLaksh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-21T11:28:27+00:00",
+      "body": ""
+    },
+    {
+      "id": "4147280911",
+      "author": "MohanLaksh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-21T11:28:48+00:00",
+      "body": ""
+    },
+    {
+      "id": "4147283287",
+      "author": "MohanLaksh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-21T11:29:17+00:00",
+      "body": ""
+    },
+    {
+      "id": "4147792712",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-21T12:56:36+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "895597bda283424815279918ccf7312c90d33c1d",
+      "message": "refactor(rust): add dependencies for enhanced input handling\n\nAdd async-trait, hickory-resolver, ipnetwork, serial_test, and tower\nto support improved request validation and test isolation in the\nRust MCP runtime.\n\nThese dependencies enable hostname resolution, network range checking,\nand better test coverage for the runtime's HTTP client layer.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-21T05:52:25+00:00"
+    },
+    {
+      "sha": "afe42a05cc2ce046ce07fce00175d5792f2406f0",
+      "message": "refactor(rust): add URL validation module with hostname resolution\n\nImplement URL validation with the following capabilities:\n- Length and format checking\n- Scheme allowlist (http/https/ws/wss)\n- Pattern filtering for malformed content\n- Hostname resolution with DNS caching (5-minute TTL)\n- Network filtering with CIDR support\n- Configurable via environment variables\n\nKey design decisions:\n- Localhost allowed by default for development ease\n- DNS results cached to avoid overhead on repeated requests\n- Invalid CIDR configuration fails startup (fail-closed)\n- Mock resolver support for deterministic testing\n\nConfiguration via environment:\n- VALIDATION_ENABLED (default: true)\n- ALLOW_LOCALHOST (default: true)\n- ALLOW_PRIVATE_NETWORKS (default: false)\n- BLOCKED_NETWORKS, BLOCKED_HOSTS\n- ALLOWED_NETWORKS for allowlist\n\nIncludes comprehensive test coverage with mock DNS resolver.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-21T05:56:42+00:00"
+    },
+    {
+      "sha": "1875bd1202a2869b040c43486f0ab3be2e3208f4",
+      "message": "feat(runtime): enhance request validation and size limiting\n\nAdd comprehensive URL validation and request body size controls to the\nRust MCP runtime to improve robustness and resource management.\n\nChanges:\n- Implement URL validator module with hostname resolution and network filtering\n- Add configurable request body size limits (default 10MB)\n- Apply validation to all backend HTTP requests\n- Add DNS caching with 5-minute TTL for performance\n- Include test coverage for validation and size limit scenarios\n\nConfiguration:\n- VALIDATION_ENABLED: Enable/disable URL validation (default: true)\n- MAX_URL_LENGTH: Maximum URL length (default: 2048)\n- ALLOW_LOCALHOST: Allow localhost access (default: true)\n- BLOCKED_NETWORKS: CIDR ranges to filter\n- BLOCKED_HOSTS: Hostname blocklist\n- MCP_RUST_MAX_REQUEST_BODY_SIZE_BYTES: Body size limit (default: 10MB)\n\nDependencies added:\n- async-trait 0.1 for DNS resolver abstraction\n- hickory-resolver 0.25 for DNS resolution\n- ipnetwork 0.21 for CIDR filtering\n- serial_test 3.4 for test isolation (dev dependency)\n- tower 0.5 features for test utilities (dev dependency)\n\nUpdated cargo-vet exemptions for new dependencies.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-21T06:45:47+00:00"
+    },
+    {
+      "sha": "46964adf991e2a8c785705075b987e5605ba9006",
+      "message": "docs(runtime): document URL validation and request size configuration\n\nAdd configuration examples and testing guidance for the new URL validation\nand request body size limit features.\n\nChanges:\n- README.md: Add Configuration section with URL validation and body size examples\n- DEVELOPING.md: Add testing guidance for validation features\n- DEVELOPING.md: Update command matrix to include validation-specific checks\n\nDocumentation covers:\n- Environment variables for URL validation (VALIDATION_ENABLED, ALLOW_LOCALHOST, etc.)\n- Default blocked networks and hosts\n- Request body size limit configuration\n- Development vs production mode examples\n- Test commands for validation features\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-21T07:03:06+00:00"
+    },
+    {
+      "sha": "4ad816c09c1f8f5e2272346f1fe06057234a58c7",
+      "message": "fix(runtime): remove unused create_strict_config helper function\n\nRemove dead code that was never used in tests. All tests use either\nUrlValidatorConfig::default() or create_test_config() instead.\n\nThis resolves the clippy dead_code warning in CI.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-21T07:26:33+00:00"
+    },
+    {
+      "sha": "a5edf8b61839712b35cc055645d1a7c8540b9e00",
+      "message": "refactor(runtime): address PR review feedback - extract constants and reduce duplication\n\n- Extract DEFAULT_MAX_REQUEST_BODY_SIZE_BYTES constant to eliminate hardcoded 10MB values\n- Add AppState::validate_backend_url() helper to centralize URL validation pattern\n- Replace 17 repetitive validation blocks with helper calls (net ~49 line reduction)\n- Clarify documentation: validator checks OUTGOING backend requests, not client-facing\n- Update module docs in url_validator.rs with threat model and scope\n- Update README.md Configuration section with validation purpose\n\nAddresses review feedback from PR #4362:\n- Hardcoded body size values now use shared constant\n- URL validation duplication eliminated via helper method\n- Documentation clearly explains validator is for Rust→Python backend requests\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-21T10:17:21+00:00"
+    },
+    {
+      "sha": "3478405ec8c103eff9269765f9e0dec5fab922d8",
+      "message": "fix(runtime): address PR #4362 review findings and fix validation regex bug\n\nAddresses all 5 critical review findings:\n\n1. Added URL validation to send_transport_to_backend() and send_session_delete_to_backend()\n   - These functions were calling reqwest directly without validation\n   - Now validate backend URLs before all HTTP calls (closes SSRF gap)\n\n2. Fixed DNS_FAIL_CLOSED logic to handle resolver errors correctly\n   - Previously DnsError returned before fail-open policy applied\n   - Now properly catches DNS errors and applies dns_fail_closed setting\n   - Fail-open mode allows access on DNS resolution failures\n   - Empty DNS results still fail closed (legitimate no-records case)\n\n3. Refactored UrlValidator to use RuntimeConfig instead of env vars\n   - Removed direct std::env::var() calls in from_config()\n   - Added validation config fields to RuntimeConfig (clap args)\n   - Single source of truth: VALIDATION_ENABLED, MAX_URL_LENGTH, etc.\n   - More hermetic tests, no hidden config plane\n\n4. Fixed invalid cargo test command in DEVELOPING.md\n   - Changed 'cargo test url_validator request_body_limit --all-features'\n   - To: 'cargo test --all-features' (valid syntax)\n\n5. Fixed author attribution in url_validator.rs\n   - Removed ', ContextForge Team' to match other crate files\n\nBONUS FIX: Suspicious pattern regex false positive\n   - Regex pattern 'on\\w+\\s*=' matched 'session_id=' in query params\n   - Changed to '\\bon\\w+\\s*=' (word boundary) to match only HTML event handlers\n   - Now correctly allows localhost URLs with session_id query parameters\n   - All tests pass with validation_enabled: true (as intended)\n\nTest results:\n- 99 lib tests passing\n- 56 integration tests passing\n- Clippy clean\n- rustfmt clean\n- validation_enabled: true in all configs (security feature active)\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-21T11:21:36+00:00"
+    },
+    {
+      "sha": "065faf8c65b3e0a810e1552d8a28a7d92d3d02d1",
+      "message": "fix(supply-chain): add missing notes field to windows-registry trust entry\n\nAdd notes field to [[trusted.windows-registry]] entry for consistency\nwith other windows crate trust entries. All windows-* crates from\nKenny Kerr (kennykerr) use the same trust annotation.\n\nAddresses PR #4362 review feedback.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-21T11:30:37+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 1767,
+  "deletions": 179,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:06:45.859209",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:45.860477",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4362,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4362.json"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3792,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3792"
+  },
+  "metadata": {
+    "title": "fix: add auth_code guard to set_gateway_state stale cleanup",
+    "state": "closed",
+    "created_at": "2026-03-23T00:27:55+00:00",
+    "updated_at": "2026-03-23T16:23:29+00:00",
+    "closed_at": "2026-03-23T16:23:29+00:00",
+    "merged_at": "2026-03-23T16:23:29+00:00",
+    "author": "kimsehwan96",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #3788 \r\n\r\n---\r\n\r\n## 📝 Summary\r\n When an auth_code gateway transitions from offline → online, `set_gateway_state` calls `_initialize_gateway` which connects without a valid OAuth token, receives empty results, and deletes all existing tools, resources, prompts, and their virtual server associations as \"stale.\"\r\n\r\n This PR mirrors the existing guard from `_refresh_gateway_tools_resources_prompts` (line 4558) into `set_gateway_state`, skipping stale cleanup when the response is empty for authorization_code gateways.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    pass    |\r\n| Unit tests                | `make test`     |    pass    |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n**What the guard protects:**\r\n- DB DELETE queries (tools, resources, prompts, metrics, `server_tool_association`)\r\n- In-memory list reassignment (`gateway.tools = [...]` filtering)\r\n\r\n**What it does NOT change:**\r\n- Non-auth_code gateways behave exactly as before\r\n- Auth_code gateways with partial results (some tools returned) still run normal stale cleanup\r\n- The guard only activates when ALL three (tools, resources, prompts) are empty AND the gateway is authorization_code type\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3992755988",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T15:49:29+00:00",
+      "body": "LGTM — guard is correct, consistent with the existing pattern, and well-tested."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "103ae805501fe60c4de924fb6f84efad0a9d07b8",
+      "message": "fix: prevent tool deletion on auth_code gateway reactivation\n\nWhen an OAuth authorization_code gateway transitions from offline to\nonline, set_gateway_state re-initializes without a valid token, receives\nempty results, and deletes all existing tools/resources/prompts as stale.\n\nAdd the same auth_code guard that _refresh_gateway_tools_resources_prompts\nalready has (PR #2537): skip stale cleanup when the response is empty\nfor authorization_code gateways.\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-03-23T00:04:44+00:00"
+    },
+    {
+      "sha": "bdbfd6c51e042aed78d5e72e567dd1c6b7d8b565",
+      "message": "test: align assert style with existing conventions\n\nReplace string-parsing assert with call_count check to match\nthe existing test patterns in test_gateway_service.py.\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-03-23T00:08:57+00:00"
+    },
+    {
+      "sha": "88323916f4246d21837add6cfe638a2668a2bd44",
+      "message": "fix: also guard in-memory list reassignment and improve test coverage\n\nSkip gateway.tools/resources/prompts list filtering when stale cleanup\nis skipped, and verify all existing tools are preserved by id.\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-03-23T00:17:25+00:00"
+    },
+    {
+      "sha": "bc62d2ee9c44a7d852f2ebeb94ae23a416de1f5e",
+      "message": "style: align variable naming with existing convention\n\nRename _is_auth_code_gw to is_auth_code_gateway and\n_skip_stale_cleanup to skip_stale_cleanup to match\n_refresh_gateway_tools_resources_prompts naming.\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-03-23T00:20:51+00:00"
+    },
+    {
+      "sha": "d108f73ce24602c9b575fc1c5c703814743585a4",
+      "message": "test: add negative and resource/prompt coverage for auth_code guard\n\nAdd two tests for set_gateway_state auth_code guard:\n- Non-auth_code gateway with empty results still runs stale cleanup\n- Auth_code guard preserves resources and prompts (not just tools)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T15:04:18+00:00"
+    },
+    {
+      "sha": "5da5e3d474b6c548fdc258f9cdefa336f4df5a37",
+      "message": "test: add partial-results coverage for auth_code guard\n\nVerify that an authorization_code gateway returning partial results\n(some tools) still runs stale cleanup, ensuring the guard only\nactivates when all three collections are empty.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T15:42:40+00:00"
+    },
+    {
+      "sha": "fe259e47c8e4f6054e5d53da31dcd34f4bcf96c3",
+      "message": "fix(sdist): include infra/s390x/Containerfile in MANIFEST.in\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T15:54:11+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 181,
+  "deletions": 6,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:05.510980",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:05.511635",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3792,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3792.json"
+  }
+}

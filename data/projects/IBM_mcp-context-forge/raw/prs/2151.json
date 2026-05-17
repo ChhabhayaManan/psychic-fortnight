@@ -1,0 +1,97 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2151,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2151"
+  },
+  "metadata": {
+    "title": "feat: Add RFC 8707 resource parameter support for JWT access tokens",
+    "state": "closed",
+    "created_at": "2026-01-17T22:49:12+00:00",
+    "updated_at": "2026-01-18T02:39:32+00:00",
+    "closed_at": "2026-01-18T02:27:41+00:00",
+    "merged_at": "2026-01-18T02:27:41+00:00",
+    "author": "bradmcnew",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# ✨ Feature / Enhancement PR\n\n## 🔗 Epic / Issue\nCloses #2149\n\n---\n\n## 🚀 Summary\nAdds RFC 8707 resource parameter support to OAuth flows, enabling OAuth providers (e.g., BetterAuth) to return JWT access tokens instead of opaque tokens. Fixes \"Invalid Compact JWS\" errors when using JWT-capable OAuth providers.\n\n---\n\n## 🧪 Checks\n- [x] `make lint` passes\n- [x] `make test` passes  \n- [x] CHANGELOG updated\n\n---\n\n## 📓 Notes\n\n**Changes:**\n- Modified `oauth_router.py` to add `resource` parameter in both `/authorize` and `/callback` endpoints\n- Updated `oauth_manager.py` to pass through resource parameter in authorization URL and token exchange\n- Added CHANGELOG entry documenting the feature\n\n**RFC 8707 Resource Indicators:**\nThe resource parameter tells the OAuth server which resource (MCP server URL) the access token is for. JWT-capable OAuth providers use this to mint audience-specific JWT tokens. Without it, providers default to opaque tokens.\n\nSigned-off-by: Brad McNew <brad@askmymoney.ai>",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3674808535",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-17T22:53:43+00:00",
+      "body": "## Pull request overview\n\nThis PR adds RFC 8707 resource parameter support to enable OAuth providers to return JWT access tokens instead of opaque tokens, fixing \"Invalid Compact JWS\" errors with JWT-capable OAuth providers like BetterAuth.\n\n**Changes:**\n- Added automatic `resource` parameter injection in OAuth authorization and token exchange flows\n- Updated tests to verify resource parameter is correctly passed through the OAuth flow\n- Documented the feature in CHANGELOG with clear explanation of benefits\n\n### Reviewed changes\n\nCopilot reviewed 4 out of 4 changed files in this pull request and generated no comments.\n\n| File | Description |\n| ---- | ----------- |\n| mcpgateway/routers/oauth_router.py | Adds resource parameter (set to gateway.url) in both /authorize and /callback endpoints for OAuth flows |\n| mcpgateway/services/oauth_manager.py | Implements RFC 8707 by including resource parameter in authorization URL and token exchange requests |\n| tests/unit/mcpgateway/routers/test_oauth_router.py | Updates mock gateway fixture and adds test assertions to verify resource parameter is correctly passed |\n| CHANGELOG.md | Documents the new RFC 8707 OAuth resource indicators feature with clear explanation of benefits |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3674915162",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-17T23:55:55+00:00",
+      "body": "Rebased, and ready to go. Thanks, great PR!"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e86977b299d5a535d7a96a7c98fbb547e9c233aa",
+      "message": "feat: Add RFC 8707 resource parameter support for JWT access tokens\n\nAdds support for RFC 8707 Resource Indicators to enable OAuth providers\nto return JWT tokens instead of opaque tokens.\n\n## Problem\n\nOAuth providers that support both token types (e.g., BetterAuth) return\nopaque tokens by default. JWT tokens are only issued when the `resource`\nparameter is present in the token request, per RFC 8707.\n\nWithout this parameter, MCP servers expecting JWT tokens fail with\n\"Invalid Compact JWS\" errors when attempting to verify opaque tokens.\n\n## Solution\n\n- Set `resource` to `gateway.url` in /authorize endpoint\n- Pass `resource` through to /callback endpoint for token exchange\n- Include `resource` in both authorization URL and token request\n\nThe resource parameter identifies the MCP server (resource server) as\nthe intended token audience, signaling the OAuth provider to mint a\nJWT token for that specific resource.\n\n## Testing\n\n- All 4,791 tests pass\n- Updated test verifies resource parameter is included\n- Manually verified JWT tokens (3 parts) returned vs opaque (1 part)\n\nSigned-off-by: Brad McNew <mcnewbrad@gmail.com>",
+      "author": "Brad McNew",
+      "date": "2026-01-17T16:12:01+00:00"
+    },
+    {
+      "sha": "876f9b97be89c1998bf47baf4fa30b20ed7772ef",
+      "message": "docs: Update CHANGELOG for RFC 8707 OAuth resource parameter support\n\nSigned-off-by: Brad McNew <mcnewbrad@gmail.com>",
+      "author": "Brad McNew",
+      "date": "2026-01-17T22:03:28+00:00"
+    },
+    {
+      "sha": "f0fc1d9f6d2a6f68f38d1e0d3b0c6c7fa4d422d3",
+      "message": "fix: Address RFC 8707 review findings for OAuth resource parameter\n\n- Add resource parameter to refresh_token flow to maintain JWT token type\n- Add URL normalization per RFC 8707 (strip fragment and query components)\n- Handle list values for multiple resource parameters with doseq=True\n- Always recompute resource from gateway.url to handle URL changes\n- Add resource parameter in token_storage_service during token refresh\n- Add tests for callback resource verification and URL normalization\n- Update CHANGELOG to note provider-specific configuration may be needed\n\nAddresses review findings:\n1. Refresh-token flow now includes resource parameter\n2. URLs are normalized per RFC 8707 Section 2 requirements\n3. Multiple resource values are properly encoded\n4. Stale resource values are avoided by recomputing at request time\n5. Test coverage expanded for callback and normalization\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-18T00:29:37+00:00"
+    },
+    {
+      "sha": "5ebb6f86eaf8e03abf42193b92fc0ff2b2abc4eb",
+      "message": "fix: Address additional RFC 8707 review findings\n\n- Respect pre-configured resource values instead of always overwriting\n- Validate absolute URI requirement (must have scheme and netloc)\n- Support multiple resource parameters with list of tuples encoding\n- Fix type signature for _normalize_resource_url to Optional[str]\n- Add tests for relative URI rejection and scheme-only URLs\n- Update token_storage_service to respect pre-configured resource\n\nThis ensures:\n1. Custom/pre-registered resource values are preserved\n2. Multiple resources are properly encoded per RFC 8707\n3. Invalid URIs (relative, no scheme) are rejected with warning\n4. Backwards compatibility with existing tests and behavior\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-18T00:40:34+00:00"
+    },
+    {
+      "sha": "7326c1aa9dfc6f18c0757ebae6484b25436e5b30",
+      "message": "fix: Address third round of RFC 8707 review findings\n\n- Normalize existing resource values in token_storage_service refresh path\n- Fix double normalization in list handling (compute once, filter once)\n- Add tests for multiple resource parameter encoding (list of tuples)\n- Document policy: only hierarchical URIs supported (URNs rejected)\n- Document policy: query components stripped per RFC 8707 SHOULD NOT\n\nThis ensures consistent normalization across authorize/callback/refresh paths\nand adds explicit test coverage for the multiple resource encoding behavior.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-18T01:53:03+00:00"
+    },
+    {
+      "sha": "9b207a696bed149c5994338707de04717007a0ff",
+      "message": "fix: Address fourth round of RFC 8707 review findings\n\n- Support URN-style absolute URIs (only require scheme, not netloc)\n- Add preserve_query parameter: strip for auto-derived, preserve for explicit config\n- Add warnings when configured resources are dropped during normalization\n- Add warnings when all list resources normalize to empty\n- Consistent normalization across authorize/callback/refresh paths\n\nTests added:\n- URN support (urn:example:app)\n- file:// URI support\n- preserve_query=True behavior\n- Fragment always stripped even with preserve_query=True\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-18T02:01:30+00:00"
+    },
+    {
+      "sha": "2606fce8ed10f90a77cd46d7d7181e2670f61167",
+      "message": "fix: Add missing Returns in docstring\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-18T02:04:09+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 353,
+  "deletions": 4,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:38.557930",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:38.558896",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2151,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2151.json"
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3713,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3713"
+  },
+  "metadata": {
+    "title": "feat(security): add container image scanner plugin with Trivy/Grype integration (#2216)",
+    "state": "open",
+    "created_at": "2026-03-17T23:10:03+00:00",
+    "updated_at": "2026-05-03T01:08:48+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "kamath-a",
+    "labels": [
+      "enhancement",
+      "security",
+      "plugins",
+      "COULD"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": []
+  },
+  "description": "# 🧱 New Plugin\r\n\r\n## 🔗 Closes\r\n\r\nCloses #2216 \r\n\r\n\r\n## 🚀 Summary\r\nScans container images for CVEs using Trivy or Grype before they are registered or deployed through the gateway, blocking or auditing based on configurable severity policy.\r\n\r\nIncluded:\r\n- Scanner CLI integration: async subprocess wrappers for Trivy and Grype, JSON output parsing, timeout and error handling\r\n- Policy engine: severity threshold filtering, CVE ignore list, enforce/audit/disabled modes with block decision and human-readable violation reason\r\n- Cache layer: digest-keyed TTL cache, policy re-evaluated on every hit so threshold changes apply without re-scanning, skipped when no digest is available\r\n- Storage layer: currently implemented with dictionaries, bounded in-memory ScanResultRepository with LRU eviction, shared module-level singleton used by both plugin and REST router\r\n- Registry auth: per-registry credential resolution from environment variables at scan time, token and basic auth support, injected into scanner subprocess environment\r\n- FastAPI router `(mcpgateway/routers/container_scanner_router.py)`: health endpoint, scan list with most-recent-first ordering, per-image lookup by ref or digest, full vulnerabilities[] array with fixed_version and description in response\r\n- Admin UI: scan results table with expandable rows showing per-CVE severity, installed version, fixed version and description, scan error surfaced inline, accessible via Extensions > Container Scanner in sidebar\r\n- Plugin orchestration `(container_scanner.py)`: full pipeline: cache → auth → scanner → policy → persist, graceful fail_open/fail_closed error handling, PluginViolation construction on block\r\n- Hook integration `(mcpgateway/plugins/framework/hooks/gateway.py)`: server_pre_register and runtime_pre_deploy hook types with ServerPreRegisterPayload / RuntimePreDeployPayload, registered into global hook registry on module import\r\n\r\n## Testing\r\n*Unit tests* (109 passed)\r\nCover each component in isolation with all external calls mocked:\r\n* test_container_scanner.py:  scan() pipeline: disabled mode, cache hits/misses, error handling (fail_open/fail_closed), result structure and summary counts\r\n* test_repository.py:  save/get round-trips, overwrite behaviour, LRU eviction, capacity limits, clear()\r\n* test_trivy_runner.py: JSON parsing, severity normalisation, empty/missing fields, timeout and non-zero exit errors\r\n* test_grype_runner.py: same for Grype's fix.state/versions schema, invalid severity filtering, auth env passthrough\r\n* test_policy_evaluator.py: threshold filtering, ignore list, fail_on_unfixed, enforce vs audit modes\r\n* test_cache_manager.py: TTL expiry, cache miss, disabled cache\r\n* test_config.py: ScannerConfig validation, registry auth field rules  \r\n\r\n```pytest tests/unit/plugins/test_container_scanner/ -v```\r\n\r\n*Integration tests* (18 passed)\r\nCovers 2 end-to-end scenarios with real policy/repository/evaluator, and scanner CLI mocked:\r\n`test_api.py`: health endpoint empty/populated state, scan list ordering (most-recent-first), per-image lookup by ref and digest, 404 on unknown image, unauthenticated requests rejected\r\n`test_hook_pipeline.py`: hook fires and result stored in shared singleton, blocked/unblocked results reflected correctly in API response, disabled mode skips runner and stores no result, CRITICAL vuln triggers block with PluginViolation, unblocked result has continue_processing=True         \r\n\r\n```pytest tests/integration/test_container_scanner/ -v```\r\n\r\n\r\n## 🧪 Checks\r\n\r\n- [x] Plugin was [bootstrapped with the CLI](https://ibm.github.io/mcp-context-forge/using/plugins/lifecycle/) (native or external template)\r\n- [x] Unit tests created for the new plugin\r\n- [x] `make lint plugins` passes\r\n- [x] `make test` passes\r\n- [x] CHANGELOG updated (if user-facing)\r\n- [x] README documentation was created for the plugin\r\n- [ ] New plugin added to the [documentation](https://ibm.github.io/mcp-context-forge/using/plugins/plugins/) linking to the README above",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "6943cc20264b9fd6ca7bfa6b9497ba3451bd6aa0",
+      "message": "Progress on issue 2216; implementation of Trivy/Grype scanners, policy evaluation, caching, storage, plugin, and some unit testing\n\nSigned-off-by: Agnetha <agnethakamath@gmail.com>",
+      "author": "Agnetha",
+      "date": "2026-03-12T23:11:29+00:00"
+    },
+    {
+      "sha": "a1aa56eebc4ff189c7e304607c04fb8df3b1b7e2",
+      "message": "uploaded design document as markdown file\n\nSigned-off-by: Agnetha <agnethakamath@gmail.com>",
+      "author": "Agnetha",
+      "date": "2026-03-12T23:22:25+00:00"
+    },
+    {
+      "sha": "e56574f396aa357444d86c46fd90b6e48d464217",
+      "message": "issue #2216: updated unit tests\n\nSigned-off-by: Agnetha <agnethakamath@gmail.com>",
+      "author": "Agnetha",
+      "date": "2026-03-17T22:18:41+00:00"
+    },
+    {
+      "sha": "5cb262ade2ff1c8ae3cb9fe74e14096e82bb533a",
+      "message": "issue #2216: updated unit test, added integration tests\n\nSigned-off-by: Agnetha <agnethakamath@gmail.com>",
+      "author": "Agnetha",
+      "date": "2026-03-17T22:19:39+00:00"
+    },
+    {
+      "sha": "b07cb027d41559d8d2956e600d13983dd7b4298b",
+      "message": "issue #2216: hook integration\n\nSigned-off-by: Agnetha <agnethakamath@gmail.com>",
+      "author": "Agnetha",
+      "date": "2026-03-17T22:20:55+00:00"
+    },
+    {
+      "sha": "61125f23ef8365edceb006c45ba8378b914db5d2",
+      "message": "issue #2216: added AdminUI\n\nSigned-off-by: Agnetha <agnethakamath@gmail.com>",
+      "author": "Agnetha",
+      "date": "2026-03-17T22:21:31+00:00"
+    },
+    {
+      "sha": "d1c3ba552f816e9c40dca545f9e2837745b503d6",
+      "message": "issue #2216: include exec.py for subprocess wrapper\n\nSigned-off-by: Agnetha <agnethakamath@gmail.com>",
+      "author": "Agnetha",
+      "date": "2026-03-17T22:22:09+00:00"
+    },
+    {
+      "sha": "61442a10b3d008738f242d5c0a726a02c97a1cd6",
+      "message": "Added README\n\nSigned-off-by: Agnetha <agnethakamath@gmail.com>",
+      "author": "Agnetha",
+      "date": "2026-03-17T22:22:34+00:00"
+    }
+  ],
+  "files_changed": 41,
+  "additions": 4071,
+  "deletions": 0,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:47.841345",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:47.843461",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3713,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3713.json"
+  }
+}

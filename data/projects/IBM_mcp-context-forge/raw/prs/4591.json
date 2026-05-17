@@ -1,0 +1,49 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4591,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4591"
+  },
+  "metadata": {
+    "title": "fix(auth): set request.state.token_teams for proxy authentication flow to resolve admin status",
+    "state": "open",
+    "created_at": "2026-05-05T07:57:00+00:00",
+    "updated_at": "2026-05-05T07:57:01+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "bug",
+      "rbac",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4587\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes proxy-authenticated admin users being unable to access private/team-scoped tools despite having `is_admin=true` in the database.\r\n\r\n**Root Cause:** The `_authenticate_proxy_user()` function correctly resolved admin status and teams from the database but failed to set `request.state.token_teams`. This caused downstream code in `get_token_teams_from_request()` to fall back to `normalize_token_teams()` instead of using the pre-resolved value, breaking admin bypass for proxy-authenticated requests.\r\n\r\n**Solution:** Added `request.state.token_teams` assignment in both proxy authentication paths (DB user lookup and platform admin bootstrap), matching the pattern used by `get_current_user()` for JWT session tokens.\r\n\r\n**Impact:** Admin users authenticated via proxy headers (when `TRUST_PROXY_AUTH=true`) now correctly receive admin bypass (`token_teams=None`) and can access all tools (public + team + private).\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Changes Made\r\n\r\n**File:** `mcpgateway/utils/verify_credentials.py`\r\n\r\n1. **Line 473** (DB user path): Added `request.state.token_teams = token_teams` after resolving teams via `_resolve_teams_from_db()`\r\n2. **Line 489** (bootstrap admin path): Added `request.state.token_teams = None` for platform admin bootstrap when `REQUIRE_USER_IN_DB=false`\r\n\r\n### Why This Works\r\n\r\nThe fix ensures proxy-authenticated requests follow the same state-setting pattern as JWT session tokens:\r\n\r\n- **JWT path** ([`auth.py:1403`](mcpgateway/auth.py:1403)): `get_current_user()` sets `request.state.token_teams` after calling `resolve_session_teams()`\r\n- **Proxy path** (now fixed): `_authenticate_proxy_user()` sets `request.state.token_teams` after calling `_resolve_teams_from_db()`\r\n\r\nThis makes `get_token_teams_from_request()` find the pre-resolved value immediately instead of falling back to `normalize_token_teams()`, ensuring consistent admin bypass behavior.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "f486db7422e1c439d88997d7b10818223df477e0",
+      "message": "fix: set request.state.token_teams for proxy authentication flow to resolve admin status\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-05T07:54:33+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 9,
+  "deletions": 2,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:47.354146",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:47.355817",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4591,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4591.json"
+  }
+}

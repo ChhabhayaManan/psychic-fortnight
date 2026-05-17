@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1736,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1736"
+  },
+  "metadata": {
+    "title": "Metrics aggregation",
+    "state": "closed",
+    "created_at": "2025-12-25T02:26:26+00:00",
+    "updated_at": "2025-12-25T02:37:41+00:00",
+    "closed_at": "2025-12-25T02:37:39+00:00",
+    "merged_at": "2025-12-25T02:37:39+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# PR: Optimize metrics aggregation performance\r\n\r\nCloses #1734\r\n\r\n## Summary\r\n\r\nFix metrics subsystem performance degradation under sustained load by addressing inefficient metrics aggregation that was performing full table scans and loading all metrics rows into memory.\r\n\r\n## Changes\r\n\r\n### Phase 1: Quick Wins\r\n- Fixed unbounded `get_top_*` queries in resource, prompt, and server services (now default to limit=5)\r\n- Updated admin.py to use `limit=10` instead of `limit=None` for top performers\r\n- Added composite indexes migration for efficient aggregation queries:\r\n  - `idx_tool_metrics_tool_is_success`\r\n  - `idx_resource_metrics_resource_is_success`\r\n  - `idx_prompt_metrics_prompt_is_success`\r\n  - `idx_server_metrics_server_is_success`\r\n  - `idx_a2a_agent_metrics_agent_is_success`\r\n\r\n### Phase 2: In-Memory Caching\r\n- Created `mcpgateway/cache/metrics_cache.py` with thread-safe TTL cache\r\n- Added caching to all 5 service `aggregate_metrics()` methods\r\n- Added cache invalidation to all `reset_metrics()` methods\r\n- Added configuration options: `METRICS_CACHE_ENABLED`, `METRICS_CACHE_TTL_SECONDS`\r\n\r\n### Phase 2.5: Fix include_metrics Defaults\r\n- Changed `include_metrics` parameter default from `True` to `False` in all `_convert_*_to_read()` methods\r\n- Affected services: tool_service, resource_service, prompt_service, server_service, a2a_service\r\n- This prevents lazy loading of thousands of metrics rows on every entity read\r\n\r\n### Phase 3: ORM Property Optimization\r\n- Added `_metrics_loaded()` helper method to all 5 models (Tool, Resource, Prompt, Server, A2AAgent)\r\n- Updated all metrics properties to check if metrics are loaded before accessing them\r\n- Properties now return 0/None when metrics aren't loaded, preventing accidental lazy loading\r\n\r\n## Performance Results\r\n\r\n| Metric | Before | After | Improvement |\r\n|--------|--------|-------|-------------|\r\n| seq_tup_read/sec | 1.22M/sec | 32K/sec | 97% reduction |\r\n| Gateway Memory | 3.2-3.8 GB | 2.6 GB | 30% reduction |\r\n| Idle in Transaction | 52-78 | 10 | 85% reduction |\r\n\r\n## Files Modified\r\n\r\n- `mcpgateway/db.py` - Added `_metrics_loaded()` guards and `sa_inspect` import\r\n- `mcpgateway/cache/metrics_cache.py` - New file for thread-safe metrics caching\r\n- `mcpgateway/config.py` - Added cache configuration options\r\n- `mcpgateway/services/tool_service.py` - Caching, cache invalidation, include_metrics default\r\n- `mcpgateway/services/resource_service.py` - Caching, cache invalidation, include_metrics default\r\n- `mcpgateway/services/prompt_service.py` - Caching, cache invalidation, include_metrics default\r\n- `mcpgateway/services/server_service.py` - Caching, cache invalidation, include_metrics default\r\n- `mcpgateway/services/a2a_service.py` - Caching, cache invalidation, include_metrics default\r\n- `mcpgateway/admin.py` - Changed `limit=None` to `limit=10`\r\n- `mcpgateway/alembic/versions/p0a1b2c3d4e5_add_metrics_aggregation_indexes.py` - New migration\r\n- `.env.example` - Documented new cache settings\r\n- `tests/conftest.py` - Added cache isolation fixture\r\n- Various test files updated for new defaults\r\n\r\n## Testing\r\n\r\n- All 1343 unit tests passing\r\n- All 35 doctests passing\r\n- Load testing verified with 1000 concurrent users\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "7abab30eee9c31a6c7ae21433c72d52ef842795c",
+      "message": "Index for metrics aggregation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-24T23:51:17+00:00"
+    },
+    {
+      "sha": "82a2595c62168e27b9b048f1f87c4b1e143f30be",
+      "message": "Redis cache for metrics aggregation, and default False to retrieving metrics when calling tools\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-25T01:07:57+00:00"
+    },
+    {
+      "sha": "0c90b5678c760672e6e47143af2cd3739afa1754",
+      "message": "Redis cache for metrics aggregation, and default False to retrieving metrics when calling tools\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-25T01:34:56+00:00"
+    },
+    {
+      "sha": "f166972c3e5542f5fb03ebf93e1f494d274efe63",
+      "message": "Replace ORM Properties with SQL Aggregation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-25T02:15:15+00:00"
+    }
+  ],
+  "files_changed": 15,
+  "additions": 738,
+  "deletions": 69,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:05.350996",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:05.352194",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1736,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1736.json"
+  }
+}

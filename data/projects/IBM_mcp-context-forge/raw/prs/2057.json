@@ -1,0 +1,94 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2057,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2057"
+  },
+  "metadata": {
+    "title": "Enforce per-Gateway-user isolation in MCPSessionPool",
+    "state": "closed",
+    "created_at": "2026-01-12T16:16:16+00:00",
+    "updated_at": "2026-01-13T18:47:01+00:00",
+    "closed_at": "2026-01-13T18:46:59+00:00",
+    "merged_at": "2026-01-13T18:46:59+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nCloses #2055\r\n\r\nImplemented strict per-user session isolation within the MCPSessionPool. It explicitly incorporates the authenticated Gateway user's identity (email) into the session pool key. This ensures that sessions are never shared between different Gateway users, even if they use the same downstream authentication credentials. This change eliminates the risk of state leakage or cross-user context sharing in pooled sessions.\r\n\r\n**One Example Problematic case:** \r\nIf 2 users are using the same session pool, and one user cancel the tool call, there is a possibility the other user's tool call might also be cancelled since there is only one session used between both. With this change, these kind of scenario will be resolved.\r\n\r\n\r\n## 🔁 Reproduction Steps\r\n1.  Enable MCPSessionPool.\r\n2.  Invoke a tool as `user_a`.\r\n3.  Invoke the same tool as `user_b` with identical headers or use an mcp server with no authentication.\r\n4.  Without this fix, the session ID is identical (reused).\r\n5.  With this fix, the session IDs are distinct.\r\n\r\n\r\n## 🐞 Root Cause\r\nThe PoolKey in MCPSessionPool was defined as (url, identity_hash, transport_type). The identity_hash was derived solely from specific HTTP headers (like `Authorization`, `X-Tenant-ID`). If two users utilized the same downstream credentials (e.g., a shared service account or anonymous access), their identity_hash was identical, causing the pool to treat them as the same \"identity\" and share the session.\r\n\r\n\r\n## 💡 Fix Description\r\nEnhanced the session pool logic to include the **Gateway User Identity** as a primary component of the pool key.\r\n\r\n1.  **Modified PoolKey**: Updated to (user_identity_hash, url, identity_hash, transport_type).\r\n    *   `user_identity_hash`: A hash of the `app_user_email`. Defaults to \"anonymous\" if no user is present.\r\n2.  **Updated `MCPSessionPool.acquire`**: Now accepts a user_identity parameter.\r\n3.  **Updated `ToolService.invoke_tool`**: Used the existing `app_user_email` argument to pass the user's email to the session pool when acquiring a session.\r\n4.  **Legacy Test Updates**: Updated existing unit tests to support the new 4-element key structure.\r\n5.  **New Verification**: Added test_mcp_session_pool_isolation.py to explicitly verify that different users get different sessions but the same user reuses their own session.\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "9b748f3c8f441a566709e81583cb9049e5c122ca",
+      "message": "fixed user isolation\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-12T15:02:32+00:00"
+    },
+    {
+      "sha": "21ae60d2fd3d1c463d8357ab10fb6e3045f53481",
+      "message": "updated test cases to support new session pool key\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-12T15:02:57+00:00"
+    },
+    {
+      "sha": "bb6b3c31dab5c47a054f3dd9a180a9c626a9b65d",
+      "message": "linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-12T15:35:58+00:00"
+    },
+    {
+      "sha": "49eb03cef53c3674eb9ebee2e03ae5b89b21acdd",
+      "message": "updated e2e test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-12T16:47:40+00:00"
+    },
+    {
+      "sha": "ee7bab12bb8d09c9051221abd88d7efd33ddcb79",
+      "message": "fix: Address review findings for session pool isolation\n\n- Fix integration tests to use new _make_pool_key signature with user_identity\n- Fix hashlib import order in unit tests (Standard instead of Third-Party)\n- Add user_identity to resource_service.py pool.session() calls\n- Add system identity for gateway health checks in gateway_service.py\n- Use full SHA-256 hash instead of truncated 16-char hash for collision resistance\n- Fix test assertions to use updated 4-element pool key structure\n- Remove unused time import from integration tests\n- Fix E302 blank line issue in unit tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-13T16:21:58+00:00"
+    },
+    {
+      "sha": "e989df37474d5aadeda9e3dbef39f6244c38b2b8",
+      "message": "fix: Thread user identity through invoke_resource for proper isolation\n\n- Add user_identity parameter to invoke_resource function\n- Pass user from read_resource to invoke_resource calls\n- Use provided user_identity for session pool isolation instead of\n  always using platform_admin_email\n- Fall back to platform_admin_email when user_identity is not provided\n  (backward compatibility)\n\nThis ensures resource reads are properly isolated by the authenticated\nuser, not shared across all users via the platform admin identity.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-13T16:29:11+00:00"
+    },
+    {
+      "sha": "be6a6d8e5d68cf2140a093123ed3370d134fb531",
+      "message": "fix: Normalize user_identity to handle dict from auth middleware\n\n- Update invoke_resource to accept Union[str, Dict[str, Any]] for user_identity\n- Add normalization logic to extract email from dict (from get_current_user_with_permissions)\n- Handle string user_identity directly\n- Fall back to platform_admin_email when user_identity is None or invalid\n\nThe auth middleware returns a dict with 'email' key, not a string. This\nfix ensures the user identity is properly normalized before being used\nfor session pool isolation and OAuth token lookup.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-13T16:58:33+00:00"
+    },
+    {
+      "sha": "c4220ad44ff1b1b12a7dcf4a38ea60e27de2c58d",
+      "message": "fix: Separate pool isolation from OAuth token lookup\n\n- Use pool_user_identity (normalized from user dict) for session pool isolation\n- Keep oauth_user_email as settings.platform_admin_email for OAuth token lookup\n- This preserves existing OAuth behavior (service account tokens) while\n  enabling per-user session isolation\n- Remove debug print statement from unit tests\n\nThe authenticated user's email is now used only for pool key generation,\nnot for OAuth token lookup. This prevents breaking OAuth integrations\nthat rely on the platform admin's stored tokens.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-13T17:24:21+00:00"
+    },
+    {
+      "sha": "66c7becbac31713ddf1ddb648fa3531a7daf9126",
+      "message": "fix: Update docstring and remove trailing whitespace\n\n- Update invoke_resource docstring to correctly state pool isolation\n  defaults to \"anonymous\" (not platform_admin_email)\n- Clarify that OAuth token lookup always uses platform_admin_email\n- Remove trailing whitespace from unit test file (W293)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-13T17:46:38+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 260,
+  "deletions": 74,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:25.074797",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:25.075641",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2057,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2057.json"
+  }
+}

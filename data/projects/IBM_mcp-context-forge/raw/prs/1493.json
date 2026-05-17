@@ -1,0 +1,46 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1493,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1493"
+  },
+  "metadata": {
+    "title": "fix: Allow OPTIONS requests on /openapi.json for CORS preflight",
+    "state": "closed",
+    "created_at": "2025-11-22T01:50:35+00:00",
+    "updated_at": "2025-11-27T22:19:28+00:00",
+    "closed_at": "2025-11-27T22:19:28+00:00",
+    "merged_at": null,
+    "author": "putz612",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "kevalmahajan"
+    ]
+  },
+  "description": "## Summary\nThis PR fixes CORS preflight authentication issues that prevent browser-based OpenAPI integrations (Open WebUI, Swagger UI, etc.) from successfully fetching the OpenAPI specification.\n\n## Problem\nThe `DocsAuthMiddleware` enforces authentication on all requests to `/openapi.json`, including OPTIONS preflight requests. However, **CORS preflight OPTIONS requests cannot include Authorization headers** per [RFC 7231 Section 4.3.7](https://datatracker.ietf.org/doc/html/rfc7231#section-4.3.7), causing a 401 response before the browser can send the actual authenticated GET request.\n\n### Symptom\nBrowser console error when integrating with Open WebUI or other browser-based tools:\n```\nAccess to fetch at 'https://mcp-context-forge.example.com/openapi.json' from origin 'https://openwebui.example.com' \nhas been blocked by CORS policy: Response to preflight request doesn't pass access control check: \nRedirect is not allowed for a preflight request.\n```\n\nServer returns `401 Unauthorized` with `www-authenticate: Bearer` header on OPTIONS request.\n\n## Solution\nAdded a check to exempt OPTIONS requests from authentication in `DocsAuthMiddleware` before checking protected paths. This allows:\n1. ✅ OPTIONS preflight to succeed (no auth required per CORS spec)\n2. ✅ GET requests to still require authentication (security maintained)\n3. ✅ Browser to complete CORS flow and fetch spec with proper auth\n\n## Changes\n- Added `request.method == \"OPTIONS\"` check in `DocsAuthMiddleware.dispatch()`\n- Updated docstring to document OPTIONS exemption\n- Positioned check before authentication to allow CORS headers from `CORSMiddleware` to be added\n\n## Testing\nTested with:\n- ✅ curl OPTIONS request returns 200 with CORS headers (no auth required)\n- ✅ curl GET request still requires Bearer token (auth maintained)\n- ✅ Open WebUI successfully fetches OpenAPI spec via browser\n- ✅ Chrome and Firefox CORS preflight now succeeds\n\n### Before\n```bash\n$ curl -i -X OPTIONS https://mcp-context-forge.example.com/openapi.json \\\n  -H \"Origin: https://openwebui.example.com\"\nHTTP/1.1 401 Unauthorized\nwww-authenticate: Bearer\n```\n\n### After\n```bash\n$ curl -i -X OPTIONS https://mcp-context-forge.example.com/openapi.json \\\n  -H \"Origin: https://openwebui.example.com\"\nHTTP/1.1 200 OK\naccess-control-allow-origin: https://openwebui.example.com\naccess-control-allow-credentials: true\n```\n\n## Security Considerations\n- ✅ No security regression: GET requests still require authentication\n- ✅ OPTIONS only returns CORS headers (no sensitive data)\n- ✅ Follows IETF RFC 7231 standard for OPTIONS handling\n- ✅ Consistent with FastAPI's CORSMiddleware behavior\n\n## Related Issues\nThis issue affects any browser-based integration attempting to use the OpenAPI spec, including:\n- Open WebUI OpenAPI tool integration\n- Swagger UI when hosted separately\n- Any browser-based API client\n\n## Checklist\n- [x] Code follows project style guidelines\n- [x] Documentation updated (docstring)\n- [x] Tested with curl and browser\n- [x] No breaking changes\n- [x] Security implications considered",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "6250a6ef4b56eebc077f1b0c6085a53f4bedb978",
+      "message": "fix: Allow OPTIONS requests on /openapi.json for CORS preflight\n\nThis change exempts OPTIONS requests from authentication on documentation\nendpoints (/docs, /redoc, /openapi.json) to support CORS preflight requests.\n\nIssue: Browser-based OpenAPI integrations (like Open WebUI) were failing\nbecause CORS preflight OPTIONS requests cannot include Authorization headers\nper RFC 7231 Section 4.3.7, but the DocsAuthMiddleware was enforcing\nauthentication on all requests including OPTIONS.\n\nSolution: Check request.method == 'OPTIONS' before applying authentication,\nallowing CORS preflight to succeed while still requiring authentication\nfor GET requests to actually fetch the OpenAPI spec.\n\nThis maintains security (GET still requires auth) while enabling proper\nCORS support for browser-based integrations.\n\nFixes browser-based OpenAPI tool integration (Open WebUI, Swagger UI, etc.)\nwhen AUTH_REQUIRED=false or when using proper authentication flows.",
+      "author": "Jason Sievert",
+      "date": "2025-11-22T01:49:11+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 9,
+  "deletions": 0,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:54.761841",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:54.762846",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1493,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1493.json"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4688,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4688"
+  },
+  "metadata": {
+    "title": "[CHORE]: Replace node:lts-alpine with UBI-based Node.js image in Containerfile frontend-builder",
+    "state": "open",
+    "created_at": "2026-05-09T09:05:43+00:00",
+    "updated_at": "2026-05-14T14:59:36+00:00",
+    "closed_at": null,
+    "author": "jonpspri",
+    "labels": [
+      "triage",
+      "devops",
+      "chore"
+    ],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88"
+    ]
+  },
+  "description": "## Summary\n\nThe standard `Containerfile` currently uses `node:lts-alpine` for the `frontend-builder` stage. All other Containerfile variants (`.lite`, `.scratch`) already use the Red Hat UBI10 Node.js 24 image (`registry.access.redhat.com/ubi10/nodejs-24`). We should align the standard `Containerfile` as well for supply-chain consistency, enterprise supportability, and to eliminate the Alpine-based build stage.\n\n## Scope\n\n- Replace `FROM node:lts-alpine AS frontend-builder` in `Containerfile` with a pinned UBI10 (or future UBI20) Node.js image.\n- Update any COPY/WORKDIR/permission patterns in that stage to match the UBI image conventions used in `Containerfile.lite`.\n\n## Non-trivial concerns to address\n\n1. **UID/GID mismatch**  \n   `node:lts-alpine` runs as `root` by default; the UBI Node.js image runs as non-root (`1001`). The current `frontend-builder` stage does `COPY package.json package-lock.json ./` and `RUN npm ci` without explicit `USER` directives. Switching to UBI will require adding `USER root` … `RUN chown …` … `USER 1001` patterns (see `Containerfile.lite` lines 161–173 for the working pattern).\n\n2. **SELinux labeling**  \n   UBI images may have stricter default SELinux contexts than Alpine. We need to verify that the final `COPY --from=frontend-builder` into the `ubi-minimal` runtime stage does not produce `permission denied` errors when the application runs as UID 1001. This likely means ensuring `chmod g=u` and correct ownership are applied in the builder stage before the artifact is copied.\n\n3. **Hadolint / build compliance**  \n   The UBI image digest must be pinned (not a floating tag) to satisfy reproducible-build requirements. We should use the same digest as `Containerfile.lite` or `Containerfile.scratch` so all variants stay in lock-step.\n\n4. **Multi-arch support**  \n   Confirm that the chosen UBI Node.js digest supports the same architectures as the current Alpine image (`amd64`, `arm64`, `s390x`, `ppc64le`).\n\n## Suggested implementation\n\n1. Pin to `registry.access.redhat.com/ubi10/nodejs-24:<same-digest-as-lite>`.\n2. Add `USER root` at the top of the stage, create directories with `chown 1001:0`, then switch to `USER 1001` before `npm ci`.\n3. Mirror the `COPY --chown=1001:0 …` pattern from `Containerfile.lite`.\n4. Run a full container build test on both `amd64` and `s390x` (or rely on CI multi-arch build) before merging.\n\n## Acceptance criteria\n\n- [ ] `Containerfile` no longer references any Alpine-based image.\n- [ ] `make docker-prod` (or equivalent) succeeds locally.\n- [ ] CI multi-arch build passes for `amd64`, `arm64`, `s390x`, `ppc64le`.\n- [ ] No regression in Admin UI static asset generation.",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:21:47.815664",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:21:47.816318",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4688,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4688.json"
+  }
+}

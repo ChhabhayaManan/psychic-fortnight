@@ -1,0 +1,89 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3463,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3463"
+  },
+  "metadata": {
+    "title": "fix(rbac): Prevent Cross-Team Data Exposure via “View Public” Checkbox",
+    "state": "closed",
+    "created_at": "2026-03-04T13:08:15+00:00",
+    "updated_at": "2026-03-04T15:45:07+00:00",
+    "closed_at": "2026-03-04T15:45:05+00:00",
+    "merged_at": "2026-03-04T15:45:05+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "bug",
+      "ica",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3411\r\n\r\n## 📌 Summary\r\nFixed a visibility leak in the admin UI where users could see team-scoped and private MCP servers, tools, resources, and prompts from other teams when the \"View Public\" checkbox was enabled. Previously, enabling this checkbox would remove the `team_id` filter entirely, exposing all accessible items across the platform and violating the selected team's isolation boundary. This change introduces an `include_public` parameter to explicitly overlay globally public items on top of the current team's items while securely maintaining team isolation.\r\n\r\n## 🔁 Reproduction Steps\r\n1. **Login in Context Forge UI**\r\n2. **Create MCP server under Team1** with Visibility: `team` (team-scoped)\r\n3. **Navigate to create virtual server from Team2** (initially, only Team2's MCP servers are visible)\r\n4. **Enable checkbox:** \"View Public — Include publicly available MCP servers, tools, resources, and prompts\"\r\n5. **Observe the bug:** Team1's team-scoped and private servers are incorrectly listed alongside Team2's servers and globally public servers.\r\n\r\nNow: Only the selected team's items + all public items are visible.\r\n\r\n## 🐞 Root Cause\r\n\r\nFrontend:\r\nThe root cause originated in the frontend JavaScript `mcpgateway/static/admin.js`. \r\nWhen the \"View Public\" checkbox was checked, the logic would deliberately strip the `team_id` parameter from the API request to fetch all public items. \r\n\r\nBackend:\r\nHowever, the backend `mcpgateway/admin.py`, when receiving a request without a `team_id`, would fall back to yielding *all* items the user technically had access to across the system, rather than strictly merging the selected team's items with public items. This broke the intended multi-tenancy boundary for the active UI view. Need a backend api such that it returns only team items + public items.\r\n\r\n\r\n## 💡 Fix Description\r\n\r\n- **Backend API Filters `mcpgateway/admin.py`:**\r\nIntroduced a new `include_public` boolean query parameter across all listing and search endpoints for gateways, tools, resources, and prompts. When `team_id` is specified with `include_public=true`, the backend now explicitly enforces an `OR` condition yielding only `[selected team's items] + [globally public items]`.\r\n\r\n- **Frontend URL Mutation `mcpgateway/static/admin.js`:** \r\nModified the behavior of the \"View Public\" checkbox to preserve the `team_id` in the query string and instead toggle the `include_public=true` parameter.\r\n\r\n- **Stateful Pagination `mcpgateway/templates/`:** \r\nUpdated the HTMX `hx-get` attributes in the infinite scroll templates (`*_selector_items.html`) so that both `team_id` and `include_public` query parameters survive across paginated requests.\r\n\r\n- **Test Coverage:** Added extensive unit tests (`test_admin.py`) for the new access condition overlays and template injections, and refactored frontend JS tests (`admin-view-public.test.js` & `admin-edit-server-selection.test.js`) to assert proper URL param generation.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |   ✅     |\r\n| Unit tests                            | `make test`          |     ✅   |\r\n| Coverage ≥ 80 %                       | `make coverage`      |     ✅   |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3890159744",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-04T15:29:13+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0226038cc5ceec5ac298e97a3a97721bcb305154",
+      "message": "fix isolation for server selection in virtual server\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-04T10:13:32+00:00"
+    },
+    {
+      "sha": "8cf9524dca8c02f03b8329f41a333f9eccf23318",
+      "message": "fix team items isolation for virtual servers\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-04T12:15:15+00:00"
+    },
+    {
+      "sha": "76caec2143af1b3993fe9260cd52cbf0fd2bd136",
+      "message": "linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-04T12:55:42+00:00"
+    },
+    {
+      "sha": "d8a450c9355450a1f17af850fc3bdcc23fe473d7",
+      "message": "add regression tests for coverage\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-04T13:38:03+00:00"
+    },
+    {
+      "sha": "37eb9a8ad9205b41d7bc3da904c0af7c4b111cfe",
+      "message": "fix new test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-04T14:03:07+00:00"
+    },
+    {
+      "sha": "3d87604ad73bc39d2bb95a07a235320a2dd016af",
+      "message": "fix(tests): add missing deny-path and selector template tests for include_public\n\nAdd gateways selector template context test (tools/resources/prompts\nhad one but gateways was missing). Add non-member deny-path regression\ntests for tools, resources, and prompts to ensure include_public=True\ncannot bypass team membership checks. Fix formatting in search endpoint\ntests (blank lines, line length, docstrings).\n\nCloses #3411\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T15:03:53+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 680,
+  "deletions": 108,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:26.503607",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:26.504266",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3463,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3463.json"
+  }
+}

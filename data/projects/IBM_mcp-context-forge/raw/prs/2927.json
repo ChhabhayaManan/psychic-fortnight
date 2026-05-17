@@ -1,0 +1,57 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2927,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2927"
+  },
+  "metadata": {
+    "title": "Fix macOS gunicorn worker crashes due to Objective-C fork safety",
+    "state": "closed",
+    "created_at": "2026-02-13T15:20:13+00:00",
+    "updated_at": "2026-02-13T23:01:25+00:00",
+    "closed_at": "2026-02-13T23:01:23+00:00",
+    "merged_at": "2026-02-13T23:01:23+00:00",
+    "author": "madhav165",
+    "labels": [
+      "python",
+      "ica"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2926\r\n\r\n## Summary\r\n\r\nFixes gunicorn worker crashes on macOS by setting `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`.\r\n\r\n## Problem\r\n\r\nOn macOS, gunicorn workers crash with:\r\n\r\n```\r\nobjc[53393]: +[NSCharacterSet initialize] may have been in progress in another thread when fork() was called.\r\nWe cannot safely call it or ignore it in the fork() child process. Crashing instead.\r\n```\r\n\r\nThis occurs because macOS's Objective-C runtime is not fork-safe. When libraries like SSL or cryptography initialize Objective-C before gunicorn forks workers, the child processes crash.\r\n\r\nWhile PR #2838 disabled `--preload` on macOS, this was insufficient as crashes can occur even without preloading.\r\n\r\n## Solution\r\n\r\nSet `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` on macOS in two locations:\r\n\r\n1. **run-gunicorn.sh** - At script start before any Python runs\r\n2. **gunicorn.config.py** - At module import time before workers fork\r\n\r\nThis disables the Objective-C fork-safety check that causes SIGABRT crashes.\r\n\r\n## Changes\r\n\r\n- `run-gunicorn.sh`: Added Section 0 to set the environment variable on Darwin\r\n- `gunicorn.config.py`: Added check at module level before imports\r\n\r\n## Testing\r\n\r\n- [x] Tested on macOS - workers start without crashes\r\n- [x] No impact on Linux (change is Darwin-only)\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3800039219",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-13T23:00:51+00:00",
+      "body": "LGTM — well-targeted, low-risk, Darwin-only fix.\n\n**Correctness:** The `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` env var is the standard workaround for the macOS Objective-C fork-safety crash. Both locations are needed — the shell script covers the normal launch path, and `gunicorn.config.py` provides defense-in-depth for direct gunicorn invocations. Placement at module level before `from mcpgateway.config import settings` is correct.\n\n**Security:** No concerns. This is a well-documented Apple env var that only affects the ObjC runtime's crash-on-fork check on Darwin. Linux is unaffected, and no cryptographic or security boundaries are weakened.\n\n**Performance:** No impact — single env var check at startup.\n\n**Consistency:** Follows existing codebase patterns (`uname -s == \"Darwin\"` in shell, `platform.system() == \"Darwin\"` in Python, matching the existing `preload_app` checks).\n\nRebased cleanly onto current main."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "db402ccc4dca8bc99794db2aed5d076f17885a40",
+      "message": "fix: set OBJC_DISABLE_INITIALIZE_FORK_SAFETY on macOS to prevent gunicorn worker crashes\n\nOn macOS, Objective-C is not fork-safe. When gunicorn forks workers after\ncertain libraries (SSL, cryptography) have initialized Objective-C, it causes\ncrashes with \"+[NSCharacterSet initialize] may have been in progress\".\n\nThis fix sets OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES on macOS in both:\n- run-gunicorn.sh (before any Python code runs)\n- gunicorn.config.py (at module import time)\n\nThe previous fix (PR #2838) only disabled --preload on macOS, which was\ninsufficient since the crashes can occur even without preloading.\n\nSigned-off-by: Madhav Kandukuri <madhav.kandukuri@gmail.com>\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T15:16:01+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 17,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:23.924275",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:23.927474",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2927,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2927.json"
+  }
+}

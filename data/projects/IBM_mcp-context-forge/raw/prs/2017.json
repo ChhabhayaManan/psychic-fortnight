@@ -1,0 +1,81 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2017,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2017"
+  },
+  "metadata": {
+    "title": "feat: singleton plugin initialization",
+    "state": "closed",
+    "created_at": "2026-01-10T01:00:36+00:00",
+    "updated_at": "2026-01-11T19:13:13+00:00",
+    "closed_at": "2026-01-11T19:13:11+00:00",
+    "merged_at": "2026-01-11T19:13:11+00:00",
+    "author": "araujof",
+    "labels": [
+      "enhancement",
+      "performance",
+      "plugins"
+    ],
+    "milestone": "Release 1.0.0-BETA-2",
+    "assignees": [
+      "araujof",
+      "crivetimihai"
+    ]
+  },
+  "description": "## Overview\r\n\r\nThe plugin manager state was being re-initialized on every service instantiation. This PR eliminates redundant plugin manager initialization that was occurring multiple times instead of once per worker process.\r\n\r\nEach service (`ToolService`, `ResourceService`, `PromptService`) creates its own `PluginManager` instance in `__init__()`. While `PluginManager` uses the Borg pattern for shared state, the `ConfigLoader.load_config()` call executed **before** state sharing, causing redundant work:\r\n\r\n```python\r\ndef __init__(self, config: str = \"\", timeout: int = DEFAULT_PLUGIN_TIMEOUT):\r\n    self.__dict__ = self.__shared_state  # State shared AFTER config load\r\n    if config:\r\n        self._config = ConfigLoader.load_config(config)  # ⚠️ Ran every time!\r\n```\r\n\r\n## Solution\r\n\r\nAdded a guard check in `PluginManager.__init__()` to only initialize when the Borg shared state is empty:\r\n\r\n```python\r\ndef __init__(self, config: str = \"\", timeout: int = DEFAULT_PLUGIN_TIMEOUT):\r\n    self.__dict__ = self.__shared_state\r\n\r\n    # Only initialize once (first instance when shared state is empty)\r\n    if not self.__shared_state:\r\n        if config:\r\n            self._config = ConfigLoader.load_config(config)\r\n\r\n        # Update executor timeouts\r\n        self._executor.config = self._config\r\n        self._executor.timeout = timeout\r\n```\r\n\r\nThis ensures:\r\n- First instantiation: loads config into shared state\r\n- Subsequent instantiations: skip initialization (shared state not empty)\r\n- All instances continue to share the same config object via Borg pattern\r\n\r\n## Thread Safety Enhancements to PluginManager                                                                                                                                                                                                                                                                                                                                                                                                    \r\n                                                                                                                                                                                                                                                                                                                                                                                                                                                 \r\nThe `PluginManager` now implements thread safety to prevent race conditions in multi-threaded and async environments. A two-level locking strategy was added: `threading.Lock` for synchronous operations (`__init__`, `reset`) to prevent concurrent config loading across threads, and `asyncio.Lock` for async operations (`initialize`, `shutdown`) to serialize coroutine execution. This uses double-checked locking patterns to ensure config loads and plugin initialization happen exactly once, even when multiple threads or coroutines create `PluginManager` instances simultaneously. The implementation now safely supports uvicorn (async workers), gunicorn with threads, and hybrid deployments without redundant initialization or state corruption.\r\n\r\n## Changes\r\n\r\n### Modified Files\r\n\r\n1. **`mcpgateway/plugins/framework/manager.py`**\r\n   - Added `if not self.__shared_state:` guard in `__init__()` to prevent re-initialization\r\n   - Added `reset()` classmethod for testing isolation\r\n   - Make initialization, reset, and shutdown thread-safe\r\n\r\n2. **`tests/unit/mcpgateway/plugins/conftest.py`** (new)\r\n   - Created pytest fixture to reset PluginManager state before each test\r\n   - Ensures test isolation while maintaining singleton pattern in production\r\n\r\n3. **`tests/unit/mcpgateway/plugins/framework/test_manager.py`**\r\n  - Added a comprehensive unit test `test_plugin_manager_singleton_behavior` to verify that the `PluginManager` correctly implements its singleton pattern (Borg pattern)\r\n  - Added a unit test to verify thread-safe behavior\r\n \r\n4. doctest updates to `(...)/server.py` and `(...)/tool_service.py`\r\n\r\n## Related Issues\r\n\r\n- Closes #2010\r\n- Related to #1963\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "e7e4ff08f3d684e59c83780aeb0a7602a0316036",
+      "message": "feat: singleton plugin initialization\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-01-10T00:48:52+00:00"
+    },
+    {
+      "sha": "fb4b376f1cf722f6734e6a15fe84eff36cde3411",
+      "message": "tests: fix doctests\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-01-10T01:33:45+00:00"
+    },
+    {
+      "sha": "47af33163e9db24dd68b94c6f8d894e162c6821b",
+      "message": "chore: update doctests\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-01-11T01:51:11+00:00"
+    },
+    {
+      "sha": "30f4c05a10c22785802a76715e275f54d6f718df",
+      "message": "test: add test to check singleton implementation\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-01-11T02:28:00+00:00"
+    },
+    {
+      "sha": "b1e2f33d3beb3d1ed299f4a83c869179ff1292c6",
+      "message": "docs: document plugin manager singleton behavior\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-01-11T16:03:12+00:00"
+    },
+    {
+      "sha": "9b296063c18186185b1d7f9a2510b3b03ef0bc7f",
+      "message": "feat: make PluginManager thread safe\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-01-11T16:20:51+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 385,
+  "deletions": 68,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:11.576369",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:11.578037",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2017,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2017.json"
+  }
+}

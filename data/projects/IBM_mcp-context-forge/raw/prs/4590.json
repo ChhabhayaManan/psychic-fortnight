@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4590,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4590"
+  },
+  "metadata": {
+    "title": "fix: forward task_id from client requests to A2A backend agents",
+    "state": "closed",
+    "created_at": "2026-05-05T07:49:12+00:00",
+    "updated_at": "2026-05-05T07:54:13+00:00",
+    "closed_at": "2026-05-05T07:54:13+00:00",
+    "merged_at": null,
+    "author": "nikdvy",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nFixes #4589\n\nWhen ContextForge proxies requests to A2A backend agents, `task_id` is dropped — the gateway uses hardcoded `\"id\": 1` and timestamp-based `messageId`. This breaks multi-turn conversations for stateful backend agents.\n\nThis PR extracts `task_id`/`taskId` from inbound parameters and forwards it to the backend agent:\n- In the JSONRPC `id` field (instead of hardcoded `1`)\n- In `message.task_id` field (for agents using it as thread identifier)\n- As `messageId` (when task_id is provided)\n\nWhen `task_id` is not provided, behavior is unchanged (backward compatible).\n\n## Changes\n\n- `mcpgateway/services/a2a_service.py` — extract and forward task_id in `invoke_agent()`\n- `mcpgateway/services/tool_service.py` — forward task_id in MCP→A2A bridge (both `invoke_tool` and `_call_a2a_agent`)\n\n## Test plan\n\n- [ ] Existing tests pass (no behavior change when task_id absent)\n- [ ] A2A agent receives task_id when client provides it\n- [ ] Multi-turn conversation works: same task_id → same thread on backend\n- [ ] Different task_id → different threads (no cross-contamination)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "7520537f230052051868780adf290e5f7c5f4158",
+      "message": "fix: forward task_id from client requests to A2A backend agents\n\nWhen ContextForge proxies requests to A2A backend agents, it currently\nuses hardcoded values for JSONRPC `id` (always 1) and `messageId`\n(timestamp-based). This makes multi-turn conversations impossible\nbecause backend agents cannot correlate messages into a session.\n\nThis change extracts `task_id`/`taskId` from inbound parameters and\nforwards it to the backend agent in:\n- JSONRPC `id` field (instead of hardcoded 1)\n- `message.task_id` field (for agents that use it as thread identifier)\n- `messageId` field (as fallback when task_id is provided)\n\nWhen task_id is not provided, behavior is unchanged (backward compatible).\n\nThis enables stateful A2A agents (e.g. those using LangGraph checkpointer)\nto maintain conversation history across multiple turns through the gateway.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Nikolai Dvoinishnikov",
+      "date": "2026-05-05T07:14:39+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 22,
+  "deletions": 5,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:03:44.871577",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:44.872669",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4590,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4590.json"
+  }
+}

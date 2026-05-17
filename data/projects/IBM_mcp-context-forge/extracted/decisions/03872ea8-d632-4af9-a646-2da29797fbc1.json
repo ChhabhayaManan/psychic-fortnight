@@ -1,0 +1,42 @@
+{
+  "id": "03872ea8-d632-4af9-a646-2da29797fbc1",
+  "title": "fix(rbac) admin user visibility issue for personal teams",
+  "summary": "# 🐛 Bug-fix PR\r\n\r\nCloses #3376\r\n\r\n## 📌 Summary\r\nFixed a security issue in the admin UI where platform administrators could see and manage personal teams belonging to other users. The issue violated the fundamental security principle that personal teams should only be visible to their owner, even for admins.\r\n\r\n**Why this matters:**\r\n- Personal teams are private workspaces that should never be exposed to other users\r\n- The vulnerability allowed admins to view, edit, and potentially delete other users' personal teams\r\n- This violated user privacy expectations and the platform's security model\r\n- The fix maintains admin capabilities while respecting personal team privacy boundaries\r\n\r\nAnother minor fix: All other private teams are still listed for the admin user for governance (managing members, editing, deleting) but when the admin user tries to see the content for that private team which he is not a member of, in that case, error banner will be displayed and will be defaulted to All Teams.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n**Original Bug:**\r\n\r\n1. Create two users: `admin@example.com` (platform admin) and `user@example.com` (regular user)\r\n2. Each user automatically gets a personal team (e.g., `personal-admin`, `personal-user`)\r\n3. Log in as `admin@example.com` to the admin UI at `/admin`\r\n4. Navigate to any team management endpoint:\r\n   - GET `/admin/teams` - List all teams\r\n   - GET `/admin/teams/{team_id}` - View team details\r\n   - PUT `/admin/teams/{team_id}` - Edit team\r\n   - DELETE `/admin/teams/{team_id}` - Delete team\r\n\r\n**Expected behavior:** Admin should only see:\r\n- Their own personal team (`personal-admin`)\r\n- All non-personal (shared) teams\r\n\r\n**Actual behavior (bug):** Admin could see:\r\n- Their own personal team (`personal-admin`)\r\n- Other users' personal teams (`personal-user`, `personal-alice`, etc.)\r\n- All non-personal teams\r\n\r\n## 🐞 Root Cause\r\nThe issue existed in `mcpgateway/admin.py` across four endpoints that used `TeamManagementService.list_teams()`:\r\n\r\n```python\r\n# BEFORE (vulnerable code)\r\nteams = team_service.list_teams(\r\n    db=db,\r\n    include_personal=True,  # Included ALL personal teams\r\n    include_public=True\r\n)\r\n```\r\n\r\n**The problem:**\r\n- `include_personal=True` returned ALL personal teams in the database\r\n- No filtering was applied to restrict personal teams to the current admin's own team\r\n- The service layer correctly implemented the logic, but the admin layer misused it\r\n\r\n**Affected endpoints:**\r\n1. `GET /admin/teams` - Team listing page\r\n2. `GET /admin/teams/{team_id}` - Team details page\r\n3. `PUT /admin/teams/{team_id}` - Team edit endpoint\r\n4. `DELETE /admin/teams/{team_id}` - Team deletion endpoint\r\n\r\n## 💡 Fix Description\r\n\r\n**Access model updated:**\r\n\r\n- Exclude all personal teams from admin queries.\r\n- Explicitly fetch and include only the current admin’s personal team.\r\n- Return 404 for attempts to access other users’ personal teams.\r\n\r\n**Implementation changes:**\r\n\r\n- Updated all four admin endpoints to:\r\n    - Call list_teams(include_personal=False)\r\n    - Fetch admin’s personal team via new helper method\r\n- Added TeamManagementService.get_user_personal_team() to retrieve owner-scoped personal team\r\n- Added UI banner clarifying visibility rules\r\n\r\n**Security Guarantees:**\r\n\r\nAfter this change:\r\nAdmins cannot:\r\n1. View other users’ personal teams\r\n2. Edit other users’ personal teams\r\n3. Delete other users’ personal teams\r\n\r\nAdmins can:\r\n1. Manage all shared (non-personal) teams\r\n2. Access their own personal team\r\n3. This enforces strict personal team isolation while preserving administrative control over shared resources.\r\n\r\n**Tests:**\r\n11 new test cases (security + UX)\r\nValidates:\r\n\r\n- Personal team isolation\r\n- 404 enforcement on unauthorized access\r\n- Admin self-access\r\n- Shared team visibility\r\n- All tests passing\r\n\r\n**Design Decision:**\r\n\r\n- The fix is applied in the admin layer, not the service layer, to preserve service flexibility and avoid impacting other valid use cases of list_teams().\r\n\r\n| Scenario | Before (Vulnerable) | After (Secure) |\r\n|----------|---------------------|----------------|\r\n| Admin views team list | Sees ALL personal teams | Sees only their own personal team |\r\n| Admin views other user's personal team | ✅ Allowed (bug) | ❌ Blocked (404 error) |\r\n| Admin views their own personal team | ✅ Allowed | ✅ Allowed |\r\n| Admin manages shared teams | ✅ Allowed | ✅ Allowed |\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |     ✅   |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |   ✅     |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "reasoning": "# 🐛 Bug-fix PR\r\n\r\nCloses #3376\r\n\r\n## 📌 Summary\r\nFixed a security issue in the admin UI where platform administrators could see and manage personal teams belonging to other users. The issue violated the fundamental security principle that personal teams should only be visible to their owner, even for admins.\r\n\r\n**Why this matters:**\r\n- Personal teams are private workspaces that should never be exposed to other users\r\n- The vulnerability allowed admins to view, edit, and potentially delete other users' personal teams\r\n- This violated user privacy expectations and the platform's security model\r\n- The fix maintains admin capabilities while respecting personal team privacy boundaries\r\n\r\nAnother minor fix: All other private teams are still listed for the admin user for governance (managing members, editing, deleting) but when the admin user tries to see the content for that private team which he is not a member of, in that case, error banner will be displayed and will be defaulted to All Tea",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "madhav165",
+    "crivetimihai",
+    "kevalmahajan"
+  ],
+  "tags": [
+    "MUST",
+    "security",
+    "bug",
+    "rest",
+    "release-fix",
+    "database",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "8418b5aa-1f54-4ff9-8554-ec8256a7fa03",
+      "source_type": "pr",
+      "source_id": "3413",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/3413",
+      "contributor": "kevalmahajan",
+      "timestamp": "2026-03-03T06:54:16Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3413.json"
+    }
+  ],
+  "timestamp": "2026-03-03T06:54:16Z",
+  "created_at": "2026-05-17T17:23:12.096548",
+  "updated_at": "2026-05-17T17:23:12.096550",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:12.097213",
+    "artifact_type": "decisions",
+    "artifact_id": "03872ea8-d632-4af9-a646-2da29797fbc1"
+  }
+}

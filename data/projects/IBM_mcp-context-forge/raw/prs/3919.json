@@ -1,0 +1,97 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3919,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3919"
+  },
+  "metadata": {
+    "title": "feat(rbac): enforce session-token team narrowing in Layer 2 permission checks",
+    "state": "closed",
+    "created_at": "2026-03-30T09:37:49+00:00",
+    "updated_at": "2026-03-30T13:40:16+00:00",
+    "closed_at": "2026-03-30T13:40:14+00:00",
+    "merged_at": "2026-03-30T13:40:13+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "enhancement",
+      "security",
+      "rbac",
+      "MUST",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3799\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes a security gap in the two-layer RBAC model where session-token team narrowing (Layer 1 / visibility) was not enforced in permission checks (Layer 2 / RBAC).\r\n\r\n**Problem:** When `check_any_team=True`, `PermissionService.check_permission()` aggregated permissions from ALL of a user's team-scoped roles, ignoring the `token_teams` narrowing applied at Layer 1. This allowed a session narrowed to team A to satisfy RBAC checks using roles the user holds in team B.\r\n\r\n**Example scenario:**\r\n- User has `developer` role in team A (`tools.read`, `tools.execute`)\r\n- User has `team_admin` role in team B (`teams.*`, `tools.create`, etc.)\r\n- User creates session narrowed to team A via JWT `teams: [\"A\"]`\r\n- **Before:** Layer 1 scoped to team A, but Layer 2 granted `teams.*` from team B\r\n- **After:** Both layers correctly restricted to team A permissions only\r\n\r\n**Solution:** Filter team-scoped roles in `_get_user_roles()` to only include roles from teams specified in `token_teams` when `include_all_teams=True` and `token_teams` is non-empty. Updated cache key generation to prevent cross-contamination between different narrowing scopes.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    Passed ✅    |\r\n| Unit tests                | `make test`     |     Passed ✅   |\r\n| Coverage ≥ 80%            | `make coverage` |    Passed ✅    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Changes Made**\r\n`mcpgateway/services/permission_service.py`:\r\n\r\n1. `get_user_permissions()` (line 212):\r\n- Added `token_teams: Optional[List[str]] = None` parameter\r\n- Updated docstring to document Layer 2 enforcement behavior\r\n- Modified cache key generation (lines 241-244) to include `token_teams` for proper isolation\r\n- Pass `token_teams` to `_get_user_roles()` (line 253)\r\n\r\n2. `_get_user_roles()` (line 461):\r\n- Added `token_teams: Optional[List[str]] = None` parameter\r\n- Updated docstring to explain narrowing enforcement\r\n- Added filtering logic (lines 505-512) to restrict team-scoped roles when `include_all_teams=True` and `token_teams` is non-empty\r\n3. `check_permission()` (line 134):\r\n- Pass `token_teams=token_teams` to `get_user_permissions()`\r\n\r\n`tests/unit/mcpgateway/services/test_permission_service_token_narrowing.py` (NEW):\r\nCreated comprehensive unit test suite with 16 tests covering:\r\n\r\n**1. Cache Key Generation (4 tests):**\r\n- Cache key includes `token_teams` to prevent cross-contamination\r\n- Different `token_teams` produce different cache keys\r\n- Token teams are sorted in cache key for consistency\r\n- Un-narrowed sessions (`token_teams=None`) use base cache key\r\n\r\n**2. Role Filtering (4 tests):**\r\n- `_get_user_roles()` filters by `token_teams` when narrowed\r\n- No filtering when `token_teams` is None (un-narrowed)\r\n- No filtering when `token_teams` is empty list (public-only)\r\n- Global team roles (`scope_id=None`) preserved when narrowed\r\n\r\n**3. End-to-End Permission Checks (8 tests):**\r\n- Narrowed session restricts to `token_teams` only\r\n- Un-narrowed session uses all team roles\r\n- Public-only token has no team permissions\r\n- Admin bypass unaffected by narrowing\r\n- Public-only blocks `admin.*` even for admin users\r\n- Multiple teams in `token_teams` aggregates from all specified\r\n- Specific `team_id` overrides `token_teams`\r\n\r\nTest Results: All 16 new tests pass ✅",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4030140998",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-30T12:16:31+00:00",
+      "body": "Reviewed and approved. Core logic is correct — token_teams narrowing is properly enforced in the check_any_team path, cache keys are isolated, and global team roles (scope_id=NULL) are correctly preserved. Added review-fix commits for cache key deduplication, strengthened regression test with realistic permissions, and cleaned up lint/formatting issues. Pre-existing scoping gaps in other code paths tracked in #3924."
+    },
+    {
+      "id": "4030592135",
+      "author": "lucarlig",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-30T13:32:01+00:00",
+      "body": "Core narrowing fix looks good. The `check_any_team` path, cache isolation, and regression test cleanup all make sense. Remaining broader `token_teams=[]` semantics can stay tracked separately in #3924."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8121fe9d7898dfe61bcdbcc6f06f9c75890906fb",
+      "message": "fix(rbac): enforce session-token team narrowing in Layer 2 permission checks\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-03-30T09:10:47+00:00"
+    },
+    {
+      "sha": "38533c152bd37ce2d8c5b970b9a284e801793842",
+      "message": "Added unit tests for token narrowing\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-03-30T09:29:10+00:00"
+    },
+    {
+      "sha": "d7129186e958d24b86432c614efa4493af3859a1",
+      "message": "Fixed pre-commit issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-03-30T10:18:11+00:00"
+    },
+    {
+      "sha": "8b0ab70b9998b88f90728e8eabaf42e6c122c5c9",
+      "message": "fix(rbac): correct misleading test and clean up token narrowing tests\n\n- Fix test_check_permission_public_only_token that passed due to\n  wildcard string mismatch rather than actual role filtering; renamed\n  to test_check_permission_public_only_token_retains_non_admin_team_perms\n  with realistic permissions and accurate assertion (Layer 1 handles\n  public-only visibility, not Layer 2 role filtering)\n- Remove unused imports (datetime, timezone) and unused variable (role_c)\n- Remove trailing \"Made with Bob\" comment\n- Apply black/isort formatting to match project standards\n- Clean up duplicate inline comments on or_() clause\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T11:02:17+00:00"
+    },
+    {
+      "sha": "1f8f8a151ba53adb15bee0299f2bae86a65fe9f8",
+      "message": "fix: add missing Returns docstring sections in _Unset sentinel (DAR201)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T11:09:25+00:00"
+    },
+    {
+      "sha": "a27c51a699a935c743ff7c2a77beec2090904b92",
+      "message": "fix(rbac): deduplicate token_teams in cache key and strengthen regression test\n\nAddress two findings from code review:\n\n1. Cache key deduplication: token_teams with duplicates (e.g.\n   [\"team-a\", \"team-a\"]) now produces the same cache key as the\n   deduplicated form ([\"team-a\"]), preventing avoidable cache\n   fragmentation. Added test_cache_key_deduplicates_token_teams.\n\n2. Strengthen test_check_permission_narrowed_session_restricts_to_token_teams:\n   replaced unrealistic \"teams.*\" wildcard permissions with explicit\n   permissions matching bootstrap_db.py built-in roles (teams.create,\n   teams.read, etc.). The previous test passed even when team-B roles\n   leaked because \"teams.create\" != \"teams.*\" in exact string matching.\n   The new test would correctly fail if role filtering broke.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T11:53:55+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 375,
+  "deletions": 16,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:44.840293",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:44.841274",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3919,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3919.json"
+  }
+}

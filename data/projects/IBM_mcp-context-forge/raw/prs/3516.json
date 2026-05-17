@@ -1,0 +1,139 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3516,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3516"
+  },
+  "metadata": {
+    "title": "[FIX][RBAC]: Session tokens denied tools.execute on /rpc and /mcp despite having team-scoped role",
+    "state": "closed",
+    "created_at": "2026-03-06T12:42:27+00:00",
+    "updated_at": "2026-03-09T01:51:35+00:00",
+    "closed_at": "2026-03-06T22:04:25+00:00",
+    "merged_at": "2026-03-06T22:04:25+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "ica",
+      "MUST",
+      "api",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 📌 Summary\n\nSession tokens whose `tools.execute` permission exists only in a team-scoped RBAC role were incorrectly denied on `/rpc` (`tools/call`) and `/mcp` (Streamable HTTP). The same user succeeded on REST endpoints because those use the `@require_permission` decorator which already applies a `check_any_team` fallback for session tokens.\n\nCloses #3515\n\n## 🔁 Reproduction Steps\n\n1. Set `DEFAULT_TEAM_MEMBER_ROLE=developer` in your environment\n2. Create a new user and a new team via the admin UI\n3. Log in as that user\n4. Add an MCP server scoped to that team\n5. Go to the Tools screen and run a tool — it fails with `-32003 Insufficient permissions. Required: tools.execute`\n\n## 🐞 Root Cause\n\nTwo permission-check helpers were missing the `check_any_team` fallback that the `@require_permission` decorator applies for session tokens (rbac.py:562–576):\n\n- **`_ensure_rpc_permission`** (main.py) — used by `POST /rpc`. Cannot use `@require_permission` at the endpoint level because `/rpc` is a multi-method dispatcher; permission is resolved after parsing the JSON-RPC body. Called `PermissionChecker.has_permission` without `check_any_team`, so `_get_user_roles` only returned global roles and team roles with `scope_id=NULL`, missing the user's actual team assignments.\n\n- **`_check_streamable_permission`** call site (streamablehttp_transport.py) — used by `POST /mcp`. The function already accepted `check_any_team` but it was always called with the default `False`. Additionally, `token_use` was not stored in `auth_user_ctx`, so the transport had no way to detect session tokens.\n\n## 💡 Fix Description\n\nThree targeted changes:\n\n1. **`PermissionChecker.has_permission`** (`mcpgateway/middleware/rbac.py`) — added `check_any_team: bool = False` parameter and threaded it through to both `PermissionService.check_permission` call sites. Default is `False`, preserving all existing callers.\n\n2. **`_ensure_rpc_permission`** (`mcpgateway/main.py`) — detects session tokens via `user.get(\"token_use\") == \"session\"` and passes `check_any_team=True` to `PermissionChecker.has_permission`.\n\n3. **Streamable HTTP transport** (`mcpgateway/transports/streamablehttp_transport.py`) — stores `token_use` in `auth_user_ctx` so it propagates into the MCP handler context; `call_tool` now detects session tokens and passes `check_any_team=True` to `_check_streamable_permission`.\n\n## 🔐 Security Rationale for `check_any_team=True`\n\nA reviewer might ask: does `check_any_team=True` allow a user with `tools.execute` in Team A to execute a team-scoped tool owned by Team B?\n\n**The answer is no, and here is why the two paths differ:**\n\n**REST path (`@require_permission`):** Tier 1 team derivation (rbac.py:566) looks up the target resource's `team_id` from the DB before the RBAC check. For a Team B tool, `team_id = Team B` is derived, `check_any_team` stays `False`, and the check \"does user have `tools.execute` in Team B?\" fails → **denied at RBAC (Layer 2)**.\n\n**RPC/MCP path (this fix):** `check_any_team=True` means the RBAC check passes (user has `tools.execute` in Team A). However, `tool_service.invoke_tool` then calls `_has_tool_access_by_visibility` (tool_service.py:796–807), which explicitly evaluates `tool.team_id in token_teams`. For a session token user in Team A only, `token_teams = [\"team-a-id\"]` (derived from server-side membership), so `\"team-b-id\" NOT IN [\"team-a-id\"]` → `ToolNotFoundError` → **denied at tool service (Layer 1)**.\n\nBoth paths deny cross-team execution. The REST path catches it at RBAC; the RPC/MCP path catches it at the tool service's visibility check. Public tools (visibility = `\"public\"`) are correctly accessible to any authenticated user with the permission on both paths — that is the intended behaviour of public visibility.\n\n**API tokens** carry explicit `token_teams` JWT claims and never use `check_any_team` (it stays `False`). Their scope is fully determined by the token claims, not server-side membership.\n\n## 🧪 Verification\n\n| Check | Command | Status |\n|---|---|---|\n| Lint suite | `make lint` | ✅ |\n| Unit tests | `uv run pytest tests/unit/` | ✅ |\n| New regression tests | `uv run pytest tests/unit/mcpgateway/test_rpc_permission_team_fallback.py tests/unit/mcpgateway/transports/test_streamable_rpc_permission_fallback.py -v` | ✅ 11 tests |\n| Manual regression | Tools screen works for session-token user with team-scoped developer role | ✅ |\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3904986786",
+      "author": "MohanLaksh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T17:18:27+00:00",
+      "body": "### Followed the below steps to test the fix:\n\n- Set `DEFAULT_TEAM_MEMBER_ROLE=developer` in my `.env` file\n- Create a new user (user1@example.com) and a new team (Test Team) via the admin UI\n- **Logged in** as `user1@example.com`\n- Added **Github MCP** server scoped to **Test team**\n- Went to the Tools screen and run a tool (github-tools-get-me)\n\n## Successfully able to execute the tool \n\n\nWorks as intended.\n\n# APPROVED"
+    },
+    {
+      "id": "3906213769",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-06T21:51:01+00:00",
+      "body": "## Review: Approved\n\nRebased onto main, reviewed for correctness/security/consistency, addressed findings from Codex cross-review, and added additional test coverage. All unit and Playwright E2E tests pass.\n\n### Changes made during review\n\n**Codex-identified fixes (commit `9eb09ed`):**\n\n1. **`servers.use` missing `check_any_team` (High)** — The `servers.use` check in `handle_streamable_http` at line 2353 gates access to `/servers/{id}/mcp` (the primary MCP client URL). Both `developer` and `team_admin` roles grant `servers.use` as a team-scoped permission, so session tokens would be denied at the transport level before even reaching `call_tool`. Fixed by adding the same session-token detection pattern.\n\n2. **`_normalize_jwt_payload` drops `token_use` (Low)** — The re-auth fallback path in `_get_request_context_or_default` uses `_normalize_jwt_payload`, which didn't include `token_use` in its output. If that fallback were triggered, `check_any_team` would silently default to `False`. Fixed by adding `\"token_use\": token_use` to the returned dict. Updated 4 existing test assertions accordingly.\n\n**Test coverage additions:**\n\n- `test_permission_checker_has_permission_forwards_check_any_team` — verifies `check_any_team=True` forwarding through `PermissionChecker.has_permission` (db_session path) (commit `9267f28`)\n- `test_permission_checker_has_permission_forwards_check_any_team_fresh_db` — same for the fresh_db_session path (commit `9267f28`)\n- `test_servers_use_check_passes_check_any_team_for_session_token` — unit test for the `servers.use` fix (commit `9eb09ed`)\n- 4 new Playwright E2E cookie-based browser tests in `TestSessionTokenCookieRBAC` (commit `a7331f3`):\n  - `test_developer_cookie_rpc_tools_call` — session cookie + `page.evaluate(fetch('/rpc'))`, matching actual Admin UI flow\n  - `test_viewer_cookie_rpc_tools_call_denied` — viewer deny-path via cookie auth\n  - `test_developer_cookie_rpc_tools_list` — `tools/list` RPC verifying fix covers all RPC permissions\n  - `test_cross_team_tool_not_visible` — Layer 1 cross-team isolation: developer in Team A cannot see Team B's tool\n\n### Security verification\n\n- `check_any_team=True` does NOT enable cross-team access — Layer 1 (`_has_tool_access_by_visibility`) checks `tool.team_id in token_teams`\n- API tokens unaffected (scoped to `token_use == \"session\"` only)\n- Personal team exclusion intact (`_get_user_roles` excludes personal teams when `include_all_teams=True`)\n- Fail-closed: missing `token_use` defaults to `check_any_team=False`\n\n### Test results\n\n- 724 unit tests passed (0 failed)\n- 7 Playwright E2E tests passed against live server (3 original + 4 new)\n- `rbac.py` at 100% coverage"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "56737e6ec6a538acfbd3308f60bc836a9458a0a7",
+      "message": "test(rbac): add failing tests for session-token check_any_team in _ensure_rpc_permission\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T12:05:35+00:00"
+    },
+    {
+      "sha": "4865618d2edbad2dd3262c8a0b9af47441bfd720",
+      "message": "test(rbac): harden assertions in rpc permission team fallback tests\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T12:11:48+00:00"
+    },
+    {
+      "sha": "5cb975dce5b0f38d3f52dbce4f7015f6220295c3",
+      "message": "feat(rbac): add check_any_team param to PermissionChecker.has_permission\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T12:13:49+00:00"
+    },
+    {
+      "sha": "88e6d51d974bb47f392bc36450718e27364806c7",
+      "message": "fix(rbac): pass check_any_team=True in _ensure_rpc_permission for session tokens\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T12:21:50+00:00"
+    },
+    {
+      "sha": "15838113b30e52e4f5de90637db6ff0ea58e5aca",
+      "message": "test(rbac): add contract tests for check_any_team threading in _check_streamable_permission\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T12:23:48+00:00"
+    },
+    {
+      "sha": "b01b5ffda4ef6c8b9b9d2bc352f77ce8ca848815",
+      "message": "fix(rbac): propagate token_use in streamablehttp auth_user_ctx and pass check_any_team for session tokens\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T12:24:47+00:00"
+    },
+    {
+      "sha": "4d811a4555a7483a1307e16f9c013b9d358c1438",
+      "message": "test(rbac): add deny-path regression tests for rpc team-permission fallback\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T12:27:23+00:00"
+    },
+    {
+      "sha": "907f7bcb68d21826759f69832353c48e9fde9f1a",
+      "message": "test(rbac): accept **kwargs in _has_permission mocks to forward check_any_team\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T12:35:14+00:00"
+    },
+    {
+      "sha": "7567c56ae2cc4802487e5a181ceae83e34c9cf19",
+      "message": "fix(rbac): remove dead null-guard in call_tool and strengthen admin+deny-path tests\n\n- streamablehttp_transport.py: drop redundant ternary guard; user_context is\n  guaranteed non-None at that point by _should_enforce_streamable_rbac check\n- test_rpc_permission_team_fallback.py: replace vacuous admin-bypass smoke test with\n  a meaningful assertion that has_permission is called with check_any_team=True for\n  admin session tokens (bypass lives inside PermissionService, not _ensure_rpc_permission)\n- test_streamable_rpc_permission_fallback.py: add deny-path integration test verifying\n  call_tool raises PermissionError when _check_streamable_permission returns False\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T14:38:14+00:00"
+    },
+    {
+      "sha": "bf9d98ebb7652788cd74e0c90bb91b2953aa6b08",
+      "message": "test(rbac): add #3515 regression Playwright tests for session-token tool execution\n\nThree tests in TestRPCToolExecutionRBAC:\n\n- test_developer_rpc_tools_call_not_denied: developer with team-scoped role\n  sends tools/call via /rpc as a session token and must NOT receive -32003\n- test_viewer_rpc_tools_call_denied: viewer (no tools.execute) must still\n  receive -32003 (deny-path regression guard)\n- test_developer_can_list_team_tool: developer can see their team-scoped tool\n  in GET /tools (Layer 1 visibility check)\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T15:58:02+00:00"
+    },
+    {
+      "sha": "9267f28f22dbbf790ec4064613702099035eeef5",
+      "message": "test(rbac): verify check_any_team forwarding in PermissionChecker.has_permission\n\nAdd two tests covering the db_session and fresh_db_session paths of\nPermissionChecker.has_permission to assert check_any_team=True is\nforwarded to PermissionService.check_permission.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T18:27:41+00:00"
+    },
+    {
+      "sha": "9eb09ed09c9633a59c6185d58521b61b282440db",
+      "message": "fix(rbac): pass check_any_team for servers.use and propagate token_use in _normalize_jwt_payload\n\nAddress Codex review findings:\n- servers.use check in handle_streamable_http now detects session tokens\n  and passes check_any_team=True, matching the call_tool fix.\n- _normalize_jwt_payload includes token_use in the returned context dict\n  so the re-auth fallback path preserves session-token detection.\n- Update existing _normalize_jwt_payload test assertions for the new key.\n- Add servers.use session-token regression test.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T21:10:54+00:00"
+    },
+    {
+      "sha": "a7331f33b3268478b87ad3c07de893d6b83101a4",
+      "message": "test(rbac): add browser cookie session-token Playwright tests for #3515\n\nFour new E2E tests in TestSessionTokenCookieRBAC:\n\n- test_developer_cookie_rpc_tools_call: session cookie + page.evaluate\n  fetch to /rpc — matches the actual Admin UI Tools screen flow\n- test_viewer_cookie_rpc_tools_call_denied: viewer deny-path via cookie\n- test_developer_cookie_rpc_tools_list: tools.read permission via /rpc\n  tools/list (verifies check_any_team applies to all RPC permissions)\n- test_cross_team_tool_not_visible: Layer 1 isolation — developer in\n  Team A cannot see Team B's tool even with check_any_team=True\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T21:41:17+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 824,
+  "deletions": 10,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:45.830102",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:45.830885",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3516,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3516.json"
+  }
+}

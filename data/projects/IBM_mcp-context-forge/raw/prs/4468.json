@@ -1,0 +1,116 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4468,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4468"
+  },
+  "metadata": {
+    "title": "fix(metrics): throttle aggregate_all_components with pg advisory lock and configurable interval",
+    "state": "open",
+    "created_at": "2026-04-27T13:00:49+00:00",
+    "updated_at": "2026-05-07T10:50:10+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "msureshkumar88",
+    "labels": [
+      "bug",
+      "python",
+      "performance"
+    ],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88",
+      "ja8zyjits",
+      "Lang-Akshay"
+    ]
+  },
+  "description": "## Summary\n\nCloses #4467\nPart of #2692 (P1 follow-up: throttle background `aggregate_all_components`)\n\n- **Advisory lock**: `aggregate_all_components` now attempts `pg_try_advisory_lock` before running when called from the background loop. If another worker holds the lock, the function returns `[]` immediately — eliminating 74 of 75 redundant full-table scans per 5-minute window on a typical 3-replica × 25-worker deployment\n- **Configurable interval**: new `METRICS_AGGREGATION_INTERVAL_SECONDS` env var decouples run frequency from window size; defaults to `window_minutes × 60` (no behaviour change unless set)\n- **Bandit fixes**: resolved B110 `try/except/pass` in `log_aggregator.py` and `audit_trail_service.py`; B105 false-positive in `oauth_manager.py`\n\n## Design notes\n\n- Session-level lock (`pg_try_advisory_lock`) not transaction-level (`pg_try_advisory_xact_lock`) — `_upsert_metric` commits inside the loop, which would auto-release a transaction-level lock and allow concurrent workers back in\n- Fail-open: if the lock SQL raises, aggregation proceeds without the lock rather than suppressing it silently\n- Lock only attempted when `should_close=True` (background loop path); callers that pass `db=` (backfill, log_search) are unaffected\n- Lock ID `6283185307179` chosen to avoid collision with `bootstrap_db.py` (`42424242424242`)\n\n## SQLite (local dev) compatibility\n\nSQLite is fully supported and completely unchanged by this PR:\n\n- `_is_postgresql()` returns `False` for SQLite — both `_try_aggregate_pg_lock` and `_release_aggregate_pg_lock` return immediately without executing any SQL, so `lock_acquired = True` unconditionally\n- Single-process `make dev` (uvicorn `--reload`) runs one worker anyway, so there is nothing to coordinate between workers\n- `METRICS_AGGREGATION_INTERVAL_SECONDS` works identically on SQLite — it controls how often the loop sleeps between runs\n- No config changes needed for local dev; the SQLite path is fully transparent\n\n## Manual testing\n\nStart the stack with PostgreSQL, multiple workers, a short interval, and DEBUG logging:\n\n```bash\n# .env\nMETRICS_AGGREGATION_ENABLED=true\nMETRICS_AGGREGATION_AUTO_START=true\nMETRICS_AGGREGATION_INTERVAL_SECONDS=15\nLOG_LEVEL=DEBUG\n```\n\n```bash\nGUNICORN_WORKERS=4 make serve\n```\n\nTail the logs and filter for aggregation activity:\n\n```bash\ndocker compose logs -f | grep -E \"aggregate|advisory|lock|Skipping\"\n```\n\n**Expected behaviour after this fix** — per interval, exactly one worker runs the aggregation; all others immediately log:\n\n```\nSkipping aggregate_all_components: lock held by another worker\n```\n\n**Before this fix**, all 4 workers would run the full aggregation simultaneously every 15 seconds with no coordination.\n\n## Changes\n\n| File | What changed |\n|---|---|\n| `mcpgateway/services/log_aggregator.py` | `_AGGREGATE_LOCK_ID`; `_try_aggregate_pg_lock`; `_release_aggregate_pg_lock`; lock guard in `aggregate_all_components` |\n| `mcpgateway/config.py` | `metrics_aggregation_interval_seconds: Optional[int]` |\n| `mcpgateway/main.py` | Use new config field for loop `interval_seconds` |\n| `.env.example` | Document `METRICS_AGGREGATION_INTERVAL_SECONDS` |\n| `tests/unit/.../test_log_aggregator.py` | 12 new tests; 98% coverage on new code; all 69 pass |\n| `mcpgateway/services/audit_trail_service.py` | B110: log debug instead of bare `pass` |\n| `mcpgateway/services/oauth_manager.py` | B105: `nosec` annotation with explanation |",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4187670772",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-28T10:04:29+00:00",
+      "body": "Thanks for the PR @msureshkumar88 . \nPlease implement following suggested changes \nThe advisory lock is a background coordination primitive — not a security gate — so there are no auth-bypass risks. The only concerns are operational reliability issues with the lock implementation pattern.\n\n| # | File                                       | Line     | Severity | CWE     | Description                                                                                                                                                                           |\n| - | ------------------------------------------ | -------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| 1 | mcpgateway/services/log_aggregator.py      | 46, 58   | Low      | CWE-89  | F-string interpolation of integer constant in raw SQL; not exploitable (constant int, no user input path), but sets a poor copy-paste precedent                                       |\n| 2 | mcpgateway/services/log_aggregator.py      | 48–50   | Low      | CWE-703 | Fail-open on advisory lock acquire error: DB errors silently allow un-coordinated parallel execution; operational concern, not a security risk                                        |\n| 3 | mcpgateway/services/log_aggregator.py      | 58–60   | Low      | CWE-667 | Session-level lock not guaranteed released on silent `pg_advisory_unlock` failure; pooled connection may retain lock, leading to aggregation starvation in multi-worker deployments |\n| 4 | mcpgateway/services/audit_trail_service.py | 171–172 | Info     | CWE-532 | Exception message logged at DEBUG; no production risk at default `LOG_LEVEL=ERROR`                                                                                                  |\n| 5 | mcpgateway/services/oauth_manager.py       | 663      | Info     | —      | `# nosec B105` annotation is correctly justified; value is an RFC 8693 token type URI, not a credential                                                                             |\n| 6 | .secrets.baseline                          | 4865     | Info     | —      | Line-number drift from new config field insertion;`is_secret: false` marking remains correct                                                                                        |\n\n**Remediation suggestions:**\n\n1. **F-string in raw SQL (Finding 1):** Use `bindparams` to eliminate ambiguity:\n\n   ```python\n   result = db.execute(text(\"SELECT pg_try_advisory_lock(:lock_id)\").bindparams(lock_id=_AGGREGATE_LOCK_ID))\n   db.execute(text(\"SELECT pg_advisory_unlock(:lock_id)\").bindparams(lock_id=_AGGREGATE_LOCK_ID))\n   ```\n2. **Session-level lock starvation (Finding 3):** Document in `_release_aggregate_pg_lock` that if `pg_advisory_unlock` fails silently on a pooled connection, the session-level lock persists until that connection is physically closed.\n\n## Redundant Code\n\n| # | File               | Line(s)    | Type                 | Description                                                                                                               | Suggestion                                                     |\n| - | ------------------ | ---------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |\n| 1 | mcpgateway/main.py | 1605–1608 | Defensive code smell | `getattr(settings, \"metrics_aggregation_interval_seconds\", None)` accesses a field always present on the Pydantic model | Use `settings.metrics_aggregation_interval_seconds` directly |"
+    },
+    {
+      "id": "4188623625",
+      "author": "Lang-Akshay",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-28T12:16:18+00:00",
+      "body": "Nice work on this one. The advisory lock design is solid — session-level (not transaction-level) is the right call given _upsert_metric commits inside the loop, and the fail-open + SQLite no-op paths are handled cleanly. Test coverage is thorough with all lock paths covered.\n\nTwo minor non-blocking suggestions:\n\n- main.py L1606: getattr(settings, \"metrics_aggregation_interval_seconds\", None) could be simplified to settings.metrics_aggregation_interval_seconds since the field is explicitly declared on Settings\n- Worth adding a quick Pydantic validation test asserting metrics_aggregation_interval_seconds=0 raises ValidationError to pin the ge=1 constraint\n\n### Neither is a blocker. ✅ Approving.\n\n"
+    },
+    {
+      "id": "4243264682",
+      "author": "Lang-Akshay",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-07T10:45:13+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "bd3025cb7ae5f731b9211b62341d6338e245a678",
+      "message": "fix(metrics): throttle aggregate_all_components with pg advisory lock and configurable interval\n\nPrevents 75+ gunicorn workers from running simultaneous full-table scans\non structured_log_entries every 5 minutes (issue #2692).\n\n- Add pg_try_advisory_lock guard in aggregate_all_components so only one\n  worker runs aggregation at a time; fail-open on lock errors; no-op on SQLite\n- Add METRICS_AGGREGATION_INTERVAL_SECONDS config to decouple run frequency\n  from window size, defaulting to window_minutes * 60\n- Add 8 unit tests covering all lock paths (skip, acquire, release on\n  success/exception, SQLite no-op, fail-open on DB error, db= passthrough)\n\nCloses #2692\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-27T10:53:01+00:00"
+    },
+    {
+      "sha": "9621789ee6472cf65819026bd39e2c160c17b67e",
+      "message": "test(metrics): add coverage for pg advisory lock success and release paths\n\nCover previously missing lines 47 and 57-60 in log_aggregator.py:\n- _try_aggregate_pg_lock: scalar True/False on PostgreSQL (line 47)\n- _release_aggregate_pg_lock: execute success and swallowed exception (lines 57-60)\n\nCloses #2692\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-27T11:55:59+00:00"
+    },
+    {
+      "sha": "809fdbd2bc9753f3154e83db51c7681e5233aa29",
+      "message": "fix(bandit): resolve B110 try-except-pass and B105 false-positive warnings\n\n- log_aggregator: log debug on advisory lock release failure instead of bare pass\n- audit_trail_service: log debug on identity context read failure instead of bare pass\n- oauth_manager: add nosec B105 annotation for RFC 8693 token type URI (not a credential)\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-27T12:52:36+00:00"
+    },
+    {
+      "sha": "619965979e0eb9514e0ef0c63ffcbe75bbf45153",
+      "message": "chore: add manual verification script for aggregate advisory lock (issue #2692)\n\nSimulates 5 concurrent workers under four scenarios:\n- SQLite path: all workers run (lock bypassed)\n- PostgreSQL simulation: exactly one worker runs, rest are skipped\n- Lock helpers: no SQL executed on SQLite\n- Caller-provided db=: lock never attempted\n\nRun with: uv run python scripts/test_advisory_lock.py\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-27T13:13:03+00:00"
+    },
+    {
+      "sha": "e11eb8c116f55b96d5c661df92aa34c48098dd65",
+      "message": "fix(test-script): make advisory lock simulation deterministic\n\nThe simulated aggregation completes in microseconds with mocks, so the\nlock holder could release before other workers attempted to acquire —\nallowing a second worker to run and causing spurious failures.\n\nFix: introduce an all_attempted Event in fake_release_lock that holds\nthe lock until every worker has called fake_try_lock. Also move all\npatches to test level (outside threads) to eliminate concurrent\npatch teardown races.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-27T13:20:46+00:00"
+    },
+    {
+      "sha": "11b5037c39e41054de6a60155ee132c961ef5e05",
+      "message": "test(audit): cover identity context exception path (lines 171-172)\n\nAdd test that patches user_identity_var.get() to raise, verifying the\nexcept clause is reached and log_action still completes successfully.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-27T13:36:08+00:00"
+    },
+    {
+      "sha": "6eb0036efc415275b3339c27529478680b4746e0",
+      "message": "chore: remove advisory lock simulation script\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-27T14:14:57+00:00"
+    },
+    {
+      "sha": "938480c41fecd542349789d7d74ab52593d94599",
+      "message": "fix(metrics): address PR review — bindparams, docstring, direct attr access\n\n- Replace f-string interpolation in pg_try_advisory_lock/pg_advisory_unlock\n  SQL with bindparams (Finding 1, CWE-89)\n- Document session-level lock starvation risk in _release_aggregate_pg_lock\n  docstring (Finding 3, CWE-667)\n- Use settings.metrics_aggregation_interval_seconds directly instead of\n  getattr defensive guard (redundant code #1)\n- Update .secrets.baseline timestamp and line-number drift from config field\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-28T10:35:44+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 181,
+  "deletions": 3,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:05:17.555960",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:17.556507",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4468,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4468.json"
+  }
+}

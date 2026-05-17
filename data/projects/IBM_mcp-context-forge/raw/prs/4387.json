@@ -1,0 +1,302 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4387,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4387"
+  },
+  "metadata": {
+    "title": "feat: Add new login endpoints",
+    "state": "closed",
+    "created_at": "2026-04-22T12:07:14+00:00",
+    "updated_at": "2026-05-03T07:30:46+00:00",
+    "closed_at": "2026-05-03T07:30:41+00:00",
+    "merged_at": null,
+    "author": "gcgoncalves",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nRelates to #4269\r\n\r\n---\r\n\r\n## 📝 Summary\r\nAdds/Edit login management endpoints to support the new client in the regular API\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [X] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    ✅    |\r\n| Unit tests                | `make test`     |    ✅    |\r\n| Coverage ≥ 80%            | `make coverage` |    ✅    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] Tests added/updated for changes\r\n- [X] Documentation updated (if applicable)\r\n- [X] No secrets or credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4155968047",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-22T15:38:21+00:00",
+      "body": "Thanks for the PR  @gcgoncalves .\nPlease address the following finding.\n### Security hardening\n\nThe PR introduces cookie-based auth plumbing with appropriate security attributes (`httpOnly`, `SameSite`, `Secure`, `Max-Age`), but the implementation has a functional gap where the route-level `get_current_user` dependency does not read from cookies, breaking the primary use case for the new endpoints.\n\n| # | File | Line | Severity | CWE | Description |\n|---|------|------|----------|-----|-------------|\n| 1 | `auth.py:201` | 201–260 | 🔴 High | CWE-287 | `/auth/me` and `/auth/logout` use `Depends(get_current_user)` which reads only from the `Authorization` header, not from cookies. Cookie-only browser clients receive 401. The `AuthContextMiddleware` reads cookies into `request.state.user` but the route dependency never consults it. |\n| 2 | `auth.py:177` | 177 | 🔴 High | CWE-200 | JWT `access_token` is returned in the plaintext JSON body AND set as an `httpOnly` cookie. Any client-side JS reading the response body defeats the `httpOnly` isolation. Especially risky combined with 30-day tokens. |\n| 3 | `auth.py:229` | 229–260 | 🔴 High | CWE-613 | `remember_me=True` sets a 30-day token with no server-side revocation path. `clear_auth_cookie` only removes the browser cookie; a captured token stays valid 30 days. |\n| 4 | `auth.py:122` | 122–198 | 🟡 Medium | CWE-307 | No route-level rate limiting on `POST /auth/login`. IP-level credential stuffing protection is absent. |\n| 5 | `security_cookies.py:113` | 113 | 🟡 Medium | CWE-755 | `CookieTooLargeError` is not caught in the login handler; it propagates as HTTP 500. Users with JWT tokens exceeding 4096 bytes (many team claims) would see an opaque server error. |\n| 6 | `security_cookies.py:87` | 87 | 🟡 Medium | CWE-16 | `settings.cookie_samesite` is an unconstrained `str`. Misconfiguring it to `\"none\"` without `Secure` produces a CSRF-vulnerable cookie with no startup-time validation. |\n| 7 | `auth.py:259` | 183, 259 | 🔵 Low | CWE-532 | User email (PII) logged at INFO level on login and logout. |\n| 8 | `test_auth.py:321` | 321–383 | 🔵 Low | CWE-778 | Deny-path test coverage missing for all three new endpoints. |\n\n---"
+    },
+    {
+      "id": "4182226944",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-27T15:35:54+00:00",
+      "body": "Thanks for the PR- @gcgoncalves \nPlease implement following security hardening recomendation.\n## Security Findings — PR #4387\n\n---\n\n### 🔴 Critical\n\n**1. `auth.py` ~256 — CWE-617: Unsupported keyword argument in `set_auth_cookie`**\n\n`set_auth_cookie(response, access_token, max_age=expires_in)` passes an unsupported keyword argument. Every `POST /browser-login` raises `TypeError` → HTTP 500. The endpoint is fully non-functional.\n\n**Recommendation:** Replace with `set_auth_cookie(response, access_token, remember_me=login_request.remember_me)`. Verify the signature of `set_auth_cookie` in `security_cookies.py` and add a unit test that calls the endpoint end-to-end to prevent signature-drift regressions.\n\n---\n\n### 🔴 High\n\n**2. `auth.py` ~256 — CWE-284: `remember_me` flag never forwarded to `set_auth_cookie`**\n\n`login_request.remember_me` is parsed, documented, and returned to the user but never forwarded to `set_auth_cookie`. `remember_me=True` silently produces a 1-hour cookie instead of 30 days — a broken security contract.\n\n**Recommendation:** The fix to Finding #1 resolves this automatically once `remember_me=login_request.remember_me` is passed. Add an explicit test asserting that `remember_me=True` results in a `Max-Age` of `2592000` (30 days) and `remember_me=False` results in `Max-Age` of `3600`.\n\n---\n\n**3. `auth.py` ~302 — CWE-613: JTI revocation removed from logout**\n\nThe new `POST /logout` only calls `clear_auth_cookie()`. The previous implementation revoked the JTI in the server-side blocklist, making the token immediately invalid. A captured token (network interception, log exfiltration) now remains valid for up to 30 days after the user logs out.\n\n**Recommendation:**\n- **Option A (preferred):** Reinstate JTI revocation alongside cookie clearing. Read the `jwt_token` cookie value in the logout handler, decode the JTI (already done in the old handler), and call `blocklist_service.revoke_token(...)` before clearing the cookie.\n- **Option B:** If stateless logout is a deliberate architectural choice, enforce a hard maximum token TTL of 15 minutes via `settings.jwt_access_token_expire_minutes`, remove the 30-day `remember_me` path, and document the trade-off explicitly in `SECURITY.md`.\n\n---\n\n**4. `auth.py` ~124 — CWE-307: No rate limiting on `POST /auth/login`**\n\n`POST /auth/login` has no `@rate_limit` decorator. `POST /browser-login` is protected at 10 req/min but the API login endpoint is fully unprotected, enabling unbounded credential-stuffing attacks against API and CLI clients.\n\n**Recommendation:** Add `@rate_limit(requests_per_minute=10)` immediately above the `POST /auth/login` handler — the same decorator already used on `POST /browser-login`. Add a test asserting the 11th consecutive request from the same IP receives HTTP 429.\n\n---\n\n**5. `test_auth.py` line 19 — CWE-778: Non-existent import breaks entire test file**\n\n`from mcpgateway.routers.auth import get_current_user_info` — this symbol does not exist in the router. The entire test file fails at import time, meaning every test in the file — including pre-existing ones — fails to collect and run.\n\n**Recommendation:** Remove `get_current_user_info` from the import line. If the intent was to import the `/me` handler, import `get_me` instead. Also update `TestLogout` to match the new two-argument `logout(response, current_user)` signature — the current class tests the removed three-argument blocklist-based signature and will error even after fixing the import.\n\n---\n\n### 🟡 Medium\n\n**6. `auth.py` ~188 — CWE-532: PII logged on authentication failure**\n\nThe error-path log `logger.error(f\"Login error for {login_request.email or login_request.username}: {e}\")` writes a user-supplied email address (PII) to application logs on any authentication failure. The success path was cleaned up in this PR but the failure path was missed.\n\n**Recommendation:** Replace with `logger.error(\"Login error: %s\", type(e).__name__)`. Never log user-supplied email on error paths. If correlation is needed for incident response, log only an opaque request ID or a hashed identifier — never the raw email or username.\n\n---\n\n**7. `api-usage.md` ~195 — CWE-287: Misleading documentation for `GET /auth/me`**\n\nThe documentation states `GET /auth/me` \"works with both Bearer token and cookie.\" The implementation uses `Depends(get_current_user_from_cookie)` which rejects Bearer tokens with `401 Cookie authentication required` — a non-standard `WWW-Authenticate` scheme that gives API clients no actionable guidance.\n\n**Recommendation:**\n- **Option A:** Update the docs to state clearly that `/me` and `/logout` are cookie-only endpoints, and that API clients should use the response body from `POST /auth/login` to get user context.\n- **Option B:** Change `/me` to fall back to Bearer authentication when no cookie is present by using `Depends(get_current_user)` (the standard dependency) instead of the cookie-only one.\n\nOption A is lower risk for this PR; Option B is better UX.\n\n---\n\n### 🔵 Low\n\n**8. `security_cookies.py` ~93 — CWE-200: Cookie name reveals authentication mechanism**\n\nThe cookie is named `jwt_token`, which reveals the underlying authentication mechanism and token format. This aids targeted XSS payloads and header-injection pivots by confirming the auth stack to an attacker.\n\n**Recommendation:** Rename to an opaque identifier. If `Secure` and `Path=/` are both set, use the `__Host-` prefix (e.g., `__Host-auth`) which also provides browser-enforced origin binding per RFC 6265bis §5.4.3 — free security hardening with no code changes beyond the string constant. Ensure the new name is reflected in `get_current_user_from_cookie`'s `Cookie(alias=\"__Host-auth\")` parameter.\n\n---\n\n**9. `auth.py` ~302 — CWE-613: Expired/missing cookie blocks logout and audit events**\n\n`POST /logout` requires a valid cookie to succeed (via `Depends(get_current_user_from_cookie)`). If the cookie is already expired or missing, the `401` prevents the user from triggering any server-side cleanup or audit event — creating a silent partial-logout state.\n\n**Recommendation:** Accept logout unconditionally: remove the auth dependency from `POST /logout`, read the cookie value directly with `jwt_token: Optional[str] = Cookie(default=None)`, attempt revocation only if the cookie is present and valid, and always call `clear_auth_cookie(response)` regardless. Return `200` in all cases. This matches the UX expectation: \"I want to be logged out\" should never fail.\n\n---\n\n### ℹ️ Info\n\n**10. All new endpoints — CWE-208: Potential timing oracle in authentication service**\n\n`EmailAuthService.authenticate_user()` may exhibit different execution timing for \"user not found\" vs \"valid user, wrong password.\" The new endpoints add more observable paths for a timing oracle. Not introduced by this PR but worth noting given the expanded attack surface.\n\n**Recommendation:** Enforce a constant-time delay (e.g., `asyncio.sleep(0.1)`) at the bottom of all authentication failure paths, or ensure `authenticate_user` uses constant-time password comparison regardless of the lookup result. Add a comment flagging this as a deliberate hardening decision."
+    },
+    {
+      "id": "4211621197",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-01T14:48:29+00:00",
+      "body": "Please implement above mentioned changes \n"
+    },
+    {
+      "id": "4211693165",
+      "author": "Lang-Akshay",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-01T15:03:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "4211950642",
+      "author": "ja8zyjits",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-01T15:52:30+00:00",
+      "body": "please check the review"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "98aff5b6a9c53b7fb3b344d7263f63041b2eabb0",
+      "message": "Scaffold react app\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-08T10:49:15+00:00"
+    },
+    {
+      "sha": "bb53f9d499cba09a9487bbcc8e67edb1b2111eea",
+      "message": "Scaffold i18n\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-09T11:12:18+00:00"
+    },
+    {
+      "sha": "b4c8b4542af1366f4ead7f3c9e1faa2326be85d9",
+      "message": "fix: rebase conflict with app_spa_router in main.py\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-13T17:10:36+00:00"
+    },
+    {
+      "sha": "147b3128707df09083989af6fec0ae77ee4ff864",
+      "message": "chore: setting up shadcn dependencies\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-14T14:43:53+00:00"
+    },
+    {
+      "sha": "9eb9893ef4eb05168b33c4d3147524beae2b28c7",
+      "message": "fix: Add path alias configuration for @ imports\n\n- Add baseUrl and paths to tsconfig.app.json for TypeScript resolution\n- Add resolve.alias to vite.config.ts for Vite bundler resolution\n- Fixes build error: Cannot find module '@/lib/utils' and '@/hooks/use-mobile'\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-14T14:52:43+00:00"
+    },
+    {
+      "sha": "ef18a0ffdb53ff621c0bce0ee8f5f79dbd2e934f",
+      "message": "feat: removing pnpm-lock.yaml\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-15T09:40:43+00:00"
+    },
+    {
+      "sha": "a16bcba9debd3f8169ff65127b59e5afc9b588e3",
+      "message": "feat: adjust navigation sidebar to the figma design\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-15T13:42:12+00:00"
+    },
+    {
+      "sha": "a99c4b961b1517d0591fc1d3f753ae22f10c67b5",
+      "message": "chore: add lint, formatter and test checks to react client for CI workflow\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-15T17:10:52+00:00"
+    },
+    {
+      "sha": "9a2f502f85236c4c02ed402803f775c15602a16d",
+      "message": "fix: the checkout action to use a valid pinned SHA\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-16T07:33:20+00:00"
+    },
+    {
+      "sha": "2c97f96d6769d6124d79a3acda824fc6ab252492",
+      "message": "fix: the checkout action to use a valid pinned SHA and update client-lint-test workflows\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-16T07:39:47+00:00"
+    },
+    {
+      "sha": "1c0e1126da187116ce17fa814cdcd382c15df4a9",
+      "message": "fix: change  npm ci to npm install in the workflow\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-16T07:45:20+00:00"
+    },
+    {
+      "sha": "e37e954d0157bbd3763bf2e4130a3522865a12dd",
+      "message": "fix: updated package-lock.json along with the workflow file\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-16T07:56:10+00:00"
+    },
+    {
+      "sha": "35773e2a273fcc00b580a66b631baf60a1d2e7d0",
+      "message": "fix: formatting in svg icons\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-16T08:13:03+00:00"
+    },
+    {
+      "sha": "78d0a92390437f5a88917c6eef3396af6898cdc3",
+      "message": "fix: lint issues\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-16T08:15:06+00:00"
+    },
+    {
+      "sha": "b8c1f1720817eda782acbef28274dbaefb935ebb",
+      "message": "Chore: Add client build output to .gitignore\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-21T14:29:31+00:00"
+    },
+    {
+      "sha": "e8ab99f016d662248cae6faab7bafe667b00e20e",
+      "message": "feat: implement dark/light mode theme toggle (#4347)\n\n* feat: implement dark/light mode theme toggle\n\n- Add ThemeProvider with React Context API for theme management\n- Create ThemeToggle component with Sun/Moon/Monitor icons\n- Support three modes: light, dark, and system preference\n- Persist theme preference to localStorage\n- Add i18n translations for EN, ES, and PT-BR\n- Integrate theme toggle in header between language switcher and user info\n- Add comprehensive unit tests (16 passing)\n- Add localStorage mock to test setup\n\nCloses #[issue-number]\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>\n\n* fix: correcting dark theme support for all components\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>\n\n* fix: add comprehensive dark mode support across all pages and components\n\n- Add dark mode variants to all 24 pages (Login, Dashboard, Gateways, etc.)\n- Fix LanguageSwitcher component with dark mode support\n- Fix authentication pages (Login, ForgotPassword, ResetPassword, ChangePassword)\n- Add dark:text-neutral-100 to all page headings\n- Add dark:bg-neutral-700/800/900 to backgrounds\n- Add dark:border-neutral-600/700 to borders\n- Fix input fields with proper dark mode text and background colors\n- Remove unused vi import from ThemeToggle.test.tsx\n- Add non-null assertion to useTheme.test.tsx\n- Format all files with Prettier\n\nTheme persists in localStorage across sessions as requested.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>\n\n* fix: update icon fills to use currentColor for dark mode support\n\n- GatewayIcon.tsx: change fill from #161616 to currentColor\n- MCPIcon.tsx: change fill from black to currentColor (2 paths)\n- MainNavIcon.tsx: change fill from black to currentColor (keep red accent)\n\nIcons now inherit text color and properly support dark theme.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>\n\n---------\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu",
+      "date": "2026-04-23T10:19:56+00:00"
+    },
+    {
+      "sha": "f2a43b29d49de168b204b55c8d7bd57b2332d269",
+      "message": "feat: add TypeScript Playwright e2e suite and CI workflow for the React admin UI\n\n* feat: add TypeScript Playwright e2e suite and CI workflow for the React admin UI (#4246)\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>\n\n* ci: pin actions/cache to SHA in client-e2e workflow to satisfy IBM allowlist\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>\n\n---------\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>",
+      "author": "Oriol Morros Vilaseca",
+      "date": "2026-04-24T11:03:22+00:00"
+    },
+    {
+      "sha": "95e85d5bb2ccc7e76cbb4db28462b6b17ff06dbc",
+      "message": "feat: add model with form for adding new MCP servers\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-23T12:21:06+00:00"
+    },
+    {
+      "sha": "efc0211180e34d4832defabd74588b8b49a50cf6",
+      "message": "chore: potencial fix for successfully run Client E2E tests on Github Actions\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-27T10:02:14+00:00"
+    },
+    {
+      "sha": "baa8c565a71e81b2392039ebac84bb11ed0238db",
+      "message": "feat: add useQuery hook for fetching data from API endpoints\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-24T10:54:37+00:00"
+    },
+    {
+      "sha": "f665303848d37ebc42651680ea28c24f14f67e99",
+      "message": "fix: the timeout, abort request, errors and dependencie array in useQuery hook\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-28T08:22:34+00:00"
+    },
+    {
+      "sha": "b34db906bed25ebe48f88709dff437f424dc328e",
+      "message": "fix: Development section in README.md file under client folder\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-27T17:02:45+00:00"
+    },
+    {
+      "sha": "d9c053b2d357cc44fc0587977d4f2beecb4fc18e",
+      "message": "Merge pull request #4430 from IBM/4175-add-use-query-hook\n\nfeat(ui-rewrite): add useQuery hook for fetching data from API endpoints",
+      "author": "Marek Dano",
+      "date": "2026-04-28T10:18:56+00:00"
+    },
+    {
+      "sha": "6625d7a2e05b26d535682b4fac9111e54efb8d70",
+      "message": "Scaffold react app\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-08T10:49:15+00:00"
+    },
+    {
+      "sha": "7b922ada7235382ce42b364c27af079e248db290",
+      "message": "fix: rebase conflict with app_spa_router in main.py\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-13T17:10:36+00:00"
+    },
+    {
+      "sha": "9cef0afa9a3a3e1c76023e97aef5c20f51501294",
+      "message": "feat: add first time ux to Gateways page, fix icons in main navbar\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-28T07:37:59+00:00"
+    },
+    {
+      "sha": "709a2ef464e617db12fe9172a7bf5c941422768a",
+      "message": "fix: remove --chmod flags from Containerfile.lite for legacy Docker builder compatibility\n\nThe --chmod flag in COPY commands requires BuildKit, which may not be available\nin all Docker installations. Replace with explicit chmod commands in RUN layers\nfor broader compatibility.\n\nChanges:\n- scripts/download-cdn-assets.sh: Use explicit chmod 0755\n- run scripts: Use explicit chmod 0755 for all entrypoint scripts\n\nThis maintains the same permissions while supporting legacy Docker builder.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-28T10:44:46+00:00"
+    },
+    {
+      "sha": "36f0eaf89cc74eaf88cf0671161d1f698835b6ad",
+      "message": "fix: introduce line in main.py after rebase\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-28T10:46:26+00:00"
+    },
+    {
+      "sha": "5058fdd59aafc23b6fb7c50623d9c2f91db94060",
+      "message": "fix: introduce line whitespace in main.py\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-28T10:47:41+00:00"
+    },
+    {
+      "sha": "766e645084c8c573753288bbffccba2ee65f87e0",
+      "message": "feat: auto-build React client with hot reload in dev mode\n\n- Add build:watch script to client/package.json for Vite watch mode\n- Modify js-build target to build both admin UI and client React app\n- Update dev target to start client build:watch in background for hot reload\n- Update stop and stop-dev targets to properly cleanup client watch process\n\nThis eliminates the need to manually run 'npm run build' in client folder\nwhen running 'make dev'. The React app now rebuilds automatically on file\nchanges during development.\n\nCloses #<issue-number>\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-28T12:51:38+00:00"
+    },
+    {
+      "sha": "7b77f582b3cbf39b3f93a351b030da177cf9c682",
+      "message": "feat: adding hot reload in build command\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-28T13:08:28+00:00"
+    },
+    {
+      "sha": "bfd7ed91585065ba9418a0c367c7228e95ec39bd",
+      "message": "Merge pull request #4503 from IBM/feature/auto-build-react-client\n\nfeat: auto-build React client with hot reload in dev mode",
+      "author": "Vishu",
+      "date": "2026-04-29T10:38:57+00:00"
+    },
+    {
+      "sha": "fbfc47e2b404fc4ae94007f1611c653b56327361",
+      "message": "fix: remove changes in navigation sidebar and icons\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-29T13:25:20+00:00"
+    },
+    {
+      "sha": "2babb3b23ad66c29c8c4c8165424aafe0f2f9c15",
+      "message": "Merge pull request #4486 from IBM/4465-first-time-ux\n\nfeat(ui-rewrite): add first time ux to Gateways page",
+      "author": "Marek Dano",
+      "date": "2026-04-29T14:24:12+00:00"
+    },
+    {
+      "sha": "56390268576f33d890b35508b6451731b3cb3857",
+      "message": "feat: Add new login endpoints\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-22T12:02:09+00:00"
+    },
+    {
+      "sha": "6f6299067da4939e47d7454d6227681f44746a0d",
+      "message": "feat(api): Tighten browser login security\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-23T09:12:59+00:00"
+    },
+    {
+      "sha": "f8fea80e9ba6ec6fe63c62717da51c087984127d",
+      "message": "feat(api): Further tighten browser login security\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-29T15:33:36+00:00"
+    },
+    {
+      "sha": "f877c15e596292a044ffc950935697514ed7870a",
+      "message": "Fix requests\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-05-01T15:16:22+00:00"
+    }
+  ],
+  "files_changed": 129,
+  "additions": 20348,
+  "deletions": 176,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:53.546888",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:53.547820",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4387,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4387.json"
+  }
+}

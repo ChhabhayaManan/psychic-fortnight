@@ -1,0 +1,237 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3483,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3483"
+  },
+  "metadata": {
+    "title": "feat(teams): add team governance feature flags and enforcement ALLOW_TEAM_CREATION ALLOW_TEAM_JOIN_REQUESTS ALLOW_TEAM_INVITATIONS",
+    "state": "closed",
+    "created_at": "2026-03-04T20:55:06+00:00",
+    "updated_at": "2026-03-05T13:16:56+00:00",
+    "closed_at": "2026-03-05T13:16:54+00:00",
+    "merged_at": "2026-03-05T13:16:54+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "client-green",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Add three new feature flags (`ALLOW_TEAM_CREATION`, `ALLOW_TEAM_JOIN_REQUESTS`, `ALLOW_TEAM_INVITATIONS`) to control self-service team operations\n- Wire three previously dead config settings (`MAX_TEAMS_PER_USER`, `REQUIRE_EMAIL_VERIFICATION_FOR_INVITES`, `PERSONAL_TEAM_PREFIX`)\n- Fix `ensure_personal_team()` flag bypass bug — now respects `AUTO_CREATE_PERSONAL_TEAMS`\n- Add `@require_permission(\"teams.join\")` to three endpoints missing permission decorators\n- Enforce `MAX_TEAMS_PER_USER` across all membership paths: create_team, add_member, accept_invitation, approve_join_request\n- Enforce `REQUIRE_EMAIL_VERIFICATION_FOR_INVITES` at both invitation creation and acceptance time\n- Admin users bypass `ALLOW_TEAM_CREATION` flag and `MAX_TEAMS_PER_USER` limit\n- All defaults preserve current behavior (backward-compatible)\n\n## Files changed (23)\n\n| Area | Files |\n|---|---|\n| Config | `config.py` — 3 new flags |\n| Services | `personal_team_service.py`, `team_management_service.py`, `team_invitation_service.py` |\n| Routers | `routers/teams.py`, `admin.py` |\n| Config propagation | `.env.example`, `docker-compose.yml`, `charts/mcp-stack/values.yaml`, `charts/mcp-stack/README.md` |\n| Schemas | `docs/config.schema.json`, `docs/docs/config.schema.json` |\n| Docs | `configuration.md`, `multitenancy.md`, `security-features.md`, `securing.md` |\n| Tests | `test_team_governance_flags.py` (new, 13 tests), plus 6 existing test files updated |\n\n## Integration tested\n\nContainer-level testing with flags disabled and enabled confirmed:\n- `ALLOW_TEAM_CREATION=false` → non-admin 403, admin 201 (bypass)\n- `ALLOW_TEAM_JOIN_REQUESTS=false` → 403 on both API and admin UI\n- `ALLOW_TEAM_INVITATIONS=false` → 400 \"Team invitations are currently disabled\"\n- `MAX_TEAMS_PER_USER=2` → 400 when user at limit, admin bypasses\n- `REQUIRE_EMAIL_VERIFICATION_FOR_INVITES=true` → 400 for unverified invitee at create and accept time\n\nCloses #3473",
+  "comments": [
+    {
+      "id": "2889313193",
+      "author": "brian-hussey",
+      "created_at": "2026-03-05T11:09:07+00:00",
+      "body": "Is all of this meant to be removed, I suspect this was an unintended change."
+    },
+    {
+      "id": "2889320223",
+      "author": "brian-hussey",
+      "created_at": "2026-03-05T11:10:31+00:00",
+      "body": "Same with this, I suspect this was an unintended change?"
+    },
+    {
+      "id": "2889355755",
+      "author": "brian-hussey",
+      "created_at": "2026-03-05T11:18:28+00:00",
+      "body": "This function is duplicated verbatim in team_invitation_service.py.\nIt should be refactored out or called from the other location."
+    },
+    {
+      "id": "2889711978",
+      "author": "crivetimihai",
+      "created_at": "2026-03-05T12:32:46+00:00",
+      "body": "Not quite, the plugin settings were already removed from a previous PR, the schema regeneration just updated the settings."
+    },
+    {
+      "id": "2889712353",
+      "author": "crivetimihai",
+      "created_at": "2026-03-05T12:32:50+00:00",
+      "body": "Not quite, the plugin settings were already removed from a previous PR, the schema regeneration just updated the settings."
+    },
+    {
+      "id": "2889727209",
+      "author": "crivetimihai",
+      "created_at": "2026-03-05T12:35:04+00:00",
+      "body": "The plugin settings (`plugins_enabled`, `plugin_config_file`, `plugins_cli_completion`, `plugins_cli_markup_mode`) were already removed from `mcpgateway/config.py` before this PR — they were migrated to the plugin framework's own config system. The schema was regenerated from the current config, so this removal is correct. The schema on `main` was stale (still referencing settings that no longer exist in config.py)."
+    },
+    {
+      "id": "2889727346",
+      "author": "crivetimihai",
+      "created_at": "2026-03-05T12:35:05+00:00",
+      "body": "Same as above — the plugin settings no longer exist in `config.py`, so the schema regeneration correctly removed them. Not an unintended change."
+    },
+    {
+      "id": "2889727502",
+      "author": "crivetimihai",
+      "created_at": "2026-03-05T12:35:07+00:00",
+      "body": "Fixed in `bac7c71`. Extracted a standalone `get_user_team_count(db, user_email)` function in `team_management_service.py`. Both `TeamManagementService` and `TeamInvitationService` now delegate to the shared function instead of duplicating the query."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3895733085",
+      "author": "brian-hussey",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-05T11:27:37+00:00",
+      "body": "A couple of queries to raise and one change requested to de-dup code."
+    },
+    {
+      "id": "3896162104",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-05T12:32:46+00:00",
+      "body": ""
+    },
+    {
+      "id": "3896162616",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-05T12:32:50+00:00",
+      "body": ""
+    },
+    {
+      "id": "3896178174",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-05T12:35:04+00:00",
+      "body": ""
+    },
+    {
+      "id": "3896178308",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-05T12:35:05+00:00",
+      "body": ""
+    },
+    {
+      "id": "3896178439",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-05T12:35:07+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ceaf369f3ebe7c91d97ca70b1bb46e72f714a67e",
+      "message": "feat(teams): add team governance feature flags and enforcement\n\nAdd three new feature flags (allow_team_creation, allow_team_join_requests,\nallow_team_invitations) to control self-service team operations. Wire three\npreviously dead config settings (max_teams_per_user,\nrequire_email_verification_for_invites, personal_team_prefix).\n\nConfig & bug fixes:\n- Add allow_team_creation, allow_team_join_requests, allow_team_invitations\n  flags to config.py with backward-compatible defaults (all true)\n- Fix ensure_personal_team() to respect auto_create_personal_teams flag\n- Wire personal_team_prefix setting in personal team slug generation\n\nService-layer enforcement:\n- Enforce max_teams_per_user in create_team, add_member_to_team,\n  accept_invitation, and approve_join_request\n- Enforce allow_team_invitations in create_invitation\n- Enforce require_email_verification_for_invites at both invitation\n  creation and acceptance time\n\nRouter-layer enforcement:\n- Check allow_team_creation in API and admin UI (with admin bypass)\n- Check allow_team_join_requests in API and admin UI join-request flows\n- Add @require_permission(\"teams.join\") to accept_invitation,\n  request_to_join_team, and leave_team endpoints\n- Add except HTTPException guard in create_team error handling\n\nConfig propagation:\n- Update .env.example, docker-compose.yml, Helm values and README\n- Regenerate config JSON schemas\n- Update configuration, multitenancy, security-features, and securing docs\n\nCloses #3473\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T19:55:45+00:00"
+    },
+    {
+      "sha": "22b2c844f2d55bc551352b8ff05c8e94d7331674",
+      "message": "fix(teams): admin bypass for max_teams_per_user in team creation\n\nAdd skip_limits parameter to create_team() so admin users bypass\nthe max_teams_per_user limit. Discovered during container integration\ntesting: with MAX_TEAMS_PER_USER=2, admins with a personal team could\nonly create one additional team.\n\nAlso restores docker-compose.yml Team Governance block to commented\ndefaults after testing.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T20:11:15+00:00"
+    },
+    {
+      "sha": "719357b2f78f17e96aee9b3f81afc80c361ea4f6",
+      "message": "fix(tests): update test_teams_v2 for skip_limits parameter\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T20:29:02+00:00"
+    },
+    {
+      "sha": "76955acdfbbfaf399a0f9818a36c7fa5f2a30bf6",
+      "message": "fix(docs): add skip_limits to create_team docstring\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T20:37:46+00:00"
+    },
+    {
+      "sha": "6f88d9b54cefd5e395db11c647cc2dcc3020f2de",
+      "message": "style: format create_team call in teams router\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T20:54:43+00:00"
+    },
+    {
+      "sha": "d59a4f844cdd9236345526dc3568d5ad50291b1c",
+      "message": "fix(teams): skip email verification for admin-created users\n\nAdmin-created users are implicitly verified since an admin vouched for\nthem. Only enforce require_email_verification_for_invites for\nself-registered users (auth_provider == \"local\") at both invitation\ncreation and acceptance time. This prevents false rejections when\ninviting users provisioned via admin API or SSO.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T21:23:41+00:00"
+    },
+    {
+      "sha": "f4cb4f911ea2c0192632b836da34da01e3694006",
+      "message": "fix(auth): set email_verified_at for admin-created users\n\nAdmin-created users are implicitly email-verified since an admin\nvouched for them. Set email_verified_at at creation time in the admin\nuser endpoint instead of checking auth_provider in the invitation\nservice (auth_provider is \"local\" for both self-registered and\nadmin-created users, making it unreliable for distinguishing them).\n\nThis fixes Playwright test failures where admin-created users were\nrejected by require_email_verification_for_invites checks.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T21:41:31+00:00"
+    },
+    {
+      "sha": "ad573f76a6993e9bb4716a647dd9af2ad67c12d1",
+      "message": "test(teams): add coverage for admin UI flag, email_verified_at, and _get_user_team_count\n\nCover 4 missing diff-coverage lines:\n- admin.py:5148 (allow_team_creation=false in admin UI)\n- email_auth.py:702-703 (email_verified_at set for admin-created users)\n- team_invitation_service.py:89 (_get_user_team_count real method)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T06:52:47+00:00"
+    },
+    {
+      "sha": "68c42795dabedd091a26e4f45bb54e28836926c2",
+      "message": "refactor: replace while-True loop to fix vulture false positive\n\nRestructure the stdio response polling loop in translate.py to use\n`while remaining > 0` instead of `while True` with break. This makes\nthe post-loop return clearly reachable, fixing vulture's false positive\n\"unreachable code after while\" at line 2098.\n\nBehavior is identical: loop exits on timeout (break or condition) and\nfalls through to the 202 response.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T06:57:25+00:00"
+    },
+    {
+      "sha": "c3c1f5f167177886f2d0c866e930abfabc8c6aec",
+      "message": "fix(teams): centralize email verification and return 403 for disabled invitations\n\n- Move email_verified_at assignment into EmailAuthService.create_user()\n  triggered by granted_by (admin-created users). This covers both the\n  Admin API and Admin UI user creation paths consistently.\n- Remove duplicate route-level logic from email_auth.py router.\n- Add router-level 403 guard for ALLOW_TEAM_INVITATIONS=false in\n  invite_team_member(), consistent with other governance flags.\n- Add tests: admin-created vs self-registered verification behavior,\n  invitation flag returns 403 at router level.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T08:06:00+00:00"
+    },
+    {
+      "sha": "16a3ab0720c71ebdaf9ef74829ab326e88a7bf4f",
+      "message": "feat(auth): allow admins to set email verification status on users\n\nAdd email_verified field to AdminUserUpdateRequest so admins can\nmanually verify (or unverify) a user's email via API and Admin UI.\nThis provides a workaround when REQUIRE_EMAIL_VERIFICATION_FOR_INVITES\nis enabled and a self-registered user cannot verify their email\n(e.g., SMTP not configured).\n\nChanges:\n- Add email_verified to AdminUserUpdateRequest schema\n- Add email_verified param to EmailAuthService.update_user()\n- Pass through in both API and Admin UI update routes\n- Add \"Email Verified\" checkbox to Admin UI user edit form\n- Return 403 (not 400) when ALLOW_TEAM_INVITATIONS=false at router level\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T08:19:16+00:00"
+    },
+    {
+      "sha": "35901b17b1a95456db937ce8ec515292a978920f",
+      "message": "docs: add team governance feature flags to CHANGELOG [1.0.0-RC2]\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T08:20:32+00:00"
+    },
+    {
+      "sha": "aeb492772b7c1dd97998f4fce351257a9745442f",
+      "message": "fix(tests): update Playwright tests for email verification and admin CRUD changes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T08:28:01+00:00"
+    },
+    {
+      "sha": "c6c6d4bc7c49dda67626eb7301cb36b6b6a9cef7",
+      "message": "test(teams): add coverage for _get_user_team_count and email_verified update\n\nCover two previously uncovered diff lines:\n- team_management_service.py:195 (_get_user_team_count real method)\n- email_auth_service.py:1567-1568 (email_verified update in update_user)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T12:27:55+00:00"
+    },
+    {
+      "sha": "bac7c71069a93bf9715e25d2cd639ad77bbfbd88",
+      "message": "refactor(teams): deduplicate _get_user_team_count into shared function\n\nExtract _get_user_team_count into a standalone get_user_team_count()\nfunction in team_management_service.py. Both TeamManagementService and\nTeamInvitationService now delegate to the shared function.\n\nAddresses review feedback from @brian-hussey.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T12:34:36+00:00"
+    },
+    {
+      "sha": "ae27a6a8ad64c132d883ee389459f4e506d10a9c",
+      "message": "fix(tests): update patch target for personal team prefix tests\n\nThe PR moved `from mcpgateway.config import settings` from inside\ncreate_personal_team() to the module top level, changing the reference\nthe tests need to patch. Update two tests to patch\n`mcpgateway.services.personal_team_service.settings` instead of\n`mcpgateway.config.settings`.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T12:51:36+00:00"
+    },
+    {
+      "sha": "bea8c7515555c2972d322203235c57f5e635c070",
+      "message": "fix(docs): restore full docstrings on _get_user_team_count delegates\n\nRestore Args/Returns sections to satisfy flake8 DAR101/DAR201 checks.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T12:59:28+00:00"
+    }
+  ],
+  "files_changed": 33,
+  "additions": 1242,
+  "deletions": 202,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:32.686473",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:32.687854",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3483,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3483.json"
+  }
+}

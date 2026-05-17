@@ -1,0 +1,107 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4029,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4029"
+  },
+  "metadata": {
+    "title": "fix(mcp): resolve MCP session pool memory leak, dead-worker locks and polling inefficiency",
+    "state": "closed",
+    "created_at": "2026-04-03T12:31:25+00:00",
+    "updated_at": "2026-04-04T16:10:59+00:00",
+    "closed_at": "2026-04-04T16:10:58+00:00",
+    "merged_at": "2026-04-04T16:10:58+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "resilience",
+      "MUST",
+      "api",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #4002\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR resolves four bugs in the MCP session pool (`mcpgateway/services/mcp_session_pool.py`) that affect scalability, robustness and resource management in multi-worker deployments:\r\n- Memory Leak (HIGH): `_mcp_session_mapping` dictionary grew indefinitely, never evicting stale entries\r\n- Dead-Worker Lock (HIGH): Orphaned Redis ownership keys caused 5-minute request failures when workers crashed\r\n- Dead Code (LOW): Unused `_pending_responses` attribute cluttered the codebase\r\n- Busy-Wait Polling (MEDIUM): 100ms polling loops scaled CPU cost linearly with concurrent forwarded requests\r\n\r\n### Changes Made\r\n\r\n**Bug 1 - Memory Leak Fix:**\r\n- Added cleanup of `_mcp_session_mapping` in `_maybe_evict_idle_pool_keys()` when pool keys are evicted\r\n- Clear mapping in `close_all()` and `drain_all()` lifecycle methods\r\n\r\n**Bug 2 - Dead-Worker Detection:**\r\n- Implemented Redis-based heartbeat mechanism (30s TTL, refreshed every 10s)\r\n- Added` _worker_heartbeat_key()`, `_start_heartbeat()`, `_is_worker_alive()` methods\r\n- Modified `acquire()` to detect dead workers and atomically reclaim ownership\r\n- Updated `forward_request_to_owner()` to check worker liveness before forwarding\r\n\r\n**Bug 3 - Dead Code Removal:**\r\n- Removed unused `_pending_responses` attribute\r\n\r\n**Bug 4 - Polling Optimization:**\r\n- Replaced `get_message(timeout=0.1)` polling loop with `pubsub.listen()` async iterator\r\n- Eliminates per-request wake-ups, reducing CPU overhead in high-concurrency scenarios\r\n\r\n**Tests Added:**\r\n- `test_worker_heartbeat_key_format` - verifies heartbeat key format includes worker ID\r\n- `test_is_worker_alive_returns_true_when_heartbeat_exists` - tests liveness detection for active workers\r\n- `test_is_worker_alive_returns_false_when_heartbeat_missing` - tests dead worker detection\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    Pass ✅    |\r\n| Unit tests                | `make test`     |    Pass ✅    |\r\n| Coverage ≥ 80%            | `make coverage` |    Pass ✅    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Design Decisions\r\n\r\n**Heartbeat Implementation:**\r\n- Chose 30s TTL with 10s refresh interval to balance liveness detection speed vs Redis load\r\n- Heartbeat runs as background task only when session affinity is enabled\r\n- Graceful shutdown cancels heartbeat task and waits for completion\r\n\r\n**Ownership Reclaim Strategy:**\r\n- Atomic delete + re-register pattern prevents race conditions\r\n- Falls back to local session creation if reclaim fails\r\n- Maintains backward compatibility with non-affinity deployments\r\n\r\n**Polling Replacement:**\r\n- `pubsub.listen()` is the recommended async pattern for Redis pub/sub\r\n- Eliminates CPU waste from timed polling in idle periods\r\n- Maintains same timeout behavior via `asyncio.timeout()` wrapper\r\n\r\n### Impact\r\n\r\nThese fixes address production reliability issues in session-affinity-enabled deployments:\r\n- Prevents memory exhaustion in long-running workers\r\n- Reduces request failure window from 5 minutes to <30 seconds on worker crashes\r\n- Improves CPU efficiency under high concurrent forwarding load",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4058626903",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-04T16:08:22+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "de9692d5d4935f5239ffa14658f66ffff87fef1c",
+      "message": "fix: resolve MCP session pool bugs\n\n- Fix memory leak in _mcp_session_mapping by adding cleanup in eviction and lifecycle methods\n- Implement worker heartbeat mechanism for dead-worker detection with Redis-based liveness checks\n- Remove _pending_responses dead code attribute\n- Replace busy-wait polling with async pubsub.listen() iterator in forward_request_to_owner\n- Add heartbeat functionality tests for key format and worker liveness checks\n\nAddresses scalability, robustness, and resource management issues in multi-worker deployments.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-03T12:22:18+00:00"
+    },
+    {
+      "sha": "80b18326a78447d58a0352fe239a6d9268ef7ec6",
+      "message": "fix: use atomic CAS for dead-worker ownership reclaim and add missing tests\n\nReplace non-atomic delete+set with Lua compare-and-swap script in both\nacquire() and forward_request_to_owner() dead-worker reclaim paths,\nconsistent with existing register_pool_session_owner() pattern. This\nprevents race conditions where two workers could simultaneously reclaim\nthe same session.\n\nAlso add comprehensive differential tests for heartbeat, dead-worker\ndetection, eviction cleanup, and lifecycle management paths.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T10:04:48+00:00"
+    },
+    {
+      "sha": "79fd13d66641c38168c75978955f51dc998e5d3d",
+      "message": "fix: remove double semaphore release in ownership check paths\n\nBoth the CAS-failure and owner-is-alive branches in acquire() explicitly\ncalled semaphore.release() before raising RuntimeError, but the outer\nexcept BaseException handler already releases the semaphore on any\nfailure. This double-release caused the semaphore count to exceed its\ninitial value, allowing more concurrent sessions than the configured max.\n\nRemove the inner release calls; the outer handler handles it.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T10:09:46+00:00"
+    },
+    {
+      "sha": "f094a61e857d893e4cf7b275595551a4428f604c",
+      "message": "fix: start heartbeat on production path, handle CAS-loss in forwarding\n\nThree fixes from Codex cross-review:\n\n1. Heartbeat never started on production path: init_mcp_session_pool()\n   creates MCPSessionPool via __init__, never __aenter__. Extract public\n   start_heartbeat() method (mirrors start_rpc_listener pattern) and\n   call it from main.py alongside the RPC listener. __aenter__ now\n   delegates to start_heartbeat() for context-manager usage.\n\n2. forward_request_to_owner ignored CAS return value: when CAS returned\n   0 (another worker already reclaimed), the function returned None\n   (execute locally), violating single-owner routing. Now re-reads the\n   new owner from Redis and falls through to forwarding logic.\n\n3. Vacuous _cleanup_pool_session_owner test: method expects str but test\n   passed MagicMock(spec=PooledSession). Replaced with two proper tests\n   (owned key deletion + unowned key skip).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T10:39:24+00:00"
+    },
+    {
+      "sha": "925820fbb93841da03606b3c0205c544c1651bb8",
+      "message": "fix: start heartbeat/RPC listener for affinity-only deployments\n\nThe heartbeat and RPC listener startup was nested under the\nmcp_session_pool_enabled guard, but the pool itself is created when\nEITHER pool OR affinity is enabled. Affinity-only deployments\n(pool disabled, affinity enabled) created the pool but never started\nthe heartbeat or RPC listener, leaving all workers appearing dead.\n\nMove the affinity startup block outside the pool-enabled guard so\nit runs whenever session affinity is enabled, matching the pool\ninit condition at line 1615.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T10:44:11+00:00"
+    },
+    {
+      "sha": "5cecc1669204f6a713684ce2202a342f4e9f4b63",
+      "message": "fix: include affinity-only deployments in pool shutdown guard\n\nThe shutdown guard at line 1926 only checked mcp_session_pool_enabled,\nbut the init guard at line 1615 checks pool_enabled OR affinity_enabled.\nAffinity-only deployments started heartbeat and RPC listener but never\nshut them down. Align the shutdown condition to match init.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T10:49:40+00:00"
+    },
+    {
+      "sha": "9450ce0ec3117b39e94abf3ebe65e7ae370cd243",
+      "message": "chore: update secrets baseline after rebase\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T11:06:01+00:00"
+    },
+    {
+      "sha": "db39d35729e90e83f7220c8bada9b584a9c50e65",
+      "message": "fix: add start_heartbeat to lifespan test pool mock\n\nThe test_lifespan_with_feature_flags test uses a SimpleNamespace mock\nfor the session pool that was missing the new start_heartbeat() method.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T15:24:34+00:00"
+    },
+    {
+      "sha": "97f49e25e0a77f30332a4f279dc52b2d9197b1ff",
+      "message": "chore: update secrets baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T15:53:13+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 918,
+  "deletions": 100,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:14.875682",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:14.876542",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4029,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4029.json"
+  }
+}

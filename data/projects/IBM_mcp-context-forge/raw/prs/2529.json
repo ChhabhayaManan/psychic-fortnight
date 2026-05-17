@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2529,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2529"
+  },
+  "metadata": {
+    "title": "fix(db): release DB sessions before external HTTP calls (#2518)",
+    "state": "closed",
+    "created_at": "2026-01-27T21:36:00+00:00",
+    "updated_at": "2026-01-27T23:22:16+00:00",
+    "closed_at": "2026-01-27T23:22:14+00:00",
+    "merged_at": "2026-01-27T23:22:14+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "performance"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\nCloses #2518 - DB connection pool exhaustion during A2A and RPC tool calls.\r\n\r\n**Root Cause:** DB sessions were held in \"idle in transaction\" state during slow upstream HTTP calls, exhausting PgBouncer's connection pool under high load.\r\n\r\n**Solution:** Extract all needed data from ORM objects before calling `db.commit()`, then proceed with external HTTP calls without holding the DB session.\r\n\r\n### Key Changes\r\n\r\n- **`mcpgateway/services/tool_service.py`**: Extract A2A agent data (endpoint URL, auth, protocol version) to local variables before `db.commit()`. A2A tool invocation now uses pre-extracted data.\r\n\r\n- **`mcpgateway/middleware/rbac.py`**: Add early `db.commit()` and `db.close()` in all authentication paths (proxy, anonymous, disabled auth) to release sessions before request processing continues.\r\n\r\n- **`tests/unit/mcpgateway/middleware/test_rbac.py`**: Updated to verify proper session cleanup.\r\n\r\n### Load Test Results (4000 concurrent users)\r\n\r\n| Metric | Value |\r\n|--------|-------|\r\n| Total Requests | 1,090,670 |\r\n| Success Rate | **99.81%** |\r\n| P50 Latency | 450ms |\r\n| P95 Latency | 4300ms |\r\n| 502 Errors | 0.02% (edge cases) |\r\n\r\nBefore this fix, connection pool exhaustion caused widespread 502 errors under load. After the fix, only edge cases (very slow upstream calls >120s) trigger timeouts.\r\n\r\n## Test Plan\r\n\r\n- [x] Unit tests pass (`make test` - 4994 passed)\r\n- [x] E2E session pool tests pass (13/13)\r\n- [x] Load test with 4000 concurrent users shows 99.81% success rate\r\n- [x] \"idle in transaction\" max age reduced from 30+ seconds to <2 seconds\r\n- [x] RBAC middleware tests updated and passing",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "bf971d4cd1e4b4c91bc5b03f95d5a7cb79f0266f",
+      "message": "Add profling tools, memray\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-27T16:15:32+00:00"
+    },
+    {
+      "sha": "1efaa7ab8120a1fca06595ed661cfc7bfd219d2e",
+      "message": "Add profling tools, memray\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-27T17:01:46+00:00"
+    },
+    {
+      "sha": "f43946652a3b3a2dd008611054646ac506d693ff",
+      "message": "fix(db): release DB sessions before external HTTP calls to prevent pool exhaustion\n\nThis commit addresses issue #2518 where DB connection pool exhaustion occurred\nduring A2A and RPC tool calls due to sessions being held during slow upstream\nHTTP requests.\n\nChanges:\n- tool_service.py: Extract A2A agent data to local variables before calling\n  db.commit(), allowing HTTP calls to proceed without holding the DB session.\n  The A2A tool invocation logic now uses pre-extracted data instead of querying\n  during the HTTP call phase.\n\n- rbac.py: Add db.commit() and db.close() calls before returning user context\n  in all authentication paths (proxy, anonymous, disabled auth). This ensures\n  DB sessions are released early and not held during subsequent request processing.\n\n- test_rbac.py: Update test to provide mock db parameter and verify that\n  db.commit() and db.close() are called for proper session cleanup.\n\nThe fix follows the pattern established in other services: extract all needed\ndata from ORM objects, call db.commit() to release the transaction, then\nproceed with external HTTP calls. This prevents \"idle in transaction\" states\nthat exhaust PgBouncer's connection pool under high load.\n\nLoad test results (4000 concurrent users, 1M+ requests):\n- Success rate: 99.81%\n- 502 errors reduced to 0.02% (edge cases with very slow upstreams)\n- P50: 450ms, P95: 4300ms\n\nCloses #2518\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-27T21:35:42+00:00"
+    },
+    {
+      "sha": "b4deb8502b505c5771272acaef640e02f608cf13",
+      "message": "perf(config): tune connection pools for high concurrency\n\nBased on profiling with 4000 concurrent users (~2000 RPS):\n\n- MCP_SESSION_POOL_MAX_PER_KEY: 50 → 200 (reduce session creation)\n- IDLE_TRANSACTION_TIMEOUT: 120s → 300s (handle slow MCP calls)\n- CLIENT_IDLE_TIMEOUT: 120s → 300s (align with transaction timeout)\n- HTTPX_MAX_CONNECTIONS: 200 → 500 (more outbound capacity)\n- HTTPX_MAX_KEEPALIVE_CONNECTIONS: 100 → 300\n- REDIS_MAX_CONNECTIONS: 150 → 100 (stay under maxclients)\n\nResults:\n- Failure rate: 0.446% → 0.102% (4.4x improvement)\n- RPC latency: 3,014ms → 1,740ms (42% faster)\n- CRUD latency: 1,207ms → 508ms (58% faster)\n\nSee: todo/profile-full.md for detailed analysis\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-27T23:19:38+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 549,
+  "deletions": 214,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:29.848594",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:29.850099",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2529,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2529.json"
+  }
+}

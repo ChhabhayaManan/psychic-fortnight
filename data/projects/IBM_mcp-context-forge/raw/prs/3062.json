@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3062,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3062"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Fix OAuth tool fetching",
+    "state": "closed",
+    "created_at": "2026-02-19T09:49:40+00:00",
+    "updated_at": "2026-02-20T12:28:41+00:00",
+    "closed_at": "2026-02-20T12:28:39+00:00",
+    "merged_at": "2026-02-20T12:28:39+00:00",
+    "author": "madhav165",
+    "labels": [
+      "ui",
+      "ica",
+      "MUST"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3059\r\n\r\n---\r\n\r\n## 📌 Summary\r\nFixes a bug where clicking \"Fetch Tools\" button in the OAuth callback page returns a 401 error with message \"Cookie authentication not allowed for API requests. Use Authorization header.\"\r\n\r\n## 🐞 Root Cause\r\nThe RBAC middleware (`mcpgateway/middleware/rbac.py`) rejects cookie-only authentication for non-browser requests. The fetch request from the OAuth callback page was missing:\r\n\r\n- Browser identification headers (`hx-request: \"true\"`, `Accept: text/html`)\r\n\r\nWithout these, the request was treated as an API request, triggering the 401 error.\r\n\r\n## 💡 Fix Description\r\n### mcpgateway/routers/oauth_router.py\r\n\r\nAdded browser identification headers to the fetch request in the OAuth callback template:\r\n\r\n```diff\r\n const response = await fetch('{safe_root_path}/oauth/fetch-tools/{escape(str(gateway_id))}', {\r\n-    method: 'POST'\r\n+    method: 'POST',\r\n+    headers: {\r\n+        'hx-request': 'true',\r\n+        'Accept': 'text/html'\r\n+    }\r\n });\r\n```\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    pass    |\r\n| Unit tests                            | `make test`          |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3825225135",
+      "author": "crivetimihai",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-02-19T11:30:46+00:00",
+      "body": "This works around the 401, but the approach has issues:\n\n1. **Fake `hx-request: true` header** — this is not an HTMX request. It's a plain `fetch()` from inline JS. Any middleware or logging that branches on `hx-request` will misclassify this request.\n\n2. **`Accept: text/html` is semantically wrong** — the endpoint returns JSON (`{\"success\": true, \"message\": \"...\"}`), and the response handler calls `response.json()`. Claiming the client wants HTML back is misleading.\n\n3. **Incomplete** — doesn't fix `admin.js:19594` `fetchToolsForGateway()` (which has the same pattern), and doesn't add `credentials: \"include\"` for cross-origin safety.\n\nThe underlying issue (as documented in #3059) is that the RBAC referer check at `rbac.py:259` only matches `\"/admin\" in referer`. The OAuth success page's referer is `/oauth/callback`, which doesn't match.\n\nThe cleaner fix would be:\n- **`rbac.py:259`**: Broaden `is_admin_ui_request` to also match `/oauth/` in the referer\n- **`oauth_router.py`** + **`admin.js`**: Add `credentials: \"include\"` (defensive, for cross-origin deployments)\n\nThat way no fake headers are needed, and both call sites are covered."
+    },
+    {
+      "id": "3827165814",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-19T17:00:42+00:00",
+      "body": "Thanks @madhav165 — this is exactly the right fix. Clean and correct.\n\n**What changed (all good):**\n\n1. **`rbac.py`** — broadened the referer check to include `/oauth/`:\n   ```python\n   is_admin_ui_request = \"/admin\" in referer or \"/oauth/\" in referer\n   ```\n   This correctly treats the OAuth callback page as a browser request, allowing cookie auth to pass through.\n\n2. **`oauth_router.py` + `admin.js`** — added `credentials: 'include'` to the `fetch-tools` call, so the browser actually sends the `jwt_token` cookie with the request.\n\n3. **Tests** — three solid cases covering admin referer (allowed), OAuth referer (allowed), and unrelated referer (rejected). Good coverage of the boundary.\n\nThe fake-header approach from the earlier revision is gone, and the fix works at the right layer (referer-based browser detection + standard cookie inclusion). LGTM."
+    },
+    {
+      "id": "3831563351",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-20T11:24:56+00:00",
+      "body": "LGTM — clean, minimal fix with good test coverage.\n\nRebased onto main and squashed into a single commit.\n\n**Changes reviewed:**\n- `credentials: 'include'` on both fetch() calls (oauth callback page + admin.js) — consistent with ~18 other admin.js fetch calls\n- `/oauth/` referer detection in RBAC middleware — mirrors existing `/admin` pattern\n- 3 new unit tests covering admin referer, oauth referer, and unrelated referer rejection\n- 100% line coverage on `mcpgateway/middleware/rbac.py`\n\n**Security:** No concerns — referer is browser-enforced (same-origin policy), cookies are httponly + samesite=lax, and cookie auth remains a secondary mechanism behind Bearer tokens."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c2a0341cefeeda2c340d7363dcd7f20dd46e6317",
+      "message": "fix(ui): fix OAuth tool fetching cookie auth\n\nAdd `credentials: 'include'` to the fetch-tools request in both the\nOAuth callback page and admin.js so the browser sends the jwt_token\ncookie.  The OAuth callback fetch also sets `Accept: text/html` so the\nRBAC middleware recognises it as a browser request through the existing\naccept-header check, avoiding the need to expand referer-based trust\nto `/oauth/` paths.\n\nCloses #3059\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-20T12:00:59+00:00"
+    },
+    {
+      "sha": "d12e4abc76341369e33e81f52cb87fcd0422f9a2",
+      "message": "Fix pre-commit\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-20T12:19:05+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 75,
+  "deletions": 9,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:14:39.620399",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:14:39.622464",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3062,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3062.json"
+  }
+}

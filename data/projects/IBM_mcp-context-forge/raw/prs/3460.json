@@ -1,0 +1,88 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3460,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3460"
+  },
+  "metadata": {
+    "title": "fix(security): harden diagnostic and metrics endpoint defaults",
+    "state": "closed",
+    "created_at": "2026-03-04T10:21:24+00:00",
+    "updated_at": "2026-03-08T21:44:58+00:00",
+    "closed_at": "2026-03-08T21:44:57+00:00",
+    "merged_at": "2026-03-08T21:44:57+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "security",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- **`/version`**: Require `require_admin_auth` instead of `require_auth`; restrict `_public_env()` to `MCPGATEWAY_`/`MCP_` prefixed vars + curated allowlist instead of dumping the entire process environment\n- **`/health/security`**: Require `require_admin_auth` instead of manual JWT parsing that accepted any user\n- **`/` (UI disabled)**: Remove `version` and `admin_api_enabled` from public root response\n- **`/metrics/prometheus`**: Replace `instrumentator.expose()` (no auth) with custom endpoint using `Depends(require_auth)`; default `ENABLE_METRICS` to `false`; use `settings.ENABLE_METRICS` instead of `os.getenv` bypass\n- **Token scoping**: Remove `/metrics` from `skip_paths`, add explicit `admin.metrics` permission patterns\n- **Docker Compose**: Add `prometheus_token` service (monitoring profile) for scrape JWT generation with `user: \"0\"` for volume write permissions\n- **Helm**: Add `metricsToken` secret reference to values/schema, update ServiceMonitor auth block, mount secret into Prometheus deployment\n- **Docs**: Update observability, configuration, api-usage, and config schema files\n\n## Test plan\n\n- [ ] `make flake8 pylint` passes (10.00/10)\n- [ ] 917 unit tests pass across all affected test files\n- [ ] `helm template` renders successfully with schema validation\n- [ ] Verify `/version` returns 401/403 for non-admin users\n- [ ] Verify `/health/security` returns 401/403 for non-admin users\n- [ ] Verify `/metrics/prometheus` returns 401 without JWT, 200 with valid JWT (when `ENABLE_METRICS=true`)\n- [ ] Verify `/metrics/prometheus` returns 503 when `ENABLE_METRICS=false` (default)\n- [ ] Verify `docker compose --profile monitoring up` generates Prometheus scrape token and Prometheus scrapes successfully\n- [ ] Verify root endpoint (`/`) no longer includes `version` or `admin_api_enabled`\n\nCloses #3460",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3889193857",
+      "author": "Lang-Akshay",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-04T12:39:31+00:00",
+      "body": "## Security findings\n\n| Finding | File | Line | Severity | CWE | Description |\n|---------|------|------|----------|-----|-------------|\n| F-1 | metrics.py:299 | 298–305 | Medium | CWE-306 | When ENABLE_METRICS=false, the metrics_disabled() fallback endpoint returns 503 without any auth dependency, allowing unauthenticated probing of config state. |\n| F-2 | version.py:184 | 174–185 | Low | CWE-200 | `CORS_ORIGINS` in _PUBLIC_ENV_ALLOWLIST reveals trusted frontend domains. Behind admin auth, so acceptable risk. |\n| F-3 | version.py:165 | 161–170 | Low | CWE-200 | _is_secret() keyword matching may miss unconventional secret var names (e.g. `CREDENTIAL`, `SIGNING`). Mitigated by allowlist-first approach in _public_env(). |\n| F-4 | token_scoping.py:113 | 113–114 | Info | — | Metrics permission pattern [^/metrics(?:$ |\n| F-5 | — | — | Info | — | No deny-path regression test for the metrics_disabled() unauthenticated endpoint. |\n\n## Suggestions to address medium severity risk.\n\n1. F-1 — Add Depends(require_auth) to the metrics_disabled() endpoint for defense-in-depth consistency. Effort: trivial. Ref: CWE-306, OWASP A01:2021.\n----\n### Not important \n2. F-2 — Consider removing `CORS_ORIGINS` from the allowlist. Effort: trivial.\n3. F-3 — Add `\"CREDENTIAL\"`, `\"PRIVATE\"`, `\"SALT\"` to _is_secret() keywords as defense-in-depth. Effort: trivial.\n---\n## Test deny-Path Coverage\n\n| Changed Endpoint | Deny-Path Test? | Gap |\n|------------------|-----------------|-----|\n| GET /health/security (now require_admin_auth) | Missing | No HTTP-level test for unauth (401) or non-admin (403) |\n| GET /metrics/prometheus (now require_auth) | Missing | Auth overridden in all tests; no unauth denial test |\n| GET /metrics/prometheus when ENABLE_METRICS=false | Missing | No test for disabled endpoint auth behavior |\n| GET /version (now require_admin_auth) | Covered | test_version.py:145 asserts 401 |\n| GET / root (info stripped) | Covered | test_main.py:541 asserts no version/admin fields |\n| Token scoping RBAC for /metrics | Missing | No test for insufficient permissions denial |"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "63f5ba4b34d86e0e242ebd0898690a5f95da8d8b",
+      "message": "fix(security): harden diagnostic and metrics endpoint defaults\n\n- /version: require admin auth instead of any authenticated user\n- /version: restrict _public_env() to MCPGATEWAY_/MCP_ prefixed vars + allowlist\n- /health/security: require admin auth instead of any authenticated user\n- / (UI disabled): remove version and admin_api_enabled from public response\n- /metrics/prometheus: replace instrumentator.expose() with auth-gated endpoint\n- /metrics/prometheus: default ENABLE_METRICS to false (opt-in)\n- /metrics/prometheus: use settings.ENABLE_METRICS instead of os.getenv bypass\n- Token scoping: remove /metrics from skip_paths, add permission patterns\n- Docker Compose: add prometheus_token service for scrape auth\n- Helm: add metricsToken secret ref, update ServiceMonitor and Prometheus mount\n- Docs: update observability, configuration, api-usage, config schemas\n\nCloses #3460\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T10:21:02+00:00"
+    },
+    {
+      "sha": "8045566188de8d5f68bc393d587215c4397d5361",
+      "message": "fix(tests): use settings.ENABLE_METRICS in metrics buffer service tests\n\nTests were using monkeypatch.setenv which doesn't affect the already-loaded\nPydantic settings object. Switch to monkeypatch.setattr on settings directly.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T11:05:06+00:00"
+    },
+    {
+      "sha": "f2d74543152891f474056d4bf2d3c27fb8efe79d",
+      "message": "fix(security): add auth to metrics_disabled endpoint and deny-path tests\n\n- Add Depends(require_auth) to metrics_disabled() endpoint so\n  unauthenticated callers cannot probe whether metrics are enabled\n  (addresses reviewer finding F-1, CWE-306)\n- Add deny-path regression tests for /metrics/prometheus (enabled +\n  disabled) and /health/security unauthenticated access\n- Fix test_setup_metrics_disabled to use monkeypatch.setattr on\n  settings instead of stale os.environ patching\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T20:02:11+00:00"
+    },
+    {
+      "sha": "a532cfebef67b1911c55de5108f2c535d89dc37d",
+      "message": "fix(monitoring): add prometheus auth to debug/verbose compose and docs\n\n- docker-compose-debug.yml: add ENABLE_METRICS=true, prometheus_token\n  service and volume mount matching docker-compose.yml\n- docker-compose-verbose-logging.yml: same treatment\n- docs/manage/observability.md: add token generation step, auth header\n  to curl example, authorization block to Prometheus scrape job example\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T20:42:36+00:00"
+    },
+    {
+      "sha": "ad9ce74c3555ca664d7b29b5701d15cb46499c2f",
+      "message": "fix: address codex review findings for metrics hardening PR\n\n- version.py: fix CORS_ORIGINS -> ALLOWED_ORIGINS in env allowlist\n  (CORS_ORIGINS env var does not exist; runtime uses ALLOWED_ORIGINS)\n- version.py: update endpoint summary and docstring to reflect\n  admin-only access via require_admin_auth\n- observability.md: fix stale \"registered by Instrumentator\" reference\n- Helm values.yaml: default metricsToken to empty so ServiceMonitor\n  and Prometheus do not reference a non-existent secret on first deploy\n- All 4 compose files: fix invalid YAML in prometheus depends_on\n  (cannot mix list and mapping syntax); convert to pure mapping with\n  condition: service_completed_successfully for the one-shot token\n  generator\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T21:02:11+00:00"
+    },
+    {
+      "sha": "6d65a8c9ef165361f40b22048223d30feb98df02",
+      "message": "test(metrics): add coverage for plain-text and multiprocess response paths\n\nCover the two previously-uncovered branches in the auth-gated\n/metrics/prometheus handler:\n- Non-gzip response (Accept-Encoding: identity)\n- PROMETHEUS_MULTIPROC_DIR multiprocess collector path\n\nDiff coverage: 100% (32/32 lines)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T21:31:51+00:00"
+    }
+  ],
+  "files_changed": 30,
+  "additions": 571,
+  "deletions": 207,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:23.931519",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:23.933203",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3460,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3460.json"
+  }
+}

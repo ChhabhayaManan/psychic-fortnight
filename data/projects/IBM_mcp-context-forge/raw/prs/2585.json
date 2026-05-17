@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2585,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2585"
+  },
+  "metadata": {
+    "title": "Update conflict detection to respect gateway_id in Prompt/Resource services",
+    "state": "closed",
+    "created_at": "2026-01-30T09:56:16+00:00",
+    "updated_at": "2026-01-31T19:54:02+00:00",
+    "closed_at": "2026-01-31T19:54:01+00:00",
+    "merged_at": "2026-01-31T19:54:00+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nCloses #2520\r\n\r\nImplemented proper Gateway Namespacing for Resources and Prompts. Historically, the application logic enforced global uniqueness for Resource URIs and Prompt Names per team/owner, ignoring which Gateway they belonged to. This change updates the ResourceService and PromptService (and their Create schemas) to respect gateway_id during registration and conflict detection. Ideally, the same URI or Name should be allowed if it is associated with a different Gateway.\r\n\r\n- Allowed same URI or prompt name from different gateways. \r\n- Added test cases to test Namespacing for Resources and Prompts\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Register a resource with URI my-uri on Gateway A (Success).\r\n2. Attempt to register a resource with URI my-uri on Gateway B (same team/owner).\r\n\r\n- Expected: Registration succeeds (namespaces are separate).\r\n- Actual (Before Fix): Registration fails with ConflictError, claiming the resource already exists.\r\n\r\n## 🐞 Root Cause\r\nThe register_resource and register_prompt methods in the service layer checked for conflicts by querying the database for any existing record with the same uri/name and team_id/visibility. The query filters completely omitted the gateway_id field. As a result, the application was mistakenly treating different gateways as sharing a single global namespace. Additionally, the Create schemas were missing the gateway_id field entirely, preventing the API from accepting this context.\r\n\r\n## 💡 Fix Description\r\n\r\nSchema Updates:\r\n  - Updated `ResourceCreate` and `PromptCreate` Pydantic models in `schemas.py` to accept an optional `gateway_id`.\r\n\r\nService Logic:\r\n  - Updated `ResourceService.register_resource` to:\r\n      - Extract `gateway_id`\r\n      - Include it in the conflict detection query\r\n        (WHERE uri = ... AND gateway_id = ...)\r\n  - Updated `PromptService.register_prompt` to:\r\n      - Extract `gateway_id`\r\n      - Pass it to the name computation logic\r\n      - Include it in the conflict detection query\r\n  - Ensured both services persist `gateway_id` to the database\r\n    when creating new records.\r\n\r\nTests:\r\n  - Added `TestResourceGatewayNamespacing` unit tests to verify that:\r\n      - Identical identifiers are allowed across different gateways\r\n      - Identical identifiers are rejected within the same gateway\r\n  - Added `TestPromptGatewayNamespacing` unit tests with the same guarantees\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3733305987",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-31T19:12:36+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c36b49fa1d744a1c390ca653dd291ffa078ace27",
+      "message": "namespace prompt names and resource URIs by gateway ID, ensuring uniqueness\n\nSigned-off-by: Keval Mahajan mahajankeval23@gmail.com",
+      "author": "Keval Mahajan",
+      "date": "2026-01-30T07:23:57+00:00"
+    },
+    {
+      "sha": "3d8fee548d008338cf60307bcf8c66707100ba23",
+      "message": "linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-30T10:06:38+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 423,
+  "deletions": 31,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:29.836788",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:29.838653",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2585,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2585.json"
+  }
+}

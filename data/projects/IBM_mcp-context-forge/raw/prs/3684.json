@@ -1,0 +1,93 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3684,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3684"
+  },
+  "metadata": {
+    "title": "chore: remove MySQL/MariaDB/MongoDB support - PostgreSQL and SQLite only",
+    "state": "closed",
+    "created_at": "2026-03-14T13:28:34+00:00",
+    "updated_at": "2026-03-21T19:33:13+00:00",
+    "closed_at": "2026-03-21T19:33:11+00:00",
+    "merged_at": "2026-03-21T19:33:11+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "python",
+      "chore",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Remove all MySQL, MariaDB, and MongoDB database support from the entire codebase\n- PostgreSQL is now the only supported production database; SQLite remains for local development\n- 73 files changed, 135 insertions, 1,398 deletions\n\n### Core code changes\n- Removed MySQL/MariaDB engine configuration, advisory locks (`GET_LOCK`/`RELEASE_LOCK`), VARCHAR patching, and JSON query branches from `db.py`, `bootstrap_db.py`, `alembic/env.py`, `sqlalchemy_modifier.py`\n- Added explicit `ValueError` for unsupported database backends in `build_engine()`\n- Removed `pymysql` and `mariadb` optional dependency groups from `pyproject.toml`\n- Changed default `db_driver` from `mariadb+mariadbconnector` to `postgresql+psycopg`\n- Removed MongoDB URL detection from metrics service\n\n### Infrastructure\n- Deleted `docker-compose.mariadb.yml`\n- Cleaned MariaDB/MySQL/MongoDB/PHPMyAdmin/mongo-express from debug and performance compose files\n- Updated Helm chart `DB_DRIVER` default to `postgresql+psycopg`\n\n### Tests\n- Removed ~22 MySQL/MariaDB/MongoDB-specific test functions across 13 test files\n- All 14,323 tests pass\n\n### Documentation\n- Rewrote `supported-databases.md`, `configuration.md`, deployment guides, and quick start\n- Updated all docs to consistently communicate PostgreSQL for production, SQLite for development\n\n### Alembic migrations\n- Removed MySQL dialect branches from 4 migration files\n- Updated MySQL/MariaDB comments in 8 migration files\n\nCloses #1688\n\n## Test plan\n- [x] All 14,323 unit/integration/e2e tests pass\n- [x] Verified no remaining MySQL/MariaDB/MongoDB references via grep (excluding CHANGELOG, intentional keeps like SQL injection test content and defensive URL masking regex)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "d66ab770820d4f75c54214e35743d20cdf142d93",
+      "message": "chore: remove MySQL/MariaDB/MongoDB support, keep PostgreSQL and SQLite only\n\nRemove all MySQL, MariaDB, and MongoDB database support from the codebase.\nPostgreSQL is the only supported production database; SQLite remains for\nlocal development.\n\nCloses #1688\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T13:28:15+00:00"
+    },
+    {
+      "sha": "eba995b9882cb9bd0d012a93976ce3267c8b940d",
+      "message": "fix: remove residual MySQL references from Containerfiles and add test coverage\n\n- Remove mysql extra from pip install in Containerfile and Containerfile.scratch\n  (the mysql optional dep group was removed from pyproject.toml but these\n  Containerfiles still referenced it, causing build failures)\n- Remove stray mysql pattern from support_bundle_service.py URL sanitizer\n- Add parametrized test for ValueError on unsupported database backends\n\nCloses #1688\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T15:18:14+00:00"
+    },
+    {
+      "sha": "49718d176b404a7db75b82a9d8eff2275c600eb3",
+      "message": "chore: remove spurious alembic extra from Containerfile\n\nalembic is a core runtime dependency, not an optional extra — the\nalembic extra group doesn't exist in pyproject.toml.  Align with\nContainerfile.scratch and Containerfile.lite which already omit it.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T15:33:16+00:00"
+    },
+    {
+      "sha": "9da92db9cdd62740ec808594d44b660534a350d4",
+      "message": "docs: add CHANGELOG entry for 1.0.0 GA release\n\nDocument removal of MySQL/MariaDB/MongoDB support as a breaking change\nin the 1.0.0 GA release targeting 2026-03-31.\n\nRefs: #3684, #1688\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T15:38:14+00:00"
+    },
+    {
+      "sha": "ef9ef00a0bbb6c4ce7f970788c1339e2e5739d56",
+      "message": "fix: scheme-agnostic URL redaction and postgresql+psycopg metrics detection\n\n- Make support_bundle_service.py URL sanitizer scheme-agnostic so\n  credentials in legacy/stale/misconfigured database URLs (e.g. mysql://)\n  are still redacted in support bundles\n- Fix metrics engine detection to recognize driver-qualified URLs like\n  postgresql+psycopg:// (the canonical DSN in docker-compose.yml)\n- Add test coverage for both fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T16:14:17+00:00"
+    },
+    {
+      "sha": "db41d09403cba6fac48882affc3c6fa9057eaa12",
+      "message": "fix(metrics): use startswith for postgresql detection to avoid false positives\n\nSubstring matching (\"postgresql\" in url) would mislabel URLs like\nsqlite:///tmp/postgres.db as engine=\"postgresql\".  Use startswith()\nwith a tuple to match scheme prefixes only.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T16:41:56+00:00"
+    },
+    {
+      "sha": "55560fb5cfd58a732d8b270fe26224aa9accb0fa",
+      "message": "chore: remove unused imports and variables after MySQL removal\n\nRemove lock_id (bootstrap_db.py), VARCHAR (db.py), and orjson\n(sqlalchemy_modifier.py) left over from MySQL/MariaDB code paths.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T16:50:21+00:00"
+    },
+    {
+      "sha": "6ffb50189b6da6004e46576e17c72a240bf349e6",
+      "message": "fix(db): add missing Raises section to build_engine docstring\n\nFixes flake8 DAR401 for the ValueError raised on unsupported backends.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T16:54:48+00:00"
+    }
+  ],
+  "files_changed": 78,
+  "additions": 192,
+  "deletions": 1389,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:32.765201",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:32.766421",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3684,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3684.json"
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1711,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1711"
+  },
+  "metadata": {
+    "title": "Release sessions",
+    "state": "closed",
+    "created_at": "2025-12-22T12:21:04+00:00",
+    "updated_at": "2025-12-23T03:33:47+00:00",
+    "closed_at": "2025-12-23T03:33:46+00:00",
+    "merged_at": "2025-12-23T03:33:46+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# Fix DB connection pool exhaustion during health checks\r\n\r\nCloses #1706 and #1714\r\n\r\n## Summary\r\n\r\n- Fix health check holding DB sessions during HTTP calls to MCP servers\r\n- Remove `db` parameter from health check chain, use `fresh_db_session()` only when needed\r\n- Update tests and fix stale docstring\r\n\r\n## Problem\r\n\r\nThe health check loop was holding a DB session for its entire lifetime, causing connection pool exhaustion under load:\r\n\r\n1. `initialize()` created a DB session at startup that was **never closed**\r\n2. This session was passed through `_run_health_checks()` → `check_health_of_gateways()` → `_check_single_gateway_health()`\r\n3. The session was held idle during all HTTP health check calls (15-48 seconds observed)\r\n4. `_get_gateways()` returns detached objects, so `gateway.last_seen = ...` never persisted\r\n\r\n**Before fix:** 10-15 sessions held for 15-48 seconds during health checks\r\n\r\n**After fix:** 0 sessions from health check pattern\r\n\r\n## Solution\r\n\r\nRemoved the `db` parameter from the entire health check chain:\r\n\r\n| Method | Before | After |\r\n|--------|--------|-------|\r\n| `initialize()` | Created DB session, passed to health checks | No DB session created |\r\n| `_run_health_checks(db, user_email)` | Held session forever | `_run_health_checks(user_email)` |\r\n| `check_health_of_gateways(db, gateways, user_email)` | Passed session through | `check_health_of_gateways(gateways, user_email)` |\r\n| `_check_single_gateway_health(db, gateway, user_email)` | Held during HTTP | `_check_single_gateway_health(gateway, user_email)` |\r\n\r\nThe refactored `_check_single_gateway_health()` now:\r\n- Extracts gateway data upfront (since gateway object may be detached)\r\n- Uses `fresh_db_session()` only when DB access is actually needed:\r\n  - OAuth token lookup\r\n  - Gateway status toggle\r\n  - `last_seen` update (now actually persists!)\r\n\r\n## Files Changed\r\n\r\n- `mcpgateway/services/gateway_service.py` - Remove db param from health check chain\r\n- `mcpgateway/auth.py` - Fix stale docstring reference to db param\r\n- `tests/unit/mcpgateway/services/test_gateway_service_oauth_comprehensive.py` - Update test\r\n- `tests/unit/mcpgateway/services/test_gateway_service_extended.py` - Update test\r\n\r\n## Verification\r\n\r\nTested with 1000 concurrent users benchmark:\r\n\r\n```sql\r\n-- Before fix: health check sessions holding 15-48 seconds\r\nSELECT COUNT(*) FROM pg_stat_activity\r\nWHERE state = 'idle in transaction'\r\nAND query ILIKE '%FROM gateways%' AND query NOT ILIKE '%WHERE%';\r\n-- Result: 10-15 sessions\r\n\r\n-- After fix: 0 health check sessions\r\n-- Result: 0 sessions\r\n```\r\n\r\n| Metric | Before | After |\r\n|--------|--------|-------|\r\n| Health check sessions | 10-15 | 0 |\r\n| Max transaction age | 29-48 sec | 16 sec |\r\n| Avg transaction age | ~15 sec | 1.3 sec |\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "56818610595ddd9968ad165268ef1fc443b37e94",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-22T00:58:56+00:00"
+    },
+    {
+      "sha": "5530ded4ef65a425a13f6ed55f69492fe69f8b3c",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-22T01:49:46+00:00"
+    },
+    {
+      "sha": "338a4476cf17c7f3aca4d857b4409de4186df4e5",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-22T02:51:04+00:00"
+    },
+    {
+      "sha": "e9e03824f91cb119b5218ca83efc7608aa8ff324",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-22T03:37:09+00:00"
+    },
+    {
+      "sha": "2ba4cb7dbb8a943eb65021fb543dd92bcf87ee88",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-22T10:24:29+00:00"
+    },
+    {
+      "sha": "096cb386adaaf67afcb3c695e3b1e25c59df0909",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-22T11:05:48+00:00"
+    },
+    {
+      "sha": "27a3288090b6b4180d18ef6d5e5b675b7cf41b0b",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-22T11:40:37+00:00"
+    },
+    {
+      "sha": "289b202143903f5fb72789fc103972156d1561d4",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-22T12:16:01+00:00"
+    },
+    {
+      "sha": "036a077673da49a1749ae308abd669a736283aaa",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-22T15:35:42+00:00"
+    },
+    {
+      "sha": "087dd329adbef2a4e96c9104da8ccadcb22a40e2",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-22T16:24:52+00:00"
+    },
+    {
+      "sha": "0447b3cf0f9b2f65d76f83b7ccd8834aa5001a22",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-23T02:30:22+00:00"
+    },
+    {
+      "sha": "95dce640494723fe82da1f415a6e665988914ffe",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-23T02:54:33+00:00"
+    },
+    {
+      "sha": "5fbfdf6bd541fe1ba19852d98442abe88655d03d",
+      "message": "Release connections\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-23T03:25:16+00:00"
+    }
+  ],
+  "files_changed": 31,
+  "additions": 2126,
+  "deletions": 1011,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:56.190669",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:56.194096",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1711,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1711.json"
+  }
+}

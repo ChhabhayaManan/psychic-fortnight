@@ -1,0 +1,33 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4746,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4746"
+  },
+  "metadata": {
+    "title": "[BUG]: Fix flaky multi_tenant integration tests; Apply the P1 session refactor parked pending root-cause",
+    "state": "open",
+    "created_at": "2026-05-13T13:15:46+00:00",
+    "updated_at": "2026-05-13T13:17:52+00:00",
+    "closed_at": null,
+    "author": "gandhipratik203",
+    "labels": [
+      "bug",
+      "triage",
+      "testing"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nThe two tests in `tests/integration/test_rate_limiter_multi_tenant.py` are flaky in practice and block reviewer P1 of #4635 (session reuse refactor). On a freshly-restarted gateway stack they pass 2/2, but the moment any other rate-limiter test has run against the same containers they degrade to 1/2 or 0/2 — without obvious test-side state pollution.\n\n## Observed symptom\n\nAfter clearing `rl:*` keys + `plugin:RateLimiterPlugin:mode` in Redis, a single `tools/call` to `/servers/<id>/mcp` returns HTTP 429 with:\n\n```\ncounter in Redis ends at 24  (rl:<tenant>:user:admin@example.com:60 = 24)\nstatic config:  by_user: 30/m, by_tenant: 3000/m, by_tool: {}\nresponse body:  plugin_name=RateLimiterPlugin, plugin_error_code=RATE_LIMIT\n                violated[0]:  remaining=0\n                allowed[0,1]: remaining=0, remaining=2\n```\n\n24 < 30 — the limit math says the call should pass. It doesn't.\n\n## What we've ruled out\n\n- **The new gateway middleware** added in #4423 (`rate_limit_middleware.py` on main, MEDIUM tier 100/min). Our current image was built before #4423 merged, so the middleware isn't even present in the running gateway. The 429 we see comes from the cpex plugin (response body confirms).\n- **cpex's own limit math.** `tests/integration/test_rate_limiter.py` — which exercises the plugin directly in-proc with similar configs — is 54/54 green after the cleanup in #4635. The math is right in isolation.\n\n## Working hypothesis\n\nThe discrepancy lives in the gateway-side integration, not in cpex itself:\n\n- Every user-level `tools/call` produces ~24 plugin-hook invocations inside the gateway (session-affinity + internal request fan-out).\n- NGINX session-affinity binds those 24 hooks to a single replica.\n- On a fresh stack the 24 ticks-per-call fits under the 30/m bucket; on a stack that's seen prior tool calls (even from unrelated tests), the rate limiter's perception of \"remaining\" diverges from the simple `30 - counter` arithmetic visible in Redis (response body confirms: `remaining=2` and `remaining=0` neither match `30 - 24`).\n- Whatever this internal accounting is, it's stable enough that a fresh gateway-restart resets the behaviour and a few test runs later we're back to flaky.\n\n## Reviewer P1 from #4635 — why it's parked here\n\nPR #4635's reviewer asked (P1) for the session-per-call handshake in `_invoke_tool_once` to be replaced by a single session established in the `server_and_tool` fixture (semantically correct: real clients hold one session, not a new one per call).\n\nImplementing P1 made both tests fail consistently rather than flakily, because the now-single session binds all calls to one replica via session-affinity — the same condition we observe causing 429s. P1 didn't introduce the bug; it surfaced it more clearly.\n\nThe diff for P1 is small (~20 lines) and lives on `verify/rate-limiter-after-deps-bump` on origin if useful — would land trivially once the underlying behaviour is understood.\n\n## Suggested approach for whoever picks this up\n\n1. Reproduce on a freshly-restarted compose stack — multi_tenant should pass 2/2. Then run any other rate-limiter test once and re-run multi_tenant; degradation should be visible.\n2. Capture the response body of the 429 (`details.dimensions.*.remaining`) alongside the Redis counter at the same instant — that's where the accounting mismatch is observable.\n3. Once the underlying behaviour is clear, apply the P1 refactor (session in `server_and_tool` fixture, threaded into `_invoke_tool_once`; `pytest.fail` instead of `return 0` on handshake failure already landed in #4635 via R4).",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:33.325663",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:33.326230",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4746,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4746.json"
+  }
+}

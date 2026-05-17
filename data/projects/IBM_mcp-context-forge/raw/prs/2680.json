@@ -1,0 +1,67 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2680,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2680"
+  },
+  "metadata": {
+    "title": "fix: not authenticate API with Cookies. Returns response 401 instead 200",
+    "state": "closed",
+    "created_at": "2026-02-03T17:39:23+00:00",
+    "updated_at": "2026-02-07T12:09:13+00:00",
+    "closed_at": "2026-02-07T12:09:12+00:00",
+    "merged_at": "2026-02-07T12:09:11+00:00",
+    "author": "marekdano",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nIssue reported at https://github.ibm.com/contextforge-org/mcp-context-forge/issues/3\r\n\r\nRelates https://github.com/IBM/mcp-context-forge/issues/2409\r\n\r\n## 📌 Summary\r\n_What problem does this PR fix and **why**?_\r\n\r\nThe issue is that API requests with cookies only (no Authorization header) are returning 200 OK instead of 401 Unauthorized. \r\n\r\nThe problem is that cookies are being accepted as valid authentication. According to the task, we should reject cookie-only authentication for API requests.\r\n\r\nThe key is to distinguish between browser requests (which should use cookies) and API requests (which should use Authorization header only).\r\n\r\nThe fix should be:\r\n   - When a token is found ONLY in cookies (not in Authorization header)\r\n   - AND the request is an API request (not a browser/HTML request)\r\n   - THEN reject with 401\r\n\r\n\r\n## 🔁 Reproduction Steps\r\n```bash\r\nmake compose-up\r\n\r\n# generate token\r\ndocker compose exec gateway python3 -m mcpgateway.utils.create_jwt_token --username admin@example.com --exp 10080 --secret my-test-key\r\n\r\n# command should return a token\r\n# save the token\r\nexport TOKEN=<TOKEN>\r\n\r\n# call APIs with cookie jwt_token\r\ncurl -s -w \"\\nStatus: %{http_code}\\n\" \\\r\n  -b \"jwt_token=$TOKEN\" \\\r\n  http://localhost:8080/gateways\r\n  \r\ncurl -s -w \"\\nStatus: %{http_code}\\n\" \\\r\n  -b \"jwt_token=$TOKEN\" \\\r\n  http://localhost:8080/resources\r\n  \r\ncurl -s -w \"\\nStatus: %{http_code}\\n\" \\\r\n  -b \"jwt_token=$TOKEN\" \\\r\n  http://localhost:8080/tools\r\n```\r\n\r\nAll APIs return 200 OK\r\n\r\n## 🐞 Root Cause\r\n_What was wrong and where?_\r\n\r\nThe user wants API requests with cookies only to return 401 instead of 200. I've identified the issue in `mcpgateway/middleware/rbac.py` where the `get_current_user_with_permissions` function accepts tokens from cookies for all requests.\r\n\r\n\r\n## 💡 Fix Description\r\n_How did you solve it?  Key design points._\r\n\r\nI've applied a fix that:\r\n   1. Prioritizes Authorization header over cookies\r\n   2. Tracks if token came from cookie\r\n   3. Checks if request is a browser request (HTML accept header or HTMX)\r\n   4. Rejects cookie-only authentication for API requests (non-browser requests)\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅  |\r\n| Unit tests                            | `make test`          |   ✅   |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3766925949",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-07T12:08:48+00:00",
+      "body": "## Review Notes\n\nRebased onto current `main` (clean, no conflicts) and added a missing test.\n\n### Changes made during review\n- **Rebased** onto `main` (26f1f3eda)\n- **Added test** `test_get_current_user_with_permissions_cookie_rejected_for_api_request` — verifies that an API request (`Accept: application/json`) with cookie-only auth and no `Authorization` header correctly returns `401` with the expected error message. The original PR updated existing tests to accommodate the new behavior but didn't include a positive assertion for the rejection itself.\n\n### Review findings\n\n**Logic & correctness**: Sound. The token source priority is correctly reordered (Authorization header → cookies → FastAPI Cookie dependency), `token_from_cookie` tracking is accurate, and the browser detection heuristic (`Accept: text/html` or `hx-request`) is consistent with the rest of the codebase.\n\n**Security**: Good defense-in-depth. The `Accept` header heuristic can be spoofed, but this is acceptable — the primary CSRF defense is the existing `SameSite=Lax` cookie attribute. This change prevents accidental cookie-based auth from API clients.\n\n**Consistency**: No conflicts with other cookie-reading patterns in the codebase:\n- `auth_middleware.py` reads cookies for informational context (logging), not enforcement — unaffected\n- `main.py` cookie reads are for admin UI routes (HTML) or run after RBAC auth — unaffected\n- MCP transports (SSE, WebSocket, streamable HTTP) use Authorization headers exclusively — unaffected\n- `llmchat_router.py` cookie read is for forwarding credentials to downstream MCP servers, not user auth — unaffected\n\n**Tests**: All 6520 unit tests pass. All 284 middleware tests pass (including the new one)."
+    },
+    {
+      "id": "3766926132",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-07T12:08:58+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b40d4c8b15232a36cfdd7322e07c0134ca707e64",
+      "message": "fix: not authenticate API with Cookies. Returns response 401 instead 200\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-03T16:55:24+00:00"
+    },
+    {
+      "sha": "cc5db059871e36715729ad35b66effa716623279",
+      "message": "test: add test for cookie rejection on API requests\n\nVerify that cookie-only authentication returns 401 for non-browser\nAPI requests (Accept: application/json), ensuring the security fix\nis explicitly covered by tests.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-07T12:08:21+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 49,
+  "deletions": 19,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:01.286722",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:01.289531",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2680,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2680.json"
+  }
+}

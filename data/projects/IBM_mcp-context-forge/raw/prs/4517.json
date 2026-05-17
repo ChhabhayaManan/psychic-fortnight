@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4517,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4517"
+  },
+  "metadata": {
+    "title": "fix(resources): Implement resource URI deduplication and graceful ambiguity handling for federated resources",
+    "state": "open",
+    "created_at": "2026-04-29T11:09:54+00:00",
+    "updated_at": "2026-04-29T12:10:36+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "bug",
+      "mcp-protocol",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4418\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes the federated resource URI ambiguity issue where multiple upstream MCP servers exposing the same resource URI (e.g., `timezone://info`) caused failures on the generic `/mcp/` endpoint.\r\n\r\n**Problem**: When `fast_time_server` (Go) and `fast_test_server` (Rust) both register `timezone://info`, the generic `/mcp/` endpoint would:\r\n- Return duplicate URIs in `resources/list`\r\n- Fail with `ResourceError: Resource URI 'timezone://info' is ambiguous` on `resources/read`\r\n\r\n**Solution**: Implements the recommended combination approach from the bug report:\r\n\r\n1. **Short-term fixes**:\r\n   - **Deduplication**: `list_resources()` now deduplicates resources by URI when `gateway_id` is not specified, returning only the first occurrence (by `created_at DESC`)\r\n   - **Graceful handling**: `read_resource()` picks the first match instead of raising an error when `MultipleResultsFound` occurs on the generic `/mcp/` endpoint\r\n\r\n2. **Long-term fix**:\r\n   - **Transparency**: Added `gateway_name` field to `ResourceRead` schema so clients can see which gateway each resource originates from\r\n\r\n**Impact**: The default docker-compose stack now works correctly via the generic `/mcp/` endpoint when multiple servers expose the same resource URI.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Implementation Details\r\n\r\n**Files Modified**:\r\n1. `mcpgateway/services/resource_service.py`:\r\n   - Lines 1295-1313: URI deduplication logic in `list_resources()`\r\n   - Lines 2415-2421: Graceful `MultipleResultsFound` handling in `read_resource()` for active resources\r\n   - Lines 2493-2498: Similar handling for inactive resource checks\r\n   - Lines 428-437: Gateway name population in `convert_resource_to_read()`\r\n\r\n2. `mcpgateway/schemas.py`:\r\n   - Line 2044: Added `gateway_name` field to `ResourceRead` schema\r\n\r\n3. Test updates:\r\n   - `tests/e2e/test_mcp_protocol_e2e.py`: Updated `test_resources_read_roundtrip` and added `test_resources_list_deduplicates_uris`\r\n   - `tests/unit/mcpgateway/services/test_resource_service.py`: Updated `test_read_resource_generic_uri_lookup_reports_ambiguity`\r\n\r\n### Design Decisions\r\n\r\n- **Deduplication strategy**: Returns first occurrence by `created_at DESC` to ensure deterministic behavior\r\n- **Backward compatibility**: Server-scoped endpoints (`/servers/{id}/mcp`) maintain strict ambiguity checks\r\n- **Transparency**: The `gateway_name` field allows clients to understand resource origin without breaking existing integrations\r\n- **Logging**: Added warning logs when ambiguous URIs are encountered to aid debugging\r\n\r\n### Behavior Changes\r\n\r\n**Before**:\r\n```\r\nGET /mcp/resources/list → [{\"uri\": \"timezone://info\"}, {\"uri\": \"timezone://info\"}]\r\nGET /mcp/resources/read?uri=timezone://info → 500 ResourceError\r\n```\r\n\r\n**After**:\r\n```\r\nGET /mcp/resources/list → [{\"uri\": \"timezone://info\", \"gateway_name\": \"fast_time\"}]\r\nGET /mcp/resources/read?uri=timezone://info → 200 OK (returns first match with warning log)\r\n```",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "4e2f3549c843d8f67a55be99f530b6c8f4c82666",
+      "message": "fix: Implement resource URI deduplication and graceful ambiguity handling for federated resources\n\nCloses #4418\n\n- Add URI deduplication in list_resources() when gateway_id is not specified\n  to prevent duplicate resource URIs from appearing in resources/list\n- Modify read_resource() to pick first match instead of raising error when\n  MultipleResultsFound occurs on generic /mcp/ endpoint\n- Add gateway_name field to ResourceRead schema for transparency and client\n  disambiguation\n- Update convert_resource_to_read() to populate gateway_name from resource's\n  associated gateway\n- Update test_read_resource_generic_uri_lookup_reports_ambiguity to verify\n  graceful handling behavior\n- Update test_resources_read_roundtrip in e2e tests to reflect fix\n- Add test_resources_list_deduplicates_uris to verify deduplication\n\nThis implements the recommended combination approach from the bug report:\n- Short term: Options A (deduplicate) + B (pick-first) for immediate fix\n- Long term: Option D (gateway origin annotation) for transparency\n\nThe fix allows the default docker-compose stack to work correctly via the\ngeneric /mcp/ endpoint when multiple servers expose the same resource URI.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-29T11:06:59+00:00"
+    },
+    {
+      "sha": "12b86784d57b4eaffd9f58548c92e63f8bbd088b",
+      "message": "improve testin coverage\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-29T11:54:30+00:00"
+    },
+    {
+      "sha": "51e61a2c3c3e41b007f02220b9abacce7669a597",
+      "message": "fix pre-commit checks\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-29T12:10:29+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 264,
+  "deletions": 38,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T17:17:07.257646",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:07.258887",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4517,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4517.json"
+  }
+}

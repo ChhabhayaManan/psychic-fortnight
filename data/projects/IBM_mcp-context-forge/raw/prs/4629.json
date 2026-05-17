@@ -1,0 +1,82 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4629,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4629"
+  },
+  "metadata": {
+    "title": "fix: cover CPEX plugin regressions",
+    "state": "open",
+    "created_at": "2026-05-06T14:22:47+00:00",
+    "updated_at": "2026-05-07T08:56:08+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "lucarlig",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nFixes CPEX migration regressions found after the internal plugin framework was replaced:\r\n\r\n- Runtime-facing external plugin launch/config paths needed to use `cpex.framework.external.mcp.server.runtime` instead of the deleted in-repo framework runtime.\r\n- `prompt_post_fetch` with CPEX hook policies could duplicate prompt messages when a post-hook modified nested prompt result content.\r\n- `ResourceContent` needed to serialize MCP resource MIME type as `mimeType`, not `mime_type`, on alias-aware dumps.\r\n- Server-scoped `resources/read` now has regression coverage for duplicate URI collisions, including `time://formats` style resources.\r\n\r\n## 🔁 Reproduction Steps\r\n- Start an external plugin launcher or stdio config that imports the old deleted framework runtime path.\r\n- Run MCP `prompts/get` for `mcp-plugin-parity-db-direct` with `PromptOutputSentinelPlugin` enabled; before the fix it returned two identical messages after `prompt_post_fetch`.\r\n- Serialize `ResourceContent(..., mime_type=\"text/plain\")` with `model_dump(by_alias=True)`; the MCP response shape must use `mimeType`.\r\n- Read a server-scoped resource URI when another resource with the same URI exists outside that server; the server-scoped path must not fall back to an ambiguous global lookup.\r\n\r\n## 🐞 Root Cause\r\n- The old in-repo framework package was removed, so runtime-facing imports must resolve through CPEX.\r\n- CPEX policy isolation wraps nested mutable fields. Passing a gateway `PromptResult` object directly into `PromptPosthookPayload` allowed the policy merge path to wrap and re-apply the nested `messages` list, producing duplicate messages.\r\n- `ResourceContent` did not inherit the alias-aware base model, so alias serialization did not consistently produce MCP camelCase.\r\n- Resource URI collisions across gateway/server associations require server filtering during lookup.\r\n\r\n## 💡 Fix Description\r\n- Updated runtime-facing external plugin paths to use `cpex.framework.external.mcp.server.runtime`.\r\n- Added a direct import regression test proving the packaged CPEX external MCP runtime is importable.\r\n- Serialize prompt post-hook input to a plain payload before invoking CPEX and validate modified hook output back into the gateway `PromptResult` model.\r\n- Added a prompt post-hook regression test using the real CPEX plugin manager, real hook policy map, and the sentinel plugin.\r\n- Made `ResourceContent` use the alias-aware base model and added serialization coverage for `mimeType`.\r\n- Added resource service regressions for server-scoped URI lookup and generic ambiguous URI handling.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Focused regression suite              | `uv run pytest tests/unit/mcpgateway/plugins/test_cpex_migration_paths.py tests/unit/mcpgateway/test_schemas.py tests/unit/mcpgateway/services/test_prompt_service.py tests/unit/mcpgateway/plugins/plugins/test_prompt_output_sentinel.py -q --tb=short` | Passed |\r\n| Targeted resource lookup regressions  | `uv run pytest tests/unit/mcpgateway/services/test_resource_service.py::TestReadResourceCoverageEdges::test_read_resource_server_scoped_uri_lookup_avoids_duplicate_uri_collisions tests/unit/mcpgateway/services/test_resource_service.py::TestReadResourceCoverageEdges::test_read_resource_generic_uri_lookup_reports_ambiguity -q --tb=short` | Passed |\r\n| Lint                                  | `uv run ruff check tests/unit/mcpgateway/plugins/test_cpex_migration_paths.py mcpgateway/services/prompt_service.py tests/unit/mcpgateway/services/test_prompt_service.py mcpgateway/common/models.py tests/unit/mcpgateway/test_schemas.py` | Passed |\r\n| Whitespace                            | `git diff --check` | Passed |\r\n| Linked CPEX source compatibility      | `PYTHONPATH=/tmp/contextforge-plugins-framework uv run pytest tests/unit/mcpgateway/plugins/test_cpex_migration_paths.py tests/unit/mcpgateway/services/test_prompt_service.py::TestPromptService::test_get_prompt_post_hook_policy_does_not_duplicate_prompt_messages tests/unit/mcpgateway/plugins/plugins/test_prompt_output_sentinel.py tests/unit/mcpgateway/test_schemas.py::TestMCPTypes::test_resource_content_serializes_mcp_mime_type_alias -q --tb=short` | Passed |\r\n| Manual regression no longer fails     | Raw local MCP `prompts/get` request against a fresh plugin-enabled server returned one sentinel-appended message | Passed |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4237243758",
+      "author": "cafalchio",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-06T15:02:39+00:00",
+      "body": "LGTM."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f5fcde76c2334e1aa11ecad5de29e32ca4a87573",
+      "message": "test: cover CPEX migration regressions\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-05-06T13:41:49+00:00"
+    },
+    {
+      "sha": "97abc2619ee97bf99b80e75d00df457174b5faac",
+      "message": "fix: avoid duplicate prompt post-hook messages\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-05-06T14:14:12+00:00"
+    },
+    {
+      "sha": "a7d95acd48826cbca11c292b1c2a61613b70b12a",
+      "message": "test: cover external plugin launcher runtime paths\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-05-06T14:19:55+00:00"
+    },
+    {
+      "sha": "83b1a36c234f8ba82bd49db763f02ce175681575",
+      "message": "test: drop stale framework path scan\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-05-06T14:33:48+00:00"
+    },
+    {
+      "sha": "47cf8416bc2e469ba718fc1e0c0709d12541da42",
+      "message": "test: cover prompt hook dict coercion\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-05-06T16:16:08+00:00"
+    },
+    {
+      "sha": "8ea8c75dd4c01214a28a244dbaa5b19b96626f54",
+      "message": "chore: refresh secrets baseline\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-05-07T08:56:02+00:00"
+    }
+  ],
+  "files_changed": 15,
+  "additions": 124,
+  "deletions": 61,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:59.058488",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:59.059264",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4629,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4629.json"
+  }
+}

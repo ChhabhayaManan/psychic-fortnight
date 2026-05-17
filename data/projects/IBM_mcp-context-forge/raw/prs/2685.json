@@ -1,0 +1,126 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2685,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2685"
+  },
+  "metadata": {
+    "title": "Feat/add plugin grpc",
+    "state": "closed",
+    "created_at": "2026-02-03T23:56:38+00:00",
+    "updated_at": "2026-02-07T15:48:03+00:00",
+    "closed_at": "2026-02-07T15:48:00+00:00",
+    "merged_at": "2026-02-07T15:48:00+00:00",
+    "author": "terylt",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "\r\n## 📝 Summary\r\n\r\n\r\nAdd gRPC and Unix Socket Transports for External Plugins                                                                                            \r\n                                                                                                                                                      \r\n                                                                                                                                                    \r\nAdds two new high-performance transport options for external plugins alongside the existing MCP/HTTP transport:                                     \r\n  \r\n| Transport | Throughput | Use Case |                                                                                                               \r\n  |-----------|------------|----------|                                                                                                               \r\n  | MCP/HTTP | ~600 calls/sec | Remote plugins, cross-platform |                                                                                      \r\n  | gRPC | ~4,700 calls/sec | Remote/local plugins, mTLS support |                                                                                    \r\n  | Unix Socket | ~9,000 calls/sec | Local plugins only, maximum performance | \r\n\r\n                                                                 \r\n  Both new transports use Protocol Buffers for serialization, sharing the same plugin_service.proto schema.                                           \r\n                                                                                                                                                      \r\n ### gRPC Transport                                                                                                                                      \r\n                                                                                                                                                      \r\n  Full-featured gRPC transport with optional mTLS authentication.                                                                                     \r\n   \r\n```yaml                                                                                                                                                   \r\n  plugins:                                                                                                                                            \r\n    - name: \"MyPlugin\"                                                                                                                                \r\n      kind: \"external\"                                                                                                                                \r\n      hooks: [\"prompt_pre_fetch\"]                                                                                                                     \r\n      grpc:                                                                                                                                           \r\n        target: \"127.0.0.1:50051\"                                                                                                                     \r\n        # Optional mTLS                                                                                                                               \r\n        tls:                                                                                                                                          \r\n          certfile: \"client-cert.pem\"                                                                                                                 \r\n          keyfile: \"client-key.pem\"                                                                                                                   \r\n          ca_bundle: \"ca-cert.pem\"\r\n```                                                                                                                  \r\n                                                                                                                                                      \r\n  Supports both TCP and Unix domain sockets:\r\n\r\n```yaml                                                                                                          \r\n  grpc:                                                                                                                                               \r\n    uds: \"/tmp/grpc-plugin.sock\"  # Alternative to target                                                                                             \r\n```\r\n                                                                                                                                                      \r\n###  Unix Socket Transport                                                                                                                               \r\n                                                                                                                                                      \r\n  Lightweight, high-performance transport using length-prefixed protobuf messages directly over Unix sockets (no HTTP/2 framing overhead).            \r\n\r\n```yaml                                                                                                                                                      \r\nplugins:                                                                                                                                            \r\n    - name: \"MyPlugin\"                                                                                                                                \r\n      kind: \"external\"                                                                                                                                \r\n      hooks: [\"prompt_pre_fetch\"]                                                                                                                     \r\n      unix_socket:                                                                                                                                    \r\n        path: \"/tmp/plugin.sock\"                                                                                                                      \r\n        timeout: 30.0                                                                                                                                 \r\n        reconnect_attempts: 3 \r\n```                                                                                                                       \r\n                                                                                                                                                      \r\n  Wire format: [4-byte big-endian length][protobuf payload]                                                                                           \r\n                                                                                                                                                      \r\n  Files Added/Modified                                                                                                                                \r\n                                                                                                                                                      \r\n  - mcpgateway/plugins/framework/external/grpc/ - gRPC client, server, TLS utilities                                                                  \r\n  - mcpgateway/plugins/framework/external/unix/ - Unix socket client, server, protocol                                                                \r\n  - mcpgateway/plugins/framework/registry.py - External plugin detection                                                                              \r\n  - docs/docs/using/plugins/grpc-transport.md - gRPC documentation                                                                                    \r\n  - docs/docs/using/plugins/unix-socket-transport.md - Unix socket documentation                                                                      \r\n  - tests/unit/mcpgateway/plugins/framework/external/grpc/ - gRPC tests                                                                               \r\n  - tests/unit/mcpgateway/plugins/framework/external/unix/ - Unix socket tests \r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [x] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3748756761",
+      "author": "araujof",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-04T03:33:56+00:00",
+      "body": "Nice work on this PR, @terylt !\n\nArchitecturally, the PR looks sound.\n\nWhile still in draft, here are a few comments worth looking into: \n\n**1. Security: Unix Domain Socket Permissions**\nThe `UnixSocketPluginServer` creates a socket file on the filesystem to facilitate IPC.\n\nVulnerability: By default, Unix sockets are created using the process's umask, which often results in permissions like 0666 or 0644. This allows any local user on the system to connect to the plugin server, potentially intercepting sensitive context data or triggering unauthorized hooks. Note: `asyncio.start_unix_server` does not guarantee secure permissions on the created Unix domain socket file by default. \n\nRecommendation: Explicitly set the socket file permissions to 0600 (read/write only by the owner) immediately after binding.\n\n```Python\n# After starting the server\nos.chmod(self.socket_path, 0o600)\n```\n\n**2. Portability: Makefile gRPC Generation**\nThe Makefile uses `sed -i ''` to fix imports in the generated gRPC Python stubs.\n\nLogic Error: The syntax `-i ''` is specific to BSD sed (macOS). On GNU sed (Linux), this will fail because Linux sed does not expect a space between `-i` and the extension, or it will interpret the empty string as the script and the actual script as the file path.\n\nRecommendation: Use a portable approach to handle both macOS and Linux, or use a Python script for post-processing the imports.\n\n```Makefile\n# Portable sed -i example\nsed -i.bak 's/old/new/' file && rm file.bak\n```\n\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7f42b12f04f9ef75e3e5190aae9cbf7e534f3d32",
+      "message": "feat: added grpc capabilities to plugin framework.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-01-30T02:36:28+00:00"
+    },
+    {
+      "sha": "21b45af8faba104eb250436137c9f22bd0c91b41",
+      "message": "feat: added test cases, documentation and features for gRPC and unix socket.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-02-03T23:48:06+00:00"
+    },
+    {
+      "sha": "c308cda2796fab0e22fb860fd0fd10df7623404e",
+      "message": "fix: added proto files to manifest.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-02-04T00:32:42+00:00"
+    },
+    {
+      "sha": "545b36f8d6d3dbd28b40209e8ae6a293122b6688",
+      "message": "fix: CI/CD failings.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-02-04T04:36:13+00:00"
+    },
+    {
+      "sha": "d060880862c38c92b78dab1605426aeb17f872d0",
+      "message": "fix: lint issues, test cases etc.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-02-04T16:20:49+00:00"
+    },
+    {
+      "sha": "eae4d07de9d6630122772f56a7c34213db329517",
+      "message": "fix: skip grpc tests if grpc not available.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-02-04T17:22:27+00:00"
+    },
+    {
+      "sha": "820713b5a8e0efe44ef00bdfed282376233a3cb5",
+      "message": "cicd: excluded generated pb files from vulture.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-02-04T17:32:22+00:00"
+    },
+    {
+      "sha": "1cd6519af753b65ce6a92255bbc9342d771c87ca",
+      "message": "cicd: exclude pb files from main linter.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-02-04T17:41:34+00:00"
+    },
+    {
+      "sha": "e51c8f7040fee7badee5e875a145bd91f7ab212f",
+      "message": "fix: flake8 issue.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-02-04T17:55:59+00:00"
+    },
+    {
+      "sha": "f26998f83376cf77c2b6eb1553d8d669270629d6",
+      "message": "fix: added conftest.py to ignore grpc doc tests when grpc is not installed.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-02-04T18:15:30+00:00"
+    },
+    {
+      "sha": "bdbca641a5ad5618661a3f7814e5e0ac711f3d00",
+      "message": "docs: updated the docs and template to support tls.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2026-02-04T22:06:35+00:00"
+    },
+    {
+      "sha": "2b0d1e51643356c867738ead4b5f21b004ee8a11",
+      "message": "fix: add grpc to dev deps and boost test coverage to 90%+ for new plugin files\n\nAdd grpcio to dev dependencies so CI installs it and grpc/unix plugin\ntests run during coverage checks. Exclude generated proto _pb2 files\nfrom coverage measurement. Add comprehensive tests for proto_convert,\nunix runtime, and extend existing test suites to cover exception\nhandling, error dispatch, reconnection, and lifecycle edge cases.\n\nSigned-off-by: Mihai Criveti <crmihai1@ie.ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-07T15:30:36+00:00"
+    },
+    {
+      "sha": "0776f07e3401524f9434b4b9d788f28b02e82e64",
+      "message": "fix: add grpcio-reflection to dev deps to fix test_translate_grpc failures\n\nAdding grpcio without grpcio-reflection caused grpc_service.py to set\nGRPC_AVAILABLE=True but reflection_pb2 remained None, breaking all\ngRPC reflection tests.\n\nSigned-off-by: Mihai Criveti <crmihai1@ie.ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-07T15:34:42+00:00"
+    }
+  ],
+  "files_changed": 65,
+  "additions": 10361,
+  "deletions": 46,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:04.515270",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:04.518611",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2685,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2685.json"
+  }
+}

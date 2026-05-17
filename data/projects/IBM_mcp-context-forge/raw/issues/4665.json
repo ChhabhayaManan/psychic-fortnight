@@ -1,0 +1,38 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4665,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4665"
+  },
+  "metadata": {
+    "title": "[CHORE]: Investigate dynamic plugin-binding flow for RateLimiterPlugin and harden its config / payload story",
+    "state": "open",
+    "created_at": "2026-05-08T10:09:22+00:00",
+    "updated_at": "2026-05-13T08:09:57+00:00",
+    "closed_at": null,
+    "author": "gandhipratik203",
+    "labels": [
+      "enhancement",
+      "triage",
+      "chore",
+      "plugins",
+      "SHOULD"
+    ],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88",
+      "gandhipratik203"
+    ]
+  },
+  "description": "### 📝 Summary\n\nThe dynamic plugin-binding API (`POST /v1/tools/plugin_bindings`) lets operators configure per-(team, tool, plugin) overrides at runtime — `mode`, `priority`, and the plugin-specific `config` dict — with the per-tenant plugin manager merging those overrides into the plugin's runtime instance.\n\nThis issue scopes an investigation into how that mechanism works end-to-end for `RateLimiterPlugin` specifically: confirm whether bindings reach the runtime as designed, identify any gaps, and decide on a path forward.\n\nCompanion to that, harden the rate-limiter's config surface — both the static `plugins/config.yaml` shape and the binding payload — which today is fairly minimal and hasn't had a focused hardening pass.\n\n### 🤔 Why this matters\n\nDownstream consumers configure rate limiting via the binding API to apply per-tenant / per-tool tighter limits. If anything in the binding → runtime path doesn't behave as designed, those overrides may not produce the configured outcome — and the failure is likely silent (the plugin runs, no error surfaces, but the runtime applies whatever the static `plugins/config.yaml` says rather than what the binding asks for).\n\nThe investigation aims to confirm the path works as designed end-to-end, or — if it doesn't — surface what would need to change.\n\nRate limiter is the only stateful plugin we ship — counter state lives in Redis, the plugin owns its own Redis connection lifecycle, it builds tenant-aware keys from `GlobalContext` at hook-call time, and mode transitions have side effects on external state (per the wipe-on-disable work in #4576). Those traits combine to make the binding-flow contract more entangled here than for most plugins, which is why it's worth a focused look rather than being assumed-by-symmetry from the rest of the framework.\n\n### 🔍 Investigation areas\n\nConcrete things worth chasing:\n\n1. **Does `_merge_tenant_config` (`mcpgateway/plugins/gateway_plugin_manager.py:220`) produce the right merged Pydantic config when a binding overrides any rate-limiter config key?** Trace the merged-config dict from the binding row through the per-tenant manager and confirm the rate-limiter receives it.\n2. **Is the per-tenant plugin manager actually being instantiated and used for tool-call paths that target a bound (team, tool) combination?** Or could the `__global__` manager's plugin instance be running, with the per-tenant override never applied?\n3. **Is there any class-level / module-level state inside the rate-limiter's Rust core (`cpex_rate_limiter`) that would prevent a new instance from picking up merged config?** A singleton core or a shared client pool keyed by URL would explain config not propagating per tenant.\n4. **What's the code path from the merged config (Pydantic) → `__init__` → Rust core construction?** Compare against what the binding-API merge logic produces.\n\n### 📐 Possible fix shapes (open, scoping discussion)\n\nThree high-level directions, depending on what the investigation surfaces:\n\n1. **If the per-tenant manager isn't rebuilding the plugin instance correctly** — fix the manager rebuild path so the plugin is re-instantiated with the merged config per tenant.\n2. **If the rate-limiter Rust core has class-level / module-level state** — make it instance-level so `__init__` constructs fresh state per merged-config instance.\n3. **If `_merge_tenant_config` itself isn't being invoked on the tool-call path for a bound (team, tool)** — trace and fix the missing call site.\n\nThe investigation should land on which of these (or something else) applies before scoping the actual change.\n\n### 🛡️ Hardening scope (config / payload)\n\nCompanion work, ideally in the same arc:\n\n1. **Audit which rate-limiter config keys are operator-scoped vs caller-scoped.** Keys like `redis_url`, `redis_key_prefix`, `backend`, `algorithm` are gateway-scoped — they don't really make sense per binding. Keys like `by_user`, `by_tenant`, `by_tool`, `fail_mode`, `mode` are genuinely caller-scoped. The binding API today accepts everything verbatim with no distinction.\n2. **Decide and document the contract**: which keys can be set per binding, which can't, and what the gateway does when an operator-scoped key shows up in a binding payload (silently drop / reject / warn).\n3. **Tighten the static-config schema** if needed: today the rate-limiter's config shape is loosely typed (the cpex framework refactor in #4286 removed CF-side schemas). A simple in-cpex schema check that surfaces unknown or invalid keys at gateway boot would catch misconfiguration earlier rather than at first traffic.\n\n### ✅ Acceptance criteria\n\n- Root cause for the dynamic-binding behaviour (or confirmation the path works as designed) documented\n- If a fix is needed: proposed, scoped, and landed; regression test in `tests/integration/test_rate_limiter_plugin_bindings_e2e.py` (or equivalent) asserts a binding's `by_user` / `by_tenant` / `by_tool` actually produces the configured rate-limiting end-to-end through the gateway HTTP path\n- Documented contract for which config keys are caller-overridable vs operator-only on the rate-limiter binding payload\n- Static-config schema validation surfaces unknown / invalid keys at gateway boot rather than runtime\n\n### 📓 Related\n\n- #4068 — introduced the per-tenant binding API + `TenantPluginManager`\n- #4286 — removed plugin config schemas (`config: Dict[str, Any]`); the merge logic at `mcpgateway/plugins/gateway_plugin_manager.py:220` is the relevant code path\n- #4622 — separate issue: binding payload hardening (don't accept infrastructure-layer keys like `redis_url` in caller bindings); framework-wide and orthogonal to the rate-limiter-specific hardening scope above",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:50.681319",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:50.682363",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4665,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4665.json"
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2173,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2173"
+  },
+  "metadata": {
+    "title": "Fix bug in listing operations",
+    "state": "closed",
+    "created_at": "2026-01-19T07:47:11+00:00",
+    "updated_at": "2026-01-20T08:56:40+00:00",
+    "closed_at": "2026-01-20T08:56:38+00:00",
+    "merged_at": "2026-01-20T08:56:38+00:00",
+    "author": "madhav165",
+    "labels": [],
+    "milestone": "Release 1.0.0-BETA-2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2172 \r\n\r\n---\r\n\r\n## 📌 Summary\r\n\r\nFixes a bug where a single entity with corrupted data would cause the entire listing operation to fail. When `convert_*_to_read` functions encountered invalid data (e.g., malformed JSON in `auth_value`, missing required fields), the exception would propagate up and return a 500 error instead of gracefully returning the valid entities.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n**Issue:** Parsing failures in entity conversion stops entire listing\r\n\r\n1. Have a tool/resource/prompt with corrupted data in the database (e.g., invalid JSON in `auth_value` field)\r\n2. Call any listing endpoint (`/admin/tools`, `/tools/list`, etc.)\r\n3. **Before fix:** 500 Internal Server Error - entire listing fails\r\n4. **After fix:** 200 OK - valid entities returned, corrupted entity skipped with error logged\r\n\r\n## 🐞 Root Cause\r\n\r\nThe `convert_*_to_read` functions (e.g., `convert_tool_to_read`, `convert_resource_to_read`, `convert_prompt_to_read`) were called without exception handling in listing loops. When Pydantic validation failed for any single entity, the exception would bubble up and abort the entire operation.\r\n\r\n**Affected locations:**\r\n- `mcpgateway/services/tool_service.py` - `list_tools`, `list_server_tools`, `list_tools_for_user`\r\n- `mcpgateway/services/resource_service.py` - resource listing methods\r\n- `mcpgateway/services/prompt_service.py` - prompt listing methods\r\n- `mcpgateway/routers/admin.py` - admin API endpoints\r\n\r\n## 💡 Fix Description\r\n\r\nWrapped all `convert_*_to_read` calls in try-except blocks to handle conversion failures gracefully:\r\n\r\n```python\r\n# Before\r\nfor tool in tools:\r\n    result.append(convert_tool_to_read(tool))\r\n\r\n# After\r\nfor tool in tools:\r\n    try:\r\n        result.append(convert_tool_to_read(tool))\r\n    except Exception as e:\r\n        logger.error(f\"Failed to convert tool {tool.id} ({getattr(tool, 'name', 'unknown')}): {e}\")\r\n        continue\r\n```\r\n\r\n**Key design points:**\r\n- Failed conversions are logged with entity ID and name for debugging\r\n- Loop continues processing remaining valid entities\r\n- No change to return type or API contract\r\n- Added comprehensive unit and e2e tests to verify graceful handling\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    pass    |\r\n| Unit tests                            | `make test`          |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3680987975",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-20T08:38:43+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "efca8d0637f974b5c5e91c4227be5c34bcbb2efa",
+      "message": "Fix listing loops\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-19T06:58:57+00:00"
+    },
+    {
+      "sha": "99ce654169a3b135be409b228feeffcfebecd8c3",
+      "message": "Fix more calls to convert to read functions\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-19T07:14:44+00:00"
+    },
+    {
+      "sha": "32c793e8993387422142da7c9b5235aeae6f518a",
+      "message": "Wrap all convert to read calls in try catch\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-19T07:19:29+00:00"
+    },
+    {
+      "sha": "5bda6797820e90ca16c42127be440fbe575fb045",
+      "message": "Add additional tests\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-19T07:42:18+00:00"
+    },
+    {
+      "sha": "9b3be8d6435a7e451f59566eb2cfdc25b565e4e2",
+      "message": "fix: Narrow exception handling to specific data validation errors\n\n- Replace broad 'except Exception' with specific exceptions:\n  ValidationError, ValueError, KeyError, TypeError, binascii.Error\n- Use logger.exception() instead of logger.error() to include traceback\n- Update e2e test to actually test corrupted data scenario by mocking\n  convert_tool_to_read to fail for one tool while succeeding for others\n\nThis addresses concerns that broad exception catching could mask DB/session\nerrors or programming bugs. Now only data validation errors are caught\nand logged, while unexpected errors will properly propagate.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T08:06:38+00:00"
+    },
+    {
+      "sha": "77a58ff16cda9807baf9c2ad80e792ff966f121c",
+      "message": "test: Add failure-path tests for all entity types\n\nAdd e2e tests verifying graceful error handling for:\n- Resources listing\n- Prompts listing\n- Servers listing\n- Gateways listing\n- A2A agents listing\n\nEach test creates entities, mocks the convert_*_to_read method to fail\nfor one entity, and verifies:\n1. API returns 200 status\n2. Valid entities are in the response\n3. Corrupted entity is excluded from the response\n\nThis provides comprehensive test coverage for the graceful error\nhandling pattern across all entity types.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T08:35:21+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 735,
+  "deletions": 31,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:43.073855",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:43.075593",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2173,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2173.json"
+  }
+}

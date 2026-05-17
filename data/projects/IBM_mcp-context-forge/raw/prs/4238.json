@@ -1,0 +1,65 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4238,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4238"
+  },
+  "metadata": {
+    "title": "fix(observability): resolve A2A and plugin post-invoke silent-success traps",
+    "state": "open",
+    "created_at": "2026-04-16T07:59:25+00:00",
+    "updated_at": "2026-04-28T10:46:54+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "observability",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4211\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes two pre-existing silent-success traps that caused `metrics_buffer.record_tool_metric(success=True)` to be recorded for responses the caller sees as errors, inflating tool success rates and masking real failures in observability.\r\n\r\n**Trap 1 - A2A 200-OK branch ignores JSONRPC error envelopes:**\r\nThe A2A integration path unconditionally set `is_error=False` and `success=True` for all 200-OK responses, regardless of whether the response body contained a JSONRPC `{\"error\": {...}}` envelope or application-level error indicators like `{\"isError\": true}`.\r\n\r\n**Trap 2 - Plugin TOOL_POST_INVOKE hook silently flips error state:**\r\nThe plugin post-invoke reconstruction dropped `is_error` entirely (Pydantic defaults to False), and the `success` flag computed before plugin invocation was never re-synced with the plugin-modified state. This caused validation plugins that flip success→error to have their intent erased, and recovery plugins that flip error→success to still record `success=False`.\r\n\r\nBoth fixes are symmetric with the REST and direct-proxy paths corrected in #4202.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Implementation Details\r\n\r\n**Trap 1 Fix (A2A)** - `mcpgateway/services/tool_service.py` lines 5536-5559:\r\n- Added detection for JSONRPC error envelopes (`{\"error\": {...}}`)\r\n- Added detection for application-level error indicators (`{\"isError\": true}` or `{\"is_error\": true}`)\r\n- Route A2A responses through `_coerce_to_tool_result` for uniform handling\r\n- Compute `success = not tool_result.is_error` after coercion\r\n- Explicitly set `success = False` in non-200 branch (no scope fall-through)\r\n\r\n**Trap 2 Fix (Plugin Post-Invoke)** - `mcpgateway/services/tool_service.py` lines 5584-5599:\r\n- Preserve `is_error` during ToolResult reconstruction from plugin payload\r\n- Check both camelCase (`isError`) and snake_case (`is_error`) aliases\r\n- Re-sync `success = not tool_result.is_error` after plugin post-invoke completes\r\n- Ensures metrics reflect plugin intent (recovery plugins show success=True, validation plugins show success=False)\r\n\r\n### Regression Tests Added\r\n\r\nFive new tests in `tests/unit/mcpgateway/services/test_tool_service_coverage.py` (lines 7231-7820):\r\n\r\n**A2A Error Handling:**\r\n1. `test_a2a_jsonrpc_error_envelope_records_success_false_in_metrics` - JSONRPC error envelope detection\r\n2. `test_a2a_application_level_is_error_true_records_success_false` - Application-level error indicator detection\r\n3. `test_a2a_non_200_response_explicitly_sets_success_false` - Non-200 HTTP status handling\r\n\r\n**Plugin Post-Invoke Error State:**\r\n4. `test_plugin_post_invoke_flips_error_to_success_records_success_true` - Recovery plugin pattern\r\n5. `test_plugin_post_invoke_flips_success_to_error_records_success_false` - Validation plugin pattern\r\n\r\n### Impact\r\n\r\n- **Metrics Accuracy**: Tool and server success rates will now correctly reflect actual failures\r\n- **Observability**: Real failures will no longer be masked in monitoring dashboards\r\n- **Plugin Behavior**: Plugin intent (recovery/validation) is now properly reflected in metrics\r\n- **Consistency**: A2A path now symmetric with REST and MCP direct-proxy paths fixed in #4202\r\n\r\n### Related PRs\r\n\r\n- #4202 - Original MCP ToolError / outputSchema bug (REST-branch success-metric clobber was fixed; A2A and plugin-hook paths were out of scope)\r\n- #4207 - E2E coverage for non-MCP tool invocation paths (would cover the A2A trap end-to-end)\r\n- #4210 - Option B: unify tool-invocation pipeline around canonical ToolResult (both traps dissolve naturally in that refactor)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "e9c982ed6e46e1199c0384b91f1bb4dc77aa8cff",
+      "message": "fix: resolve A2A and plugin post-invoke silent-success traps\n\nTwo pre-existing bugs caused metrics_buffer.record_tool_metric(success=True)\nto be recorded for responses the caller sees as errors, inflating tool success\nrates and masking real failures in observability.\n\nTrap 1 - A2A 200-OK branch ignores JSONRPC error envelopes:\n- Added detection for JSONRPC error envelopes ({\"error\": {...}})\n- Added detection for application-level error indicators ({\"isError\": true})\n- Route A2A responses through _coerce_to_tool_result for uniform handling\n- Compute success = not tool_result.is_error after coercion\n- Explicitly set success = False in non-200 branch (no scope fall-through)\n\nTrap 2 - Plugin TOOL_POST_INVOKE hook silently flips error state:\n- Preserve is_error during ToolResult reconstruction from plugin payload\n- Check both camelCase (isError) and snake_case (is_error) aliases\n- Re-sync success = not tool_result.is_error after plugin post-invoke\n- Ensures metrics reflect plugin intent (recovery/validation plugins)\n\nRegression tests added:\n- test_a2a_jsonrpc_error_envelope_records_success_false_in_metrics\n- test_a2a_application_level_is_error_true_records_success_false\n- test_a2a_non_200_response_explicitly_sets_success_false\n- test_plugin_post_invoke_flips_error_to_success_records_success_true\n- test_plugin_post_invoke_flips_success_to_error_records_success_false\n\nFixes symmetric with REST and direct-proxy paths fixed in #4202.\nNatural follow-ups to #4202, addressing A2A and plugin-hook paths.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-16T07:56:31+00:00"
+    },
+    {
+      "sha": "0eb718bb6bac25f46f4b24bd3fcac02cc59ff3b0",
+      "message": "fix: remove trailing whitespace from test docstrings\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-16T08:14:00+00:00"
+    },
+    {
+      "sha": "275c7e8b68a8d6e5448008dfe35630015c595bd4",
+      "message": "fix pre-commit issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-23T12:27:52+00:00"
+    },
+    {
+      "sha": "6c978f5d8a379389ef77bfa1530ed420a19f3f84",
+      "message": "Merge branch 'main' into 4211-bug-silent-success-metric-traps-in-a2a-200-ok-path-and-plugin-tool_post_invoke-mutation",
+      "author": "Bogdan-Marius Cătănuș",
+      "date": "2026-04-23T12:30:42+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 414,
+  "deletions": 8,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:13.128757",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:13.129411",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4238,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4238.json"
+  }
+}

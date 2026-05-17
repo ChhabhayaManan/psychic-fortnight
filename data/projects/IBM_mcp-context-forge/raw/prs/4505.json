@@ -1,0 +1,80 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4505,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4505"
+  },
+  "metadata": {
+    "title": "fix: rate-limit _cleanup_table DELETEs with configurable inter-batch sleep",
+    "state": "open",
+    "created_at": "2026-04-28T13:06:52+00:00",
+    "updated_at": "2026-05-08T12:56:55+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "msureshkumar88",
+    "labels": [
+      "bug",
+      "python",
+      "performance",
+      "resilience",
+      "database"
+    ],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88",
+      "gandhipratik203",
+      "Lang-Akshay"
+    ]
+  },
+  "description": "## Summary\r\n\r\n- Adds `METRICS_CLEANUP_BATCH_SLEEP_MS` config field (default `50 ms`, range `0–5000 ms`)\r\n- `_cleanup_table` and `delete_metrics_in_batches` now sleep between **full** batches only — a partial (final) batch never adds unnecessary delay\r\n- New setting surfaced in `get_stats()` output for observability\r\n- `.env.example` updated with commented entry near `METRICS_CLEANUP_BATCH_SIZE`\r\n\r\n## Motivation\r\n\r\nBack-to-back batch DELETEs with no pause competed directly with request-serving queries, contributing ~12% of profiled DB capacity (88/740 py-spy samples) to PgBouncer saturation. A 50 ms sleep between full batches gives the DB breathing room while adding negligible total cleanup time.\r\n\r\n## Test plan\r\n\r\n- [ ] `test_cleanup_table_sleeps_between_full_batches` — sleep called once when first batch is full\r\n- [ ] `test_cleanup_table_no_sleep_after_partial_batch` — sleep never called when batch < batch_size\r\n- [ ] `test_get_stats_includes_batch_sleep_ms` — new key present in `get_stats()` output\r\n- [ ] `METRICS_CLEANUP_BATCH_SLEEP_MS=0` disables sleep entirely (backward-compatible)\r\n\r\nCloses #4504\r\nRelates to #2692\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4252369526",
+      "author": "gandhipratik203",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-08T12:56:55+00:00",
+      "body": "Thanks @msureshkumar88 — this lands really well. The new `tests/integration/test_metrics_cleanup_pg.py` is exactly the shape I had in mind: Postgres-gated with the same skip pattern as `test_concurrency_row_locking.py`, and the four scenarios (single batch, multi-batch with `batch_size=2`, empty table, all-recent) cover the behavior we actually care about against a real DB instead of mocks.\n\nAlso a really nice bonus on the inline-delete path — pulling the `time.sleep` out of `delete_metrics_in_batches` cleanly resolves both concerns from the previous comment (event-loop blocking on user-facing async deletes + the open-transaction lock-hold issue), and the commit message lays out the reasoning clearly. Background cleanup keeps the throttle where it actually helps.\n\nOne thing before merge: pre-commit hooks are failing in CI (looks like the detect-secrets hook flagged a baseline modification). Could you take a look and push the fix?"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ac46a6753a150362ffe0484d1ccf4375a3808720",
+      "message": "fix: rate-limit _cleanup_table DELETEs with inter-batch sleep\n\nAdd METRICS_CLEANUP_BATCH_SLEEP_MS (default 50 ms) to insert a\nconfigurable pause between batch DELETEs in both _cleanup_table and\ndelete_metrics_in_batches. This reduces background DB pressure that\nwas competing with request-serving queries (~12% of profiled DB\ncapacity under load per issue #2692).\n\nSetting to 0 disables the sleep entirely for dev/low-traffic use.\nExposed in get_stats() and .env.example for operator visibility.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-28T11:17:20+00:00"
+    },
+    {
+      "sha": "7762e0949158f5d71b991a8e98b5be52f32a257e",
+      "message": "chore: reformat metrics_cleanup_batch_sleep_ms Field for readability\n\nWrap the long Field(...) call across multiple lines to stay within the\nproject's line-length convention; no functional change.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-28T11:40:59+00:00"
+    },
+    {
+      "sha": "83fa74a9b3f61b895fecefd2f6516c959be9d7dd",
+      "message": "fix: remove inter-batch sleep from delete_metrics_in_batches\n\n`delete_metrics_in_batches` is called inline (no `asyncio.to_thread`)\nfrom five async service methods (a2a, tool, resource, prompt, server).\n`time.sleep()` there blocked the event loop on every user-initiated\nentity delete.\n\nAdditionally, unlike `_cleanup_table`, this function holds its\ntransaction open across batches with no `db.commit()` between them, so\nsleeping while row locks are live worsens DB pressure — the opposite of\nthe PR's intent.\n\nFix: remove `batch_sleep_ms` read and `time.sleep()` from\n`delete_metrics_in_batches` entirely. Background cleanup (`_cleanup_table`)\nretains its inter-batch sleep — that path runs via `asyncio.to_thread`\nand commits after each batch.\n\nCloses part of review findings F1 + F2 on #4505.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-08T10:11:52+00:00"
+    },
+    {
+      "sha": "baabff0efffd76c9599f543db3cb594820c50c18",
+      "message": "test: add Postgres-gated integration tests for _cleanup_table\n\nFour tests in tests/integration/test_metrics_cleanup_pg.py verify\nthat the batched-DELETE logic removes rows older than the retention\ncutoff from a real Postgres DB while leaving in-window rows untouched:\n\n- deletes old rows / keeps recent (single batch)\n- multi-batch path (batch_size=2, 6 old rows → 3 passes)\n- empty table noop\n- nothing to delete when all rows are recent\n\nTests skip in the default hermetic SQLite run. Enable with:\n  MCPGATEWAY_TEST_ALLOW_EXTERNAL_DB=1 DATABASE_URL=postgresql://...\n\nAddresses review finding F3 on #4505.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-08T11:56:24+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 269,
+  "deletions": 0,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T17:17:02.806117",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:02.806627",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4505,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4505.json"
+  }
+}

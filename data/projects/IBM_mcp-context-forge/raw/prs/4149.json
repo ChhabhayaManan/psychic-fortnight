@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4149,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4149"
+  },
+  "metadata": {
+    "title": "feat(teams): comprehensive team management — role hierarchy, OIDC sync, admin UI team scoping",
+    "state": "open",
+    "created_at": "2026-04-13T14:32:44+00:00",
+    "updated_at": "2026-04-27T10:55:15+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "ecthelion77",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# ✨ Feature / Enhancement PR\n\n## 🔗 Epic / Issue\n\nSupersedes #3999 (which only covered SSO_ENTRA_TEAM_MAPPING).\n\nThis PR delivers the complete team management feature set: role hierarchy, OIDC group synchronization, team-scoped entity management in the admin UI, and proper team ownership isolation.\n\n---\n\n## 🔗 Epic / Issue\n\nCloses #3997\n\n## 🚀 Summary\n\nThis PR adds comprehensive multi-team management capabilities to MCP Context Forge, enabling enterprise deployments where multiple teams share a single gateway instance with proper isolation and role-based access control.\n\n### Key features:\n\n#### 1. Role hierarchy (`platform_user`, `developer`, `viewer`)\n- **`platform_user`**: Existing admin role renamed for clarity — full CRUD on all entities\n- **`developer`**: Can create and manage servers, tools, prompts, resources within their team\n- **`viewer`** (formerly `member`): Read-only access to team resources\n- Global role dropdown replaces the simple Admin checkbox on user edit forms\n\n#### 2. OIDC group synchronization\n- New `oidc_sync_enabled`, `oidc_group_claim`, and `oidc_group_value` fields on the Team model\n- When enabled, users are automatically assigned to teams based on OIDC token claims during SSO login\n- Alembic migration adds the new columns to the existing teams table\n\n#### 3. SSO Entra team mapping (`SSO_ENTRA_TEAM_MAPPING`)\n- Declarative environment variable mapping Entra ID groups to gateway teams\n- Processed during SSO bootstrap to auto-create teams and assign users\n\n#### 4. Admin UI team-scoped entity management\n- Team dropdown added to all create and edit forms (servers, gateways, tools, prompts, resources, A2A agents)\n- Team selection is preserved during entity edits (no longer reset to None)\n- JavaScript refactored into modular `admin_ui/*.js` files with shared `populateTeamSelect()` utility\n- Team selects are populated dynamically via `/api/teams` API\n\n#### 5. Team ownership isolation\n- `verify_team_for_user()` raises `PermissionError` instead of silently allowing cross-team access\n- Edit endpoints preserve the original `team_id` — entity ownership cannot be changed after creation\n- Proper team validation on all CRUD operations\n\n### Files changed (23 files, +548/-250):\n\n| Area | Files |\n|------|-------|\n| Backend | `admin.py`, `schemas.py`, `config.py`, `db.py`, `bootstrap_db.py` |\n| Services | `team_management_service.py`, `sso_service.py`, `prompt_service.py`, `resource_service.py`, `tool_service.py` |\n| Admin UI JS | `utils.js` (new), `servers.js`, `gateways.js`, `tools.js`, `prompts.js`, `resources.js`, `a2aAgents.js`, `initialization.js`, `formSubmitHandlers.js` |\n| Templates | `admin.html`, `team_users_selector.html` |\n| SSO | `sso_bootstrap.py` |\n| Migration | `f7a2b1c3d4e5_add_oidc_sync_to_teams.py` |\n\n---\n\n## 🧪 Checks\n\n- [x] `make lint` passes\n- [x] `make test` passes\n- [x] CHANGELOG updated (if user-facing)\n\n---\n\n## 📓 Notes\n\n### Relationship to PR #3999\n\nPR #3999 (`feat/sso-entra-team-mapping-upstream`) only covers the `SSO_ENTRA_TEAM_MAPPING` environment variable (1 commit). This PR is the comprehensive implementation that includes SSO team mapping plus all the other team management capabilities. PR #3999 can be closed in favor of this one.\n\n### Migration\n\nThe Alembic migration `f7a2b1c3d4e5_add_oidc_sync_to_teams.py` adds three nullable columns to the `teams` table. It is safe to apply on existing databases — no data migration needed.\n\n### Admin UI architecture\n\nThe JavaScript has been refactored from inline scripts in `admin.html` into modular files under `admin_ui/`:\n- `utils.js`: Shared utilities including `populateTeamSelect()`\n- Each entity type has its own JS module\n- `initialization.js`: DOMContentLoaded setup",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "7d0d52fcee89e61124b9c34695135945b5f980df",
+      "message": "feat(teams): SSO team mapping, OIDC sync, developer role, team RBAC\n\n- Add SSO-based team auto-assignment via OIDC group claims\n- Support multiple OIDC group IDs per team (JSON column)\n- OIDC groups UI: table with Display Name + Group ID columns\n- Add developer role between member and owner\n- Team-scoped RBAC for servers, tools, prompts, resources\n- Bootstrap default teams from OIDC_TEAM_MAPPING env var\n- Admin UI: create/edit team modals with OIDC sync settings\n\nSigned-off-by: Olivier Gelin <olivier.gelin@forterro.com>\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-14T14:57:13+00:00"
+    },
+    {
+      "sha": "b0fb805bbec63c33e72a797cc8ce817dcf1d2b67",
+      "message": "fix(alembic): rename duplicate revision a1b2c3d4e5f6 -> a5b1cec45457\n\nUpstream team-management also uses a1b2c3d4e5f6 for\nadd_identity_propagation_to_gateways. Give our rename_oidc_group_id\nmigration a unique revision ID.\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-27T10:55:13+00:00"
+    }
+  ],
+  "files_changed": 26,
+  "additions": 1018,
+  "deletions": 415,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T17:17:32.904801",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:32.905283",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4149,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4149.json"
+  }
+}

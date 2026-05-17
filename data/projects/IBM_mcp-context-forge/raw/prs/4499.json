@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4499,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4499"
+  },
+  "metadata": {
+    "title": "fix(tools): restore tool reachability status during gateway refresh",
+    "state": "closed",
+    "created_at": "2026-04-28T11:05:46+00:00",
+    "updated_at": "2026-05-06T20:11:47+00:00",
+    "closed_at": "2026-05-06T20:11:45+00:00",
+    "merged_at": "2026-05-06T20:11:45+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "ica",
+      "MUST",
+      "api",
+      "release-fix",
+      "regression"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4454\r\n**Jira Issue:** https://jsw.ibm.com/browse/ICACF-32\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes a critical bug where tools from registered gateways were appearing as offline even though the gateways were functional and successfully returning tools during health checks and refresh operations.\r\n\r\n**Problem:** Tools have a `reachable` boolean field that tracks their availability. When tools were updated during gateway refresh operations (health checks, manual refresh, OAuth flows), the `reachable` field was never updated. This meant that if a tool was previously marked as `reachable=False` during a gateway failure, it would remain offline indefinitely, even after the gateway recovered and successfully returned the tool.\r\n\r\n**Solution:** Modified [`gateway_service.py`](mcpgateway/services/gateway_service.py) to ensure tools are marked as reachable when successfully fetched:\r\n\r\n1. **[`_create_db_tool()`](mcpgateway/services/gateway_service.py:4584-4615)**: Explicitly set `enabled=True` and `reachable=True` for newly created tools\r\n2. **[`_update_or_create_tools()`](mcpgateway/services/gateway_service.py:4697-4700)**: Added logic to mark existing tools as `reachable=True` when successfully fetched from gateway during refresh operations\r\n\r\n**Impact:** Tools are now automatically restored to online status when gateways successfully return them, resolving the issue where users couldn't invoke tools despite having functional gateway connections.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes (existing tests validate the fix)\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Root Cause Analysis\r\n\r\nThe issue was in the [`_update_or_create_tools()`](mcpgateway/services/gateway_service.py:4614-4731) method. When tools were updated during gateway refresh/health checks:\r\n\r\n1. **New tools** were created via [`_create_db_tool()`](mcpgateway/services/gateway_service.py:4562-4612) which didn't explicitly set `reachable=True` (relied on model default)\r\n2. **Existing tools** were updated at lines 4696-4713, but the `reachable` field was **never updated**\r\n3. If a tool was previously marked as `reachable=False` (e.g., during a gateway failure), it stayed offline even after successful gateway health checks and tool refreshes\r\n\r\nThe gateway's `reachable` status was correctly updated during health checks ([`gateway_service.py:3827`](mcpgateway/services/gateway_service.py:3827)), but the individual tools' `reachable` status was not propagated.\r\n\r\n### Code Changes\r\n\r\n**File:** `mcpgateway/services/gateway_service.py`\r\n\r\n**Change 1 - New tool creation (lines 4584-4615):**\r\n```python\r\nreturn DbTool(\r\n    # ... existing fields ...\r\n    # Status fields - tools successfully fetched from gateway are reachable\r\n    enabled=True,\r\n    reachable=True,\r\n    # ... rest of fields ...\r\n)\r\n```\r\n\r\n**Change 2 - Existing tool update (lines 4697-4700):**\r\n```python\r\n# Always mark tool as reachable when successfully fetched from gateway\r\nif not existing_tool.reachable:\r\n    existing_tool.reachable = True\r\n    fields_to_update = True\r\n```\r\n\r\n### User Impact\r\n\r\n**Before:** Users reported tools showing as offline in the UI and receiving errors like:\r\n```\r\nERROR: Tool 'github-com-read-tools-search-repositories' exists but is currently offline. \r\nPlease verify if it is running.\r\n```\r\n\r\n**After:** Tools are automatically restored to online status when gateways successfully return them during any refresh operation (health checks, manual refresh, OAuth flows).",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "fbbc7504e13ace90f5f738ddeea91afd85da9c59",
+      "message": "fix: Restore tool reachability status during gateway refresh\n\nTools were remaining offline even after successful gateway health checks\nand tool refreshes because the reachable field was never updated during\nthe tool update process.\n\nChanges:\n- Set reachable=True for newly created tools in _create_db_tool()\n- Update existing tools to reachable=True when successfully fetched\n  during gateway refresh in _update_or_create_tools()\n\nThis ensures tools are automatically marked as online when gateways\nsuccessfully return them during health checks, manual refresh, or\nOAuth flows.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-28T11:01:10+00:00"
+    },
+    {
+      "sha": "be993cf2f22bed6db64743f9bf6ff6ba8b817d17",
+      "message": "improve testing coverage and fix pre-commit issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-28T11:26:05+00:00"
+    },
+    {
+      "sha": "cf1d39985b2b79bbd6c9e99691b76b87fc37cb21",
+      "message": "test(gateway): pin admin-disabled invariant; drop stray blank line\n\nAdd a regression test asserting that gateway refresh flips an existing\ntool from reachable=False to True without re-enabling tools that an\nadmin had set enabled=False. This pins the security-relevant invariant\nbehind the reachable-restoration fix so future changes can't silently\nre-enable admin-disabled tools.\n\nAlso drop one stray blank line ahead of the new test class to clear a\nruff E303 (too-many-blank-lines) introduced during the rebase.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-06T19:42:26+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 242,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:29.811238",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:29.812291",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4499,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4499.json"
+  }
+}

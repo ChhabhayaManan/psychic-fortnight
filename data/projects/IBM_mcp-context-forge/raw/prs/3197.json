@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3197,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3197"
+  },
+  "metadata": {
+    "title": "feat(security): implement environment-aware defaults and fail-closed secrets",
+    "state": "closed",
+    "created_at": "2026-02-24T10:06:23+00:00",
+    "updated_at": "2026-05-08T07:26:04+00:00",
+    "closed_at": "2026-05-08T07:26:02+00:00",
+    "merged_at": "2026-05-08T07:26:02+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "security",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #2847 due to repository maintenance. Your code and branch are intact. @EleniKechrioti please verify everything looks good.\n\n## Related Issue\r\nPartially addresses #2595 . Implements US-1 (Environment-Aware Defaults) and US-2 (Fail-Closed on Unconfigured Secrets).\r\n\r\n---\r\n\r\n## Summary\r\nThis PR implements the **Fail-Closed** security mechanism for **US-2**. It ensures the Gateway terminates execution if critical security secrets are missing, unconfigured, or weak when running in production mode.\r\n\r\n**Key Changes:**\r\n\r\n### Environment-Aware Enforcement (US-1)\r\n- **Dynamic Defaults:** Implemented `default_factory` for `require_strong_secrets`, automatically enabling enforcement (`true`) in `production` and disabling it (`false`) in `development`.\r\n- **Audit Logging:** Added explicit security audit logs when enforcement is manually overridden in production environments.\r\n\r\n### Fail-Closed Mechanism (US-2)\r\n- **Sentinel & Weak Secret Detection:** Added logic to block execution if `JWT_SECRET_KEY` or `AUTH_ENCRYPTION_SECRET` are missing, weak, or set to default values.\r\n- **Enforcement Logic:** Enhanced `get_settings()` to trigger a `SystemExit` in production mode when critical security risks are detected.\r\n- **Remediation Guidance:** Implemented clear error messaging with specific error codes, pointing operators to the `init_secrets` script and official IBM security docs.\r\n\r\n### Documentation & Testing\r\n- **Docs Update:** Updated `.env.example`, `CHANGELOG.md`, and `configuration.md` to document the new environment-aware behavior and breaking changes.\r\n- **Automated Testing:** Added 6 comprehensive unit tests in `tests/test_config_security.py` covering all environment-specific scenarios.\r\n\r\n---\r\n\r\n## Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [x] Documentation\r\n- [x] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n\r\n---\r\n\r\n## Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | Pass   |\r\n| Unit tests                | `make test`     | Pass   |\r\n| Coverage ≥ 80%            | `make coverage` | Pass   |\r\n\r\n*Note: Verified specifically with `pytest tests/test_config_security.py`.*\r\n\r\n---\r\n\r\n## Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (References added in logs)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## Notes\r\nManual verification performed:\r\n1. `ENVIRONMENT=production` with empty secrets correctly triggers `SystemExit(1)`.\r\n2. `ENVIRONMENT=development` correctly proceeds with warnings.\r\n3. Remediation logs point to `init_secrets` script and official IBM documentation.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "cd374561886bd6db581bbbf052bcca0f159db0e9",
+      "message": "feat(security): implement fail-closed enforcement for critical secrets\n\n- Added detection for sentinel values ('', 'UNCONFIGURED')\n- Defined weak/default secret constants for production validation\n- Enhanced get_security_status() with specific error codes and risks\n- Implemented log_critical_issues() with remediation and documentation links\n- Enforced application termination (SystemExit) in production environments\n- Added unit tests to verify security gates and development-mode bypass\n\nSigned-off-by: Eleni Kechrioti <elenikehrioti@gmail.com>",
+      "author": "Eleni Kechrioti",
+      "date": "2026-02-11T13:28:57+00:00"
+    },
+    {
+      "sha": "dea65a2ce0a8ea8d8951cb09b537331d12d70d22",
+      "message": "feat/ environment-aware defaults and documentation (Phase 1)\n\n- Implement default_factory for REQUIRE_STRONG_SECRETS based on ENVIRONMENT\n- Add audit logging for production security overrides\n- Update .env.example, configuration reference, and CHANGELOG\n- Add unit tests for production/development scenarios\n\nCloses US-1\n\nSigned-off-by: Eleni Kechrioti <elenikehrioti@gmail.com>",
+      "author": "Eleni Kechrioti",
+      "date": "2026-02-11T19:56:08+00:00"
+    },
+    {
+      "sha": "5ec8e7402bc6114ecc248d3b89bc6085da6e2861",
+      "message": "refactor(security): enforce fail-closed logic & implement entropy checks\n\nDetailed changes:\n\n1. Decoupled Validation from Execution:\n\n   - Replaced direct sys.exit(1) in config.py with a custom SecurityConfigurationError.\n\n   - main.py now handles the exception and process termination.\n\n2. Dynamic Secret Strength Analysis:\n\n   - Implemented Shannon Entropy calculation to detect weak secrets dynamically (threshold < 3.5).\n\n   - Catches weak patterns without relying solely on static blocklists.\n\n3. Refactored Logic Flow:\n\n   - Removed redundant production check in get_settings.\n\n   - The system now strictly follows the SecurityStatus response.\n\n4. Developer Experience:\n\n   - Development mode now explicitly logs [DEV WARNING] for unconfigured secrets.\n\n   - Updated tests/test_config_security.py to verify log outputs.\n\nSigned-off-by: Eleni Kechrioti <elenikehrioti@gmail.com>",
+      "author": "Eleni Kechrioti",
+      "date": "2026-02-18T13:47:48+00:00"
+    },
+    {
+      "sha": "35629b1fd7af55e7030ce045a2a4f78f20da3fa4",
+      "message": "fix(security): tighten fail-closed secret validation\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-08T05:01:23+00:00"
+    },
+    {
+      "sha": "c95c0926f7dfac121f62012d9e0e6ad4700a1b26",
+      "message": "fix(tests): cover security validation branches\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-08T07:25:15+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 436,
+  "deletions": 76,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:16.708260",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:16.711021",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3197,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3197.json"
+  }
+}

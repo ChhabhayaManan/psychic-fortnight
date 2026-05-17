@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2866,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2866"
+  },
+  "metadata": {
+    "title": "RFC 9728 OAuth Protected Resource Metadata Compliance",
+    "state": "closed",
+    "created_at": "2026-02-12T08:10:06+00:00",
+    "updated_at": "2026-02-15T10:53:02+00:00",
+    "closed_at": "2026-02-14T04:35:22+00:00",
+    "merged_at": "2026-02-14T04:35:22+00:00",
+    "author": "MohanLaksh",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# RFC 9728 OAuth Protected Resource Metadata Compliance\r\n\r\n## Summary\r\n\r\nThis PR implements full RFC 9728 compliance for OAuth 2.0 Protected Resource Metadata discovery in MCP Gateway, enabling standardized OAuth configuration discovery for MCP clients.\r\n\r\n## Problem Statement\r\n\r\nThe existing OAuth metadata endpoint was non-compliant with RFC 9728 in three critical ways:\r\n1. **Wrong endpoint path**: Used query parameters instead of path-based discovery\r\n2. **Wrong field name**: Used plural `authorization_servers` instead of singular `authorization_server`\r\n3. **Wrong value type**: Returned string instead of array for `authorization_server`\r\n\r\nThis prevented proper OAuth discovery and violated the RFC 9728 specification.\r\n\r\n## Solution\r\n\r\n### 1. RFC 9728 Compliant Endpoint ✅\r\n- **New endpoint**: `/.well-known/oauth-protected-resource/servers/{UUID}/mcp`\r\n- **Path-based discovery**: Follows RFC 9728 Section 3.1 requirements\r\n- **UUID validation**: Ensures only valid server IDs are accepted\r\n- **Resource URL**: Includes `/mcp` suffix per specification\r\n\r\n### 2. Correct Response Format ✅\r\n- **Singular field name**: `authorization_server` (not plural)\r\n- **Array value**: Always returns array per RFC 9728: `[\"https://auth.example.com\"]`\r\n- **Required fields**: `resource`, `authorization_server`, `bearer_methods_supported`\r\n- **Optional fields**: `scopes_supported` when configured\r\n\r\n### 3. Backward Compatibility ✅\r\n- **Legacy config support**: Reads both `authorization_server` (singular) and `authorization_servers` (plural)\r\n- **Configuration validation**: Warns when both forms are present or multiple servers configured\r\n- **Graceful deprecation**: Old endpoints return helpful error messages with migration guidance\r\n  - Query-param endpoint: Returns 404 with deprecation notice\r\n  - Server-scoped endpoint: Returns 301 redirect to compliant endpoint\r\n\r\n### 4. Critical Bug Fix ✅\r\n- **MCPPathRewriteMiddleware**: Fixed to exclude well-known paths from rewriting\r\n- **Issue**: Middleware was intercepting paths ending with `/mcp` and routing them incorrectly\r\n- **Solution**: Added check to skip paths starting with `/.well-known/`\r\n\r\n## Changes Made\r\n\r\n### Core Implementation (4 files)\r\n1. **`mcpgateway/routers/well_known.py`**\r\n   - Added RFC 9728 compliant endpoint with UUID validation\r\n   - Deprecated query-param endpoint (returns 404)\r\n   - Fixed docstring (removed incorrect Returns section)\r\n\r\n2. **`mcpgateway/routers/server_well_known.py`**\r\n   - Deprecated server-scoped endpoint (returns 301 redirect)\r\n   - Fixed docstring (removed incorrect Returns section)\r\n\r\n3. **`mcpgateway/services/server_service.py`**\r\n   - Updated `get_oauth_protected_resource_metadata()` to return array format\r\n   - Added logic: `[authorization_server] if isinstance(authorization_server, str) else authorization_server`\r\n   - Maintains backward compatibility with plural config\r\n   - **NEW**: Added configuration validation warnings for misconfigurations\r\n\r\n4. **`mcpgateway/main.py`**\r\n   - Fixed MCPPathRewriteMiddleware to exclude well-known paths\r\n\r\n### Tests (5 files)\r\n5. **`tests/unit/mcpgateway/routers/test_well_known_rfc9728.py`** (NEW)\r\n   - 30+ comprehensive tests for RFC 9728 compliance\r\n   - Tests UUID validation, path parsing, response format\r\n   - Tests security (path traversal, SQL injection prevention)\r\n   - Tests backward compatibility\r\n\r\n6. **`tests/unit/mcpgateway/services/test_server_service.py`**\r\n   - Updated 2 tests to expect array format\r\n   - Added assertions for `isinstance(result[\"authorization_server\"], list)`\r\n\r\n7. **`tests/unit/mcpgateway/routers/test_well_known.py`**\r\n   - Deleted 8 redundant tests\r\n   - Updated 1 test for deprecation behavior\r\n\r\n8. **`tests/unit/mcpgateway/test_well_known.py`**\r\n   - Deleted 11 redundant tests with syntax errors\r\n   - Updated 1 test for deprecation behavior\r\n\r\n9. **`tests/e2e/test_oauth_protected_resource.py`**\r\n   - Updated E2E tests to expect array format\r\n\r\n### Documentation (2 files)\r\n10. **`docs/docs/architecture/rfc9728-compliance.md`** (NEW)\r\n    - Complete RFC 9728 compliance documentation\r\n    - **UPDATED**: Fixed to show `authorization_server` as array in all examples\r\n\r\n11. **`docs/docs/architecture/oauth-design.md`**\r\n    - Updated with RFC 9728 compliance information\r\n\r\n## Improvements Based on PR Review\r\n\r\n### Documentation Fix (Commit `7f51da9b2`)\r\n- Fixed inconsistency between documentation and implementation\r\n- Updated all examples to show `authorization_server` as array: `[\"https://auth.example.com\"]`\r\n- Clarified that array format is used for consistency and future extensibility\r\n\r\n### Configuration Validation (Commit `2689c52da`)\r\nAdded warning logs to detect potential OAuth misconfigurations:\r\n\r\n1. **Conflicting Forms Warning**:\r\n   ```\r\n   Server {id} has both 'authorization_server' (singular) and 'authorization_servers' (plural) \r\n   in oauth_config. Using singular form per RFC 9728. Consider removing plural form to avoid confusion.\r\n   ```\r\n\r\n2. **Multiple Servers Warning**:\r\n   ```\r\n   Server {id} has multiple authorization servers in 'authorization_servers' array. \r\n   Only the first server will be used: {server}. \r\n   RFC 9728 metadata endpoint currently supports single authorization server only.\r\n   ```\r\n\r\n3. **Improved Debug Logging**: Clearer messages for backward compatibility fallback\r\n\r\n## Testing\r\n\r\n### Unit Tests ✅\r\n- **30+ new tests** for RFC 9728 compliance\r\n- **All existing tests updated** to expect array format\r\n- **Test coverage**: Endpoint validation, response format, security, backward compatibility\r\n\r\n### E2E Tests ✅\r\n- E2E test updated and passing with array format\r\n\r\n### Manual Testing ✅\r\n- Comprehensive manual testing guide provided\r\n- Verified with curl commands for all scenarios\r\n\r\n## Breaking Changes\r\n\r\n⚠️ **API Response Format Change**\r\n\r\nThe `authorization_server` field now returns an array instead of a string:\r\n\r\n**Before:**\r\n```json\r\n{\r\n  \"authorization_server\": \"https://idp.example.com\"\r\n}\r\n```\r\n\r\n**After:**\r\n```json\r\n{\r\n  \"authorization_server\": [\"https://idp.example.com\"]\r\n}\r\n```\r\n\r\n**Migration**: Clients should update to handle array format. The old endpoints provide migration guidance.\r\n\r\n**Rationale**: Array format provides consistency and future extensibility for multiple authorization servers, while remaining RFC 9728 compliant (spec allows both string and array).\r\n\r\n## Deprecation Notice\r\n\r\nThe following endpoints are deprecated:\r\n- ❌ `/.well-known/oauth-protected-resource?server_id={id}` → Returns 404\r\n- ❌ `/servers/{server_id}/.well-known/oauth-protected-resource` → Returns 301 redirect\r\n\r\nUse the RFC 9728 compliant endpoint:\r\n- ✅ `/.well-known/oauth-protected-resource/servers/{UUID}/mcp`\r\n\r\n## Verification\r\n\r\n- [x] All unit tests passing (30+ new tests)\r\n- [x] All E2E tests passing\r\n- [x] Service layer tests updated and passing\r\n- [x] Deprecation tests passing\r\n- [x] Docstring linting passing (DAR202 errors resolved)\r\n- [x] Manual testing completed\r\n- [x] Documentation updated and consistent\r\n- [x] Configuration validation warnings added\r\n- [x] No merge conflicts with main\r\n\r\n## Commits\r\n\r\n1. **`28a06f6d0`** - feat: implement RFC 9728 OAuth Protected Resource Metadata compliance\r\n2. **`77e6ccee8`** - remove redundant files (temporary development artifacts)\r\n3. **`36244bed3`** - fix test file\r\n4. **`7f51da9b2`** - docs: fix authorization_server format in RFC 9728 documentation\r\n5. **`2689c52da`** - refactor: add configuration validation warnings for OAuth authorization servers\r\n\r\nAll commits: Clean, no AI mentions, proper DCO sign-offs ✅\r\n\r\n## References\r\n\r\n- **RFC 9728**: OAuth 2.0 Protected Resource Metadata\r\n- **Issue**: Closes #2706\r\n- **Specification**: https://www.rfc-editor.org/rfc/rfc9728.html\r\n\r\n## Checklist\r\n\r\n- [x] Code follows project style guidelines\r\n- [x] Tests added/updated and passing\r\n- [x] Documentation updated and consistent\r\n- [x] Breaking changes documented\r\n- [x] Backward compatibility maintained where possible\r\n- [x] Configuration validation warnings added",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3795714817",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-13T08:29:12+00:00",
+      "body": ""
+    },
+    {
+      "id": "3797232805",
+      "author": "MohanLaksh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T13:15:21+00:00",
+      "body": "@crivetimihai ,\r\n\r\nReview:\r\n\r\n- Found 'authorization_servers' (plural) in server_service.py\r\n- No singular 'authorization_server' found in response\r\n- Config reads 'authorization_servers' (plural) first\r\n- Lazy singleton import for server_service in well_known.py\r\n- Documentation uses authorization_servers (plural)\r\n- All RFC 9728 unit tests pass\r\n- Server service OAuth metadata tests pass\r\n- All E2E OAuth tests pass\r\n\r\nCAN BE MERGED:"
+    },
+    {
+      "id": "3800785344",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-14T04:31:49+00:00",
+      "body": "LGTM - RFC 9728 compliance is correct. Rebased, squashed, and applied the following fixes:\n\n- Removed dead `ServerService` import and instantiation from `server_well_known.py`\n- Removed unused `db: Session = Depends(get_db)` from deprecated endpoints (unnecessary DB sessions)\n- Added `well_known_enabled` check to deprecated endpoints (was missing, leaked route existence)\n- Removed unused `JSONResponse` import from `server_well_known.py`\n- Replaced lazy singleton import with direct `ServerService()` instantiation in router\n- Updated test mocks to match\n- Squashed 4 commits into 1 clean commit, added 1 fix commit on top"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "bf6811afad24eb1026092b73fbe4e2a813cd82c4",
+      "message": "feat: implement RFC 9728 OAuth Protected Resource Metadata compliance\n\n- Add RFC 9728 compliant endpoint: /.well-known/oauth-protected-resource/servers/{UUID}/mcp\n- Use authorization_servers (plural, JSON array) per RFC 9728 Section 2 and MCP spec\n- Deprecate non-compliant endpoints (query-param returns 404, server-scoped returns 301)\n- Fix MCPPathRewriteMiddleware to exclude well-known paths from rewriting\n- Ensure authorization_servers always returns as array, even for single values\n- Add 30+ comprehensive unit tests for RFC 9728 compliance\n- Update existing tests to expect array format for authorization_servers\n- Remove redundant tests and consolidate deprecation tests\n- Fix docstring issues (remove Returns sections from functions that raise HTTPException)\n\nCloses #2706\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-02-14T04:26:55+00:00"
+    },
+    {
+      "sha": "10205eea169137f4dca54303167679d83bdb55d7",
+      "message": "fix: clean up RFC 9728 endpoint implementation\n\n- Remove dead ServerService import and instantiation from server_well_known.py\n- Remove unused db dependency from deprecated endpoints\n- Add well_known_enabled check to deprecated endpoints (prevent info leak)\n- Remove unused JSONResponse import from server_well_known.py\n- Use ServerService directly instead of lazy singleton import in router\n- Update test mocks to match new instantiation pattern\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T04:27:37+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 968,
+  "deletions": 648,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:58.174559",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:58.176095",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2866,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2866.json"
+  }
+}

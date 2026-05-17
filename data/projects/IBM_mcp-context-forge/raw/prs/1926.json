@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1926,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1926"
+  },
+  "metadata": {
+    "title": "fix: improve tool status updates and fix test flake8 errors #1641",
+    "state": "closed",
+    "created_at": "2026-01-05T22:33:30+00:00",
+    "updated_at": "2026-01-07T18:15:16+00:00",
+    "closed_at": "2026-01-07T18:15:15+00:00",
+    "merged_at": null,
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\r\n\r\n- Rename `toggle_tool_status` to `set_tool_status` for clarity and consistency\r\n- Add row-level locking with `with_for_update` to prevent race conditions during concurrent status updates\r\n- Wrap status updates in explicit transaction with `db.begin()` for better atomicity\r\n- Fix multiple flake8 errors in test files (E402, E262, F841, F401, F541, F811, E266)\r\n\r\nThis is the first PR addressing Issue #1641 - more PRs will follow.\r\n\r\nAddresses #1641 (more to come)",
+  "comments": [
+    {
+      "id": "2662995158",
+      "author": "Copilot",
+      "created_at": "2026-01-05T22:38:15+00:00",
+      "body": "The `db.get()` method may not support the `with_for_update` parameter in all SQLAlchemy versions. The recommended pattern throughout this codebase (and in the linked issue) is to use `db.execute(select(DbTool).where(DbTool.id == tool_id).with_for_update(...)).scalar_one_or_none()`. This ensures compatibility and follows the established convention.\n\nAdditionally, the issue recommends `skip_locked=True` rather than `key_share=True`. The `skip_locked=True` option causes blocked transactions to immediately skip locked rows rather than wait, which is better for high-concurrency scenarios where you want to avoid request pileups."
+    },
+    {
+      "id": "2662995169",
+      "author": "Copilot",
+      "created_at": "2026-01-05T22:38:15+00:00",
+      "body": "The logic for detecting if the tool was modified is potentially incorrect. The code sets `tool.enabled = activate` and `tool.reachable = reachable` unconditionally (lines 2059-2060), then checks if the tool was modified with `db.is_modified(tool)`. However, if `activate` equals the current `tool.enabled` value and `reachable` equals the current `tool.reachable` value, SQLAlchemy may not mark the object as modified since the values didn't actually change. Consider explicitly checking if the values changed before assigning: `if tool.enabled != activate or tool.reachable != reachable:` before making the assignments."
+    },
+    {
+      "id": "2662995180",
+      "author": "Copilot",
+      "created_at": "2026-01-05T22:38:15+00:00",
+      "body": "Verify that the mocking of `db.get()` with `with_for_update` parameter works correctly. If the actual implementation is changed to use `db.execute(select(...).with_for_update(...))` as recommended, these test mocks will need to be updated accordingly to mock `db.execute()` instead of `db.get()`."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3628637935",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-05T22:38:16+00:00",
+      "body": "## Pull request overview\n\nThis PR is the first in a series addressing race conditions under high concurrency (Issue #1641). It focuses specifically on improving the tool status update mechanism by renaming `toggle_tool_status` to `set_tool_status`, adding row-level locking, implementing explicit transactions, and fixing various flake8 linting errors in test files.\n\n**Key changes:**\n- Renamed `toggle_tool_status` to `set_tool_status` for clearer semantics\n- Added row-level locking using `with_for_update` to prevent race conditions during concurrent status updates\n- Wrapped status updates in explicit transaction with `db.begin()` for better atomicity\n- Fixed multiple flake8 errors (E402, E262, F841, F401, F541, F811, E266) across test files\n\n### Reviewed changes\n\nCopilot reviewed 10 out of 10 changed files in this pull request and generated 4 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `mcpgateway/services/tool_service.py` | Renamed method to `set_tool_status`, added row-level locking with `with_for_update`, and wrapped status updates in `db.begin()` transaction |\r\n| `mcpgateway/services/gateway_service.py` | Updated calls from `toggle_tool_status` to `set_tool_status` and updated comments |\r\n| `mcpgateway/main.py` | Updated REST API endpoint to call `set_tool_status` |\r\n| `mcpgateway/admin.py` | Updated admin endpoint to call `set_tool_status` and updated docstring examples |\r\n| `tests/unit/mcpgateway/test_main.py` | Updated test mocks and patches to use `set_tool_status`, removed duplicate test sections, fixed unused variables and imports |\r\n| `tests/unit/mcpgateway/test_admin.py` | Updated test mocks to use `set_tool_status`, fixed formatting and removed unused variables |\r\n| `tests/unit/mcpgateway/services/test_tool_service.py` | Updated tests to mock `db.begin()` and `db.is_modified()`, renamed test methods, removed unused imports and variables |\r\n| `tests/unit/mcpgateway/services/test_gateway_service.py` | Updated test mocks to use `set_tool_status` and updated comments |\r\n| `tests/loadtest/locustfile.py` | Renamed load test method from `toggle_tool_status` to `set_tool_status` |\r\n| `.pre-commit-config.yaml` | Added `loadtest` directory to test naming convention exclusions |\n</details>\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (1)</summary>\n\n**tests/unit/mcpgateway/test_main.py:1330**\n* This comment appears to contain commented-out code.\n```\n# class TestA2AAgentEndpoints:\n#     \"\"\"Test A2A agent API endpoints.\"\"\"\n#\n#     @patch(\"mcpgateway.main.a2a_service.list_agents\")\n#     def test_list_a2a_agents(self, mock_list, test_client, auth_headers):\n#        \"\"\"Test listing A2A agents.\"\"\"\n#        mock_list.return_value = []\n#        response = test_client.get(\"/a2a\", headers=auth_headers)\n#        assert response.status_code == 200\n#        mock_list.assert_called_once()\n#\n#    @patch(\"mcpgateway.main.a2a_service.get_agent\")\n#    def test_get_a2a_agent(self, mock_get, test_client, auth_headers):\n#        \"\"\"Test getting specific A2A agent.\"\"\"\n#        mock_agent = {\n#            \"id\": \"test-id\",\n#            \"name\": \"test-agent\",\n#            \"description\": \"Test agent\",\n#            \"endpoint_url\": \"https://api.example.com\",\n#            \"agent_type\": \"generic\",\n#            \"enabled\": True,\n#            \"metrics\": MOCK_METRICS,\n#        }\n#        mock_get.return_value = mock_agent\n#\n#        response = test_client.get(\"/a2a/test-id\", headers=auth_headers)\n#        assert response.status_code == 200\n#        mock_get.assert_called_once()\n#\n#    @patch(\"mcpgateway.main.a2a_service.register_agent\")\n#    @patch(\"mcpgateway.main.MetadataCapture.extract_creation_metadata\")\n#    def test_create_a2a_agent(self, mock_metadata, mock_register, test_client, auth_headers):\n#        \"\"\"Test creating A2A agent.\"\"\"\n#        mock_metadata.return_value = {\n#            \"created_by\": \"test_user\",\n#            \"created_from_ip\": \"127.0.0.1\",\n#            \"created_via\": \"api\",\n#            \"created_user_agent\": \"test\",\n#            \"import_batch_id\": None,\n#            \"federation_source\": None,\n#        }\n#        mock_register.return_value = {\"id\": \"new-id\", \"name\": \"new-agent\"}\n#\n#        agent_data = {\n#            \"name\": \"new-agent\",\n#            \"endpoint_url\": \"https://api.example.com/agent\",\n#            \"agent_type\": \"custom\",\n#            \"description\": \"New test agent\",\n#        }\n#\n#        response = test_client.post(\"/a2a\", json=agent_data, headers=auth_headers)\n#        assert response.status_code == 201\n#        mock_register.assert_called_once()\n#\n#    @patch(\"mcpgateway.main.a2a_service.update_agent\")\n#    @patch(\"mcpgateway.main.MetadataCapture.extract_modification_metadata\")\n#    def test_update_a2a_agent(self, mock_metadata, mock_update, test_client, auth_headers):\n#        \"\"\"Test updating A2A agent.\"\"\"\n#        mock_metadata.return_value = {\n#            \"modified_by\": \"test_user\",\n#            \"modified_from_ip\": \"127.0.0.1\",\n#            \"modified_via\": \"api\",\n#            \"modified_user_agent\": \"test\",\n#        }\n#        mock_update.return_value = {\"id\": \"test-id\", \"name\": \"updated-agent\"}\n#\n#        update_data = {\"description\": \"Updated description\"}\n#\n#        response = test_client.put(\"/a2a/test-id\", json=update_data, headers=auth_headers)\n#        assert response.status_code == 200\n#        mock_update.assert_called_once()\n#\n#    @patch(\"mcpgateway.main.a2a_service.toggle_agent_status\")\n#    def test_toggle_a2a_agent_status(self, mock_toggle, test_client, auth_headers):\n#        \"\"\"Test toggling A2A agent status.\"\"\"\n#        mock_toggle.return_value = {\"id\": \"test-id\", \"enabled\": False}\n#\n#        response = test_client.post(\"/a2a/test-id/toggle?activate=false\", headers=auth_headers)\n#        assert response.status_code == 200\n#        mock_toggle.assert_called_once()\n#\n#    @patch(\"mcpgateway.main.a2a_service.delete_agent\")\n#    def test_delete_a2a_agent(self, mock_delete, test_client, auth_headers):\n#        \"\"\"Test deleting A2A agent.\"\"\"\n#        mock_delete.return_value = None\n#\n#        response = test_client.delete(\"/a2a/test-id\", headers=auth_headers)\n#        assert response.status_code == 200\n#        mock_delete.assert_called_once()\n#\n#    @patch(\"mcpgateway.main.a2a_service.invoke_agent\")\n#    def test_invoke_a2a_agent(self, mock_invoke, test_client, auth_headers):\n#        \"\"\"Test invoking A2A agent.\"\"\"\n#        mock_invoke.return_value = {\"response\": \"Agent response\", \"status\": \"success\"}\n#\n#        response = test_client.post(\n#            \"/a2a/test-agent/invoke\",\n#            json={\"parameters\": {\"query\": \"test\"}, \"interaction_type\": \"query\"},\n#            headers=auth_headers\n#        )\n#        assert response.status_code == 200\n#        mock_invoke.assert_called_once()\n#\n\n\n# ----------------------------------------------------- #\n# Middleware & Security Tests                           #\n# ----------------------------------------------------- #\n```\n</details>\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a08eecd724a4c92847181929219b6b259b612764",
+      "message": "fix: improve tool status updates and fix test flake8 errors #1641\n\n- Rename toggle_tool_status to set_tool_status for clarity\n- Add row-level locking with with_for_update to prevent race conditions\n- Wrap status updates in transaction with db.begin()\n- Fix flake8 errors in test files:\n  - Move import to top of file (E402)\n  - Fix inline comment spacing (E262)\n  - Remove unused variables (F841)\n  - Remove unused imports (F401)\n  - Fix f-string without placeholders (F541)\n  - Remove duplicate test function definitions (F811)\n  - Fix double-hash comments (E266)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jonpspri@gmail.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-05T22:31:55+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 126,
+  "deletions": 302,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:18:45.319929",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:45.321813",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1926,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1926.json"
+  }
+}

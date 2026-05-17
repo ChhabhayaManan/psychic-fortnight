@@ -1,0 +1,234 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3247,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3247"
+  },
+  "metadata": {
+    "title": "fix(auth): allow removing non-last admin users",
+    "state": "closed",
+    "created_at": "2026-02-25T13:05:55+00:00",
+    "updated_at": "2026-04-11T18:45:28+00:00",
+    "closed_at": "2026-04-11T18:45:28+00:00",
+    "merged_at": null,
+    "author": "vishu-bh",
+    "labels": [
+      "bug",
+      "python",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses # https://github.com/IBM/mcp-context-forge/issues/2808\r\n\r\n---\r\n\r\n## 📝 Summary\r\n_What does this PR do and why?_\r\n\r\nThis PR fixes thes issue When an admin user tries to remove the admin privileges from the other admin user, API returns error message. It should not return an error message untill it is the last admin.\r\n\r\nKey Changes:\r\n- Updated the admin permission removal logic, to check first if it is the last admin. If it is last admin then admin permission cannot be removed.\r\n- if the requesting admin is trying to self demote itself using api or UI, then an error message will be shown\r\n- Lastly, if admin tries to demote other admin and it is not the last admin in system then it should be allowed to do it. \r\n\r\nThe root cause was: There is a flag in config called 'protect_all_admins'. This flag is set to true by in configuration. Hence, it was restricting other admins to demote other admins. \r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |  ✅ Passed (Pylint score: 10/10)      |\r\n| Unit tests                | `make test`     | ✅ Passed (updated unit tests with the changes)        |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Passed (100% for modified files, 99%+ overal        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [
+    {
+      "id": "2908050439",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-09T21:32:07+00:00",
+      "body": "When `requesting_user_email=None` (the default), `is_self_demotion` is set to `None` and the entire this block is skipped. A caller can demote an admin without restriction by not passing a `requesting_user_email`. The parameter should either be made required (non-optional) or the logic should default to blocking: `is_self_demotion = not requesting_user_email` or `email_a == email_b`."
+    },
+    {
+      "id": "2908089002",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-09T21:41:40+00:00",
+      "body": "`granted_by` is the email of the user being demoted, not the admin performing the action (\"admin-a@example.com\"). The same issue appears in `test_update_user_demote_admin_success`, where the requester is `superadmin@example.com` but `granted_by=\"admin@example.com\"` (the target).\n\nIf these assertions reflect what the service actually does, the audit trail records the role change as self-granted by the target user rather than by the acting admin. Could you confirm what value is passed to `granted_by` in the service code? If it's pulling from the target user's email instead of `requesting_user_email`, that's an audit integrity bug worth fixing here."
+    },
+    {
+      "id": "2912682388",
+      "author": "vishu-bh",
+      "created_at": "2026-03-10T15:42:09+00:00",
+      "body": "adrressed"
+    },
+    {
+      "id": "2912685574",
+      "author": "vishu-bh",
+      "created_at": "2026-03-10T15:42:33+00:00",
+      "body": "added a check to raise error if no requesting_user_email found"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3860389698",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-02-26T11:38:08+00:00",
+      "body": "## Code Review Summary for PR #3247\n\n**Issue**: [#2808](https://github.com/IBM/mcp-context-forge/issues/2808) - Admin user should be able to remove admin privileges from other admin users\n\n### Overview\nThis PR changes the admin protection behavior from blocking ALL admin demotions (when `protect_all_admins=True`) to specifically preventing **self-demotion** while allowing admins to demote other admins.\n\n### Key Changes\n1. **Core Logic** ([`email_auth_service.py:1559`](mcp-context-forge/mcpgateway/services/email_auth_service.py:1559)): Added `requesting_user_email` parameter and self-demotion check\n2. **API Integration** ([`email_auth.py:786`](mcp-context-forge/mcpgateway/routers/email_auth.py:786)): Passes requesting user's email to service\n3. **UI Integration** ([`admin.py:7346`](mcp-context-forge/mcpgateway/admin.py:7346)): Passes requesting user's email from UI\n4. **Test Updates**: Modified existing tests and added new test for successful cross-admin demotion\n\n### Review Findings\n**8 issues identified** (1 high, 3 medium, 4 low) - all added to Bob Findings panel:\n\n**Critical Issues:**\n- **High**: Missing test coverage for cross-admin demotion scenario\n- **Medium**: Outdated test still references old error message\n- **Medium**: Email normalization edge case could bypass self-demotion check\n- **Medium**: Case-insensitive email comparison may fail with empty string\n\n**Documentation & Maintenance:**\n- Configuration documentation needs updating to reflect new behavior\n- Test naming inconsistencies and misleading docstrings\n- Test fixture changes may affect other tests\n\n### Alignment with Issue #2808\n✅ **Correctly addresses the issue**: The PR successfully allows admins to demote other admins while preventing self-demotion, which aligns with the expected behavior described in the issue.\n\n### Recommendations\n1. Add explicit None check for `requesting_user_email` before string operations\n2. Update [`config.py:511`](mcp-context-forge/mcpgateway/config.py:511) documentation to reflect new behavior\n3. Fix outdated test at [`test_email_auth_router.py:809`](mcp-context-forge/tests/unit/mcpgateway/routers/test_email_auth_router.py:809)\n4. Add test case for email normalization edge cases\n5. Add explicit test for Admin A demoting Admin B scenario"
+    },
+    {
+      "id": "3861708324",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-26T15:23:11+00:00",
+      "body": ""
+    },
+    {
+      "id": "3862319337",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-26T17:02:05+00:00",
+      "body": "## ✅ LGTM \n\n\n**Summary**: Successfully prevents admin self-demotion while allowing cross-admin operations.\n\n**Ready to merge** 🚀"
+    },
+    {
+      "id": "3914643680",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-09T11:10:03+00:00",
+      "body": ""
+    },
+    {
+      "id": "3918343561",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-09T21:32:07+00:00",
+      "body": ""
+    },
+    {
+      "id": "3918384356",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-09T21:41:40+00:00",
+      "body": ""
+    },
+    {
+      "id": "3923441888",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-10T15:42:09+00:00",
+      "body": ""
+    },
+    {
+      "id": "3923445526",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-10T15:42:33+00:00",
+      "body": ""
+    },
+    {
+      "id": "3923626321",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-10T16:06:25+00:00",
+      "body": ""
+    },
+    {
+      "id": "3943331161",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-13T11:25:44+00:00",
+      "body": ""
+    },
+    {
+      "id": "3992201932",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T14:31:34+00:00",
+      "body": ""
+    },
+    {
+      "id": "3992598154",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T15:25:30+00:00",
+      "body": ""
+    },
+    {
+      "id": "4000009884",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-24T15:06:56+00:00",
+      "body": ""
+    },
+    {
+      "id": "4000016945",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-24T15:07:59+00:00",
+      "body": ""
+    },
+    {
+      "id": "4044486909",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-01T14:10:20+00:00",
+      "body": "## Review: PR #3247 — fix(auth): allow removing non-last admin users\n\nNice work tackling this, and thanks for being responsive to the earlier review rounds. The core approach — replacing the blanket demotion block with a self-demotion check plus last-admin guard — is solid and well-tested. I have a few items I'd like to talk through before this merges.\n\n### Blocking\n\n**1. `docs/docs/manage/configuration.md` — mkdocs admonition rendering is broken**\n\nIt looks like the table-alignment reformatting also stripped the 4-space indentation from all `!!! warning` / `!!! info` / `!!! tip` admonition blocks. mkdocs needs that indentation to render them correctly — without it, the content falls outside the admonition and shows as plain text. For example, line 24 currently reads:\n\n```markdown\n!!! warning \"Startup Validation\"\nIf any required `.env` variable is missing or invalid, ...\n```\n\n…but needs to be:\n\n```markdown\n!!! warning \"Startup Validation\"\n    If any required `.env` variable is missing or invalid, ...\n```\n\nThis affects roughly 15 admonitions throughout the file. The easiest fix might be to revert the formatting-only changes and keep just the `PROTECT_ALL_ADMINS` description update — that would also shrink the diff from ~1200 lines to a handful, which is kinder to future `git blame`.\n\n**2. `protect_all_admins` semantics have changed — worth aligning on the intended behavior**\n\nThis is the concern @gcgoncalves raised, and I think it deserves a clear resolution before merge. After this PR, `protect_all_admins=True` no longer prevents cross-admin demotion via `update_user` — that protection was the flag's original purpose. The flag is still used for login-lockout bypass (`email_auth_service.py:800`), so it isn't dead, but its scope has narrowed significantly.\n\nThe `config.py` description was updated to \"prevent any admin from being locked out via API/UI\", which is closer to the new reality, but I think it could be more precise. A couple of options worth considering:\n\n- **Option A**: Keep the flag, but update the description to clearly state it now only controls login-lockout bypass for admins. Something like: *\"When true (default), allow admin accounts to continue login attempts even when locked out. Self-demotion prevention and last-admin protection are always enforced regardless of this setting.\"*\n- **Option B**: If the flag should still gate cross-admin demotion in some configurations, re-add it as a condition in the `update_user` guard alongside the self-demotion and last-admin checks.\n\nEither way, it would be good to note this behavioral change in the PR description so it's visible to anyone reviewing the changelog.\n\n### Suggestions\n\n**3. Redundant `is_last_active_admin` pre-check in admin.py (line 7997–8002)**\n\nThe UI handler checks `is_last_active_admin()` before calling `update_user()`, which runs the same check internally. Not a correctness problem, but it does mean two DB queries for the same thing on every admin demotion via the UI. Since `update_user()` raises a `ValueError` that the `except` block at line 8030 already handles, you could remove the pre-check and let the service layer be the single source of truth.\n\n**4. A few test names/docstrings still reference the old `protect_all_admins` behavior**\n\n- `test_update_user_protect_self_deactivation` (line 2363) — docstring says *\"Test that protect_all_admins blocks deactivating any admin\"* but it's actually testing self-deactivation prevention now.\n- `test_update_user_protect_all_admins_allows_other_updates` (line 2383) — sets `protect_all_admins=True` via monkeypatch, but the code under test no longer reads this flag. Same for the monkeypatches at lines 2348, 2368, 2425, and 2455.\n\nThese aren't broken, but they'll confuse someone reading the tests later. A quick rename/cleanup pass would help.\n\n**5. Redundant normalization at line 1689**\n\n`email` is already lowercased and stripped at line 1670, so the right side of the comparison could just be `== email` instead of `== email.lower().strip()`. Tiny thing, but it reads more clearly.\n\n### Minor notes\n\n- The PR includes a few changes that came in during the rebase (scroll-reset on tab nav, plugin card cleanup, resource service test threshold). Might be worth noting in the PR description that those are from main so reviewers don't spend time on them.\n- The bob second-opinion tool flagged a potential edge case: `requesting_user_email=\"   \"` (whitespace-only) would pass the `if not requesting_user_email` check at line 1685, though it would never match a real email in the comparison. A test for that edge case would be a nice-to-have.\n\n---\n\nOverall this is headed in the right direction. The main thing to sort out is the `protect_all_admins` semantics (item 2) and the docs rendering (item 1) — once those are addressed I think this is close."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b0852c0e5ebfb71ab9c9cf32b5e7d1cfe614fd1f",
+      "message": "fix: preventing admin self demotion\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-02-25T13:03:28+00:00"
+    },
+    {
+      "sha": "666444880385bf8628bec492cb3f4a967a30d83a",
+      "message": "fix: removing stale test\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-02-26T14:16:52+00:00"
+    },
+    {
+      "sha": "a366839803b204f9812017b83324e20793cf08c3",
+      "message": "fix: improving test coverage.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-02-26T15:09:36+00:00"
+    },
+    {
+      "sha": "20d4e950f020270d06d53649c63add89f244c029",
+      "message": "fix: rebasing and conflict resolution\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-05T15:23:21+00:00"
+    },
+    {
+      "sha": "c267bcbf690feca2edd0adc5e494029115d999d8",
+      "message": "fix: PR comment addressed\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-10T14:57:32+00:00"
+    },
+    {
+      "sha": "83acf0e6d67dfa9d440673809dcd321fbee90e39",
+      "message": "fix: adding unit test for change added\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-10T15:41:10+00:00"
+    },
+    {
+      "sha": "c77ee1e95a447d14cfcc591bbc0d80c199d51784",
+      "message": "chore: update documentation to reflect correcttly what protect_all_admin flag do\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-10T15:59:14+00:00"
+    },
+    {
+      "sha": "ba1b49cde2f824b69704eb9ddf5cb2a016c93c29",
+      "message": "feat: rebase with main and resolved conflict\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-01T12:40:09+00:00"
+    },
+    {
+      "sha": "2a7802155a66cf562fed17474d6c17b76877d178",
+      "message": "feat: addressing review comments\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-02T14:59:15+00:00"
+    },
+    {
+      "sha": "f6cffd278509c0e34ff106a01864f190096a8a1e",
+      "message": "feat: updating secrets baseline\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-08T13:28:51+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 970,
+  "deletions": 724,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:11:25.088691",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:25.090295",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3247,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3247.json"
+  }
+}

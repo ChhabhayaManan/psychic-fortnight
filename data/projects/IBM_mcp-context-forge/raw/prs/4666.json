@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4666,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4666"
+  },
+  "metadata": {
+    "title": "Fix cpex framework",
+    "state": "open",
+    "created_at": "2026-05-08T10:45:38+00:00",
+    "updated_at": "2026-05-08T13:22:13+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "popagruia",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 📝 Summary\r\nFixed critical bug in vault plugin where \\`CopyOnWriteDict.model_dump()\\` returned empty dictionary instead of actual headers, preventing vault token extraction and injection in production environments.\r\n\r\n**Root Cause:** The plugin was using \\`payload.headers.model_dump()\\` which returns an empty dict in production (with real HTTP requests), though it works in unit tests.\r\n\r\n**Solution:** Changed to use \\`payload.headers.root\\` attribute directly for reliable header access.\r\n\r\n**Additional Enhancement:** Added case-insensitive HTTP header lookup to comply with RFC 7230.\r\nRelated to https://jsw.ibm.com/browse/ICACF-42\r\n                  https://jsw.ibm.com/browse/ICACF-41\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | \\`make lint\\`     | ✅ Pass |\r\n| Unit tests                | \\`make test\\`     | ✅ 15/15 passing |\r\n| Coverage ≥ 80%            | \\`make coverage\\` | ✅ Pass |\r\n\r\n**Manual Integration Tests:** All 5 scenarios passing\r\n- ✅ Session initialization\r\n- ✅ OAuth2 token injection (200 OK)\r\n- ✅ PAT token injection (200 OK)\r\n- ✅ Graceful handling without vault tokens\r\n- ✅ Vault header security stripping\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (\\`make black isort pre-commit\\`)\r\n- [x] Tests added/updated for changes (3 new comprehensive tests)\r\n- [x] Documentation updated (inline comments)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Changes Made\r\n\r\n**File: \\`plugins/vault/vault_plugin.py\\`**\r\n- Line 176: Changed \\`payload.headers.model_dump()\\` → \\`dict(payload.headers.root)\\`\r\n- Line 188: Changed \\`payload.headers.model_dump()\\` → \\`payload.headers.root\\`\r\n- Lines 190-202: Added case-insensitive HTTP header lookup (RFC 7230 compliant)\r\n\r\n**File: \\`tests/unit/mcpgateway/plugins/plugins/vault/test_vault_plugin.py\\`**\r\n- Added \\`test_case_insensitive_vault_header_detection\\`: validates 4 case variations\r\n- Added \\`test_copyonwritedict_root_attribute_access\\`: validates .root usage\r\n- Added \\`test_case_insensitive_header_with_config_variations\\`: validates 7 config/request combinations\r\n\r\n\r\n### Test Coverage\r\n\r\n- **Before:** 12 unit tests\r\n- **After:** 15 unit tests (12 original + 3 new)\r\n- **New tests prevent:** CopyOnWriteDict regression, case sensitivity issues, config/request mismatches\"\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "c5a49e5e0fb4b5b50172ea3bb2e24d646c7064b8",
+      "message": "fix: vault plugin CopyOnWriteDict header access bug\n\n- Changed payload.headers.model_dump() to payload.headers.root for correct header access\n- CopyOnWriteDict.model_dump() returns empty dict, must use .root attribute\n- Added case-insensitive HTTP header lookup (RFC 7230 compliant)\n- Fixes vault token extraction and injection in production environments\n\nThe bug was not caught by unit tests because they already used .root directly.\nThis fix aligns the plugin code with the correct access pattern.\n\nTested with manual integration tests - all 5 scenarios passing:\n- Session initialization\n- OAuth2 token injection\n- PAT token injection\n- Graceful handling without vault tokens\n- Vault header security stripping\n\nSigned-off-by: popagruia <adrian.popa@ro.ibm.com>",
+      "author": "popagruia",
+      "date": "2026-05-08T09:57:26+00:00"
+    },
+    {
+      "sha": "d3670f90028e793208a9912cd1cb7896b8b76e80",
+      "message": "test: add comprehensive vault plugin tests for case-insensitive headers\n\n- Added test_case_insensitive_vault_header_detection: validates RFC 7230 compliance with 4 case variations\n- Added test_copyonwritedict_root_attribute_access: validates .root attribute usage and documents the fix\n- Added test_case_insensitive_header_with_config_variations: validates all 7 combinations of config/request header case\n- All 15 vault plugin unit tests passing (12 original + 3 new)\n\nThe new tests validate:\n1. Case-insensitive header matching (X-Vault-Tokens, x-vault-tokens, X-VAULT-TOKENS, etc.)\n2. Correct use of .root attribute for header access (prevents CopyOnWriteDict.model_dump() regression)\n3. All combinations of config header case vs request header case\n4. Preservation of custom headers during token injection\n\nThese tests would catch similar bugs early in development.\n\nSigned-off-by: popagruia <adrian.popa@ro.ibm.com>",
+      "author": "popagruia",
+      "date": "2026-05-08T10:01:35+00:00"
+    },
+    {
+      "sha": "b4c0190f177600343e9df9009759103124103501",
+      "message": "fix: Add missing auth_value field to gateway cache payload\n\nThe gateway_payload dictionary in _build_tool_cache_payload() was missing\nthe auth_value field, causing Pydantic validation to fail when the vault\nplugin tried to read gateway metadata from cache. This prevented the plugin\nfrom determining the system key for vault token lookup.\n\nThe auth_value field is required by the Gateway Pydantic model but was not\nbeing included in the cache serialization, even though it exists in the\ndatabase.\n\nFixes vault plugin system key determination for cached gateway metadata.\n\nSigned-off-by: popagruia <adrian.popa@ro.ibm.com>",
+      "author": "popagruia",
+      "date": "2026-05-08T13:21:23+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 151,
+  "deletions": 10,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:08.243942",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:08.244734",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4666,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4666.json"
+  }
+}

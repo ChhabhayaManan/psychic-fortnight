@@ -1,0 +1,170 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3964,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3964"
+  },
+  "metadata": {
+    "title": " fix: Add server-scoped metrics to prevent cross-server aggregation (#3642)",
+    "state": "open",
+    "created_at": "2026-04-01T05:56:28+00:00",
+    "updated_at": "2026-04-09T22:12:48+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "rakdutta",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "  ## Summary\r\n\r\n  Fixes metrics aggregation bug where `/servers/{server_id}/tools?include_metrics=true` returned incorrect totals aggregated across ALL servers instead of server-specific metrics. This prevented accurate per-server SLA tracking and\r\n  observability in multi-tenant deployments.\r\n\r\n  ## Changes\r\n\r\n  ### Database Schema\r\n  - Added `server_id` column to 6 metrics tables: `tool_metrics`, `resource_metrics`, `prompt_metrics`, and their `*_hourly` rollup variants\r\n  - Column is nullable to support legacy metrics and admin UI executions (no server context)\r\n  - Added indexes for query performance\r\n  - **Migration:** `cdcb8fb5d994_server_id_add_into_metrics_tables.py`\r\n\r\n  ### Core Implementation\r\n  - **ORM Models** (`db.py`): Updated all metrics models with `server_id` field\r\n  - **Services**: Modified metrics recording to capture `server_id` context:\r\n    - `tool_service.py`: Pass server_id during tool execution and metrics aggregation\r\n    - `resource_service.py`: Pass server_id during resource access\r\n    - `prompt_service.py`: Pass server_id during prompt execution\r\n  - **Metrics Aggregation**: Updated `metrics_summary` properties to filter by `server_id`\r\n  - **Rollup Service** (`metrics_rollup_service.py`): Updated hourly aggregation to group by `server_id`\r\n\r\n  ### Prometheus Metrics\r\n  - Added opt-in `PROMETHEUS_SERVER_SCOPED_METRICS` feature flag to control label cardinality\r\n  - When enabled, Prometheus counters include `server_id` label dimension\r\n  - Defaults to `false` to prevent cardinality explosion in large deployments\r\n  - Updated circuit breaker plugin to support server-scoped labels\r\n\r\n  ### Testing\r\n  - Updated 21 test files to accommodate server_id parameter\r\n  - All existing tests pass with backward compatibility for null server_id\r\n\r\n  ### Documentation\r\n  - Added comprehensive design document: `docs/superpowers/specs/2026-03-20-server-scoped-metrics-design.md`\r\n\r\n  ## Backward Compatibility\r\n\r\n  ✅ **Fully backward compatible:**\r\n  - Existing metrics retain `server_id = NULL`\r\n  - Queries without server_id filter aggregate all metrics (preserves current behavior)\r\n  - Queries with server_id filter return server-scoped metrics (fixes the bug)\r\n  - Admin UI executions continue to work with null server_id\r\n\r\n## Testing Checklist\r\n\r\n  ### Database Metrics\r\n  - [ ] Metrics recorded with correct `server_id` during tool/resource/prompt execution\r\n  - [ ] `/servers/{server_id}/tools?include_metrics=true` returns server-scoped metrics\r\n  - [ ] `/servers/{server_id}/resources?include_metrics=true` returns server-scoped metrics\r\n  - [ ] `/servers/{server_id}/prompts?include_metrics=true` returns server-scoped metrics\r\n  - [ ] Admin UI executions work with `server_id = NULL`\r\n  - [ ] Hourly rollup aggregation includes `server_id` grouping\r\n  - [ ] Alembic migration is idempotent and handles existing data\r\n\r\n  ### Prometheus Metrics\r\n  - [ ] Prometheus metrics work correctly with `PROMETHEUS_SERVER_SCOPED_METRICS=false` (default)\r\n  - [ ] Prometheus counters include `server_id` label when `PROMETHEUS_SERVER_SCOPED_METRICS=true`\r\n  - [ ] Prometheus metrics gracefully handle null `server_id` (admin UI executions)\r\n  - [ ] Circuit breaker plugin metrics include `server_id` label when feature enabled\r\n  - [ ] No cardinality explosion with multiple servers\r\n\r\n  ### General\r\n  - [ ] All unit tests pass\r\n  - [ ] No regressions in existing metrics functionality\r\n\r\n  ## Related Issues\r\n\r\n  Closes #3642",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "d78b23a31c613cafbe7cb4d6c17992cb529f22cc",
+      "message": "server_id\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-20T09:24:20+00:00"
+    },
+    {
+      "sha": "a75e14c1a655a7ea49a0316830dc921dc3d3ee5a",
+      "message": "server_id\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-20T09:31:40+00:00"
+    },
+    {
+      "sha": "21d33233ffb56f643ea7eebc9199bc09ee703d39",
+      "message": "PROMETHEUS_SERVER_SCOPED_METRICS\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-20T09:38:03+00:00"
+    },
+    {
+      "sha": "7d5f6442275c823ab47cee7926a5d3ec3c6dc027",
+      "message": "rollup\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-20T09:42:53+00:00"
+    },
+    {
+      "sha": "e644df65ace095cb47540267c9ad5e496167f14c",
+      "message": "lint fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-01T08:59:32+00:00"
+    },
+    {
+      "sha": "bd39c5f4743f0294cb90742b8afb098465acfeda",
+      "message": "alembic head and docstest fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-01T09:12:52+00:00"
+    },
+    {
+      "sha": "50a2bdf3f14580464891f3765ac043f6a6826f86",
+      "message": "test case fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-01T09:49:45+00:00"
+    },
+    {
+      "sha": "47e1b98fdc110091f6fee2961c7ef0afc8272f2a",
+      "message": "alembic script\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-01T09:52:13+00:00"
+    },
+    {
+      "sha": "7c49dc8d60150279516ed8ea4f0e917b8db362c1",
+      "message": "alembix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-01T09:59:14+00:00"
+    },
+    {
+      "sha": "50d31d8cf7c453d5e902f8737d18c1ab152f322c",
+      "message": "alembic\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-01T10:15:03+00:00"
+    },
+    {
+      "sha": "c5d2e66b2f7c14158fe8f034df717faa8093f160",
+      "message": "alembic\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-01T10:25:22+00:00"
+    },
+    {
+      "sha": "1e57bc7d32457f7c778da363fdb7a4df11da1e67",
+      "message": "rollup fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-02T05:25:58+00:00"
+    },
+    {
+      "sha": "45f19a88ef1f52f4ab17086cb127fe8c7c586886",
+      "message": "resolve conflict bug\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-02T06:25:45+00:00"
+    },
+    {
+      "sha": "d75e29aed47c3bca077b753add8a2d7b941dd105",
+      "message": ".env.example\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-02T07:32:19+00:00"
+    },
+    {
+      "sha": "c5c8cbba2eb58f5e540e4d1fb9f32fe5ce9feb68",
+      "message": "docstring\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-06T07:32:17+00:00"
+    },
+    {
+      "sha": "d21ac352ed0d31f61f438077af91e95175b506cf",
+      "message": "test cases for coverage improvement\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-06T10:32:33+00:00"
+    },
+    {
+      "sha": "2192d75eb36c46b146be07dd9b9be4f19373eb4a",
+      "message": "test cases coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-06T11:21:11+00:00"
+    },
+    {
+      "sha": "39e67a621d256e0351570708732f0f6654505cb6",
+      "message": "test cases\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-06T11:49:32+00:00"
+    },
+    {
+      "sha": "b04ed64e27a5767faf0d04fcdc6cedabb753cb86",
+      "message": "test case -pragma: no cover\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-06T12:30:12+00:00"
+    },
+    {
+      "sha": "ed08e9e9ee8d5836f9d11234dbfeff26fc6a507f",
+      "message": "test case -pragma: no cover\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-06T12:47:46+00:00"
+    },
+    {
+      "sha": "561bf567fc260fd3327b5d88cb43f11dbc0fdafd",
+      "message": "lint and alembic\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-08T10:17:40+00:00"
+    },
+    {
+      "sha": "246c2b089406ca99292a492737beb8572631565b",
+      "message": "plug\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-04-08T10:23:53+00:00"
+    }
+  ],
+  "files_changed": 29,
+  "additions": 2141,
+  "deletions": 118,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:01.510471",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:01.511795",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3964,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3964.json"
+  }
+}

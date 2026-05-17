@@ -1,0 +1,43 @@
+{
+  "id": "389e3b6b-5c36-4afc-9a6b-4328bb7fdc4e",
+  "title": "feat(search): add tool embedding index and semantic search service",
+  "summary": "## 🔗 Related Issue\r\nCloses #2229\r\n\r\n## 📝 Summary\r\nThis PR implements **Phase 1: Complete Embedding & Vector Search Infrastructure** for semantic tool discovery in the MCP Gateway. This enables natural-language queries to find relevant tools (e.g., \"database operations\" → returns DB-related tools).\r\n\r\n## 🚀 Key Changes\r\n\r\n### 1. **Embedding Service** (`mcpgateway/services/embedding_service.py`) \r\n-  Multi-provider support: OpenAI (`text-embedding-3-small`), Mistral, and local models\r\n-  Async embedding generation with configurable dimensions (default: 1536)\r\n-  Lazy initialization with provider factory pattern\r\n-  Batch processing (`batch_embed_tools()`, `batch_embed_texts()`)\r\n-  Tool metadata extraction (`prepare_tool_text()`)\r\n-  Environment-based configuration via `settings.embedding_provider`\r\n\r\n### 2. **Vector Search Service** (`mcpgateway/services/vector_search_service.py`)\r\n-  **Full PostgreSQL+pgvector implementation** with HNSW indexing\r\n-  **SQLite fallback** using numpy for development/testing\r\n-  Cosine similarity search with threshold filtering\r\n-  `search_similar_tools()` fully implemented (lines 75-236)\r\n-  Automatic backend detection (PostgreSQL vs SQLite)\r\n\r\n### 3. **Semantic Search Service** (`mcpgateway/services/semantic_search_service.py`) \r\n-  Orchestrates embedding generation + vector search\r\n-  Query normalization and preprocessing\r\n-  Two-tier caching (Redis + in-memory fallback)\r\n-  Configurable similarity thresholds\r\n-  Handles missing providers gracefully with fallback stubs\r\n\r\n### 4. **Database Schema** (`mcpgateway/db.py`) \r\n-  `ToolEmbedding` table with pgvector `Vector(1536)` column\r\n-  JSON fallback for SQLite compatibility\r\n-  Cascade delete on tool removal\r\n-  Composite indexes for performance\r\n\r\n### 5. **Alembic Migrations** \r\n-  `bab4694b3e90`: Creates `tool_embeddings` table with IVFFlat index\r\n-  `c3d4e5f6a7b8`: Upgrades to HNSW index (`m=16`, `ef_construction=64`)\r\n-  Idempotent migrations with existence checks\r\n\r\n### 6. **REST API Endpoint** (`mcpgateway/main.py`) \r\n-  `GET /tools/semantic` endpoint (line 3637)\r\n-  Query parameters: `query` (required), `limit` (1-50), `threshold` (0-1)\r\n-  Returns ranked results with similarity scores\r\n-  Full authentication and RBAC integration\r\n-  Comprehensive error handling (400, 422, 500)\r\n\r\n### 7. **Configuration** (`mcpgateway/config.py`) \r\n-  `embedding_provider` (default: \"openai\")\r\n-  `embedding_model` (default: \"text-embedding-3-small\")\r\n-  `embedding_api_key` (SecretStr)\r\n-  `hnsw_m` (default: 16) - HNSW max connections\r\n-  `hnsw_ef_construction` (default: 64) - HNSW search depth\r\n\r\n### 8. **PostgreSQL Infrastructure** \r\n-  Custom Dockerfile using `pgvector/pgvector:pg18` base image\r\n-  Initialization script creates `vector` extension\r\n-  Docker Compose configured for `postgres:18-pgvector`\r\n-  Health checks and replication support\r\n\r\n### 9. **Dependencies** (`pyproject.toml`) \r\n-  `pgvector>=0.3.6` for PostgreSQL vector support\r\n-  `langchain-mistralai>=0.2.0` for Mistral embeddings\r\n-  `langchain-openai>=1.1.9` for OpenAI embeddings\r\n-  (Optional) `sentence-transformers` for local models (documented in RSS server)\r\n\r\n### 10. **Testing** \r\n-  Unit tests for embedding service\r\n  Unit tests for vector search service (PostgreSQL + SQLite paths)\r\n-  Unit tests for semantic search service\r\n-  Unit tests for API endpoint\r\n-  Database schema tests (HNSW index)\r\n-  Integration test for embedding storage\r\n\r\n## 🏗️ Architecture Decisions\r\n\r\n| Component | Choice | Rationale |\r\n|-----------|--------|-----------|\r\n| **Default Provider** | OpenAI `text-embedding-3-small` (1536 dims) | Industry-leading quality/cost ratio, 1536-dimensional vectors balance performance with storage |\r\n| **PostgreSQL Backend** | pgvector with HNSW indexing | Production-grade ANN search, 10-100x faster than IVFFlat for high-dimensional vectors |\r\n| **SQLite Fallback** | JSON storage + numpy cosine similarity | Development convenience, zero-dependency setup for local testing |\r\n| **Lazy Initialization** | Deferred embedding provider creation | Avoids startup overhead, API keys only required when semantic search is used |\r\n| **Caching Strategy** | Redis (primary) + in-memory (fallback) | Reduces embedding API costs, graceful degradation when Redis unavailable |\r\n| **Provider Abstraction** | Factory pattern with EmbeddingProviderFactory | Easy to add new providers (Anthropic, Cohere) without changing business logic |\r\n\r\n## 📊 Implementation Status\r\n\r\n| Feature | Status | Implementation |\r\n|---------|--------|----------------|\r\n| Embedding Service | ✅ Complete | `mcpgateway/services/embedding_service.py` |\r\n| Vector Search (PostgreSQL) | ✅ Complete | `mcpgateway/services/vector_search_service.py:119-172` |\r\n| Vector Search (SQLite) | ✅ Complete | `mcpgateway/services/vector_search_service.py:174-207` |\r\n| Semantic Search Orchestration | ✅ Complete | `mcpgateway/services/semantic_search_service.py` |\r\n| Database Schema | ✅ Complete | `mcpgateway/db.py:3205-3273` |\r\n| HNSW Index Migration | ✅ Complete | Alembic migrations |\r\n| REST API Endpoint | ✅ Complete | `mcpgateway/main.py:3637-3700` |\r\n| Unit Tests | ✅ Complete | 50+ tests passing |\r\n| Integration Tests | ✅ Complete | `tests/integration/test_embedding_storage_integration.py` |\r\n| PostgreSQL/pgvector Setup | ✅ Complete | `infra/postgres/` + Docker Compose |\r\n\r\n## 🏷️ Type of Change\r\n- [x] Feature / Enhancement\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|------|---------|--------|\r\n| Lint suite | `make lint` | ✅ |\r\n| Unit tests | `make test` | ✅ |\r\n| Coverage ≥ 80% | `make coverage` | ✅ |\r\n| Type checks | `make mypy` | ✅ |\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n- [x] Signed commits (`git commit -s`)",
+  "reasoning": "## 🔗 Related Issue\r\nCloses #2229\r\n\r\n## 📝 Summary\r\nThis PR implements **Phase 1: Complete Embedding & Vector Search Infrastructure** for semantic tool discovery in the MCP Gateway. This enables natural-language queries to find relevant tools (e.g., \"database operations\" → returns DB-related tools).\r\n\r\n## 🚀 Key Changes\r\n\r\n### 1. **Embedding Service** (`mcpgateway/services/embedding_service.py`) \r\n-  Multi-provider support: OpenAI (`text-embedding-3-small`), Mistral, and local models\r\n-  Async embedding generation with configurable dimensions (default: 1536)\r\n-  Lazy initialization with provider factory pattern\r\n-  Batch processing (`batch_embed_tools()`, `batch_embed_texts()`)\r\n-  Tool metadata extraction (`prepare_tool_text()`)\r\n-  Environment-based configuration via `settings.embedding_provider`\r\n\r\n### 2. **Vector Search Service** (`mcpgateway/services/vector_search_service.py`)\r\n-  **Full PostgreSQL+pgvector implementation** with HNSW indexing\r\n-  **SQLite fallback** using numpy for d",
+  "confidence": 0.9,
+  "related_services": [],
+  "contributors": [
+    "crivetimihai",
+    "AbdulR11",
+    "Copilot",
+    "copilot-pull-request-reviewer[bot]"
+  ],
+  "tags": [
+    "COULD",
+    "enhancement",
+    "docker",
+    "tcd",
+    "rest",
+    "database",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "aada50cf-f2d9-4c23-a7e8-57405d92de60",
+      "source_type": "pr",
+      "source_id": "2995",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/2995",
+      "contributor": "AbdulR11",
+      "timestamp": "2026-02-17T09:48:59Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2995.json"
+    }
+  ],
+  "timestamp": "2026-02-17T09:48:59Z",
+  "created_at": "2026-05-17T17:23:43.123363",
+  "updated_at": "2026-05-17T17:23:43.123365",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:43.123799",
+    "artifact_type": "decisions",
+    "artifact_id": "389e3b6b-5c36-4afc-9a6b-4328bb7fdc4e"
+  }
+}

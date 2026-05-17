@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4470,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4470"
+  },
+  "metadata": {
+    "title": "perf: speed up content pattern scans",
+    "state": "closed",
+    "created_at": "2026-04-27T13:49:58+00:00",
+    "updated_at": "2026-05-10T08:47:22+00:00",
+    "closed_at": "2026-05-10T08:47:20+00:00",
+    "merged_at": "2026-05-10T08:47:20+00:00",
+    "author": "lucarlig",
+    "labels": [
+      "python",
+      "performance",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\nNone\n\n---\n\n## 📝 Summary\nSpeeds up content security pattern validation by using direct compiled-regex searches for the built-in safe pattern set while preserving the soft timeout wrapper for custom configured regexes.\n\nAdds a bounded cache for successful clean pattern validations, makes the cache size configurable, and updates docs to describe the clean-result cache behavior.\n\nThe repeated clean-content gains apply when identical normalized clean content is submitted within the same process. Unique clean-content gains come from avoiding the thread-per-regex timeout wrapper on the built-in pattern set. Custom configured pattern lists still use the existing soft timeout wrapper for ReDoS protection, so they do not take the direct-scan fast path.\n\n---\n\n## 📊 Benchmarks\n\nThree benchmark types were run locally with Python 3.12 using `tests/performance/test_content_security_benchmark.py`.\n\n### 1. Service latency microbenchmark\n\nDirectly times `ContentSecurityService.detect_malicious_patterns()` for clean content. This isolates the validator itself and excludes HTTP, auth, DB, and serialization overhead.\n\n| Clean content case | `origin/main` | This branch first scan | First-scan diff | This branch repeated clean cache hit | Cache-hit diff |\n|--------------------|---------------|------------------------|-----------------|--------------------------------------|----------------|\n| Small text | mean `0.608ms` | first `0.036ms` | `16.9x` faster | mean `0.004ms` | `152.0x` faster |\n| 10KB prompt | mean `1.331ms` | first `0.632ms` | `2.1x` faster | mean `0.032ms` | `41.6x` faster |\n| 100KB resource | mean `6.54ms` | first `5.94ms` | `1.1x` faster | mean `0.277ms` | `23.6x` faster |\n\nHow to run from the PR branch:\n\n```bash\nuv run python tests/performance/test_content_security_benchmark.py --mode latency\n```\n\nThe harness imports `ContentSecurityService`, scans small/10KB/100KB clean strings, records first-scan time, then repeats the same clean input to measure cache-hit latency. To compare against main, run the same command from an `origin/main` checkout.\n\n### 2. Service RPS microbenchmark\n\nDirectly measures validator operations/sec for clean content. This isolates validation throughput and excludes HTTP, auth, DB, and serialization overhead.\n\n| Clean content case | `origin/main` | This branch | Diff |\n|--------------------|---------------|-------------|------|\n| Small text, uncached | `2,354 rps` | `227,599 rps` | `96.7x` |\n| Small text, repeated | `2,348 rps` | `506,350 rps` | `215.7x` |\n| 10KB prompt, uncached | `780 rps` | `1,361 rps` | `1.7x` |\n| 10KB prompt, repeated | `783 rps` | `88,252 rps` | `112.8x` |\n| 100KB resource, uncached | `132 rps` | `145 rps` | `1.1x` |\n| 100KB resource, repeated | `123 rps` | `10,965 rps` | `89.0x` |\n\nHow to run from the PR branch:\n\n```bash\nuv run python tests/performance/test_content_security_benchmark.py --mode service-rps\n```\n\nThe harness imports `ContentSecurityService`, disables the clean-result cache for uncached cases, enables it for repeated cases, and reports median ops/sec over five runs. To compare against main, run the same command from an `origin/main` checkout.\n\n### 3. HTTP end-to-end RPS benchmark\n\nMeasured on 2026-04-28 against current `origin/main` (`6ec1992be`). This uses a live uvicorn server, admin JWT authentication, temporary SQLite database, and `POST /prompts` with unique prompt names. FastAPI routing, auth/RBAC middleware, DB write, prompt service, template validation, content security scan, and response serialization are all in path.\n\n| HTTP benchmark case | `origin/main` | This branch | Diff |\n|---------------------|---------------|-------------|------|\n| Small repeated clean prompt | `162.2 rps` | `194.2 rps` | `1.20x` / `+19.8%` |\n| 10KB repeated clean prompt | `64.1 rps` | `70.7 rps` | `1.10x` / `+10.4%` |\n| 10KB unique clean prompt | `60.3 rps` | `64.0 rps` | `1.06x` / `+6.0%` |\n\nHow to run from the PR branch:\n\n```bash\nuv run python tests/performance/test_content_security_benchmark.py --mode http-e2e\n```\n\nTo compare against main, run the same command from an `origin/main` checkout. The HTTP harness starts uvicorn with:\n\n```bash\nAUTH_REQUIRED=true \\\nMCP_REQUIRE_AUTH=true \\\nMCPGATEWAY_UI_ENABLED=false \\\nMCPGATEWAY_ADMIN_API_ENABLED=false \\\nDATABASE_URL=sqlite:////tmp/<temp-db>.db \\\nJWT_SECRET_KEY=e2e-benchmark-secret-key-with-minimum-32-bytes \\\nBASIC_AUTH_PASSWORD=StrongPass123! \\\nAUTH_ENCRYPTION_SECRET=e2e-benchmark-encryption-secret-32-bytes \\\nLOG_LEVEL=ERROR\n```\n\nIt generates an admin JWT with `python -m mcpgateway.utils.create_jwt_token`, warms up each case, then reports median RPS over five measured rounds.\n\n---\n\n## 🏷️ Type of Change\n- [ ] Bug fix\n- [x] Feature / Enhancement\n- [x] Documentation\n- [ ] Refactor\n- [ ] Chore (deps, CI, tooling)\n- [ ] Other (describe below)\n\n---\n\n## 🧪 Verification\n\n| Check                     | Command         | Status |\n|---------------------------|-----------------|--------|\n| E2E suite                 | `uv run pytest tests/e2e -q` | Passed; environment-dependent tests skipped |\n| HTTP RPS benchmark        | `uv run python tests/performance/test_content_security_benchmark.py --mode http-e2e` against `origin/main` and this branch | Passed |\n| Lint suite                | `uv run ruff check docs/docs/manage/securing.md mcpgateway/services/content_security.py mcpgateway/config.py tests/unit/mcpgateway/services/test_content_pattern_detection.py` | Passed |\n| Unit tests                | `uv run pytest tests/unit/mcpgateway/services/test_content_security.py tests/unit/mcpgateway/services/test_content_pattern_detection.py tests/unit/mcpgateway/test_config.py -q` | Passed |\n| Secrets scan              | `make detect-secrets-scan` | Passed |\n| Coverage ≥ 80%            | Not run | Not checked |\n\n---\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] Tests added/updated for changes\n- [x] Documentation updated (if applicable)\n- [x] No secrets or credentials committed\n\n---\n\n## 📓 Notes (optional)\nThe cache stores only successful clean validation results. Malicious matches are still evaluated on every request and are not cached.\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "bc7f50378e456976beb2b4d1e9cb6610f40e4c20",
+      "message": "perf: speed up content pattern scans\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-27T13:18:56+00:00"
+    },
+    {
+      "sha": "b5a0281a8ce40c85bafd9461c67c52c742064e7d",
+      "message": "refactor: address council review findings for content security perf\n\n- Fix cache insertion race condition under concurrent duplicate keys\n- Use null delimiter in pattern signature to avoid newline ambiguity\n- Soften timeout docstrings to accurately reflect GIL limitation\n- Correct validation mode descriptions (strict/moderate are identical)\n- Replace MagicMock with real re.Pattern proxy in tests\n- Update docs: accurate default patterns, PII-safe logging, remove\n  misleading 'context-aware' wording\n- Fix benchmark docstring path\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T08:28:57+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 595,
+  "deletions": 122,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:17.495571",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:17.496723",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4470,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4470.json"
+  }
+}

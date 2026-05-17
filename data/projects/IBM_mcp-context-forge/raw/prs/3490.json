@@ -1,0 +1,122 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3490,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3490"
+  },
+  "metadata": {
+    "title": "fix(ui): display custom auth headers when editing/viewing tools",
+    "state": "closed",
+    "created_at": "2026-03-05T07:29:43+00:00",
+    "updated_at": "2026-03-07T15:45:46+00:00",
+    "closed_at": "2026-03-07T15:45:45+00:00",
+    "merged_at": "2026-03-07T15:45:45+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "bug",
+      "ui",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "MohanLaksh"
+    ]
+  },
+  "description": "# Fix Custom Headers Not Visible When Editing/Viewing Tools\r\n\r\n## Description\r\nFixes issue #3439 where custom authentication headers were not visible when editing or viewing Tools in the admin UI.\r\n\r\n## Problem\r\nWhen adding a Tool with Authentication Type = Custom Headers, the headers were not displayed in:\r\n1. Edit Tool form - preventing users from modifying existing headers\r\n2. View Tool modal - preventing users from seeing what headers were configured\r\n\r\n## Root Cause\r\nMultiple issues in the authentication data flow:\r\n1. **Backend** (`admin.py`): Was passing individual auth fields directly to `ToolCreate` schema instead of building encrypted `AuthenticationValues` objects\r\n2. **Service Layer** (`tool_service.py`): Only returned the first header in legacy format, not all headers\r\n3. **Schema** (`schemas.py`): Missing `authHeaders` and `authHeadersUnmasked` array fields\r\n4. **Frontend** (`admin.js`): View modal only displayed first header instead of iterating through all headers\r\n\r\n## Changes Made\r\n\r\n### Backend (`mcpgateway/admin.py`)\r\n- Modified `admin_add_tool()` (lines 10697-10745): Build auth dictionary from form fields, encrypt using `encode_auth()`, create proper `AuthenticationValues` object\r\n- Modified `admin_edit_tool()` (lines 10866-10914): Same auth object building logic\r\n- Supports basic, bearer, and authheaders (multi-header format)\r\n\r\n### Service Layer (`mcpgateway/services/tool_service.py`)\r\n- Modified `convert_tool_to_read()` (lines 872-893): Returns ALL headers in `authHeaders` and `authHeadersUnmasked` arrays\r\n- Maintains backward compatibility with legacy single-header fields (`auth_header_key`, `auth_header_value`)\r\n\r\n### Schema (`mcpgateway/schemas.py`)\r\n- Added `authHeaders: Optional[List[Dict[str, str]]]` field to `AuthenticationValues` (line 281)\r\n- Added `authHeadersUnmasked: Optional[List[Dict[str, str]]]` field (line 282)\r\n\r\n### Frontend (`mcpgateway/static/admin.js`)\r\n- Modified `editTool()` (lines 3831-3867): Loads all headers from `authHeadersUnmasked` or `authHeaders` array into edit form\r\n- Modified `viewTool()` (lines 14944-14966): Displays all headers in view modal using array iteration\r\n- **Bonus**: Added Tool ID display at top of View Tool modal (lines 15050-15053, 15218)\r\n\r\n## Testing\r\n- ✅ Manually tested adding Tool with multiple custom headers\r\n- ✅ Verified all headers visible in edit form\r\n- ✅ Verified all headers visible in view modal\r\n- ✅ Verified auth data correctly saved and encrypted\r\n- ✅ Verified backward compatibility with existing single-header tools\r\n\r\n## Backward Compatibility\r\nAll changes maintain backward compatibility:\r\n- Service layer returns both new array format (`authHeaders`) and legacy single-header fields\r\n- Frontend checks for both `authHeadersUnmasked` and `authHeaders` arrays\r\n- Existing tools with single headers continue to work\r\n\r\n## Files Changed\r\n- `mcpgateway/admin.py` (101 insertions, 5 deletions)\r\n- `mcpgateway/services/tool_service.py` (17 insertions, 2 deletions)\r\n- `mcpgateway/schemas.py` (6 insertions, 1 deletion)\r\n- `mcpgateway/static/admin.js` (18 insertions, 0 deletions)\r\n- `tests/unit/mcpgateway/test_admin.py` (201 insertions, 0 deletions)\r\n\r\n**Total**: 4 files changed, 124 insertions(+), 18 deletions(-)\r\n\r\nCloses #3439",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3895067550",
+      "author": "Nayana-R-Gowda",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-05T09:18:22+00:00",
+      "body": "Tested adding Tool with multiple custom headers\nVerified all headers visible in edit form\nVerified all headers visible in view modal\nVerified Tool ID is present in the view modal"
+    },
+    {
+      "id": "3895646844",
+      "author": "Nayana-R-Gowda",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-05T10:53:10+00:00",
+      "body": ""
+    },
+    {
+      "id": "3904834461",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T16:46:35+00:00",
+      "body": ""
+    },
+    {
+      "id": "3908957105",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-07T15:38:32+00:00",
+      "body": "LGTM. Rebased, reviewed for correctness/security/performance, strengthened tests to 100% differential coverage, fixed lint."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e742a3d80955013bfeea57057e06719ed3fa24d5",
+      "message": "fix: display custom headers in tool edit form\n\nWhen editing a Tool with Authentication Type = Custom Headers, the\ncustom headers were not being displayed in the edit form. This was\nbecause the editTool() function was missing the code to load the\nauth_headers array into the edit-auth-headers-container.\n\nThis fix adds the same logic used in editGateway() to:\n- Extract authHeadersUnmasked or authHeaders from tool.auth\n- Call loadAuthHeaders() to populate the container with masked values\n- Preserve backward compatibility with single header fields\n\nCloses #3439\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-03-04T06:42:48+00:00"
+    },
+    {
+      "sha": "e39b48dfe30c3ea1c78f1314ad01da264932b993",
+      "message": "fix: Custom headers not visible when editing/viewing Tools\n\nRoot cause: Multiple issues in the auth data flow:\n1. Backend was passing individual auth fields to ToolCreate schema instead of\n   building encrypted AuthenticationValues objects\n2. Service layer only returned first header (legacy format)\n3. Schema was missing multi-header array fields\n4. View modal only displayed first header\n\nChanges:\n- mcpgateway/admin.py: Build and encrypt auth objects in admin_add_tool() and\n  admin_edit_tool() using encode_auth()\n- mcpgateway/services/tool_service.py: Return all headers in authHeaders and\n  authHeadersUnmasked arrays in convert_tool_to_read()\n- mcpgateway/schemas.py: Add authHeaders and authHeadersUnmasked fields to\n  AuthenticationValues schema\n- mcpgateway/static/admin.js: Update viewTool() to display all headers, add\n  Tool ID display in view modal\n\nAll changes maintain backward compatibility with legacy single-header format.\n\nFixes #3439\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-03-05T07:22:35+00:00"
+    },
+    {
+      "sha": "9ae7043e91c4a06b5ab09908faf9ba5609040d76",
+      "message": "test: add coverage for authentication handling in tool add/edit\n\nAdd comprehensive tests for authentication handling code paths:\n- Basic auth (username/password)\n- Bearer token auth\n- Custom headers (multi-header format)\n- Custom headers (legacy single-header format)\n\nTests cover both admin_add_tool and admin_edit_tool\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-03-05T08:26:33+00:00"
+    },
+    {
+      "sha": "2178fc3d73dcc101f76ea7d4757f8041e204a56e",
+      "message": "refactor(ui): extract auth form helper, fix None string bug, remove authHeadersUnmasked\n\n- Extract _build_auth_obj_from_form() helper in admin.py, replacing two\n  verbatim 40-line duplicates in admin_add_tool and admin_edit_tool\n- Fix str(form.get('auth_headers')) → form.get(...) or '' at all 6\n  call sites to avoid truthy 'None' string from missing form fields\n- Remove authHeadersUnmasked from tool_service, schemas, and admin.js;\n  simplify JS to use authHeaders directly in both tool and gateway edit modals\n- Strengthen custom-headers test assertions to verify auth_type and\n  auth_value on the ToolCreate/ToolUpdate argument\n\nCloses #3490\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T16:44:26+00:00"
+    },
+    {
+      "sha": "374209162cad009b82bc530ffe84be3446c7e1af",
+      "message": "lint-web fix\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T18:07:51+00:00"
+    },
+    {
+      "sha": "cdb6dae0820ebd98c66ac7c6c4ece30725dad538",
+      "message": "test: strengthen auth test assertions and add coverage for edge cases\n\n- Add _build_auth_obj_from_form direct unit tests covering: no auth_type,\n  invalid JSON, missing credentials, and empty header keys\n- Strengthen basic/bearer admin tests to verify auth object fields and\n  decoded values instead of just checking mock.called\n- Add multi-header test for convert_tool_to_read to verify authHeaders\n  array format\n- Add authHeaders field assertions to existing single-header test\n- Fix missing blank line between test methods\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T14:39:15+00:00"
+    },
+    {
+      "sha": "e5a75a38dda89951b0e98905695d4e175ec2d1c2",
+      "message": "fix(lint): add missing docstring params for _build_auth_obj_from_form\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T15:15:23+00:00"
+    },
+    {
+      "sha": "b4aeca53b262b95decbbde3252673b0809912502",
+      "message": "update tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T15:45:25+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 418,
+  "deletions": 35,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:36.089259",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:36.090577",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3490,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3490.json"
+  }
+}
