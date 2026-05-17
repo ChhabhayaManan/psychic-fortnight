@@ -7,9 +7,66 @@ and shared state across pages.
 
 import streamlit as st
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 import json
 from datetime import datetime
+import threading
+
+class PipelineControl:
+    """Shared control state for background threads."""
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(PipelineControl, cls).__new__(cls)
+                cls._instance.stop_requested = False
+                cls._instance.active_tasks: Set[str] = set()
+                cls._instance.current_stage = 'idle'
+                cls._instance.error_message = ''
+            return cls._instance
+            
+    def request_stop(self):
+        with self._lock:
+            self.stop_requested = True
+            
+    def reset_stop(self):
+        with self._lock:
+            self.stop_requested = False
+            
+    def should_stop(self) -> bool:
+        with self._lock:
+            return self.stop_requested
+
+    def get_stage(self) -> str:
+        with self._lock:
+            return self.current_stage
+            
+    def set_stage(self, stage: str):
+        with self._lock:
+            self.current_stage = stage
+            
+    def get_error(self) -> str:
+        with self._lock:
+            return self.error_message
+            
+    def set_error(self, message: str):
+        with self._lock:
+            self.error_message = message
+            self.current_stage = 'error'
+
+    def register_task(self, task_name: str):
+        with self._lock:
+            self.active_tasks.add(task_name)
+            
+    def unregister_task(self, task_name: str):
+        with self._lock:
+            self.active_tasks.discard(task_name)
+            
+    def is_task_active(self, task_name: str) -> bool:
+        with self._lock:
+            return task_name in self.active_tasks
 
 
 class UIState:
@@ -81,12 +138,24 @@ class UIState:
                             existing_config[key.strip()] = value.strip()
             
             # Update with new config
-            existing_config.update({
+            updates = {
                 'GITHUB_TOKEN': config.get('github_token', ''),
                 'REPO_OWNER': config.get('repo_owner', ''),
                 'REPO_NAME': config.get('repo_name', ''),
                 'LLM_API_KEY': config.get('llm_api_key', ''),
-            })
+            }
+            if 'llm_provider' in config:
+                provider = config['llm_provider']
+                updates['LLM_PROVIDER'] = provider
+                api_key = config.get('llm_api_key', '')
+                if provider == "Gemini":
+                    updates['GEMINI_API_KEY'] = api_key
+                elif provider == "Groq":
+                    updates['GROQ_API_KEY'] = api_key
+                elif provider == "Watsonx":
+                    updates['WATSONX_API_KEY'] = api_key
+
+            existing_config.update(updates)
             
             # Write back to .env
             with open(env_path, 'w') as f:
@@ -138,6 +207,8 @@ class UIState:
                                 config['repo_name'] = value
                             elif key == 'LLM_API_KEY':
                                 config['llm_api_key'] = value
+                            elif key == 'LLM_PROVIDER':
+                                config['llm_provider'] = value
         except Exception as e:
             st.warning(f"Could not load configuration: {e}")
         
@@ -157,7 +228,6 @@ class UIState:
             'extracted': base / 'extracted',
             'embeddings': base / 'embeddings' / 'chroma',
             'graph': base / 'graph',
-            'snapshots': base / 'snapshots',
             'state': base / 'state',
         }
     

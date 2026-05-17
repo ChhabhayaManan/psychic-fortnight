@@ -6,7 +6,6 @@ from typing import Any, Optional
 
 from app.memory.graph_store import GraphStore
 from app.memory.json_store import JsonStore
-from app.memory.snapshots import SnapshotStore
 from app.orchestration.state import QueryState
 from app.retrieval.hybrid import HybridRetriever
 
@@ -19,13 +18,11 @@ class RetrievalOrchestrator:
         json_store: JsonStore,
         vector_store: Optional[Any] = None,
         graph_store: Optional[GraphStore] = None,
-        snapshot_store: Optional[SnapshotStore] = None,
     ):
         self.hybrid_retriever = HybridRetriever(
             json_store=json_store,
             vector_store=vector_store,
             graph_store=graph_store,
-            snapshot_store=snapshot_store,
         )
 
     def retrieve(self, state: QueryState) -> QueryState:
@@ -33,7 +30,6 @@ class RetrievalOrchestrator:
         result = self.hybrid_retriever.search(state.request, state.retrieval_plan)
         state.timeline_results = result.timeline_context
         state.graph_results = result.graph_context
-        state.snapshot_context = result.snapshot_context
         state.evidence = result.evidence
         state.reranked_evidence = result.evidence
         state.limitations.extend(

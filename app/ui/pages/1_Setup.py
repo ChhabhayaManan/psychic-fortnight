@@ -74,6 +74,12 @@ def main():
             help="Generate a token at https://github.com/settings/tokens with 'repo' scope"
         )
         
+        verify_ssl = st.checkbox(
+            "Verify SSL Certificates",
+            value=config.get('verify_ssl', True),
+            help="Uncheck this if you are behind a corporate proxy that uses self-signed certificates"
+        )
+        
         if github_token:
             st.info(f"Token: {UIState.mask_token(github_token)}")
         
@@ -118,10 +124,13 @@ def main():
                 'github_token': github_token,
                 'repo_owner': repo_owner,
                 'repo_name': repo_name,
+                'verify_ssl': verify_ssl,
                 'llm_api_key': config.get('llm_api_key', ''),
             }
             
             if UIState.save_config(config_data):
+                from app.config.settings import reload_settings
+                reload_settings()
                 st.success("✅ Configuration saved successfully!")
                 st.info("You can now proceed to the Processing Dashboard to start ingestion.")
                 
@@ -145,7 +154,8 @@ def main():
         
         llm_provider = st.selectbox(
             "LLM Provider",
-            options=["Watsonx", "OpenAI", "Azure OpenAI", "Local Model"],
+            options=["Watsonx", "Gemini", "Groq", "OpenAI", "Azure OpenAI", "Local Model"],
+            index=["Watsonx", "Gemini", "Groq", "OpenAI", "Azure OpenAI", "Local Model"].index(config.get('llm_provider', 'Watsonx')) if config.get('llm_provider', 'Watsonx') in ["Watsonx", "Gemini", "Groq", "OpenAI", "Azure OpenAI", "Local Model"] else 0,
             help="Select your LLM provider"
         )
         
@@ -171,11 +181,15 @@ def main():
             'repo_owner': config.get('repo_owner', ''),
             'repo_name': config.get('repo_name', ''),
             'llm_api_key': llm_api_key,
+            'llm_provider': llm_provider,
         }
         
         if UIState.save_config(config_data):
+            from app.config.settings import reload_settings
+            reload_settings()
             st.success("✅ LLM configuration saved successfully!")
             st.session_state.llm_api_key = llm_api_key
+            st.session_state.llm_provider = llm_provider
         else:
             st.error("❌ Failed to save LLM configuration")
     
@@ -196,6 +210,41 @@ def main():
     st.markdown("---")
     st.header("🔧 Advanced Settings")
     
+    with st.expander("Discovery Limits (Testing)"):
+        st.markdown("""
+        Limit the number of items to discover for testing purposes or very large repositories.
+        Set to 0 or leave empty for no limit.
+        """)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            pr_limit = st.number_input(
+                "Max PRs",
+                min_value=0,
+                max_value=10000,
+                value=config.get('pr_limit', 50),
+                help="Maximum number of PRs to discover"
+            )
+        
+        with col2:
+            issue_limit = st.number_input(
+                "Max Issues",
+                min_value=0,
+                max_value=10000,
+                value=config.get('issue_limit', 50),
+                help="Maximum number of issues to discover (excluding PRs)"
+            )
+        
+        if st.button("💾 Save Limits"):
+            config_data = UIState.load_config()
+            config_data['pr_limit'] = pr_limit
+            config_data['issue_limit'] = issue_limit
+            if UIState.save_config(config_data):
+                st.success("✅ Limits saved!")
+            else:
+                st.error("❌ Failed to save limits")
+
     with st.expander("Rate Limiting"):
         st.markdown("""
         Configure rate limiting for GitHub API calls to avoid hitting rate limits.
@@ -208,7 +257,7 @@ def main():
                 "Requests per Period",
                 min_value=1,
                 max_value=1000,
-                value=100,
+                value=config.get('rate_limit_requests', 100),
                 help="Maximum number of requests allowed per period"
             )
         
@@ -217,9 +266,18 @@ def main():
                 "Period (seconds)",
                 min_value=1,
                 max_value=3600,
-                value=60,
+                value=config.get('rate_limit_period', 60),
                 help="Time period for rate limiting in seconds"
             )
+        
+        if st.button("💾 Save Rate Limits"):
+            config_data = UIState.load_config()
+            config_data['rate_limit_requests'] = rate_limit_requests
+            config_data['rate_limit_period'] = rate_limit_period
+            if UIState.save_config(config_data):
+                st.success("✅ Rate limits saved!")
+            else:
+                st.error("❌ Failed to save rate limits")
     
     with st.expander("Worker Configuration"):
         st.markdown("""
@@ -233,7 +291,7 @@ def main():
                 "Ingestion Workers",
                 min_value=1,
                 max_value=20,
-                value=5,
+                value=config.get('ingestion_workers', 5),
                 help="Number of concurrent workers for GitHub ingestion"
             )
         
@@ -242,9 +300,18 @@ def main():
                 "Extraction Workers",
                 min_value=1,
                 max_value=20,
-                value=3,
+                value=config.get('extraction_workers', 3),
                 help="Number of concurrent workers for artifact extraction"
             )
+            
+        if st.button("💾 Save Worker Config"):
+            config_data = UIState.load_config()
+            config_data['ingestion_workers'] = ingestion_workers
+            config_data['extraction_workers'] = extraction_workers
+            if UIState.save_config(config_data):
+                st.success("✅ Worker configuration saved!")
+            else:
+                st.error("❌ Failed to save worker configuration")
     
     # Configuration Summary
     st.markdown("---")

@@ -101,7 +101,7 @@ class VectorStore:
                 metadatas=[metadata]
             )
 
-            logger.info(
+            logger.debug(
                 "Artifact upserted to vector store",
                 artifact_type=artifact_type,
                 artifact_id=artifact.id

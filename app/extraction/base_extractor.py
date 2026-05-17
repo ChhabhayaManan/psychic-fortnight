@@ -234,10 +234,9 @@ class BaseExtractor(ABC):
             source_id: Source identifier
         """
         logger.info(
-            f"Extracted {artifact_type}",
+            f"Extracted {artifact_type} -- {count}",
             count=count,
-            source_id=source_id,
-            extractor=self.__class__.__name__
+            source_id=source_id
         )
 
 

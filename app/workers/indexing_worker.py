@@ -4,7 +4,6 @@ from typing import Any, Dict, Optional
 
 from app.memory.graph_store import GraphStore
 from app.memory.json_store import JsonStore
-from app.memory.snapshots import SnapshotStore
 from app.memory.vector_store import VectorStore
 from app.utils.logging import get_logger
 
@@ -15,7 +14,7 @@ class IndexingWorker:
     """
     Indexing worker.
 
-    Updates vector store, graph store, and snapshots after
+    Updates vector store, graph store after
     artifacts are extracted and stored.
     """
 
@@ -24,7 +23,7 @@ class IndexingWorker:
         json_store: JsonStore,
         vector_store: Optional[VectorStore] = None,
         graph_store: Optional[GraphStore] = None,
-        snapshot_store: Optional[SnapshotStore] = None
+        stop_check: Optional[Callable[[], bool]] = None
     ):
         """
         Initialize indexing worker.
@@ -33,18 +32,17 @@ class IndexingWorker:
             json_store: JsonStore for reading artifacts
             vector_store: VectorStore for embeddings (optional)
             graph_store: GraphStore for relationships (optional)
-            snapshot_store: SnapshotStore for summaries (optional)
+            stop_check: Optional callback to check if indexing should stop
         """
         self.json_store = json_store
         self.vector_store = vector_store
         self.graph_store = graph_store
-        self.snapshot_store = snapshot_store
+        self.stop_check = stop_check
 
         logger.info(
             "Indexing worker initialized",
             has_vector_store=vector_store is not None,
             has_graph_store=graph_store is not None,
-            has_snapshot_store=snapshot_store is not None
         )
 
     async def index_all_artifacts(self) -> Dict[str, Any]:
@@ -63,7 +61,6 @@ class IndexingWorker:
             "vector_failed": 0,
             "graph_failed": 0,
             "failures": [],
-            "snapshot_refreshed": False
         }
 
         # Get all artifact types
@@ -87,14 +84,6 @@ class IndexingWorker:
             stats["graph_failed"] += type_stats.get("graph_failed", 0)
             stats["failures"].extend(type_stats.get("failures", []))
 
-        # Refresh snapshot
-        if self.snapshot_store:
-            try:
-                self.snapshot_store.refresh_project_summary()
-                stats["snapshot_refreshed"] = True
-            except Exception as e:
-                logger.error("Failed to refresh snapshot", error=str(e))
-
         logger.info("Full indexing complete", **stats)
 
         return stats
@@ -109,8 +98,6 @@ class IndexingWorker:
         Returns:
             Indexing statistics for this type
         """
-        logger.info(f"Indexing {artifact_type}")
-
         stats = {
             "count": 0,
             "vector_indexed": 0,
@@ -128,8 +115,14 @@ class IndexingWorker:
             if not artifact_ids:
                 return stats
 
+            logger.info(f"Indexing {artifact_type} -- {len(artifact_ids)} items", count=len(artifact_ids))
+
             # Index each artifact
             for artifact_id in artifact_ids:
+                if self.stop_check and self.stop_check():
+                    logger.info("Stop requested, halting indexing")
+                    break
+                    
                 try:
                     # Load artifact
                     artifact = self.json_store.get_artifact(artifact_type, artifact_id)
@@ -150,8 +143,7 @@ class IndexingWorker:
                                 "error": str(e)
                             })
                             logger.error(
-                                "Failed to index to vector store",
-                                artifact_type=artifact_type,
+                                "Vector indexing failed",
                                 artifact_id=artifact_id,
                                 error=str(e)
                             )
@@ -173,16 +165,14 @@ class IndexingWorker:
                                 "error": str(e)
                             })
                             logger.error(
-                                "Failed to index to graph store",
-                                artifact_type=artifact_type,
+                                "Graph indexing failed",
                                 artifact_id=artifact_id,
                                 error=str(e)
                             )
 
                 except Exception as e:
                     logger.error(
-                        "Failed to index artifact",
-                        artifact_type=artifact_type,
+                        "Indexing failed",
                         artifact_id=artifact_id,
                         error=str(e)
                     )
@@ -192,7 +182,7 @@ class IndexingWorker:
                 self.graph_store.save()
 
             logger.info(
-                f"Indexed {artifact_type}",
+                f"Indexed {artifact_type} complete",
                 count=stats["count"],
                 vector_indexed=stats["vector_indexed"],
                 graph_indexed=stats["graph_indexed"]
@@ -258,24 +248,3 @@ class IndexingWorker:
             )
             return False
 
-    async def refresh_snapshot(self) -> bool:
-        """
-        Refresh project snapshot.
-
-        Returns:
-            True if successful, False otherwise
-        """
-        if not self.snapshot_store:
-            logger.warning("No snapshot store configured")
-            return False
-
-        try:
-            self.snapshot_store.refresh_project_summary()
-            logger.info("Snapshot refreshed")
-            return True
-        except Exception as e:
-            logger.error("Failed to refresh snapshot", error=str(e))
-            return False
-
-
-# Made with Bob

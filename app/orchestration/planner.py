@@ -46,7 +46,6 @@ class QueryPlanner:
             use_semantic=True,
             use_timeline=use_timeline,
             use_graph=use_graph,
-            use_snapshot=query_type == "general",
             metadata={"planner": "deterministic"},
         )
 

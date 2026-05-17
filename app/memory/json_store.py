@@ -70,7 +70,7 @@ class JsonStore:
         for directory in self.directories.values():
             directory.mkdir(parents=True, exist_ok=True)
 
-        logger.info("JSON store initialized", base_path=str(base_path))
+        logger.debug("JSON store initialized", base_path=str(base_path))
 
     def store_artifact(
         self,
@@ -111,7 +111,7 @@ class JsonStore:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(artifact_dict, f, indent=2, ensure_ascii=False)
 
-        logger.info(
+        logger.debug(
             "Artifact stored",
             artifact_type=artifact_type,
             artifact_id=artifact.id,

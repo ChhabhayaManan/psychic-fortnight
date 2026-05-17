@@ -118,7 +118,7 @@ Once processing is complete, you can:
 - Ingestion progress tracking
 - Extraction statistics by artifact type
 - Processing queue status
-- Indexing status (vector store, graph, snapshots)
+- Indexing status (vector store, graph)
 - Worker controls (pause/resume)
 - Auto-refresh option
 
@@ -268,7 +268,6 @@ The UI integrates with backend services through `app/ui/utils/api.py`:
 - **BackendAPI**: Main interface to backend
 - **IngestionStateManager**: Ingestion status tracking
 - **JsonStore**: Artifact storage access
-- **SnapshotStore**: Project summary access
 - **GraphStore**: Knowledge graph access
 
 ## Performance Tips

@@ -1,7 +1,7 @@
 """GitHub repository ingestion implementation."""
 
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.ingestion.base import BaseIngestion
 from app.ingestion.github.client import GitHubClient
@@ -88,9 +88,13 @@ class GitHubIngestion(BaseIngestion):
             )
             return False
 
-    async def discover(self) -> DiscoveryResult:
+    async def discover(self, pr_limit: Optional[int] = None, issue_limit: Optional[int] = None) -> DiscoveryResult:
         """
-        Discover all PRs and Issues.
+        Discover PRs and Issues.
+
+        Args:
+            pr_limit: Max PRs to discover (None for all)
+            issue_limit: Max Issues to discover (None for all)
 
         Returns:
             DiscoveryResult with PR and Issue numbers
@@ -104,22 +108,30 @@ class GitHubIngestion(BaseIngestion):
 
         logger.info(
             "Starting discovery",
-            source_id=self.get_source_id()
+            source_id=self.get_source_id(),
+            pr_limit=pr_limit,
+            issue_limit=issue_limit
         )
 
         # Discover PRs
+        logger.info(f"Discovering pull requests (limit={pr_limit})...")
         prs = await self.client.list_pull_requests(
             self._repository,
-            state="all"
+            state="all",
+            limit=pr_limit
         )
         pr_numbers = [pr.number for pr in prs]
+        logger.info(f"Discovered {len(pr_numbers)} pull requests")
 
         # Discover Issues (excluding PRs)
+        logger.info(f"Discovering issues (limit={issue_limit})...")
         issues = await self.client.list_issues(
             self._repository,
-            state="all"
+            state="all",
+            limit=issue_limit
         )
         issue_numbers = [issue.number for issue in issues]
+        logger.info(f"Discovered {len(issue_numbers)} issues")
 
         # Create discovery result
         result = DiscoveryResult(

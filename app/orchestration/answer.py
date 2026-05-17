@@ -6,7 +6,6 @@ from typing import Any, Optional
 
 from app.memory.graph_store import GraphStore
 from app.memory.json_store import JsonStore
-from app.memory.snapshots import SnapshotStore
 from app.orchestration.agents import AnswerAgent
 from app.orchestration.state import QueryRequest, QueryResponse, QueryState
 
@@ -35,7 +34,6 @@ def answer_query(
     json_store: Optional[JsonStore] = None,
     vector_store: Optional[Any] = None,
     graph_store: Optional[GraphStore] = None,
-    snapshot_store: Optional[SnapshotStore] = None,
 ) -> QueryResponse:
     """Run the Step 4 backend query workflow and return a structured response."""
     if isinstance(request, dict):
@@ -51,7 +49,6 @@ def answer_query(
         json_store=json_store,
         vector_store=vector_store,
         graph_store=graph_store,
-        snapshot_store=snapshot_store,
     )
     final_state = workflow.invoke(QueryState(request=request, query=request.query))
     if isinstance(final_state, dict):

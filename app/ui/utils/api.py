@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from app.models.ingestion_state import IngestionStateManager, ProcessingQueue
 from app.memory.json_store import JsonStore
-from app.memory.snapshots import SnapshotStore
 from app.memory.graph_store import GraphStore
 
 
@@ -35,7 +34,6 @@ class BackendAPI:
         
         # Initialize stores
         self.json_store = JsonStore(self.data_path / 'extracted')
-        self.snapshot_store = SnapshotStore(self.data_path / 'snapshots')
         
         # Initialize state manager
         self.state_manager = IngestionStateManager(self.data_path / 'state')
@@ -51,19 +49,22 @@ class BackendAPI:
             Status dictionary or None if not found
         """
         try:
-            state = self.state_manager.load_source_state(source_id)
+            state = self.state_manager.load_state(source_id)
             if state:
+                status = "Completed" if state.is_complete else "In Progress"
+                if state.total_count == 0:
+                    status = "Not Started"
                 return {
                     'source_id': state.source_id,
-                    'status': state.status,
-                    'discovered_count': state.discovered_count,
+                    'status': status,
+                    'discovered_count': state.total_count,
                     'queued_count': state.queued_count,
                     'stored_count': state.stored_count,
                     'skipped_count': state.skipped_count,
                     'failed_count': state.failed_count,
-                    'started_at': state.started_at,
-                    'completed_at': state.completed_at,
-                    'last_updated': state.last_updated,
+                    'started_at': state.discovered_at,
+                    'completed_at': state.discovered_at if state.is_complete else None,
+                    'last_updated': state.discovered_at,
                 }
             return None
         except Exception as e:
@@ -79,11 +80,11 @@ class BackendAPI:
         """
         try:
             queue = ProcessingQueue(self.data_path / 'state')
-            items = queue.list_pending()
+            items = queue.peek(10)
             
             return {
-                'pending_count': len(items),
-                'items': items[:10],  # First 10 items
+                'pending_count': queue.size(),
+                'items': [item.to_dict() for item in items],
             }
         except Exception as e:
             print(f"Error getting queue status: {e}")
@@ -109,18 +110,6 @@ class BackendAPI:
         
         return stats
     
-    def get_project_snapshot(self) -> Optional[Dict[str, Any]]:
-        """
-        Get current project snapshot.
-        
-        Returns:
-            Snapshot dictionary or None if not available
-        """
-        try:
-            return self.snapshot_store.get_latest_snapshot()
-        except Exception as e:
-            print(f"Error getting snapshot: {e}")
-            return None
     
     def get_decisions(self, 
                      min_confidence: float = 0.0,
@@ -264,8 +253,12 @@ class BackendAPI:
         """
         try:
             from github import Github
+            from app.ui.utils.state import UIState
             
-            g = Github(token)
+            config = UIState.load_config()
+            verify_ssl = config.get('verify_ssl', True)
+            
+            g = Github(token, verify=verify_ssl)
             repository = g.get_repo(f"{owner}/{repo}")
             
             # Try to access basic info
@@ -289,11 +282,134 @@ class BackendAPI:
             Tuple of (success, message)
         """
         try:
-            # This would trigger the actual ingestion workflow
-            # For now, return a placeholder
-            return True, "Ingestion started (implementation pending)"
+            import threading
+            import asyncio
+            from app.ingestion.github.client import GitHubClient
+            from app.memory.raw_storage import RawDataStorage
+            from app.models.ingestion_state import ProcessingQueue
+            from app.ingestion.github.workflow import GitHubIngestionWorkflow
+            from app.utils.rate_limiter import RateLimiter
+            from app.ui.utils.state import UIState
+            
+            config = UIState.load_config()
+            verify_ssl = config.get('verify_ssl', True)
+            pr_limit = config.get('pr_limit')
+            issue_limit = config.get('issue_limit')
+            ingestion_workers = config.get('ingestion_workers', 3)
+            rate_limit_requests = config.get('rate_limit_requests', 100)
+            rate_limit_period = config.get('rate_limit_period', 60)
+            
+            # Convert 0 to None for no limit
+            if pr_limit == 0: pr_limit = None
+            if issue_limit == 0: issue_limit = None
+            
+            def run_workflow_in_background():
+                import traceback
+                from app.utils.logging import get_logger
+                logger = get_logger(__name__)
+                
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    logger.info(f"Starting ingestion workflow for {owner}/{repo}")
+                    rate_limiter = RateLimiter(max_requests=rate_limit_requests, period=rate_limit_period)
+                    client = GitHubClient(token=token, rate_limiter=rate_limiter, verify_ssl=verify_ssl)
+                    storage = RawDataStorage(self.data_path / 'raw')
+                    processing_queue = ProcessingQueue(self.data_path / 'state')
+                    
+                    workflow = GitHubIngestionWorkflow(
+                        owner=owner,
+                        repo=repo,
+                        client=client,
+                        storage=storage,
+                        state_manager=self.state_manager,
+                        processing_queue=processing_queue,
+                        max_workers=ingestion_workers,
+                        pr_limit=pr_limit,
+                        issue_limit=issue_limit
+                    )
+                    
+                    logger.info("Workflow initialized, starting execution")
+                    final_state = loop.run_until_complete(workflow.run())
+                    logger.info(f"Workflow completed successfully. Stored: {final_state.stored_count}, Failed: {final_state.failed_count}")
+                except Exception as e:
+                    logger.error(f"Workflow failed: {e}")
+                    logger.error(traceback.format_exc())
+                    # Save error to metadata
+                    try:
+                        from app.models.ingestion_state import IngestionSourceState
+                        from datetime import datetime
+                        error_state = IngestionSourceState(
+                            source_id=f"{owner}_{repo}",
+                            repository=f"{owner}/{repo}",
+                            discovered_at=datetime.now().isoformat(),
+                            metadata={"error": str(e), "failed_at": datetime.now().isoformat(), "status": "error"}
+                        )
+                        self.state_manager.save_state(error_state)
+                    except Exception as save_error:
+                        logger.error(f"Failed to save error state: {save_error}")
+                finally:
+                    try:
+                        if 'client' in locals():
+                            client.close()
+                    except Exception as close_error:
+                        logger.error(f"Failed to close client: {close_error}")
+                    loop.close()
+                    
+            thread = threading.Thread(target=run_workflow_in_background)
+            thread.daemon = True
+            thread.start()
+            
+            return True, f"Ingestion started for {owner}/{repo}"
         except Exception as e:
             return False, f"Failed to start ingestion: {str(e)}"
+    
+    def start_extraction(self) -> Tuple[bool, str]:
+        """
+        Start extraction process for queued items.
+        
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            import threading
+            import asyncio
+            from app.workers.extraction_worker import ExtractionWorker
+            from app.models.ingestion_state import ProcessingQueue
+            
+            def run_extraction_in_background():
+                import traceback
+                from app.utils.logging import get_logger
+                logger = get_logger(__name__)
+                
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    logger.info("Starting extraction worker")
+                    processing_queue = ProcessingQueue(self.data_path / 'state')
+                    
+                    worker = ExtractionWorker(
+                        json_store=self.json_store,
+                        processing_queue=processing_queue,
+                        max_workers=3
+                    )
+                    
+                    logger.info("Extraction worker initialized, starting processing")
+                    stats = loop.run_until_complete(worker.process_all())
+                    logger.info(f"Extraction completed. Processed: {stats['processed']}, Succeeded: {stats['succeeded']}, Failed: {stats['failed']}")
+                except Exception as e:
+                    logger.error(f"Extraction failed: {e}")
+                    logger.error(traceback.format_exc())
+                finally:
+                    loop.close()
+            
+            thread = threading.Thread(target=run_extraction_in_background)
+            thread.daemon = True
+            thread.start()
+            
+            return True, "Extraction started - processing queued items"
+        except Exception as e:
+            return False, f"Failed to start extraction: {str(e)}"
     
     def query_memory(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """

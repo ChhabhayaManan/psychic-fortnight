@@ -6,7 +6,6 @@ from typing import Any, Optional
 
 from app.memory.graph_store import GraphStore
 from app.memory.json_store import JsonStore
-from app.memory.snapshots import SnapshotStore
 from app.orchestration.answer import generate_answer
 from app.orchestration.planner import QueryPlanner
 from app.orchestration.retrieval import RetrievalOrchestrator
@@ -22,14 +21,12 @@ class QueryWorkflow:
         json_store: JsonStore,
         vector_store: Optional[Any] = None,
         graph_store: Optional[GraphStore] = None,
-        snapshot_store: Optional[SnapshotStore] = None,
     ):
         self.planner = QueryPlanner()
         self.retrieval = RetrievalOrchestrator(
             json_store=json_store,
             vector_store=vector_store,
             graph_store=graph_store,
-            snapshot_store=snapshot_store,
         )
         self.summarizer = QuerySummarizer()
 
@@ -108,7 +105,6 @@ def build_query_graph(
     json_store: JsonStore,
     vector_store: Optional[Any] = None,
     graph_store: Optional[GraphStore] = None,
-    snapshot_store: Optional[SnapshotStore] = None,
 ) -> QueryWorkflow | LangGraphQueryWorkflow:
     """Build the Step 4 query workflow.
 

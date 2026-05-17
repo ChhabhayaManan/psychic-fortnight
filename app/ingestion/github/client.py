@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from github import Github, GithubException, Issue, PullRequest, Repository
 
@@ -20,18 +20,29 @@ class GitHubClient:
     to prevent API quota violations.
     """
 
-    def __init__(self, token: str, rate_limiter: RateLimiter):
+    def __init__(self, token: str, rate_limiter: RateLimiter, verify_ssl: bool = True):
         """
         Initialize GitHub client.
 
         Args:
             token: GitHub OAuth token (Personal Access Token)
             rate_limiter: Rate limiter instance
+            verify_ssl: Whether to verify SSL certificates
         """
-        self.github = Github(token)
+        # Initialize with retry and timeout for robustness
+        from github import Auth
+        auth = Auth.Token(token)
+        self.github = Github(
+            auth=auth,
+            verify=verify_ssl,
+            timeout=30,
+            retry=5,
+            per_page=100  # Increase per_page for efficient listing
+        )
         self.rate_limiter = rate_limiter
+        self.verify_ssl = verify_ssl
 
-        logger.info("GitHub client initialized")
+        logger.info("GitHub client initialized", verify_ssl=verify_ssl, per_page=100)
 
     async def get_repository(self, owner: str, repo: str) -> Repository:
         """
@@ -73,7 +84,8 @@ class GitHubClient:
     async def list_pull_requests(
         self,
         repo: Repository,
-        state: str = "all"
+        state: str = "all",
+        limit: int = None
     ) -> List[PullRequest]:
         """
         List all PRs in repository.
@@ -81,6 +93,7 @@ class GitHubClient:
         Args:
             repo: Repository object
             state: PR state ("open", "closed", "all")
+            limit: Maximum number of PRs to fetch (None = fetch all)
 
         Returns:
             List of PullRequest objects
@@ -88,14 +101,37 @@ class GitHubClient:
         await self.rate_limiter.acquire()
 
         try:
-            prs = await asyncio.to_thread(
-                lambda: list(repo.get_pulls(state=state))
-            )
+            def _fetch():
+                paginated = repo.get_pulls(state=state)
+                
+                # Use totalCount for early feedback if supported
+                try:
+                    total = paginated.totalCount
+                    if total > 0:
+                        logger.info(f"Listing {total} PRs for {repo.full_name}...")
+                    else:
+                        total = None
+                except Exception:
+                    total = None
+                
+                if limit:
+                    from itertools import islice
+                    return list(islice(paginated, limit))
+                
+                # Fetch all with progress logging
+                results = []
+                for i, pr in enumerate(paginated):
+                    results.append(pr)
+                    if (i + 1) % 100 == 0:
+                        progress = f"{i + 1}/{total}" if total else f"{i + 1}"
+                        logger.info(f"Fetched {progress} PRs")
+                
+                return results
+
+            prs = await asyncio.to_thread(_fetch)
 
             logger.info(
-                "PRs listed",
-                repo=repo.full_name,
-                state=state,
+                f"PRs listed -- {len(prs)}",
                 count=len(prs)
             )
 
@@ -112,7 +148,8 @@ class GitHubClient:
     async def list_issues(
         self,
         repo: Repository,
-        state: str = "all"
+        state: str = "all",
+        limit: int = None
     ) -> List[Issue]:
         """
         List all issues in repository (excluding PRs).
@@ -120,6 +157,7 @@ class GitHubClient:
         Args:
             repo: Repository object
             state: Issue state ("open", "closed", "all")
+            limit: Maximum number of issues to fetch (None = fetch all)
 
         Returns:
             List of Issue objects (PRs are filtered out)
@@ -127,18 +165,44 @@ class GitHubClient:
         await self.rate_limiter.acquire()
 
         try:
-            # Get all issues (includes PRs)
-            all_issues = await asyncio.to_thread(
-                lambda: list(repo.get_issues(state=state))
-            )
+            def _fetch_issues():
+                paginated = repo.get_issues(state=state)
+                
+                try:
+                    total = paginated.totalCount
+                    if total > 0:
+                        logger.info(f"Listing {total} potential items (issues+PRs) for {repo.full_name}...")
+                    else:
+                        total = None
+                except Exception:
+                    total = None
 
-            # Filter out PRs (issues with pull_request attribute)
-            issues = [issue for issue in all_issues if not issue.pull_request]
+                if limit:
+                    from itertools import islice
+                    # Still need to filter PRs if limited, but we'll fetch 'limit' items first
+                    all_items = list(islice(paginated, limit))
+                    return [item for item in all_items if not item.pull_request]
+                
+                # Fetch all and filter PRs in one pass to avoid double iteration
+                results = []
+                for i, item in enumerate(paginated):
+                    # Only keep issues that are NOT pull requests
+                    # Accessing .pull_request here is generally safe and doesn't trigger 
+                    # a full API call if the item was fetched via get_issues()
+                    if not item.pull_request:
+                        results.append(item)
+                    
+                    if (i + 1) % 100 == 0:
+                        progress = f"{i + 1}/{total}" if total else f"{i + 1}"
+                        logger.info(f"Fetched {progress} items (issues+PRs)")
+                
+                return results
+
+            # Get issues (already filtered in the thread)
+            issues = await asyncio.to_thread(_fetch_issues)
 
             logger.info(
-                "Issues listed",
-                repo=repo.full_name,
-                state=state,
+                f"Issues listed -- {len(issues)}",
                 count=len(issues)
             )
 

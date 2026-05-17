@@ -3,6 +3,7 @@
 import json
 import logging
 import sys
+import warnings
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -20,7 +21,7 @@ class LogLevel(str, Enum):
 
 class StructuredLogger:
     """
-    Structured logger with JSON output support.
+    Structured logger with concise output support.
 
     Provides consistent logging across the application with support for
     both human-readable and JSON formats.
@@ -30,7 +31,7 @@ class StructuredLogger:
         self,
         name: str,
         log_level: str = "INFO",
-        log_format: str = "json",
+        log_format: str = "text",
         log_file: Optional[Path] = None
     ):
         """
@@ -46,6 +47,9 @@ class StructuredLogger:
         self.log_format = log_format
         self.logger = logging.getLogger(name)
         self.logger.setLevel(getattr(logging, log_level.upper()))
+
+        # Suppress noisy library logs
+        _suppress_library_noise()
 
         # Remove existing handlers
         self.logger.handlers.clear()
@@ -131,10 +135,7 @@ class JSONFormatter(logging.Formatter):
             "timestamp": datetime.now().isoformat(),
             "level": record.levelname,
             "message": record.getMessage(),
-            "logger": record.name,
-            "module": record.module,
-            "function": record.funcName,
-            "line": record.lineno
+            "logger": record.name
         }
 
         # Add context if available
@@ -149,29 +150,40 @@ class JSONFormatter(logging.Formatter):
 
 
 class TextFormatter(logging.Formatter):
-    """Human-readable text formatter."""
+    """Clean human-readable text formatter."""
 
     def __init__(self):
         """Initialize text formatter."""
         super().__init__(
-            fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            fmt="[%(asctime)s] %(levelname)-8s | %(message)s",
+            datefmt="%H:%M:%S"
         )
 
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as text."""
         base_message = super().format(record)
 
-        # Add context if available
+        # Add context if available (only specific fields like batch/total)
         if hasattr(record, "context"):
-            context_str = " | ".join(
+            important_fields = ["batch", "total", "count", "error", "progress"]
+            context_parts = [
                 f"{k}={v}" for k, v in record.context.items()
-                if k not in ["timestamp", "logger_name"]
-            )
-            if context_str:
-                base_message += f" | {context_str}"
+                if k in important_fields
+            ]
+            if context_parts:
+                base_message += f" | {' '.join(context_parts)}"
 
         return base_message
+
+
+def _suppress_library_noise():
+    """Silence noisy third-party libraries."""
+    warnings.filterwarnings("ignore", category=UserWarning)
+    warnings.filterwarnings("ignore", message=".*Accessing `__path__`.*")
+    logging.getLogger("transformers").setLevel(logging.ERROR)
+    logging.getLogger("chromadb").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("github").setLevel(logging.WARNING)
 
 
 # Global logger cache
@@ -196,15 +208,14 @@ def get_logger(
     Returns:
         StructuredLogger instance
     """
-    # Import here to avoid circular dependency
-    from app.config.settings import get_settings
-
     if name not in _loggers:
-        settings = get_settings()
+        # Avoid circular dependency by using defaults if config not loaded
+        level = log_level or "INFO"
+        fmt = log_format or "text"
         _loggers[name] = StructuredLogger(
             name=name,
-            log_level=log_level or settings.log_level,
-            log_format=log_format or settings.log_format,
+            log_level=level,
+            log_format=fmt,
             log_file=log_file
         )
 
@@ -213,7 +224,7 @@ def get_logger(
 
 def setup_logging(
     log_level: str = "INFO",
-    log_format: str = "json",
+    log_format: str = "text",
     log_dir: Optional[Path] = None
 ) -> None:
     """
@@ -224,6 +235,8 @@ def setup_logging(
         log_format: Default log format
         log_dir: Directory for log files
     """
+    _suppress_library_noise()
+    
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, log_level.upper()))

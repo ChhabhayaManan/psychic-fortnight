@@ -3,7 +3,6 @@
 from typing import Optional
 
 from langchain_core.language_models import BaseLLM
-from langchain_ibm import WatsonxLLM
 
 from .settings import get_settings
 
@@ -40,23 +39,27 @@ class LLMConfig:
         """
         self.require_llm_ready()
         if self._llm is None:
-            self._llm = self._create_watsonx_llm(
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **kwargs
-            )
+            if self.settings.llm_provider == 'Gemini':
+                self._llm = self._create_gemini_llm(temperature=temperature, max_tokens=max_tokens, **kwargs)
+            elif self.settings.llm_provider == 'Groq':
+                self._llm = self._create_groq_llm(temperature=temperature, max_tokens=max_tokens, **kwargs)
+            else:
+                self._llm = self._create_watsonx_llm(temperature=temperature, max_tokens=max_tokens, **kwargs)
         return self._llm
 
     def validate_llm_ready(self) -> bool:
-        """Return whether Watsonx credentials are configured."""
+        """Return whether credentials are configured."""
+        if self.settings.llm_provider == "Gemini":
+            return bool(self.settings.gemini_api_key)
+        elif self.settings.llm_provider == "Groq":
+            return bool(self.settings.groq_api_key)
         return bool(self.settings.watsonx_api_key and self.settings.watsonx_project_id)
 
     def require_llm_ready(self) -> None:
         """Raise a clear error when LLM credentials are missing."""
         if not self.validate_llm_ready():
             raise RuntimeError(
-                "Watsonx credentials are not configured. Set WATSONX_API_KEY "
-                "and WATSONX_PROJECT_ID before running LLM-backed operations."
+                f"{self.settings.llm_provider} credentials are not configured. Set the appropriate API keys."
             )
 
     def _create_watsonx_llm(
@@ -64,7 +67,8 @@ class LLMConfig:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         **kwargs
-    ) -> WatsonxLLM:
+    ) -> BaseLLM:
+        from langchain_ibm import WatsonxLLM  # lazy import
         """
         Create IBM watsonx.ai LLM instance.
 
@@ -91,6 +95,26 @@ class LLMConfig:
             apikey=self.settings.watsonx_api_key,
             project_id=self.settings.watsonx_project_id,
             params=params
+        )
+
+    def _create_gemini_llm(self, temperature=None, max_tokens=None, **kwargs) -> BaseLLM:
+        from langchain_google_genai import ChatGoogleGenerativeAI  # lazy import
+        return ChatGoogleGenerativeAI(
+            model=self.settings.gemini_model,
+            google_api_key=self.settings.gemini_api_key,
+            temperature=temperature or self.settings.llm_temperature,
+            max_output_tokens=max_tokens or self.settings.llm_max_tokens,
+            **kwargs
+        )
+
+    def _create_groq_llm(self, temperature=None, max_tokens=None, **kwargs) -> BaseLLM:
+        from langchain_groq import ChatGroq  # lazy import
+        return ChatGroq(
+            model_name=self.settings.groq_model,
+            groq_api_key=self.settings.groq_api_key,
+            temperature=temperature or self.settings.llm_temperature,
+            max_tokens=max_tokens or self.settings.llm_max_tokens,
+            **kwargs
         )
 
     def get_extraction_llm(self) -> BaseLLM:

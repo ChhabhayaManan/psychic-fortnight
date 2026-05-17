@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     raw_data_dir: Path = data_dir / "raw"
     extracted_data_dir: Path = data_dir / "extracted"
     graph_data_dir: Path = data_dir / "graph"
-    snapshots_dir: Path = data_dir / "snapshots"
     embeddings_dir: Path = data_dir / "embeddings"
     state_dir: Path = data_dir / "state"
     logs_dir: Path = project_root / "logs"
@@ -29,12 +28,17 @@ class Settings(BaseSettings):
     watsonx_api_key: Optional[str] = None
     watsonx_project_id: Optional[str] = None
     github_token: Optional[str] = None
+    gemini_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
 
     # LLM Configuration
     watsonx_url: str = "https://us-south.ml.cloud.ibm.com"
     llm_model: str = "meta-llama/llama-3-1-70b-instruct"
     llm_temperature: float = 0.1
     llm_max_tokens: int = 2048
+    gemini_model: str = "gemini-1.5-pro"
+    groq_model: str = "llama3-70b-8192"
+    llm_provider: str = "Watsonx"
 
     # Processing Configuration
     max_workers: int = 5
@@ -86,7 +90,6 @@ class Settings(BaseSettings):
             self.raw_data_dir,
             self.extracted_data_dir,
             self.graph_data_dir,
-            self.snapshots_dir,
             self.embeddings_dir,
             self.state_dir,
             self.logs_dir,

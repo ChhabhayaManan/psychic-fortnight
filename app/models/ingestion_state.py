@@ -6,6 +6,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import threading
 
 
 class IngestionStatus(str, Enum):
@@ -57,8 +58,13 @@ class IngestionSourceState:
 
     def add_item(self, item: IngestionItemState) -> None:
         """Add or update an item."""
+        # Update counts incrementally
+        if item.item_id in self.items:
+            old_status = self.items[item.item_id].status
+            self._decrement_count(old_status)
+        
         self.items[item.item_id] = item
-        self._update_counts()
+        self._increment_count(item.status)
 
     def update_item_status(
         self,
@@ -70,13 +76,16 @@ class IngestionSourceState:
         """Update item status."""
         if item_id in self.items:
             item = self.items[item_id]
+            if item.status != status:
+                self._decrement_count(item.status)
+                self._increment_count(status)
+                
             item.status = status
             item.updated_at = datetime.now().isoformat()
             if raw_data_path:
                 item.raw_data_path = raw_data_path
             if error:
                 item.error = error
-            self._update_counts()
 
     def get_item(self, item_id: str) -> Optional[IngestionItemState]:
         """Get item by ID."""
@@ -86,8 +95,30 @@ class IngestionSourceState:
         """Get all items with given status."""
         return [item for item in self.items.values() if item.status == status]
 
+    def _increment_count(self, status: IngestionStatus) -> None:
+        """Increment count for status."""
+        if status == IngestionStatus.QUEUED:
+            self.queued_count += 1
+        elif status == IngestionStatus.STORED:
+            self.stored_count += 1
+        elif status == IngestionStatus.SKIPPED:
+            self.skipped_count += 1
+        elif status == IngestionStatus.FAILED:
+            self.failed_count += 1
+
+    def _decrement_count(self, status: IngestionStatus) -> None:
+        """Decrement count for status."""
+        if status == IngestionStatus.QUEUED:
+            self.queued_count -= 1
+        elif status == IngestionStatus.STORED:
+            self.stored_count -= 1
+        elif status == IngestionStatus.SKIPPED:
+            self.skipped_count -= 1
+        elif status == IngestionStatus.FAILED:
+            self.failed_count -= 1
+
     def _update_counts(self) -> None:
-        """Update status counts."""
+        """Update status counts (full recalculation, use sparingly)."""
         self.queued_count = sum(1 for item in self.items.values() if item.status == IngestionStatus.QUEUED)
         self.stored_count = sum(1 for item in self.items.values() if item.status == IngestionStatus.STORED)
         self.skipped_count = sum(1 for item in self.items.values() if item.status == IngestionStatus.SKIPPED)
@@ -195,67 +226,76 @@ class ProcessingQueue:
         self.queue_dir = state_dir / "processing_queue"
         self.queue_dir.mkdir(parents=True, exist_ok=True)
         self.queue_file = self.queue_dir / "queue.json"
+        self._lock = threading.Lock()
 
     def enqueue(self, handoff: ProcessingHandoff) -> None:
         """Add item to processing queue."""
-        queue = self._load_queue()
-        key = self._handoff_key(handoff.to_dict())
-        if not any(self._handoff_key(item) == key for item in queue):
-            queue.append(handoff.to_dict())
-        self._save_queue(queue)
+        with self._lock:
+            queue = self._load_queue()
+            key = self._handoff_key(handoff.to_dict())
+            if not any(self._handoff_key(item) == key for item in queue):
+                queue.append(handoff.to_dict())
+            self._save_queue(queue)
 
     def enqueue_batch(self, handoffs: List[ProcessingHandoff]) -> None:
         """Add multiple items to processing queue."""
-        queue = self._load_queue()
-        existing_keys = {self._handoff_key(item) for item in queue}
-        for handoff in handoffs:
-            data = handoff.to_dict()
-            key = self._handoff_key(data)
-            if key not in existing_keys:
-                queue.append(data)
-                existing_keys.add(key)
-        self._save_queue(queue)
+        with self._lock:
+            queue = self._load_queue()
+            existing_keys = {self._handoff_key(item) for item in queue}
+            for handoff in handoffs:
+                data = handoff.to_dict()
+                key = self._handoff_key(data)
+                if key not in existing_keys:
+                    queue.append(data)
+                    existing_keys.add(key)
+            self._save_queue(queue)
 
     def dequeue(self, count: int = 1) -> List[ProcessingHandoff]:
         """Remove and return items from queue."""
-        queue = self._load_queue()
-        active = [item for item in queue if not item.get("dead_letter")]
-        items = active[:count]
-        item_keys = {self._handoff_key(item) for item in items}
-        remaining = [item for item in queue if self._handoff_key(item) not in item_keys]
-        self._save_queue(remaining)
-        return [ProcessingHandoff.from_dict(item) for item in items]
+        with self._lock:
+            queue = self._load_queue()
+            active = [item for item in queue if not item.get("dead_letter")]
+            items = active[:count]
+            item_keys = {self._handoff_key(item) for item in items}
+            remaining = [item for item in queue if self._handoff_key(item) not in item_keys]
+            self._save_queue(remaining)
+            return [ProcessingHandoff.from_dict(item) for item in items]
 
     def peek(self, count: int = 1) -> List[ProcessingHandoff]:
         """View items without removing."""
-        queue = self._load_queue()
-        items = [
-            item for item in queue
-            if not item.get("dead_letter") and item.get("status", "queued") == "queued"
-        ][:count]
-        return [ProcessingHandoff.from_dict(item) for item in items]
+        with self._lock:
+            queue = self._load_queue()
+            items = [
+                item for item in queue
+                if not item.get("dead_letter") and item.get("status", "queued") == "queued"
+            ][:count]
+            return [ProcessingHandoff.from_dict(item) for item in items]
 
     def size(self, include_dead_letters: bool = False) -> int:
         """Get queue size."""
-        queue = self._load_queue()
-        if include_dead_letters:
-            return len(queue)
-        return len([item for item in queue if not item.get("dead_letter")])
+        with self._lock:
+            queue = self._load_queue()
+            if include_dead_letters:
+                return len(queue)
+            return len([item for item in queue if not item.get("dead_letter")])
 
     def dead_letter_size(self) -> int:
         """Get dead-letter item count."""
-        return len([item for item in self._load_queue() if item.get("dead_letter")])
+        with self._lock:
+            return len([item for item in self._load_queue() if item.get("dead_letter")])
 
     def peek_dead_letters(self, count: int = 1) -> List[ProcessingHandoff]:
         """View dead-letter items without removing them."""
-        items = [item for item in self._load_queue() if item.get("dead_letter")][:count]
-        return [ProcessingHandoff.from_dict(item) for item in items]
+        with self._lock:
+            items = [item for item in self._load_queue() if item.get("dead_letter")][:count]
+            return [ProcessingHandoff.from_dict(item) for item in items]
 
     def record_success(self, handoff: ProcessingHandoff) -> None:
         """Remove a successfully processed item from the queue."""
-        key = self._handoff_key(handoff.to_dict())
-        queue = [item for item in self._load_queue() if self._handoff_key(item) != key]
-        self._save_queue(queue)
+        with self._lock:
+            key = self._handoff_key(handoff.to_dict())
+            queue = [item for item in self._load_queue() if self._handoff_key(item) != key]
+            self._save_queue(queue)
 
     def record_failure(
         self,
@@ -264,39 +304,41 @@ class ProcessingQueue:
         max_attempts: int = 3
     ) -> ProcessingHandoff:
         """Track a failed processing attempt and dead-letter after max attempts."""
-        key = self._handoff_key(handoff.to_dict())
-        queue = self._load_queue()
-        updated: Optional[Dict[str, Any]] = None
-        for item in queue:
-            if self._handoff_key(item) != key:
-                continue
-            item["attempt_count"] = int(item.get("attempt_count", 0)) + 1
-            item["last_error"] = error
-            item["next_retry_at"] = datetime.now().isoformat()
-            if item["attempt_count"] >= max_attempts:
-                item["status"] = "dead_letter"
-                item["dead_letter"] = True
-            else:
-                item["status"] = "queued"
-                item["dead_letter"] = False
-            updated = item
-            break
+        with self._lock:
+            key = self._handoff_key(handoff.to_dict())
+            queue = self._load_queue()
+            updated: Optional[Dict[str, Any]] = None
+            for item in queue:
+                if self._handoff_key(item) != key:
+                    continue
+                item["attempt_count"] = int(item.get("attempt_count", 0)) + 1
+                item["last_error"] = error
+                item["next_retry_at"] = datetime.now().isoformat()
+                if item["attempt_count"] >= max_attempts:
+                    item["status"] = "dead_letter"
+                    item["dead_letter"] = True
+                else:
+                    item["status"] = "queued"
+                    item["dead_letter"] = False
+                updated = item
+                break
 
-        if updated is None:
-            updated = handoff.to_dict()
-            updated["attempt_count"] = int(updated.get("attempt_count", 0)) + 1
-            updated["last_error"] = error
-            updated["next_retry_at"] = datetime.now().isoformat()
-            updated["dead_letter"] = updated["attempt_count"] >= max_attempts
-            updated["status"] = "dead_letter" if updated["dead_letter"] else "queued"
-            queue.append(updated)
+            if updated is None:
+                updated = handoff.to_dict()
+                updated["attempt_count"] = int(updated.get("attempt_count", 0)) + 1
+                updated["last_error"] = error
+                updated["next_retry_at"] = datetime.now().isoformat()
+                updated["dead_letter"] = updated["attempt_count"] >= max_attempts
+                updated["status"] = "dead_letter" if updated["dead_letter"] else "queued"
+                queue.append(updated)
 
-        self._save_queue(queue)
-        return ProcessingHandoff.from_dict(updated)
+            self._save_queue(queue)
+            return ProcessingHandoff.from_dict(updated)
 
     def clear(self) -> None:
         """Clear the queue."""
-        self._save_queue([])
+        with self._lock:
+            self._save_queue([])
 
     def _handoff_key(self, item: Dict[str, Any]) -> str:
         """Stable identity for queue deduplication and state updates."""

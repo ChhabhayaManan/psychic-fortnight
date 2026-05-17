@@ -1,4 +1,4 @@
-"""Hybrid retrieval across semantic, timeline, graph, and snapshot context."""
+"""Hybrid retrieval across semantic, timeline, and graph context."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 
 from app.memory.graph_store import GraphStore
 from app.memory.json_store import JsonStore
-from app.memory.snapshots import SnapshotStore
 from app.orchestration.state import (
     EvidenceItem,
     GraphContextItem,
@@ -28,7 +27,6 @@ class HybridSearchResult:
     evidence: List[EvidenceItem] = field(default_factory=list)
     timeline_context: List[TimelineContextItem] = field(default_factory=list)
     graph_context: List[GraphContextItem] = field(default_factory=list)
-    snapshot_context: Dict[str, Any] = field(default_factory=dict)
     limitations: List[str] = field(default_factory=list)
 
 
@@ -40,12 +38,10 @@ class HybridRetriever:
         json_store: JsonStore,
         vector_store: Optional[Any] = None,
         graph_store: Optional[GraphStore] = None,
-        snapshot_store: Optional[SnapshotStore] = None,
     ):
         self.json_store = json_store
         self.vector_store = vector_store
         self.graph_store = graph_store
-        self.snapshot_store = snapshot_store
         self.reranker = EvidenceReranker()
 
     def search(self, request: QueryRequest, plan: Optional[RetrievalPlan] = None) -> HybridSearchResult:
@@ -55,7 +51,6 @@ class HybridRetriever:
         timeline_context: List[TimelineContextItem] = []
         graph_context: List[GraphContextItem] = []
         limitations: List[str] = []
-        snapshot_context: Dict[str, Any] = {}
 
         if plan.artifact_types and not request.artifact_types:
             request = request.model_copy(update={"artifact_types": plan.artifact_types})
@@ -99,17 +94,11 @@ class HybridRetriever:
                 if not graph_context:
                     limitations.append("No graph relationships matched the query.")
 
-        if plan.use_snapshot and self.snapshot_store is not None:
-            snapshot_context = self.snapshot_store.load_project_summary() or {}
-            if not snapshot_context:
-                limitations.append("Project snapshot is unavailable.")
-
         reranked = self.reranker.rerank(evidence, top_k=request.top_k)
         return HybridSearchResult(
             evidence=reranked,
             timeline_context=timeline_context,
             graph_context=graph_context,
-            snapshot_context=snapshot_context,
             limitations=limitations,
         )
 

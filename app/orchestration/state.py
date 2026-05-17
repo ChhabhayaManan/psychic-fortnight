@@ -149,7 +149,6 @@ class RetrievalPlan(BaseModel):
     use_semantic: bool = True
     use_timeline: bool = False
     use_graph: bool = False
-    use_snapshot: bool = False
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("query_type")
@@ -171,7 +170,6 @@ class QueryState(BaseModel):
     semantic_results: List[EvidenceItem] = Field(default_factory=list)
     timeline_results: List[TimelineContextItem] = Field(default_factory=list)
     graph_results: List[GraphContextItem] = Field(default_factory=list)
-    snapshot_context: Dict[str, Any] = Field(default_factory=dict)
     evidence: List[EvidenceItem] = Field(default_factory=list)
     reranked_evidence: List[EvidenceItem] = Field(default_factory=list)
     evidence_summary: str = ""

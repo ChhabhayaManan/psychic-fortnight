@@ -65,7 +65,7 @@ class RawDataStorage:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-        logger.info(
+        logger.debug(
             "PR data stored",
             source_id=source_id,
             pr_number=pr_number,
@@ -110,7 +110,7 @@ class RawDataStorage:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-        logger.info(
+        logger.debug(
             "Issue data stored",
             source_id=source_id,
             issue_number=issue_number,

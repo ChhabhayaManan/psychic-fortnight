@@ -7,14 +7,11 @@ from typing import Any, Dict, List, Optional
 
 from app.extraction.base_extractor import BaseExtractor
 from app.extraction.decisions.extractor import DecisionExtractor
-from app.extraction.noop_extractors import (
-    ArchitectureExtractor,
-    IncidentExtractor,
-    OwnershipExtractor,
-    RelationshipExtractor,
-    TimelineExtractor,
-    UnresolvedExtractor,
-)
+from app.extraction.incidents.extractor import IncidentExtractor
+from app.extraction.architecture.extractor import ArchitectureExtractor
+from app.extraction.timeline.extractor import TimelineExtractor
+from app.extraction.ownership.extractor import OwnershipExtractor
+from app.extraction.unresolved.extractor import UnresolvedExtractor
 from app.memory.json_store import JsonStore
 from app.models.ingestion_state import ProcessingHandoff, ProcessingQueue
 from app.utils.logging import get_logger
@@ -26,8 +23,9 @@ class ExtractionWorker:
     """
     Extraction worker.
 
-    Processes raw GitHub data through extraction agents to produce
-    typed memory artifacts.
+    Processes raw GitHub data through LLM extraction agents to produce
+    typed memory artifacts (decisions, incidents, timeline, architecture,
+    ownership, unresolved questions).
     """
 
     def __init__(
@@ -36,7 +34,8 @@ class ExtractionWorker:
         processing_queue: ProcessingQueue,
         extractors: Optional[List[BaseExtractor]] = None,
         max_workers: int = 3,
-        max_attempts: int = 3
+        max_attempts: int = 3,
+        stop_check: Optional[Callable[[], bool]] = None
     ):
         """
         Initialize extraction worker.
@@ -44,13 +43,16 @@ class ExtractionWorker:
         Args:
             json_store: JsonStore for storing extracted artifacts
             processing_queue: ProcessingQueue for raw data
-            extractors: List of extractors to use
+            extractors: List of extractors to use (defaults to all LLM extractors)
             max_workers: Maximum concurrent workers
+            max_attempts: Max retry attempts per item
+            stop_check: Optional callback to check if extraction should stop
         """
         self.json_store = json_store
         self.processing_queue = processing_queue
         self.max_workers = max_workers
         self.max_attempts = max_attempts
+        self.stop_check = stop_check
 
         # Initialize extractors
         if extractors is None:
@@ -65,15 +67,14 @@ class ExtractionWorker:
         )
 
     def _get_default_extractors(self) -> List[BaseExtractor]:
-        """Get default set of extractors."""
+        """Get default set of extractors (all LLM-powered)."""
         return [
-            DecisionExtractor(min_confidence=0.7),
+            DecisionExtractor(min_confidence=0.6),
             IncidentExtractor(min_confidence=0.6),
-            TimelineExtractor(min_confidence=0.7),
-            ArchitectureExtractor(min_confidence=0.7),
-            OwnershipExtractor(min_confidence=0.7),
-            UnresolvedExtractor(min_confidence=0.7),
-            RelationshipExtractor(min_confidence=0.5),
+            TimelineExtractor(min_confidence=0.5),
+            ArchitectureExtractor(min_confidence=0.6),
+            OwnershipExtractor(min_confidence=0.6),
+            UnresolvedExtractor(min_confidence=0.6),
         ]
 
     async def process_queue(self, batch_size: int = 10) -> Dict[str, Any]:
@@ -86,13 +87,10 @@ class ExtractionWorker:
         Returns:
             Processing statistics
         """
-        logger.info("Starting extraction processing", batch_size=batch_size)
-
         # Get items from queue
         items = self.processing_queue.peek(batch_size)
 
         if not items:
-            logger.info("No items in queue")
             return {
                 "processed": 0,
                 "succeeded": 0,
@@ -100,7 +98,7 @@ class ExtractionWorker:
                 "artifacts_created": 0
             }
 
-        logger.info(f"Processing {len(items)} items")
+        logger.info(f"Processing batch -- {len(items)} items", count=len(items))
 
         # Process items concurrently
         semaphore = asyncio.Semaphore(self.max_workers)
@@ -141,7 +139,7 @@ class ExtractionWorker:
             "dead_letters": self.processing_queue.dead_letter_size()
         }
 
-        logger.info("Extraction processing complete", **stats)
+        logger.info("Batch extraction complete", **stats)
 
         return stats
 
@@ -163,10 +161,8 @@ class ExtractionWorker:
         async with semaphore:
             try:
                 logger.info(
-                    "Processing item",
-                    source_id=handoff.source_id,
-                    item_type=handoff.item_type,
-                    item_number=handoff.item_number
+                    f"Extracting {handoff.item_type.upper()} #{handoff.item_number}",
+                    source_id=handoff.source_id
                 )
 
                 # Load raw data
@@ -178,7 +174,7 @@ class ExtractionWorker:
                         "artifacts_created": 0
                     }
 
-                # Run extractors
+                # Run all extractors
                 artifacts_created = 0
                 for extractor in self.extractors:
                     try:
@@ -198,8 +194,7 @@ class ExtractionWorker:
 
                     except Exception as e:
                         logger.error(
-                            "Extractor failed",
-                            extractor=extractor.__class__.__name__,
+                            f"{extractor.__class__.__name__} failed",
                             error=str(e)
                         )
                         # Continue with other extractors
@@ -260,13 +255,24 @@ class ExtractionWorker:
             "artifacts_created": 0
         }
 
+        queue_size = self.processing_queue.size()
+        print(f"\n[EXTRACT] Queue has {queue_size} item(s) to process")
+
         while self.processing_queue.size() > 0:
+            if self.stop_check and self.stop_check():
+                logger.info("Stop requested, halting extraction")
+                print("[EXTRACT] 🛑 Stop requested")
+                break
+                
             batch_stats = await self.process_queue(batch_size=10)
 
             # Aggregate statistics
             for key in total_stats:
                 total_stats[key] += batch_stats.get(key, 0)
 
+        print(f"[EXTRACT] Done — processed={total_stats['processed']}  "
+              f"artifacts={total_stats['artifacts_created']}  "
+              f"failed={total_stats['failed']}")
         logger.info("All items processed", **total_stats)
 
         return total_stats
