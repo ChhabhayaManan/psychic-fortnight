@@ -12,7 +12,9 @@ def test_settings_load_without_llm_environment(monkeypatch):
     settings_module = importlib.import_module("app.config.settings")
     settings_module._settings = None
 
-    settings = settings_module.get_settings()
+    # Force skip .env file loading for test isolation
+    settings = settings_module.Settings(_env_file=None)
+    settings_module._settings = settings
 
     assert settings.watsonx_api_key is None
     assert settings.watsonx_project_id is None
@@ -22,7 +24,7 @@ def test_llm_readiness_reports_missing_credentials(monkeypatch):
     monkeypatch.delenv("WATSONX_API_KEY", raising=False)
     monkeypatch.delenv("WATSONX_PROJECT_ID", raising=False)
     settings_module = importlib.import_module("app.config.settings")
-    settings_module._settings = None
+    settings_module._settings = settings_module.Settings(_env_file=None)
     llm_module = importlib.import_module("app.config.llm_config")
     llm_module._llm_config = None
 
@@ -202,14 +204,9 @@ def test_ingestion_workflow_requeues_failed_items_on_resume(tmp_path):
     )
     workflow.state = state
 
-    workflow._queue_items([
-        IngestionItem(
-            id="acme_project_pr_1",
-            source_id="acme_project",
-            item_type="pr",
-            item_number=1,
-        )
-    ])
+    # Simulate requeueing a failed item
+    item_id = "acme_project_pr_1"
+    workflow._register_queued("pr", 1)
 
-    assert workflow.state.get_item("acme_project_pr_1").status == IngestionStatus.QUEUED
-    assert workflow.state.get_item("acme_project_pr_1").error is None
+    assert workflow.state.get_item(item_id).status == IngestionStatus.QUEUED
+    assert workflow.state.get_item(item_id).error is None

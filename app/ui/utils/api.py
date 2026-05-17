@@ -477,22 +477,66 @@ class BackendAPI:
     
     def query_memory(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Query the engineering memory system.
-        
+        Query the engineering memory system using the Step 4 orchestration pipeline.
+
         Args:
             query: User query string
             context: Optional context for the query
-            
+
         Returns:
             Query response dictionary
         """
-        # This would integrate with Step 4 (LangGraph orchestration)
-        # For now, return a placeholder response
-        return {
-            'answer': 'Query processing not yet implemented. This will integrate with Step 4 orchestration.',
-            'sources': [],
-            'confidence': 0.0,
-            'context': {},
-        }
+        try:
+            from app.orchestration.answer import answer_query
+            from app.orchestration.state import QueryRequest
+            from app.memory.vector_store import VectorStore
+
+            paths = self.project_paths
+            if not paths:
+                return {
+                    'answer': 'No project configured. Please set up a repository first.',
+                    'sources': [], 'confidence': 0.0, 'context': {},
+                }
+
+            # Build stores from project paths
+            json_store = JsonStore(paths['extracted'])
+
+            try:
+                vector_store = VectorStore(paths['chroma'])
+            except Exception:
+                vector_store = None
+
+            try:
+                from app.memory.graph_store import GraphStore
+                graph_store = GraphStore(paths['graph'])
+            except Exception:
+                graph_store = None
+
+            request = QueryRequest(query=query)
+            response = answer_query(
+                request=request,
+                json_store=json_store,
+                vector_store=vector_store,
+                graph_store=graph_store,
+            )
+
+            return {
+                'answer': response.answer or 'No answer generated.',
+                'sources': response.sources or [],
+                'confidence': response.confidence or 0.0,
+                'context': {
+                    'query_type': response.query_type,
+                    'evidence_count': len(response.evidence or []),
+                    'limitations': response.limitations or [],
+                },
+            }
+
+        except Exception as e:
+            return {
+                'answer': f'Query failed: {str(e)}',
+                'sources': [],
+                'confidence': 0.0,
+                'context': {'error': str(e)},
+            }
 
 # Made with Bob

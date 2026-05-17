@@ -116,7 +116,6 @@ def build_query_graph(
         json_store=json_store,
         vector_store=vector_store,
         graph_store=graph_store,
-        snapshot_store=snapshot_store,
     )
     try:
         return LangGraphQueryWorkflow(fallback)

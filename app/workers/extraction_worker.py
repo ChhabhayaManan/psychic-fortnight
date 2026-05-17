@@ -12,6 +12,7 @@ from app.extraction.architecture.extractor import ArchitectureExtractor
 from app.extraction.timeline.extractor import TimelineExtractor
 from app.extraction.ownership.extractor import OwnershipExtractor
 from app.extraction.unresolved.extractor import UnresolvedExtractor
+from app.extraction.noop_extractors import RelationshipExtractor
 from app.memory.json_store import JsonStore
 from app.models.ingestion_state import ProcessingHandoff, ProcessingQueue
 from app.utils.logging import get_logger
@@ -75,6 +76,7 @@ class ExtractionWorker:
             ArchitectureExtractor(min_confidence=0.6),
             OwnershipExtractor(min_confidence=0.6),
             UnresolvedExtractor(min_confidence=0.6),
+            RelationshipExtractor(),
         ]
 
     async def process_queue(self, batch_size: int = 10) -> Dict[str, Any]:

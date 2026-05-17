@@ -32,7 +32,7 @@ from app.utils.logging import get_logger
 logger = get_logger(__name__)
 
 # Number of parallel fetch workers
-FETCH_WORKERS = 8
+FETCH_WORKERS = 10
 # Max items buffered in the queue between discovery and fetch
 QUEUE_BUFFER = 400
 # Log progress every N fetches
@@ -158,6 +158,10 @@ class GitHubIngestionWorkflow:
         Scans PR and issue numbers page by page (100/page, ~1s per page).
         Writes each discovered number to the manifest JSONL file and puts
         items that need fetching into the work queue.
+
+        Pre-flight optimisation: if the local prs/ folder already contains at
+        least as many files as pr_limit (or any files when no limit is set),
+        skip GitHub network calls for PRs entirely and re-enqueue from disk.
         """
         manifest_path = self._manifest_path()
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,45 +169,71 @@ class GitHubIngestionWorkflow:
         pr_scanned = 0
         issue_scanned = 0
 
+        # ── Pre-flight: check local prs/ folder ──────────────────────────────
+        prs_dir = self.storage.base_path / "prs"
+        stored_pr_files = sorted(prs_dir.glob("*.json")) if prs_dir.exists() else []
+        stored_pr_count = len(stored_pr_files)
+        need = self.pr_limit if self.pr_limit is not None else 0
+        pr_already_satisfied = stored_pr_count > 0 and (need == 0 or stored_pr_count >= need)
+
         with open(manifest_path, "w", encoding="utf-8") as mf:
 
             # ── PRs ──────────────────────────────────────────────────────────
-            pr_limit_rem = self.pr_limit
-            async for page_nums in self.client.stream_pr_pages(repo, state="all"):
-                if self._should_stop():
-                    break
-
-                page_nums = sorted(page_nums)  # oldest first
-                if pr_limit_rem is not None:
-                    page_nums = page_nums[:pr_limit_rem]
-                    pr_limit_rem -= len(page_nums)
-
-                for num in page_nums:
+            if pr_already_satisfied:
+                # Fast path: all required PRs already on disk — skip GitHub scan
+                files_to_use = stored_pr_files[:self.pr_limit] if self.pr_limit else stored_pr_files
+                print(f"[INGEST] PRs already on disk ({stored_pr_count} files) — "
+                      f"skipping fetch, re-enqueueing {len(files_to_use)} for extraction")
+                for pr_file in files_to_use:
+                    num = int(pr_file.stem)
+                    path = str(pr_file)
                     mf.write(json.dumps({"type": "pr", "number": num}) + "\n")
+                    self._register_existing("pr", num, path)
+                    self.processing_queue.enqueue(ProcessingHandoff(
+                        source_id=self.source_id,
+                        item_type="pr",
+                        item_number=num,
+                        raw_data_path=path,
+                    ))
+                    async with self._counter_lock:
+                        self._skipped += 1
+                pr_scanned = len(files_to_use)
+            else:
+                # Normal path: scan GitHub and fetch missing PRs
+                pr_limit_rem = self.pr_limit
+                async for page_nums in self.client.stream_pr_pages(repo, state="all"):
+                    if self._should_stop():
+                        break
 
-                    # Decide if we need to fetch or can skip
-                    if self._is_stored("pr", num):
-                        path = self._stored_path("pr", num)
-                        self._register_existing("pr", num, path)
-                        # Still enqueue for extraction
-                        self.processing_queue.enqueue(ProcessingHandoff(
-                            source_id=self.source_id,
-                            item_type="pr",
-                            item_number=num,
-                            raw_data_path=path,
-                        ))
-                        async with self._counter_lock:
-                            self._skipped += 1
-                    else:
-                        self._register_queued("pr", num)
-                        await queue.put(("pr", num))
+                    page_nums = sorted(page_nums)  # oldest first
+                    if pr_limit_rem is not None:
+                        page_nums = page_nums[:pr_limit_rem]
+                        pr_limit_rem -= len(page_nums)
 
-                pr_scanned += len(page_nums)
-                print(f"[INGEST] Scanned {pr_scanned} PRs  |  queue={queue.qsize()}  "
-                      f"fetched={self._fetched}")
+                    for num in page_nums:
+                        mf.write(json.dumps({"type": "pr", "number": num}) + "\n")
 
-                if pr_limit_rem is not None and pr_limit_rem <= 0:
-                    break
+                        if self._is_stored("pr", num):
+                            path = self._stored_path("pr", num)
+                            self._register_existing("pr", num, path)
+                            self.processing_queue.enqueue(ProcessingHandoff(
+                                source_id=self.source_id,
+                                item_type="pr",
+                                item_number=num,
+                                raw_data_path=path,
+                            ))
+                            async with self._counter_lock:
+                                self._skipped += 1
+                        else:
+                            self._register_queued("pr", num)
+                            await queue.put(("pr", num))
+
+                    pr_scanned += len(page_nums)
+                    print(f"[INGEST] Scanned {pr_scanned} PRs  |  queue={queue.qsize()}  "
+                          f"fetched={self._fetched}")
+
+                    if pr_limit_rem is not None and pr_limit_rem <= 0:
+                        break
 
             mf.flush()
 
@@ -354,7 +384,11 @@ class GitHubIngestionWorkflow:
 
     def _register_queued(self, item_type: str, number: int) -> None:
         item_id = f"{self.source_id}_{item_type}_{number}"
-        if not self.state.get_item(item_id):
+        existing = self.state.get_item(item_id)
+        if existing:
+            existing.status = IngestionStatus.QUEUED
+            existing.error = None
+        else:
             self.state.add_item(IngestionItemState(
                 item_id=item_id,
                 source_id=self.source_id,
@@ -365,7 +399,7 @@ class GitHubIngestionWorkflow:
 
     def _manifest_path(self) -> Path:
         return (
-            self.state_manager.base_path / "ingestion" / f"{self.source_id}_manifest.jsonl"
+            self.state_manager.state_dir / f"{self.source_id}_manifest.jsonl"
         )
 
     # ─── Read-only helpers ────────────────────────────────────────────────────

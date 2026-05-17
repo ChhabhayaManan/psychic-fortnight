@@ -72,9 +72,9 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, _env_file: Optional[str] = ".env", **kwargs):
         """Initialize settings and create directories."""
-        super().__init__(**kwargs)
+        super().__init__(_env_file=_env_file, **kwargs)
 
         # Set chroma directory if not specified
         chroma_directory = self.chroma_persist_directory or self.embeddings_dir / "chroma"
