@@ -3,7 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from app.extraction.base_extractor import BaseExtractor
 from app.extraction.decisions.extractor import DecisionExtractor
@@ -35,7 +35,7 @@ class ExtractionWorker:
         extractors: Optional[List[BaseExtractor]] = None,
         max_workers: int = 3,
         max_attempts: int = 3,
-        stop_check: Optional[callable[[], bool]] = None
+        stop_check: Optional[Callable[[], bool]] = None
     ):
         """
         Initialize extraction worker.
@@ -165,6 +165,9 @@ class ExtractionWorker:
                     source_id=handoff.source_id
                 )
 
+                # Mark as running in queue so peek() skips it
+                self._update_queue_status(handoff, "running")
+                
                 # Load raw data
                 raw_data = self._load_raw_data(handoff.raw_data_path)
                 if not raw_data:
@@ -240,6 +243,17 @@ class ExtractionWorker:
         except Exception as e:
             logger.error(f"Failed to load raw data: {e}")
             return None
+
+    def _update_queue_status(self, handoff: ProcessingHandoff, status: str) -> None:
+        """Update item status in the queue file."""
+        with self.processing_queue._lock:
+            queue = self.processing_queue._load_queue()
+            key = self.processing_queue._handoff_key(handoff.to_dict())
+            for item in queue:
+                if self.processing_queue._handoff_key(item) == key:
+                    item["status"] = status
+                    break
+            self.processing_queue._save_queue(queue)
 
     async def process_all(self) -> Dict[str, Any]:
         """

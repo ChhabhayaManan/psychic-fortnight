@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from app.models.ingestion_state import IngestionStateManager, ProcessingQueue
 from app.memory.json_store import JsonStore
 from app.memory.graph_store import GraphStore
+from app.config import get_settings
 
 
 class BackendAPI:
@@ -30,13 +31,28 @@ class BackendAPI:
             base_path: Base directory path for data
         """
         self.base_path = base_path
+        self.settings = get_settings()
+        self.current_source_id = None
+        self.project_paths = None
+        
+        # Legacy defaults
         self.data_path = base_path / 'data'
-        
-        # Initialize stores
         self.json_store = JsonStore(self.data_path / 'extracted')
-        
-        # Initialize state manager
         self.state_manager = IngestionStateManager(self.data_path / 'state')
+
+    def set_project(self, source_id: str):
+        """
+        Set the current active project.
+        
+        Args:
+            source_id: Project identifier
+        """
+        self.current_source_id = source_id
+        self.project_paths = self.settings.get_project_paths(source_id)
+        
+        # Re-initialize stores with project-specific paths
+        self.json_store = JsonStore(self.project_paths['extracted'])
+        self.state_manager = IngestionStateManager(self.project_paths['state'])
     
     def get_ingestion_status(self, source_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -48,6 +64,10 @@ class BackendAPI:
         Returns:
             Status dictionary or None if not found
         """
+        # Ensure we are using the correct project paths
+        if self.current_source_id != source_id:
+            self.set_project(source_id)
+            
         try:
             state = self.state_manager.load_state(source_id)
             if state:
@@ -71,15 +91,22 @@ class BackendAPI:
             print(f"Error getting ingestion status: {e}")
             return None
     
-    def get_processing_queue_status(self) -> Dict[str, Any]:
+    def get_processing_queue_status(self, source_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Get processing queue status.
         
+        Args:
+            source_id: Optional source identifier
+            
         Returns:
             Queue status dictionary
         """
+        if source_id and self.current_source_id != source_id:
+            self.set_project(source_id)
+            
         try:
-            queue = ProcessingQueue(self.data_path / 'state')
+            path = self.project_paths['state'] if self.project_paths else self.data_path / 'state'
+            queue = ProcessingQueue(path)
             items = queue.peek(10)
             
             return {
@@ -90,13 +117,19 @@ class BackendAPI:
             print(f"Error getting queue status: {e}")
             return {'pending_count': 0, 'items': []}
     
-    def get_extraction_stats(self) -> Dict[str, int]:
+    def get_extraction_stats(self, source_id: Optional[str] = None) -> Dict[str, int]:
         """
         Get extraction statistics by artifact type.
         
+        Args:
+            source_id: Optional source identifier
+            
         Returns:
             Dictionary of artifact type to count
         """
+        if source_id and self.current_source_id != source_id:
+            self.set_project(source_id)
+            
         stats = {}
         artifact_types = ['decisions', 'incidents', 'timeline', 'architecture', 
                          'ownership', 'unresolved', 'relationships']
@@ -115,7 +148,8 @@ class BackendAPI:
                      min_confidence: float = 0.0,
                      tags: Optional[List[str]] = None,
                      services: Optional[List[str]] = None,
-                     limit: int = 100) -> List[Dict[str, Any]]:
+                     limit: int = 100,
+                     source_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Get filtered decisions.
         
@@ -124,10 +158,14 @@ class BackendAPI:
             tags: Filter by tags
             services: Filter by related services
             limit: Maximum number of results
+            source_id: Optional source identifier
             
         Returns:
             List of decision dictionaries
         """
+        if source_id and self.current_source_id != source_id:
+            self.set_project(source_id)
+            
         try:
             all_decisions = self.json_store.list_artifacts('decisions')
             filtered = []
@@ -162,7 +200,8 @@ class BackendAPI:
                            start_date: Optional[str] = None,
                            end_date: Optional[str] = None,
                            event_types: Optional[List[str]] = None,
-                           limit: int = 100) -> List[Dict[str, Any]]:
+                           limit: int = 100,
+                           source_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Get filtered timeline events.
         
@@ -171,10 +210,14 @@ class BackendAPI:
             end_date: End date filter (ISO format)
             event_types: Filter by event types
             limit: Maximum number of results
+            source_id: Optional source identifier
             
         Returns:
             List of timeline event dictionaries
         """
+        if source_id and self.current_source_id != source_id:
+            self.set_project(source_id)
+            
         try:
             all_events = self.json_store.list_artifacts('timeline')
             filtered = []
@@ -205,15 +248,22 @@ class BackendAPI:
             print(f"Error getting timeline events: {e}")
             return []
     
-    def get_graph_data(self) -> Optional[Dict[str, Any]]:
+    def get_graph_data(self, source_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Get knowledge graph data.
         
+        Args:
+            source_id: Optional source identifier
+            
         Returns:
             Graph data dictionary or None if not available
         """
+        if source_id and self.current_source_id != source_id:
+            self.set_project(source_id)
+            
         try:
-            graph_path = self.data_path / 'graph' / 'knowledge_graph.json'
+            path = self.project_paths['graph'] if self.project_paths else self.data_path / 'graph'
+            graph_path = path / 'knowledge_graph.json'
             if graph_path.exists():
                 with open(graph_path, 'r') as f:
                     return json.load(f)
@@ -222,17 +272,21 @@ class BackendAPI:
             print(f"Error getting graph data: {e}")
             return None
     
-    def get_artifact_details(self, artifact_type: str, artifact_id: str) -> Optional[Dict[str, Any]]:
+    def get_artifact_details(self, artifact_type: str, artifact_id: str, source_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Get detailed information for a specific artifact.
         
         Args:
             artifact_type: Type of artifact
             artifact_id: Artifact identifier
+            source_id: Optional source identifier
             
         Returns:
             Artifact dictionary or None if not found
         """
+        if source_id and self.current_source_id != source_id:
+            self.set_project(source_id)
+            
         try:
             return self.json_store.get_artifact(artifact_type, artifact_id)
         except Exception as e:
@@ -291,6 +345,9 @@ class BackendAPI:
             from app.utils.rate_limiter import RateLimiter
             from app.ui.utils.state import UIState
             
+            source_id = f"{owner}_{repo}"
+            self.set_project(source_id)
+            
             config = UIState.load_config()
             verify_ssl = config.get('verify_ssl', True)
             pr_limit = config.get('pr_limit')
@@ -314,8 +371,8 @@ class BackendAPI:
                     logger.info(f"Starting ingestion workflow for {owner}/{repo}")
                     rate_limiter = RateLimiter(max_requests=rate_limit_requests, period=rate_limit_period)
                     client = GitHubClient(token=token, rate_limiter=rate_limiter, verify_ssl=verify_ssl)
-                    storage = RawDataStorage(self.data_path / 'raw')
-                    processing_queue = ProcessingQueue(self.data_path / 'state')
+                    storage = RawDataStorage(self.project_paths['raw'])
+                    processing_queue = ProcessingQueue(self.project_paths['state'])
                     
                     workflow = GitHubIngestionWorkflow(
                         owner=owner,
@@ -340,7 +397,7 @@ class BackendAPI:
                         from app.models.ingestion_state import IngestionSourceState
                         from datetime import datetime
                         error_state = IngestionSourceState(
-                            source_id=f"{owner}_{repo}",
+                            source_id=source_id,
                             repository=f"{owner}/{repo}",
                             discovered_at=datetime.now().isoformat(),
                             metadata={"error": str(e), "failed_at": datetime.now().isoformat(), "status": "error"}
@@ -364,10 +421,13 @@ class BackendAPI:
         except Exception as e:
             return False, f"Failed to start ingestion: {str(e)}"
     
-    def start_extraction(self) -> Tuple[bool, str]:
+    def start_extraction(self, source_id: Optional[str] = None) -> Tuple[bool, str]:
         """
         Start extraction process for queued items.
         
+        Args:
+            source_id: Optional source identifier
+            
         Returns:
             Tuple of (success, message)
         """
@@ -377,6 +437,9 @@ class BackendAPI:
             from app.workers.extraction_worker import ExtractionWorker
             from app.models.ingestion_state import ProcessingQueue
             
+            if source_id:
+                self.set_project(source_id)
+                
             def run_extraction_in_background():
                 import traceback
                 from app.utils.logging import get_logger
@@ -386,7 +449,8 @@ class BackendAPI:
                 asyncio.set_event_loop(loop)
                 try:
                     logger.info("Starting extraction worker")
-                    processing_queue = ProcessingQueue(self.data_path / 'state')
+                    path = self.project_paths['state'] if self.project_paths else self.data_path / 'state'
+                    processing_queue = ProcessingQueue(path)
                     
                     worker = ExtractionWorker(
                         json_store=self.json_store,

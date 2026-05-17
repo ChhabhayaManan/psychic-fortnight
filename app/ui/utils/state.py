@@ -215,13 +215,28 @@ class UIState:
         return config
     
     @staticmethod
-    def get_data_paths() -> Dict[str, Path]:
+    def get_data_paths(source_id: Optional[str] = None) -> Dict[str, Path]:
         """
-        Get standard data directory paths.
+        Get project-specific data directory paths.
         
+        Args:
+            source_id: Optional project identifier
+            
         Returns:
             Dictionary of path names to Path objects
         """
+        if source_id:
+            from app.config import get_settings
+            paths = get_settings().get_project_paths(source_id)
+            # Map keys to match expected UI structure if necessary
+            return {
+                'raw': paths['raw'],
+                'extracted': paths['extracted'],
+                'embeddings': paths['chroma'],
+                'graph': paths['graph'],
+                'state': paths['state'],
+            }
+            
         base = Path('data')
         return {
             'raw': base / 'raw' / 'github',
@@ -232,14 +247,17 @@ class UIState:
         }
     
     @staticmethod
-    def check_data_availability() -> Dict[str, bool]:
+    def check_data_availability(source_id: Optional[str] = None) -> Dict[str, bool]:
         """
         Check which data directories have content.
         
+        Args:
+            source_id: Optional project identifier
+            
         Returns:
             Dictionary of data type to availability status
         """
-        paths = UIState.get_data_paths()
+        paths = UIState.get_data_paths(source_id)
         availability = {}
         
         for name, path in paths.items():

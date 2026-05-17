@@ -47,7 +47,7 @@ class RawDataStorage:
             Path to stored file
         """
         # Create directory structure
-        pr_dir = self.base_path / "github" / source_id / "prs"
+        pr_dir = self.base_path / "prs"
         pr_dir.mkdir(parents=True, exist_ok=True)
 
         file_path = pr_dir / f"{pr_number}.json"
@@ -92,7 +92,7 @@ class RawDataStorage:
             Path to stored file
         """
         # Create directory structure
-        issue_dir = self.base_path / "github" / source_id / "issues"
+        issue_dir = self.base_path / "issues"
         issue_dir.mkdir(parents=True, exist_ok=True)
 
         file_path = issue_dir / f"{issue_number}.json"
@@ -134,7 +134,7 @@ class RawDataStorage:
         Returns:
             PR data if exists, None otherwise
         """
-        file_path = self.base_path / "github" / source_id / "prs" / f"{pr_number}.json"
+        file_path = self.base_path / "prs" / f"{pr_number}.json"
 
         if not file_path.exists():
             return None
@@ -166,7 +166,7 @@ class RawDataStorage:
         Returns:
             Issue data if exists, None otherwise
         """
-        file_path = self.base_path / "github" / source_id / "issues" / f"{issue_number}.json"
+        file_path = self.base_path / "issues" / f"{issue_number}.json"
 
         if not file_path.exists():
             return None
@@ -201,9 +201,9 @@ class RawDataStorage:
             True if item exists, False otherwise
         """
         if item_type == "pr":
-            file_path = self.base_path / "github" / source_id / "prs" / f"{item_number}.json"
+            file_path = self.base_path / "prs" / f"{item_number}.json"
         elif item_type == "issue":
-            file_path = self.base_path / "github" / source_id / "issues" / f"{item_number}.json"
+            file_path = self.base_path / "issues" / f"{item_number}.json"
         else:
             return False
 
@@ -219,7 +219,7 @@ class RawDataStorage:
         Returns:
             Source metadata if exists, None otherwise
         """
-        metadata_path = self.base_path / "github" / source_id / "metadata.json"
+        metadata_path = self.base_path / "metadata.json"
 
         if not metadata_path.exists():
             return None
@@ -250,10 +250,7 @@ class RawDataStorage:
         Returns:
             Path to metadata file
         """
-        source_dir = self.base_path / "github" / source_id
-        source_dir.mkdir(parents=True, exist_ok=True)
-
-        metadata_path = source_dir / "metadata.json"
+        metadata_path = self.base_path / "metadata.json"
 
         with open(metadata_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)

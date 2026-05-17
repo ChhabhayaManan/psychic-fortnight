@@ -233,9 +233,17 @@ def main():
     st.title("🎯 Decision Explorer")
     st.markdown("Browse and explore engineering decisions extracted from your repository.")
     st.markdown("---")
+
+    config = UIState.load_config()
+    if not config.get("repo_owner") or not config.get("repo_name"):
+        st.warning("⚠️ No repository configured — go to **Setup** first.")
+        return
+
+    source_id = f"{config['repo_owner']}_{config['repo_name']}"
+    api.set_project(source_id)
     
     # Check if data is available
-    availability = UIState.check_data_availability()
+    availability = UIState.check_data_availability(source_id)
     
     if not availability.get('extracted'):
         st.warning("⚠️ No decision data available. Please run extraction first.")
@@ -258,7 +266,8 @@ def main():
             min_confidence=filters['min_confidence'],
             tags=filters['tags'] if filters['tags'] else None,
             services=filters['services'] if filters['services'] else None,
-            limit=100
+            limit=100,
+            source_id=source_id
         )
     
     # Apply search filter

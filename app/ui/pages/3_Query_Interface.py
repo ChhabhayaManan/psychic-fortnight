@@ -150,9 +150,17 @@ def main():
     st.title("💬 Query Interface")
     st.markdown("Ask questions about your engineering history and get source-grounded answers.")
     st.markdown("---")
+
+    config = UIState.load_config()
+    if not config.get("repo_owner") or not config.get("repo_name"):
+        st.warning("⚠️ No repository configured — go to **Setup** first.")
+        return
+
+    source_id = f"{config['repo_owner']}_{config['repo_name']}"
+    api.set_project(source_id)
     
     # Check if system is ready
-    availability = UIState.check_data_availability()
+    availability = UIState.check_data_availability(source_id)
     
     if not availability.get('extracted'):
         st.warning("⚠️ No extracted data available. Please run ingestion and extraction first.")
@@ -240,9 +248,13 @@ def main():
     
     with col2:
         if st.button("💾 Save Chat", use_container_width=True):
-            # Save chat history to file
-            chat_file = Path('data/chats') / f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            chat_file.parent.mkdir(parents=True, exist_ok=True)
+            # Save chat history to file in project state dir
+            from app.config import get_settings
+            paths = get_settings().get_project_paths(source_id)
+            chat_dir = paths["state"] / "chats"
+            chat_dir.mkdir(parents=True, exist_ok=True)
+            
+            chat_file = chat_dir / f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             
             import json
             with open(chat_file, 'w') as f:

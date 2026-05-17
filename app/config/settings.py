@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Project paths
     project_root: Path = Path(__file__).parent.parent.parent
     data_dir: Path = project_root / "data"
+    projects_dir: Path = data_dir / "projects"
     raw_data_dir: Path = data_dir / "raw"
     extracted_data_dir: Path = data_dir / "extracted"
     graph_data_dir: Path = data_dir / "graph"
@@ -82,11 +83,39 @@ class Settings(BaseSettings):
         # Create required directories
         self._create_directories()
 
+    def get_project_paths(self, source_id: str) -> dict[str, Path]:
+        """
+        Get all data paths for a specific project.
+        
+        Args:
+            source_id: Project identifier (e.g., 'owner_repo')
+            
+        Returns:
+            Dictionary mapping path types to Path objects
+        """
+        base = self.projects_dir / source_id
+        paths = {
+            "base": base,
+            "raw": base / "raw",
+            "extracted": base / "extracted",
+            "graph": base / "graph",
+            "embeddings": base / "embeddings",
+            "chroma": base / "embeddings" / "chroma",
+            "state": base / "state",
+        }
+        
+        # Ensure project directories exist
+        for path in paths.values():
+            path.mkdir(parents=True, exist_ok=True)
+            
+        return paths
+
     def _create_directories(self) -> None:
         """Create required directories if they don't exist."""
         chroma_directory = self.chroma_persist_directory or self.embeddings_dir / "chroma"
         directories = [
             self.data_dir,
+            self.projects_dir,
             self.raw_data_dir,
             self.extracted_data_dir,
             self.graph_data_dir,
