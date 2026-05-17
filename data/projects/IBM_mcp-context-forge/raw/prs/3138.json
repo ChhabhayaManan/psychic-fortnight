@@ -1,0 +1,91 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3138,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3138"
+  },
+  "metadata": {
+    "title": "fix(middleware): add client disconnect middleware to prevent CLOSE_WAIT accumulation",
+    "state": "closed",
+    "created_at": "2026-02-24T09:18:26+00:00",
+    "updated_at": "2026-05-10T16:40:24+00:00",
+    "closed_at": "2026-05-10T16:40:22+00:00",
+    "merged_at": "2026-05-10T16:40:22+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #2719 due to repository maintenance. Your code and branch are intact. @crivetimihai please verify everything looks good.\n\n## Summary\n\n- Add `ClientDisconnectMiddleware` — pure ASGI middleware that cancels in-flight request handlers when the client (e.g., nginx reverse proxy) closes the connection\n- Prevents CLOSE_WAIT socket accumulation and memory leaks under sustained load when nginx's `proxy_read_timeout` fires before the handler completes\n- Triggers `finally` blocks in FastAPI dependencies (e.g., `get_db` closing its DB session), ensuring resource cleanup\n- Skips SSE, WebSocket, and MCP streaming paths that manage their own disconnect handling\n- Added as outermost middleware (last registered = first to run)\n\n## Test plan\n\n- [ ] Verify normal HTTP requests complete successfully\n- [ ] Verify SSE/WebSocket/MCP paths are not affected (skipped by prefix check)\n- [ ] Under load with short nginx timeouts, confirm CLOSE_WAIT sockets are cleaned up instead of accumulating\n- [ ] Verify DB sessions are released when requests are cancelled (via `get_db` finally block)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3992166962",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-23T14:26:40+00:00",
+      "body": "The implementation is `solid` and `well-designed`. It addresses the `CLOSE_WAIT` socket accumulation issue effectively by cancelling request handlers when nginx closes the connection.\n\n   ---\nStrengths\n\n1. Correct Middleware Placement ✅\n       - Added as outermost middleware (last registered = first to run)\n       - Properly positioned in main.py at line 2982\n\n2. Smart Path Filtering ✅\n       - Correctly skips SSE (/sse/), WebSocket (/ws/), and MCP (/mcp/) paths\n       - These paths already handle their own disconnect detection\n\n3. Clean ASGI Implementation ✅\n       - Pure ASGI middleware (no FastAPI dependencies)\n       - Proper use of asyncio tasks for concurrent monitoring\n       - Correct cleanup in finally block\n\n4. Resource Cleanup ✅\n       - Cancellation triggers FastAPI dependency finally blocks (e.g., get_db)\n       - Prevents memory leaks from ORM objects and response buffers\n\n5. Error Handling ✅\n       - Distinguishes between disconnect-triggered cancellation and other cancellations\n       - Suppresses expected errors after disconnect\n       - Re-raises unexpected CancelledError\n\n   ---\nMinor Issues & Suggestions\n\n1. Missing Tests ⚠️\n    Issue: No test file found for this middleware.\n\n   Recommendation: Add tests/unit/mcpgateway/middleware/test_client_disconnect.py:\n```bash\n     1 # -*- coding: utf-8 -*-\n     2 \"\"\"Tests for client disconnect middleware.\"\"\"\n     3\n     4 import asyncio\n     5 import pytest\n     6 from unittest.mock import AsyncMock, MagicMock\n     7\n     8 from mcpgateway.middleware.client_disconnect import \nClientDisconnectMiddleware\n     9\n    10\n    11 @pytest.mark.asyncio\n    12 async def test_non_http_scope_passes_through():\n    13     \"\"\"WebSocket and lifespan scopes should pass through unchanged.\"\"\"\n    14     app = AsyncMock()\n    15     middleware = ClientDisconnectMiddleware(app)\n    16\n    17     scope = {\"type\": \"websocket\"}\n    18     await middleware(scope, AsyncMock(), AsyncMock())\n    19\n    20     app.assert_awaited_once()\n    21\n    22\n    23 @pytest.mark.asyncio\n    24 async def test_sse_path_bypasses_middleware():\n    25     \"\"\"SSE paths should bypass disconnect handling.\"\"\"\n    26     app = AsyncMock()\n    27     middleware = ClientDisconnectMiddleware(app)\n    28\n    29     scope = {\"type\": \"http\", \"path\": \"/sse/stream\"}\n    30     await middleware(scope, AsyncMock(), AsyncMock())\n    31\n    32     app.assert_awaited_once()\n    33\n    34\n    35 @pytest.mark.asyncio\n    36 async def test_mcp_path_bypasses_middleware():\n    37     \"\"\"MCP paths should bypass disconnect handling.\"\"\"\n    38     app = AsyncMock()\n    39     middleware = ClientDisconnectMiddleware(app)\n    40\n    41     scope = {\"type\": \"http\", \"path\": \"/mcp\"}\n    42     await middleware(scope, AsyncMock(), AsyncMock())\n    43\n    44     app.assert_awaited_once()\n    45\n    46\n    47 @pytest.mark.asyncio\n    48 async def test_normal_request_completes():\n    49     \"\"\"Normal HTTP requests should complete successfully.\"\"\"\n    50     app = AsyncMock()\n    51     middleware = ClientDisconnectMiddleware(app)\n    52\n    53     async def receive():\n    54         return {\"type\": \"http.request\", \"body\": b\"\", \"more_body\": False}\n    55\n    56     send = AsyncMock()\n    57     scope = {\"type\": \"http\", \"path\": \"/tools\"}\n    58\n    59     await middleware(scope, receive, send)\n    60\n    61     app.assert_awaited_once()\n    62\n    63\n    64 @pytest.mark.asyncio\n    65 async def test_disconnect_cancels_handler():\n    66     \"\"\"Handler should be cancelled when client disconnects.\"\"\"\n    67     handler_cancelled = False\n    68\n    69     async def slow_app(scope, receive, send):\n    70         nonlocal handler_cancelled\n    71         try:\n    72             await asyncio.sleep(10)  # Simulate slow handler\n    73         except asyncio.CancelledError:\n    74             handler_cancelled = True\n    75             raise\n    76\n    77     middleware = ClientDisconnectMiddleware(slow_app)\n    78\n    79     disconnect_sent = False\n    80     async def receive():\n    81         nonlocal disconnect_sent\n    82         if not disconnect_sent:\n    83             disconnect_sent = True\n    84             await asyncio.sleep(0.1)  # Small delay\n    85             return {\"type\": \"http.disconnect\"}\n    86         await asyncio.sleep(10)\n    87\n    88     send = AsyncMock()\n    89     scope = {\"type\": \"http\", \"path\": \"/tools\"}\n    90\n    91     with pytest.raises(asyncio.CancelledError):\n    92         await middleware(scope, receive, send)\n    93\n    94     assert handler_cancelled\n```\n\n2. Documentation Enhancement 💡   \nThe middleware docstring is excellent, but consider adding a usage example in the module docstring:\n```bash\n     1 \"\"\"\n     2 ...existing docstring...\n     3\n     4 Usage:\n     5     # In main.py, add as outermost middleware (last = first to run)\n     6     app.add_middleware(ClientDisconnectMiddleware)\n     7\n     8     # The middleware will:\n     9     # 1. Monitor for http.disconnect events\n    10     # 2. Cancel the handler task when disconnect is detected\n    11     # 3. Trigger finally blocks in dependencies (e.g., get_db)\n    12     # 4. Clean up all helper tasks\n    13 \"\"\"\n```\n\n3. Potential Race Condition 🔍\nLine 147-148: There's a theoretical race where `handler_task.cancel()` is called after the handler completes naturally, but before `handler_task.done()` is checked.\n\nCurrent code:\n```bash\n    1 if not handler_task.done():\n    2     handler_task.cancel()\n```\n\nSafer approach:\n```bash\n    1 if not handler_task.done():\n    2     handler_task.cancel()\n    3     # Wait briefly for cancellation to propagate\n    4     with suppress(asyncio.CancelledError):\n    5         await handler_task\n```\n   \nHowever, this is extremely unlikely in practice and the current code is acceptable.\n\n4. Logging Level 💡\nThe debug log at line 156 is appropriate, but consider adding an INFO-level log during startup to confirm the middleware is active (already done in main.py ✅).\n\n---\n\nSecurity Considerations ✅\n \n 1. No Security Issues: The middleware doesn't handle authentication or authorization\n 2. Proper Scope: Only affects HTTP requests, not WebSocket/lifespan\n 3. No Data Leakage: Only logs the path on disconnect (debug level)\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c95686d037bbf337e7031c62ae367d01395f98cf",
+      "message": "fix: add client disconnect middleware to cancel handlers on nginx timeout\n\nAdd ClientDisconnectMiddleware that detects when a client (e.g., nginx\nreverse proxy) closes the connection and cancels the in-flight request\nhandler. This triggers cleanup of DB sessions, HTTP connections, and\nother resources held by the request.\n\nWithout this, when nginx's proxy_read_timeout fires, the handler keeps\nrunning while the socket enters CLOSE_WAIT — under sustained load this\ncauses OOM via CLOSE_WAIT accumulation and retained request memory.\n\nThe middleware is added as the outermost layer (last added = first to\nrun) and skips SSE/WebSocket/MCP streaming paths that manage their own\ndisconnect handling.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-05T19:58:19+00:00"
+    },
+    {
+      "sha": "b8769933007e12c4e6ebc21cfad363c645f1a38e",
+      "message": "fix: resolve rebase conflict marker in main.py imports\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T14:22:37+00:00"
+    },
+    {
+      "sha": "b55fdf1d84bdd5e21804d55b0f3c792bd334e04c",
+      "message": "fix: address council review findings for client disconnect middleware\n\n- Fix streaming path skip logic (remove trailing slashes, /ws/)\n- Remove swallowed CancelledError in _receive_wrapper\n- Add handler_task cleanup in finally block\n- Narrow exception catch to (OSError, ConnectionError)\n- Use bounded queue (maxsize=1) for ASGI backpressure\n- Set response_started only after successful send\n- Update copyright year to 2026\n- Remove legacy Tuple import, use tuple[str, ...]\n- Add CLIENT_DISCONNECT_MIDDLEWARE_ENABLED feature flag\n- Add comprehensive unit tests for the middleware\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T14:36:50+00:00"
+    },
+    {
+      "sha": "e886314ffdca258f31cbd7c6557e434b907e26d5",
+      "message": "fix: expand self-managed prefixes and improve skip test diagnostics\n\n- Add /servers and /_internal/mcp to _SELF_MANAGED_PREFIXES\n- Make skip test verify original receive/send are passed through unwrapped\n- Fix task cleanup test to avoid brittle global pending assertion\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T14:47:27+00:00"
+    },
+    {
+      "sha": "cbcea62d54419836703252c4cb30e3ecf385f920",
+      "message": "fix: use precise prefix matching for self-managed streaming paths\n\n- Add _is_server_streaming_path() helper for /servers/{id}/sse and /servers/{id}/mcp\n- Remove over-broad /servers and /_internal/mcp prefixes\n- Add /_internal/mcp/transport as precise prefix\n- Add tests verifying regular REST endpoints are NOT skipped\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T14:58:57+00:00"
+    },
+    {
+      "sha": "9aa50f0fd77899f78e0acb7049afd2ef54218801",
+      "message": "style: add missing blank line before function (ruff E302)\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T15:06:35+00:00"
+    },
+    {
+      "sha": "a716d0b558f24892ad8fb240c73882b6518a65f4",
+      "message": "test: add coverage for edge cases and feature flag\n\n- Add tests for send_wrapper body suppression and OSError handling\n- Add test for handler cancellation in finally block\n- Add tests for client_disconnect feature flag in main.py\n- Remove obsolete disconnect-message-enqueue test\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T15:26:40+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 695,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:38.582050",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:38.583702",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3138,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3138.json"
+  }
+}

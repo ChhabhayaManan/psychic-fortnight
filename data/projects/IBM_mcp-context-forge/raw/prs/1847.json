@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1847,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1847"
+  },
+  "metadata": {
+    "title": "Add LRU Caching to Hot Paths",
+    "state": "closed",
+    "created_at": "2026-01-01T23:21:08+00:00",
+    "updated_at": "2026-01-01T23:34:13+00:00",
+    "closed_at": "2026-01-01T23:34:11+00:00",
+    "merged_at": "2026-01-01T23:34:11+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Closes #1809\r\nCloses #1812\r\nCloses #1813\r\nCloses #1814\r\n\r\n## Summary\r\n\r\nThis PR adds LRU caching to four hot paths in the MCP Gateway to improve performance by avoiding redundant compilation/parsing operations:\r\n\r\n1. **Jinja Template Caching** (#1814) - Cache compiled Jinja templates in prompt rendering\r\n2. **jq Filter Caching** (#1813) - Cache compiled jq filter programs\r\n3. **JSONPath Caching** (#1812) - Cache parsed JSONPath expressions\r\n4. **JSON Schema Validator Caching** (#1809) - Cache schema validator class selection and schema checks\r\n\r\n## Changelog\r\n\r\n### mcpgateway/main.py\r\n- Added `@lru_cache(maxsize=512)` decorated `_parse_jsonpath()` function\r\n- Updated `jsonpath_modifier()` to use cached parsed expressions\r\n- Updated `transform_data_with_mappings()` to pre-parse mapping expressions once per call (not per item)\r\n\r\n### mcpgateway/services/prompt_service.py\r\n- Added module-level `_JINJA_ENV` singleton for shared Jinja environment\r\n- Added `_get_jinja_env()` function to lazily initialize the singleton\r\n- Added `@lru_cache(maxsize=256)` decorated `_compile_jinja_template()` function\r\n- Updated `PromptService.__init__` to use the shared singleton\r\n- Updated `_render_template()` to use cached compiled templates\r\n- Added cache invalidation (`_compile_jinja_template.cache_clear()`) in:\r\n  - `update_prompt()` when template changes\r\n  - `register_prompts_bulk()` update path when template changes\r\n\r\n### mcpgateway/services/tool_service.py\r\n- Added `@lru_cache(maxsize=256)` decorated `_compile_jq_filter()` function\r\n- Added `@lru_cache(maxsize=128)` decorated `_get_validator_class_and_check()` function with proper return type `Tuple[type, dict]`\r\n- Added `_canonicalize_schema()` helper to create canonical JSON strings for cache keys\r\n- Added `_validate_with_cached_schema()` function using `best_match()` to preserve `jsonschema.validate()` error selection semantics\r\n- Updated `extract_using_jq()` to use cached compiled program via `program.input(data).all()`\r\n- Updated `_extract_and_validate_structured_content()` to use `_validate_with_cached_schema()`\r\n- Fixed scalar JSON string handling to preserve original behavior\r\n\r\n### tests/unit/mcpgateway/services/test_prompt_service.py\r\n- Added `reset_jinja_singleton` autouse fixture to reset `_JINJA_ENV` and clear cache before each test\r\n- Updated `test_render_template_fallback_and_error` to patch `_compile_jinja_template` instead of `_jinja_env.from_string`\r\n- Added `TestJinjaTemplateCaching` class with tests:\r\n  - `test_template_caching_works` - verifies cache hits on repeated template use\r\n  - `test_different_templates_cached_separately` - verifies different templates get separate cache entries\r\n  - `test_format_fallback_still_works` - verifies Python format() fallback when Jinja fails\r\n\r\n### tests/unit/mcpgateway/services/test_tool_service.py\r\n- Updated `test_extract_using_jq_happy_path` to test actual behavior with caching (removed mock)\r\n- Added `TestJqFilterCaching` class with tests:\r\n  - `test_jq_caching_works` - verifies cache hits on repeated filter use\r\n  - `test_empty_filter_bypasses_cache` - verifies empty filter returns data directly\r\n- Added `TestSchemaValidatorCaching` class with tests:\r\n  - `test_schema_caching_works` - verifies validator class caching\r\n  - `test_validation_still_works` - verifies validation errors are properly raised\r\n\r\n### tests/unit/mcpgateway/test_main.py\r\n- Added `TestJsonPathCaching` class with tests:\r\n  - `test_jsonpath_caching_works` - verifies cache hits on repeated JSONPath use\r\n  - `test_mappings_parsed_once_per_request` - verifies mappings are parsed once per call, not per item\r\n  - `test_different_jsonpath_cached_separately` - verifies different expressions get separate cache entries\r\n\r\n## Cache Sizes\r\n\r\n| Cache | Max Size | Rationale |\r\n|-------|----------|-----------|\r\n| `_parse_jsonpath` | 512 | High cardinality of JSONPath expressions |\r\n| `_compile_jinja_template` | 256 | Moderate number of unique templates |\r\n| `_compile_jq_filter` | 256 | Moderate number of unique jq filters |\r\n| `_get_validator_class_and_check` | 128 | Lower cardinality of unique schemas |\r\n\r\n## Cache Invalidation\r\n\r\n- Jinja template cache is cleared when prompts are updated (single or bulk) to reduce memory growth\r\n- Other caches rely on LRU eviction since their keys are immutable content\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "401a32f62f0a28e3133781ee6171968ba0eab0cb",
+      "message": " dd LRU Caching to Hot Paths\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-01T23:20:37+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 386,
+  "deletions": 37,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:33.648749",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:33.650527",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1847,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1847.json"
+  }
+}

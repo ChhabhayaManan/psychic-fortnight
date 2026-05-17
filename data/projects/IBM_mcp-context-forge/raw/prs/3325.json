@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3325,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3325"
+  },
+  "metadata": {
+    "title": "[FIX]: Prevent stream consumed errors in request logging middleware",
+    "state": "closed",
+    "created_at": "2026-02-27T15:20:36+00:00",
+    "updated_at": "2026-03-09T01:51:23+00:00",
+    "closed_at": "2026-02-27T15:58:33+00:00",
+    "merged_at": "2026-02-27T15:58:33+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\n\n## 📌 Summary\nFixes intermittent `RuntimeError: Stream consumed` when admin form submissions are processed with detailed request logging enabled.\n\n## 🔁 Reproduction Steps\nIssue: #3313\n\n1. Enable detailed request logging (`LOG_LEVEL=INFO` or lower).\n2. Submit server form data from Admin UI (`/admin/servers`), especially with select-all style payloads.\n3. Endpoint may fail while parsing `await request.form()` due to consumed request stream.\n\n## 🐞 Root Cause\n`RequestLoggingMiddleware` read `await request.body()` and then created a synthetic `Request` object (`new_request`) before calling `call_next`. Under `BaseHTTPMiddleware`, downstream processing uses the original ASGI receive channel, so reconstructing `Request` this way can leave downstream form parsing on a consumed stream.\n\n## 💡 Fix Description\n- Removed synthetic `Request` reconstruction in `request_logging_middleware`.\n- Cached the body on the original request (`request._body = body`).\n- Called `call_next(request)` with the original request object.\n- Added regression coverage:\n  - middleware pipeline/form parsing regression test\n  - deterministic guard asserting the original request object is passed to `call_next`\n  - admin-path form regression test under logging-enabled middleware\n\nCloses #3313\n\n## 🧪 Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Lint suite                            | `make lint`          | Not run in this cycle |\n| Unit tests                            | `uv run --no-sync pytest tests/unit/mcpgateway/middleware/test_request_logging_middleware.py -v` | Pass (66 passed) |\n| Coverage ≥ 80 %                       | `make coverage`      | Not run in this cycle |\n| Manual regression no longer fails     | `uv run --no-sync pytest tests/unit/mcpgateway/test_admin.py -k \"stream_consume or logging_enabled\" -v` | Pass (1 selected) |\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [ ] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "925243f9461e15daed2b23cc9fe56d567ccf55d9",
+      "message": "test: reproduce stream consumed regression for multipart form\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T15:01:40+00:00"
+    },
+    {
+      "sha": "ef701f8546a70b4b83a67f08e693cf6d5d71f6d1",
+      "message": "fix: preserve request body for downstream form parsing in logging middleware\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T15:01:47+00:00"
+    },
+    {
+      "sha": "1de33b211a08de8e21bc5a9ba1ef2a5b33fa8d0f",
+      "message": "test: add admin server form regression for request logging stream handling\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T15:01:54+00:00"
+    },
+    {
+      "sha": "73f6749f1e2c402b79e82b62d84d3a03a9446ad5",
+      "message": "test: assert request logging middleware passes original request to call_next\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-27T15:07:14+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 87,
+  "deletions": 15,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:54.621794",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:54.623141",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3325,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3325.json"
+  }
+}

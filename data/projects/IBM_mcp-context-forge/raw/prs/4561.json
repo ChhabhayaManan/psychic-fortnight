@@ -1,0 +1,88 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4561,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4561"
+  },
+  "metadata": {
+    "title": "feat(ui-rewrite): add useMCPServerForm hook for creating and editing MCP servers",
+    "state": "closed",
+    "created_at": "2026-05-01T09:59:10+00:00",
+    "updated_at": "2026-05-11T12:22:38+00:00",
+    "closed_at": "2026-05-11T12:22:36+00:00",
+    "merged_at": "2026-05-11T12:22:36+00:00",
+    "author": "marekdano",
+    "labels": [
+      "ui-rewrite"
+    ],
+    "milestone": null,
+    "assignees": [
+      "marekdano"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nRelated #4175\r\n\r\n---\r\n\r\n## 📝 Summary\r\nAdd a hook for creating and editing MCP servers. The hook contains calls to API endpoints to create or edit MCP Servers.\r\n\r\n\r\nhttps://github.com/user-attachments/assets/29d03e38-bd22-4910-97b6-d8698e34e88e\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4235211591",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-06T10:18:58+00:00",
+      "body": "Hey @marekdano 👋 — good direction overall. Extracting the form logic into a\ndedicated hook with Zod validation is the right architectural call, and the\nRouterProvider test fix is a solid improvement. That said, there are a few things that I noticed\n\n---\n\n### 🔴 Blockers\n\n**Zod v4 / v3 conflict**\n`package.json` bumps to `zod@^4.4.1`, but shadcn carries a peer dep on\n`zod@3.25.76`. Zod v4 has breaking API changes — the `@hookform/resolvers/zod`\nadapter is built against v3, so this will silently break form validation at\nruntime. We need to either pin to v3 to match shadcn, or fully audit resolver\ncompatibility before upgrading.\n\n**`passthroughHeaders` type mismatch**\nThe Zod schema defines this field as `z.array(z.string())`, but the form stores\nit as a comma-separated string. `validateField(\"passthroughHeaders\", ...)` will\npass a `string` to an array validator — either silently passing garbage or\nthrowing unexpectedly. This will also break edit mode when pre-population is\nwired up. Suggest parsing the comma-string to an array on change or at\nsubmission time, and documenting the approach.\n\n**`handleSubmit` typed as `void` but implemented as `async`**\nThe interface declares `handleSubmit: () => void`, masking the promise.\nConsumers won't await it, and any thrown error (e.g., a failed API call) will\nbe an unhandled rejection — no error toast, no UI feedback. Please update the\ntype to `() => Promise<void>` and make sure callers handle the promise.\n\n---\n\n### 🟠 Should Fix\n\n**`updateGateway` with undefined `gatewayId`**\nIf `gatewayId` is `undefined`, the update URL resolves to `/gateways/undefined`\n— a silently wrong API call. Add a guard that throws (or returns early) before\nthe fetch if `gatewayId` is not set.\n\n**`sanitizeCertificate` trims trailing newline**\nPEM certs require a trailing `\\n` after `-----END CERTIFICATE-----`.\nCalling `.trim()` removes it, producing a cert that looks valid but fails\nTLS parsing downstream. Suggest replacing `.trim()` with `.trimStart()` and\nensuring the output always ends with `\\n`.\n\n---\n\n### 🟡 Nice to Fix\n\n- **`// Made with Bob`** comment at the end of `useMCPServerForm.test.ts` —\n  please remove.\n- **`console.log` in file-upload handler** — the test asserts it's called,\n  which means it's in the production component. Replace with proper state\n  or remove it.\n- **`isValid` URL check** — currently just checks for non-empty string.\n  A `new URL(url)` guard (or `z.string().url()`) would give users a much\n  clearer error when they type an invalid URL.\n- **Edit mode pre-population** — `gatewayId` is accepted but existing data\n  is never loaded. If this is a known gap, please add a `// TODO` with\n  the tracking issue so it's not forgotten.\n\n---\n\nHappy to pair on the Zod version story if useful — that one has some nuance.\nRest looks clean. 🙌"
+    },
+    {
+      "id": "4244599602",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-07T13:57:55+00:00",
+      "body": "Thanks for the follow-up pass here — this is moving in a good direction. Extracting the form logic into `useMCPServerForm` makes the component much easier to follow, and the Zod version + `passthroughHeaders` fixes address a couple of the main concerns from the previous review.\n\nI went back through the earlier comments, and most of the blocking feedback now looks resolved. There’s one piece I still don’t think is fully closed yet:\n\n### Remaining blocker\n\n**`handleSubmit` is now typed async in the hook, but `MCPServerForm.tsx` still treats it as fire-and-forget**\nIn `client/src/hooks/useMCPServerForm.ts`, the contract is now correctly `Promise<void>`, but in `client/src/components/mcp-servers/MCPServerForm.tsx` the submit handler still just calls:\n\n```ts\nhandleSubmit(event, () => {\n  onToggle();\n});\n```\n\nwithout awaiting it or explicitly handling the returned promise. So the type-level fix is there, but the consuming component still doesn’t fully honour the async contract. I’d like to see that wired through cleanly so we’re not leaving promise handling implicit at the call site.\n\n### Still worth tightening up\n\n- In `client/src/hooks/useMCPServerForm.ts`, the runtime guard for missing `gatewayId` is a good improvement, though the hook still initialises `useQuery` with `/gateways/${gatewayId}` even when `gatewayId` is undefined. That’s safer than before, but still a bit fragile.\n\nOnce the async submit integration is cleaned up, this should be in much better shape from my side."
+    },
+    {
+      "id": "4263403873",
+      "author": "vishu-bh",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-11T11:58:14+00:00",
+      "body": "PR looks good now. \n\nLGTM ☘️ "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "69359af409897961073c5288437aba98d666d4e4",
+      "message": "feat: add useMCPServerForm hook for creating and editing MCP servers\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-08T07:35:36+00:00"
+    },
+    {
+      "sha": "76beb7ff19bc1a4efd8954bd7b5e807bf5b06aee",
+      "message": "fix: zod version, validation, parsing and types\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-06T11:18:52+00:00"
+    },
+    {
+      "sha": "4c5773aa4e1bbdbd8e351b9e4dc15c02b5b9e946",
+      "message": "fix: add gatewayId to useCallback deps in useMCPServerForm\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-06T11:21:59+00:00"
+    },
+    {
+      "sha": "a314aa1774f385030c20f672bbada1dfdeb58914",
+      "message": "fix: reset form after successful submission in both create and edit modes\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-08T07:45:28+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 1230,
+  "deletions": 120,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T17:17:19.580943",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:19.582178",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4561,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4561.json"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3892,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3892"
+  },
+  "metadata": {
+    "title": "fix(security): Validate Server ID in Streamable HTTP to Prevent Unauthorized Access",
+    "state": "closed",
+    "created_at": "2026-03-27T13:30:17+00:00",
+    "updated_at": "2026-03-27T23:04:09+00:00",
+    "closed_at": "2026-03-27T23:04:07+00:00",
+    "merged_at": "2026-03-27T23:04:07+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "ica",
+      "MUST",
+      "api",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3891\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes a critical security vulnerability where invalid server IDs in MCP endpoint URLs (e.g., `/servers/xyz/mcp`) bypassed virtual server isolation and provided unauthorized access to all MCP components.\r\n\r\n**The Problem:**\r\n\r\n- URLs with invalid server IDs were processed by the SDK without validation\r\n- This allowed bypassing virtual server restrictions\r\n- Attackers could access MCP components they shouldn't have access to\r\n\r\n\r\n**The Solution:**\r\n\r\n- Added database validation for server_id before SDK processing\r\n- Returns `404` for non-existent servers\r\n- Returns `503` on database errors (fail-closed security)\r\n- Validation happens early in the request flow, preventing any further processing\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    ✅ passed    |\r\n| Unit tests                | `make test`     |    ✅ passed    |\r\n| Coverage ≥ 80%            | `make coverage` |    ✅ passed   |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Security Impact\r\n\r\n**Before:** Invalid server IDs provided access to all MCP components\r\n**After:** Invalid server IDs are rejected with proper HTTP error codes\r\n\r\n### Implementation Details\r\n**File:** `mcpgateway/transports/streamablehttp_transport.py` (lines 2862-2904)\r\n\r\nThe fix adds validation in `SessionManagerWrapper.handle_streamable_http()`:\r\n```\r\n# SECURITY: Validate that the server_id exists in the database\r\ntry:\r\n    async with get_db() as db:\r\n        server = db.execute(select(DbServer).where(DbServer.id == server_id)).scalar_one_or_none()\r\n        if server is None:\r\n            # Return 404 and exit - no further processing\r\n            return\r\nexcept Exception as e:\r\n    # Return 503 and exit - fail-closed on errors\r\n    return\r\n```\r\n\r\nKey Security Properties:\r\n\r\n- Early validation: Happens before `server_id_var.set()` (line 2906) and SDK's `handle_request()` (line 2945)\r\n- Fail-closed: Any validation error denies access\r\n- Proper error codes: `404` for not found, `503` for service errors\r\n- Virtual server isolation: Enforced at request entry point\r\n \r\nTest Updates\r\nUpdated `test_session_manager_wrapper_handle_streamable_http_exception` to verify:\r\n- `503` response is returned on validation failure\r\n- \"Failed to validate server ID\" appears in logs\r\n- No further processing occurs after validation error",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4024073851",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-27T22:54:13+00:00",
+      "body": "Approved — the three-layer security fix correctly closes #3891 for all attack vectors. Rebased, hardened with regex anchoring and affinity-path coverage, and verified via unit tests (1248 passed), mcp-cli e2e (22 passed), and live curl/Playwright testing against the deployed instance."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2d9bf2dee951739ea315453747240a626cd1a7cc",
+      "message": "fix(security): validate server ID in Streamable HTTP to prevent unauthorized access\n\nThe hex-only regex _SERVER_ID_RE only captured server IDs matching\n[a-fA-F0-9\\-]+.  Non-hex IDs (e.g. \"xyz\", \"hello world\", empty\nsegments) caused the regex to silently fail, setting server_id to None\nand falling through to unscoped global access — exposing all tools,\nprompts, resources, and agents to any authenticated caller.\n\nThree-layer defense:\n- Widen _SERVER_ID_RE from [a-fA-F0-9\\-]+ to [^/]+ so ALL server-\n  scoped paths are captured and validated against the database\n- Add defense-in-depth guard via _SERVER_SCOPED_PATH_RE to reject edge\n  cases like /servers//mcp where the primary regex still doesn't match\n- Add server ID format validation in MCPPathRewriteMiddleware before\n  path rewriting occurs\n\nAdditional improvements:\n- Extract _validate_server_id() to SessionManagerWrapper for clarity\n- Extract entity_exists() to BaseService for lightweight existence checks\n- Add require_valid_server FastAPI dependency for the message endpoint\n- Use ORJSONResponse pattern for consistency with rest of codebase\n- Remove server_id from error messages to prevent information leakage\n\nCloses #3891\n\nCo-authored-by: Jonathan Springer <jps@s390x.com>\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-03-27T21:33:52+00:00"
+    },
+    {
+      "sha": "6dfb15c0f14685843807968e406eabd0959ea96d",
+      "message": "fix(security): anchor regex and middleware to canonical /servers/ paths\n\nAddress Codex review findings:\n\n1. Move _validate_server_id() before affinity routing branches so\n   nonexistent server IDs get a clean 404 even with stateful session\n   affinity enabled (USE_STATEFUL_SESSIONS + SESSION_AFFINITY).\n\n2. Anchor _SERVER_ID_RE and _SERVER_SCOPED_PATH_RE with ^ so paths\n   like /foo/servers/xyz/mcp cannot embed a server segment and bypass\n   route matching.\n\n3. Restrict MCPPathRewriteMiddleware to only rewrite paths starting\n   with /servers/ — arbitrary prefixes (e.g. /foo/mcp) now pass\n   through without rewriting to /mcp/.\n\n4. Add entity_exists mock to 8 existing affinity tests that now hit\n   the earlier validation gate.\n\nCloses #3891\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T22:53:20+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 550,
+  "deletions": 37,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:35.011214",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:35.014195",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3892,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3892.json"
+  }
+}

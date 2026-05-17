@@ -1,0 +1,58 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3055,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3055"
+  },
+  "metadata": {
+    "title": "[Fix][Auth]: fix identity drift in stateful session fallback by using header-first token precedence in streamablehttp",
+    "state": "closed",
+    "created_at": "2026-02-19T06:31:02+00:00",
+    "updated_at": "2026-02-20T14:28:06+00:00",
+    "closed_at": "2026-02-20T14:28:04+00:00",
+    "merged_at": "2026-02-20T14:28:04+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3019\r\n\r\n## 📌 Summary\r\nThe stateful session fallback path in `_get_request_context_or_default()` resolved user identity through `require_auth_override()` -> `require_auth()`, which reads cookie tokens before Authorization headers. The primary ASGI middleware (streamable_http_auth) resolves identity using the Authorization header only. This asymmetry caused identity drift: a request carrying both a valid Authorization: Bearer `<token-A>` header and a `jwt_token=<token-B>` cookie would authenticate as user-A through the middleware but as user-B through the stateful session fallback, silently producing two different identities within the same request lifecycle.\r\n\r\n\r\n## 🔁 Reproduction Steps\r\n1. Set USE_STATEFUL_SESSIONS=true  \r\n2. Send a request to `/servers/{id}/mcp/` with both:  \r\n   - Authorization: `Bearer <token-for-user-A> ` \r\n   - Cookie `jwt_token=<token-for-user-B>` \r\n3. streamable_http_auth middleware sets ContextVar identity to user A (header-only path)  \r\n4. In any code path where `_get_request_context_or_default()` fires its fallback (ContextVar stale / not yet set), user identity resolves to user B (cookie wins in require_auth)\r\n\r\nThe practical trigger — both a valid header and a different valid cookie on the same request — is uncommon in normal operation (MCP SDK clients use headers; Admin UI uses cookies, not both). However, it is a correctness and security issue whenever it does occur.\r\n\r\n\r\n## 🐞 Root Cause\r\nThree layers interact to produce the bug.\r\n\r\nLayer 1 - ASGI middleware (streamable_http_auth, streamablehttp_transport.py:2200-2209)  \r\nExtracts the token from the Authorization header only. If no Bearer token is present the middleware raises immediately; cookies are never consulted.\r\n\r\n```\r\ntoken: str | None = None\r\nif authorization:\r\n    scheme, credentials = get_authorization_scheme_param(authorization)\r\n    if scheme.lower() == \"bearer\" and credentials:\r\n        token = credentials\r\n```\r\n\r\nLayer 2 - Fallback (_get_request_context_or_default, streamablehttp_transport.py:996-1002)  \r\nCalled when ContextVars are stale. Passed both the Authorization header value and the jwt_token cookie value to require_auth_override().\r\n\r\nLayer 3 - require_auth token resolution (verify_credentials.py:389-401)  \r\nrequire_auth_override delegates to require_auth, whose token resolution order is:\r\n\r\n1. request.cookies.get(\"jwt_token\")   ← COOKIE WINS (highest priority)  \r\n2. credentials.credentials            ← Authorization header (only if no cookie)  \r\n3. jwt_token parameter                ← cookie param fallback  \r\n\r\nThe cookie always beats the Authorization header, the exact inverse of the middleware.\r\n\r\nA wrong comment in the fallback (# In stateful session, cookie might be more reliable) made this look intentional.\r\n\r\n\r\n## 💡 Fix Description\r\nNew function: require_auth_header_first() (verify_credentials.py)\r\n\r\nA dedicated variant of require_auth_override() with reversed token precedence matching the middleware:\r\n\r\n1. Authorization Bearer header   ← header wins (highest priority)  \r\n2. request.cookies jwt_token     ← cookie fallback  \r\n3. jwt_token keyword argument    ← parameter fallback  \r\n\r\nAll other behaviour is identical to require_auth_override: proxy auth, Basic auth (docs_allow_basic_auth), anonymous when auth not required, and 401 when required but no token is found. require_auth itself is not changed — its cookie-first ordering is intentional for browser/Admin UI routes and protected by explicit API/browser checks in rbac.py.\r\n\r\nCall-site change (streamablehttp_transport.py)\r\n\r\n_get_request_context_or_default() now calls require_auth_header_first() instead of require_auth_override(), and the misleading comment is replaced with an accurate one explaining the precedence alignment:\r\n\r\n```\r\n# Use require_auth_header_first to match streamable_http_auth token precedence:\r\n# Authorization header > request cookies > jwt_token parameter\r\nraw_payload = await require_auth_header_first(auth_header=auth_header, jwt_token=cookie_token, request=request)\r\n```\r\n\r\nTests\r\n\r\n- test_verify_credentials.py - 15 new tests for require_auth_header_first: header beats request.cookies, header beats jwt_token param, cookie fallback when no header, jwt_token param fallback, anonymous/401 modes, proxy auth path, Basic auth path, and edge cases (auth_header=\"\", \"Bearer \" with empty token, request.cookies wins over jwt_token param)  \r\n- test_streamablehttp_transport.py - 1 new test (test_get_request_context_header_wins_over_cookie) that intercepts at verify_credentials_cached to assert the header token is passed when both header and cookie are present; 5 existing tests updated to mock require_auth_header_first instead of the now-removed require_auth_override import  \r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3825254971",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-19T11:35:33+00:00",
+      "body": "Good fix for a real identity drift bug. The root cause is clear: `require_auth()` reads cookies before headers (lines 389-397), while `streamable_http_auth` middleware reads headers first. When both an Authorization header and a jwt_token cookie are present, the stateful session fallback (`_get_request_context_or_default`) would resolve to the cookie identity while the middleware had already authenticated using the header — causing the user context to silently drift.\n\nThe new `require_auth_header_first()` implements the correct precedence (header > request.cookies > jwt_token param), matching the middleware. The function is self-contained and avoids the cookie-first ordering baked into `require_auth`.\n\nTests are thorough — 14 cases covering the precedence matrix, edge cases (empty Bearer, non-Bearer scheme, no-request fallback), proxy auth paths, and the key integration test `test_get_request_context_header_wins_over_cookie` that directly reproduces the drift scenario.\n\nOne minor note: the `require_auth_override` function is now unused by this transport but remains exported — that's fine since other callers may still use it. No issues found."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a398323c4f84349ab8040be2843213ee004b40b0",
+      "message": "fix auth precedence for streamable http\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T06:16:03+00:00"
+    },
+    {
+      "sha": "568a498546b91cfe91e90fb1b862f2bcd1c5c2e5",
+      "message": "increase cov\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-19T06:47:32+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 531,
+  "deletions": 13,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:14:34.981285",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:14:34.982710",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3055,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3055.json"
+  }
+}

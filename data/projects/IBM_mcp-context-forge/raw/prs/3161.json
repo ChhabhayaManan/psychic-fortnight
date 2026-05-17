@@ -1,0 +1,127 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3161,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3161"
+  },
+  "metadata": {
+    "title": "feat: implement top-level Rust workspace (ADR-041)",
+    "state": "closed",
+    "created_at": "2026-02-24T09:28:14+00:00",
+    "updated_at": "2026-04-08T10:50:27+00:00",
+    "closed_at": "2026-04-08T10:50:27+00:00",
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "rust",
+      "MUST"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "lucarlig"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3029 due to repository maintenance. Your code and branch are intact. @lucarlig please verify everything looks good.\r\n\r\nImplements [ADR-041: Top-Level Rust Workspace](docs/docs/architecture/adr/041-top-level-rust-workspace.md). All Rust code is now part of a single workspace at the repository root, with one set of commands and one CI workflow for building, testing, and releasing.\r\n\r\n#### Summary\r\n\r\n- **Workspace at repo root**  \r\n  Root `Cargo.toml` and `Cargo.lock` define a workspace. Rust crates live under `crates/` (e.g. `crates/plugins/`, `crates/tools/`, `crates/gateway_rs/`, `crates/mcp-servers/`). A single `cargo build` / `cargo test` at the repo root builds and tests all Rust code.\r\n\r\n- **Single Rust CI workflow**  \r\n  Replaces the separate Rust Plugins and Rust Tools workflows with one [`.github/workflows/rust.yml`](.github/workflows/rust.yml) that:\r\n  - Runs on `ubuntu-latest` and `macos-latest` (no Windows; Makefile assumes a Unix shell).\r\n  - Triggers on changes under `crates/**`, root `Cargo.toml`/`Cargo.lock`, `rust-toolchain.toml`, `deny.toml`, and the workflow file.\r\n  - Uses Makefile targets for: build + stub generation/verification, `rust-fmt-check`, `rust-lint` (clippy), `rust-test`, wheel build, `rust-audit`, `rust-licenses`, `rust-bench-check`, coverage, docs, and (on tags) release/publish.\r\n\r\n- **Makefile as single entrypoint**  \r\n  All Rust operations go through `make` targets (e.g. `rust-build-check`, `rust-fmt-check`, `rust-lint`, `rust-test`, `rust-build-wheels`, `rust-audit`, `rust-licenses`, `rust-coverage`, `rust-doc`, `rust-release` / `rust-release-publish`). CI and local dev use the same commands.\r\n\r\n- **Pre-commit**  \r\n  Adds a local hook that runs Rust fmt, build, and clippy when Rust is installed and when files under `crates/`, `Cargo.toml`, `Cargo.lock`, or `rust-toolchain.toml` change. Path exclusions and hook config were updated from `plugins_rust/` / `tools_rust/` to the new `crates/` paths.\r\n\r\n- **Docs and config**  \r\n  [AGENTS.md](AGENTS.md) and pre-commit config now refer to `crates/plugins/` and `crates/tools/` instead of `plugins_rust/` and `tools_rust/`.\r\n\r\n#### Consequences (per ADR-041)\r\n\r\n- One place to run Rust: `make rust-check` (and related targets) at repo root.\r\n- One CI workflow for Rust; fewer duplicated jobs and caches.\r\n- Shared root `.venv` for maturin builds when using the top-level workspace.\r\n- Easier to add new Rust crates under `crates/` and to do cross-crate refactors.\r\n\r\n#### Related\r\n\r\n- ADR: [041-top-level-rust-workspace.md](docs/docs/architecture/adr/041-top-level-rust-workspace.md)\r\n- Issue: [#3027](https://github.com/IBM/mcp-context-forge/issues/3027)\r\n\r\n---",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3922046372",
+      "author": "sco3",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T12:33:05+00:00",
+      "body": ""
+    },
+    {
+      "id": "3922129974",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-10T12:47:00+00:00",
+      "body": "Looks good build works, unit tests works, coverage needs improvent:"
+    },
+    {
+      "id": "3922753536",
+      "author": "lucarlig",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T14:14:47+00:00",
+      "body": ""
+    },
+    {
+      "id": "3922754123",
+      "author": "sco3",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T14:14:51+00:00",
+      "body": "look good"
+    },
+    {
+      "id": "4021918066",
+      "author": "dima-zakharov",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-27T15:23:24+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "3cc0989ef948f5be18a77ddc5783eaa8453e0fd5",
+      "message": "chore(rust): add workspace and move Rust code under crates/\n\n- Add root Cargo.toml, Cargo.lock, rust-toolchain.toml, deny.toml\n- Move plugins_rust to crates/plugins (encoded_exfil_detection, pii_filter, secrets_detection)\n- Move tools_rust to crates/tools (wrapper)\n- Move mcp-servers/rust to crates/mcp-servers (fast-test-server, filesystem-server)\n- Add crates/gateway_rs/services/a2a_service scaffolding\n- Remove plugins_rust/, tools_rust/, mcp-servers/rust/\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-10T11:45:33+00:00"
+    },
+    {
+      "sha": "7e9b25f93a28ac83296426afca99e364b5a8c59e",
+      "message": "ci(rust): unify Rust CI into single workflow\n\n- Remove rust-plugins.yml and rust-tools.yml\n- Add rust.yml for workspace (crates/*), maturin plugins, and tools\n- Run on ubuntu and macos only; use Makefile rust-* targets\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-10T11:45:38+00:00"
+    },
+    {
+      "sha": "373b40d021107930dd687077f1074294becace68",
+      "message": "chore(rust): add Rust pre-commit hook and path exclusions\n\n- Add rust-pre-commit hook (fmt, build, clippy) in pre-commit and lite configs\n- Add scripts/pre-commit-rust.sh; run only when Rust is installed\n- Update detect-private-key and shebang exclusions for crates/plugins paths\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-10T11:45:42+00:00"
+    },
+    {
+      "sha": "9bd70bf2708729e7886411287d182c5914831a00",
+      "message": "docs: update paths and docs for crates layout\n\n- AGENTS.md: plugins_rust -> crates/plugins, tools_rust -> crates/tools\n- MANIFEST.in: prune crates paths, remove tools_rust\n- docs: rust-plugins.md, release-management, testing, mcp-best-practices\n- tests/AGENTS.md, tests/README.md: Rust paths\n- plugins READMEs: path and import references\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-10T11:45:49+00:00"
+    },
+    {
+      "sha": "0f4fafff4b0bccab5c6cd8abffcd648b027f20e0",
+      "message": "chore(build): update Containerfiles and Makefile for Rust workspace\n\n- Containerfile*: Rust paths and build steps for crates/\n- Makefile: rust-* targets for workspace (build, fmt, clippy, test, wheels, audit, licenses, coverage, doc, release)\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-10T11:45:55+00:00"
+    },
+    {
+      "sha": "cf583e9cd301b1bf192021c1da9b8db7f90927fa",
+      "message": "fix(tests): update Python imports and tests for crates layout\n\n- plugins/pii_filter/pii_filter_rust.py: look for crates/plugins in addition to plugins_rust\n- plugins/secrets_detection/README.md: path references\n- tests: pii_filter, prompt_service, tool_service_coverage, secrets_detection (imports and mocks)\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-10T11:46:00+00:00"
+    },
+    {
+      "sha": "1e55622a26671eec283cceb074174b62565d2593",
+      "message": "chore: add crates to license checker and refresh uv.lock\n\n- scripts/license_checker.py: recognize crates/ path for Rust packages\n- uv.lock: refresh for workspace/maturin dependencies\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-10T11:46:08+00:00"
+    },
+    {
+      "sha": "6d1f69cd6adf67322fad11408257bb8f0f77a654",
+      "message": "Merge remote-tracking branch 'origin/main' into 3027_setup_rust_mcpgateway_for_internal_components\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-10T13:56:59+00:00"
+    }
+  ],
+  "files_changed": 151,
+  "additions": 5721,
+  "deletions": 1215,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:12:53.721135",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:53.722315",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3161,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3161.json"
+  }
+}

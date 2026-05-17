@@ -1,0 +1,133 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4595,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4595"
+  },
+  "metadata": {
+    "title": "perf(auth): cache get_user_by_email at service level to reduce DB hot-path queries",
+    "state": "closed",
+    "created_at": "2026-05-05T09:23:14+00:00",
+    "updated_at": "2026-05-06T16:52:10+00:00",
+    "closed_at": "2026-05-06T16:52:08+00:00",
+    "merged_at": "2026-05-06T16:52:08+00:00",
+    "author": "msureshkumar88",
+    "labels": [
+      "enhancement",
+      "python",
+      "performance",
+      "COULD"
+    ],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## Summary\n\n`EmailAuthService.get_user_by_email()` is called on every service operation that reads or verifies a user (login, password change, SSO upsert, OAuth token introspection, profile fetch, admin bootstrap, and more — 12+ internal call sites). Each call issued a synchronous `SELECT … WHERE email = ?` with no caching, even though the existing `AuthCache` already had an allocated `_user_cache` dict and the Redis key `mcpgw:auth:user:{email}` wired into `invalidate_user()` but never populated.\n\n- Adds `get_user()` / `set_user()` to `AuthCache` using the same L1 (in-memory) → L2 (Redis) write-through pattern as `get_user_role()` / `set_user_role()`\n- Wires those methods into `EmailAuthService.get_user_by_email()` so every call checks cache first and populates on a DB hit\n- Adds missing cache invalidation to `update_user()`, `activate_user()`, and `deactivate_user()` — three mutation methods that previously committed user changes without busting the cache\n- Exposes `user_cache_size` in `AuthCache.stats()` (was always 0 because the cache was never written)\n- All cache operations wrapped in `try/except`; Redis outage falls through to DB transparently\n\nNo new config knobs. Existing `auth_cache_user_ttl` (default 60 s) and `auth_cache_enabled` govern this path.\n\nCloses #3061\nSub-issue of #2692 (DB query hot-path optimisations)\n\n## Files Changed\n\n| File | What changed |\n|------|-------------|\n| `mcpgateway/cache/auth_cache.py` | Added `get_user()` and `set_user()` methods; added `user_cache_size` to `stats()` |\n| `mcpgateway/services/email_auth_service.py` | Added `_user_obj_to_dict()` / `_user_dict_to_obj()` helpers; updated `get_user_by_email()` to use cache; added `_invalidate_user_auth_cache()` calls in `update_user()`, `activate_user()`, `deactivate_user()` |\n| `tests/unit/mcpgateway/cache/test_auth_cache_user.py` | 7 new unit tests for cache hit, miss, expiry, invalidation, Redis write-through, disabled cache, and stats |\n| `tests/unit/mcpgateway/services/test_email_auth_get_user_cache.py` | 8 new unit tests for helper round-trips, cache hit skips DB, cache miss populates cache, error fallback to DB, and all three mutation invalidations |\n\n## Invalidation Coverage After This PR\n\n| Mutation path | Method | Invalidation |\n|--------------|--------|-------------|\n| Password reset | `reset_password()` | existing |\n| Password change | `change_password()` | existing |\n| User update (name, admin flag, etc.) | `update_user()` | **added here** |\n| Activate user | `activate_user()` | **added here** |\n| Deactivate user | `deactivate_user()` | **added here** |\n| User deletion | `delete_user()` | existing |\n| User creation | `create_user()` | not needed |",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4228552880",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-05T13:41:55+00:00",
+      "body": "### Thanks for the PR - @msureshkumar88 \n### Please address the following findings\n - The PR stores a full user object (including `password_hash`) in Redis and returns a SQLAlchemy-detached object from  cache hits. Any method that mutates the returned object (e.g. `authenticate_user`, `unlock_user_account`) silently   discards those changes because the ORM session does not track the detached instance. This enables two critical  authentication-path bypasses.\n\n| # | File                                          | Line       | Severity           | CWE     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |\n| - | --------------------------------------------- | ---------- | ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |\n| 1 | `mcpgateway/services/email_auth_service.py` | 897        | **Critical** | CWE-307 | **Brute-force lockout bypass via detached ORM object.** `authenticate_user` calls `get_user_by_email` → cache hit → `_user_dict_to_obj` returns a new, session-detached `EmailUser`. Then `user.increment_failed_attempts()` is called and `self.db.commit()` is issued — but the detached object is not tracked, so the DB counter is never updated. Every request within the 60 s TTL window sees `failed_login_attempts = <stale>` and failed attempts are silently discarded, enabling unlimited password guesses during the TTL. |\n| 2 | `mcpgateway/services/email_auth_service.py` | 1162–1175 | **Critical** | CWE-613 | **`unlock_user_account` mutations are silently dropped + missing invalidation.** `get_user_by_email` on a cache-hit returns a detached object. Assignments `user.failed_login_attempts = 0` and `user.locked_until = None` then `self.db.commit()` silently no-op. Account is never actually unlocked in DB. No `_invalidate_user_auth_cache` call either, so stale locked state persists in cache.                                                                                                                                        |\n| 3 | `mcpgateway/services/email_auth_service.py` | 76–91     | **High**     | CWE-312 | **`password_hash` serialised into Redis.** `_user_obj_to_dict` includes the Argon2id hash in the JSON payload written to Redis. A Redis compromise (SSRF, misconfigured bind, key dump) directly exposes all cached hashes. The existing module docstring states \"JWT payloads are NOT cached (security risk)\" — the same principle applies here.                                                                                                                                                                                                 |\n| 4 | `mcpgateway/services/email_auth_service.py` | 121        | **Medium**   | CWE-20  | **`is_active` defaults to `True` on deserialization.** `d.get(\"is_active\", True)` means a corrupted/missing key produces an active user — fails open. Should be `False` to fail closed.                                                                                                                                                                                                                                                                                                                                                       |\n| 5 | `mcpgateway/services/email_auth_service.py` | 579, 596   | **Low**      | —      | **Duplicate `import auth_cache` inside `get_user_by_email`.** `from mcpgateway.cache.auth_cache import auth_cache` appears in two separate `try` blocks within the same method call.                                                                                                                                                                                                                                                                                                                                                           |\n| 6 | `mcpgateway/cache/auth_cache.py`            | ~413       | **Low**      | CWE-362 | **L1 cache dict read outside lock.** `self._user_cache.get(email)` at the top of `get_user` is done without acquiring `self._lock`, inconsistent with the write path inside the method.                                                                                                                                                                                                                                                                                                                                                          |\n## Redundant Code\n\n| # | File                                          | Line(s)    | Type                 | Description                                                                                                                     | Suggestion                                                                               |\n| - | --------------------------------------------- | ---------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |\n| 1 | `mcpgateway/services/email_auth_service.py` | 579, 596   | Duplicated import    | `from mcpgateway.cache.auth_cache import auth_cache` appears twice in consecutive `try` blocks inside `get_user_by_email` | Import once at the top of the method or hoist above both `try` blocks                  |\n| 2 | `mcpgateway/cache/auth_cache.py`            | ~428, ~456 | Repeated lazy import | `import orjson` inside both `get_user` and `set_user` try-blocks                                                          | Move to top of `auth_cache.py` alongside other third-party imports (or at class level) |"
+    },
+    {
+      "id": "4234816587",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-06T09:23:10+00:00",
+      "body": "### Security hardening\nScope includes cache integration for user lookups and mutation invalidation. The changes introduce two password-reset regressions tied to cached detached objects.\n\n| # | File | Line | Severity | CWE | Description | Fix |\n| - | ---- | ---- | -------- | --- | ----------- | --- |\n| 1 | [mcpgateway/services/email_auth_service.py](mcpgateway/services/email_auth_service.py) | [reset_password_with_token](mcpgateway/services/email_auth_service.py#L1106-L1140) | High | CWE-610 | `reset_password_with_token()` uses `get_user_by_email()`, which can return a detached cached user; writes to `user.password_hash` may not persist, leaving the previous password valid. | Fetch a session-attached user in `reset_password_with_token()` via `_fetch_user_from_db()` (or merge the object into the session) before mutating and committing. |\n| 2 | [mcpgateway/services/email_auth_service.py](mcpgateway/services/email_auth_service.py) | [reuse check](mcpgateway/services/email_auth_service.py#L1128-L1130) | Medium | CWE-521 | Password reuse checks can be bypassed on cache hits because cached users store an empty `password_hash`, making reuse comparisons always pass. | Perform reuse checks using a DB-attached "
+    },
+    {
+      "id": "4236831708",
+      "author": "Lang-Akshay",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-06T14:13:05+00:00",
+      "body": "Thanks for the PR implementing service-level caching for [get_user_by_email()](vscode-file://vscode-app/Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html), reducing database load during the authentication hot path by storing User objects in AuthCache (both L1 in-memory and L2 Redis)"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "dcc7b9cc24629b227ab685aaeb9076203b0ade66",
+      "message": "perf(auth): cache get_user_by_email at service level (#3061)\n\nAdd get_user()/set_user() to AuthCache (L1+L2) and wire them into\nEmailAuthService.get_user_by_email() to avoid repeated SELECT queries\non every service call. Add missing cache invalidation to update_user(),\nactivate_user(), and deactivate_user(). Include unit tests for cache\nhit, miss, fallback, and invalidation paths.\n\nCloses #3061\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-30T15:53:31+00:00"
+    },
+    {
+      "sha": "c380912dec29fa6e42d9f22375ac4bf825a6875a",
+      "message": "test(auth): add missing coverage for auth_cache and email_auth_service\n\nCover previously untested error paths:\n- AuthCache.get_user(): Redis exception handler (line 438)\n- AuthCache.set_user(): Redis path with orjson import and setex (lines 463/466) and exception handler (line 468)\n- _user_dict_to_obj(): _dt() passthrough for datetime objects (line 110)\n- get_user_by_email(): set_user exception suppression (line 598)\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-30T16:21:15+00:00"
+    },
+    {
+      "sha": "7e91e80ed9fb0bbeb44e691bf40cba337c3cd659",
+      "message": "fix precommit issues\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-05T09:03:02+00:00"
+    },
+    {
+      "sha": "09f5bc8df2e392947a4b9d6149cf026df92b80b1",
+      "message": "perf(auth): improve cache exception logging in get_user_by_email\n\nLog debug messages on cache read/write failures instead of silently\npassing, making Redis fallback behaviour observable.\n\nCloses #3061\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-05T09:22:33+00:00"
+    },
+    {
+      "sha": "851a63fecdcc486160a894816ca946a141402c40",
+      "message": "security(auth): fix 6 review findings in get_user_by_email cache\n\n- Remove password_hash from cache dict (CWE-312): _user_obj_to_dict no\n  longer serialises the Argon2id hash into Redis; _user_dict_to_obj falls\n  back to empty string for read-only paths\n- is_active defaults to False on deserialisation (CWE-20): fail-closed\n  instead of fail-open for missing/corrupted cache key\n- Add _fetch_user_from_db() helper for mutation paths; wire\n  authenticate_user and unlock_user_account to use it instead of the\n  cached detached object, preventing silent ORM mutation discards\n  (CWE-307 brute-force bypass, CWE-613 unlock bypass)\n- Add _invalidate_user_auth_cache() call to unlock_user_account after\n  DB commit so stale locked state is evicted immediately\n- Hoist duplicate auth_cache import above both try blocks in\n  get_user_by_email; move orjson module-level import in auth_cache.py\n- Acquire self._lock before L1 dict read in get_user() to be consistent\n  with the write path (CWE-362)\n\nTests: 5 new regression tests covering each security finding; updated\ntest_email_auth_basic.py to patch _fetch_user_from_db for unlock tests.\nAll 17286 unit tests pass.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-05T14:44:06+00:00"
+    },
+    {
+      "sha": "a617b53c99b1f535be6d47650d84f30f4b97ce14",
+      "message": "test(auth): cover Redis miss branch in AuthCache.get_user (line 438)\n\nAdd test hitting the path where Redis is available but returns None,\nincrementing _redis_miss_count. Previously untested, causing 97.4%\ncoverage on auth_cache.py.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-05T14:59:45+00:00"
+    },
+    {
+      "sha": "a870338e1ae2a088d117b6707c9389ad7179d80a",
+      "message": "add secrets baseline\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-05T15:02:08+00:00"
+    },
+    {
+      "sha": "ecdf28a30ef2a66f4afac42cab827d3c2b02cd65",
+      "message": "chore(auth): remove CWE identifiers from code comments\n\nDrop CWE-307 and CWE-613 tags from inline comments in\nemail_auth_service.py. Explanatory text retained intact.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-05T15:21:09+00:00"
+    },
+    {
+      "sha": "e033d72b2bdb20fb15eecf277c5a8a120746db00",
+      "message": "chore(cache): remove redundant local orjson re-imports in auth_cache\n\norjson already imported at module level (line 41). Local re-imports\nat lines 309, 381, 817, 856 triggered W0621/W0404 pylint warnings.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-05T15:40:59+00:00"
+    },
+    {
+      "sha": "4fc39f8bf33cca762d73f8b385ac030c2b3f37e0",
+      "message": "fix(auth): use _fetch_user_from_db in reset_password_with_token\n\nget_user_by_email can return a detached cached EmailUser with\nan empty password_hash. Two regressions followed:\n\n- CWE-610: mutations (password_hash, failed_login_attempts, etc.)\n  written to the detached object were silently dropped on commit,\n  leaving the old password valid after a reset.\n- CWE-521: the password-reuse check compared against \"\" (cached\n  hash placeholder), so reuse was never detected on cache hits.\n\n_fetch_user_from_db always returns a session-attached object with\nthe real hash, matching the pattern already used in authenticate_user\nand unlock_user_account.\n\nTests updated: mock _fetch_user_from_db (sync) instead of the\nasync get_user_by_email across all four reset_password_with_token\ntest cases.\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-06T10:20:19+00:00"
+    },
+    {
+      "sha": "e46c2e1eaa3c09a88f5e7523bcbcf865d9829ee4",
+      "message": "add security baselin\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-05-06T10:42:22+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 652,
+  "deletions": 34,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:47.958407",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:47.959197",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4595,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4595.json"
+  }
+}

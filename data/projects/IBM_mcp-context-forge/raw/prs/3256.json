@@ -1,0 +1,84 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3256,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3256"
+  },
+  "metadata": {
+    "title": "[FIX][A2A]: Fix auth_value stored with extra surrounding double quotes in PostgreSQL (#3122)",
+    "state": "closed",
+    "created_at": "2026-02-25T15:59:11+00:00",
+    "updated_at": "2026-03-11T10:38:52+00:00",
+    "closed_at": "2026-03-11T10:38:50+00:00",
+    "merged_at": "2026-03-11T10:38:50+00:00",
+    "author": "cafalchio",
+    "labels": [
+      "bug",
+      "a2a",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 📝 Summary\r\nFixes PostgreSQL-specific bug where A2A agent auth tokens were stored with \r\nextra JSON quotes (`\"<encrypted_blob>\"` instead of `<encrypted_blob>`), \r\ncausing 422 validation errors on retrieval.\r\n\r\n### Root Cause\r\nThe `auth_value` column was typed as `JSON` (Dict[str, str]) in the ORM model, \r\nbut the application stores AES-GCM encrypted base64 strings. PostgreSQL's JSON \r\ncolumn serializes Python strings as JSON string literals with surrounding quotes, \r\nbreaking decryption on read.\r\n\r\n### Solution\r\n- Changed `A2AAgent.auth_value` column type from `JSON` to `Text` in db.py\r\n- Created idempotent Alembic migration with data cleanup\r\n- Migration handles both PostgreSQL (type conversion with USING clause) and \r\n  SQLite (no-op, already stored as TEXT internally)\r\n\r\n### Testing\r\n- Manual testing via comprehensive guide in manual_test_migration.md\r\n- Verified on PostgreSQL 17 container with populated data\r\n- Migration tested with upgrade/downgrade cycles\r\n\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅     |\r\n| Coverage ≥ 80%            | `make coverage` | ✅     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [✅] Code formatted (`make black isort pre-commit`)\r\n- [✅] Tests added/updated for changes\r\n- [✅] Documentation updated (if applicable)\r\n- [✅] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n\r\nUsed make db-migration",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3867183954",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-27T14:18:42+00:00",
+      "body": "# PR Review Report — PR #3256: Fix A2A Agents auth_value storage with extra quotes\n\n**Author**: @cafalchio \n**Branch**: `fix/3122_A2A_Agents_auth_value_is_stored_in_the_postgres_database_with_extra_surrounding_double_quotes` → `main`\n**State**: Open\n**Reviewed at**: 2026-02-27T14:07:55Z\n\n---\n\n## Summary\n\nThis PR addresses Issue #3122 where A2A agent `auth_value` was incorrectly typed as `JSON/Dict[str, str]` in the database model, causing PostgreSQL to wrap encrypted authentication tokens in extra double quotes during storage. This prevented successful decryption on retrieval, resulting in 422 validation errors. The fix changes the column type from JSON to Text and includes an Alembic migration to convert existing data safely.\n\n**Risk Level**: Medium — Database schema change with data migration affecting authentication credentials.\n\n---\n\n## Linked Issues — Completion Status\n\n| Issue | Title | Status | Notes |\n| ----- | ----- | ------ | ----- |\n| #3122 | [BUG][API]: A2A_Agents.auth_value is stored in the postgres database with extra surrounding double quotes | ✅ Done | Core issue resolved: column type changed from JSON to Text with proper migration |\n\n**Overall Issue Coverage**: 1 of 1 requirements addressed.\n\n### Acceptance Criteria Assessment\n\n| Criterion | Status | Evidence |\n| --------- | ------ | -------- |\n| Change `auth_value` column type from JSON to Text | ✅ Done | [`db.py:4581`](mcp-context-forge/mcpgateway/db.py:4581) - Type changed to `Mapped[Optional[str]] = mapped_column(Text)` |\n| Create Alembic migration for schema change | ✅ Done | [`a3c38b6c2437_fix_a2a_agents_auth_value.py`](mcp-context-forge/mcpgateway/alembic/versions/a3c38b6c2437_fix_a2a_agents_auth_value.py) - Migration created with upgrade/downgrade |\n| Strip JSON quotes from existing data | ✅ Done | Migration line 52 uses `postgresql_using=\"auth_value#>>'{}'\"` to strip quotes |\n| Handle NULL/empty values safely | ✅ Done | Migration lines 44-47 null out empty JSON values before conversion |\n| Encrypted tokens decrypt successfully after migration | ⚠️ Partial | No integration test verifies end-to-end decryption after migration |\n\n---\n\n## Security Findings\n\n### Overview\n\nSecurity analysis performed on the database schema change and migration affecting encrypted authentication credentials. The changes involve sensitive data (encrypted API tokens, bearer tokens, basic auth credentials) stored in the `a2a_agents` table. **Overall risk: Medium** — 0 critical, 1 high, 2 medium, 1 low findings.\n\n### Findings Summary\n\n| # | File | Line | Severity | CWE | Description |\n| - | ---- | ---- | -------- | --- | ----------- |\n| 1 | [`a3c38b6c2437_fix_a2a_agents_auth_value.py`](mcp-context-forge/mcpgateway/alembic/versions/a3c38b6c2437_fix_a2a_agents_auth_value.py:40) | 40-53 | High | CWE-757 | Migration only handles PostgreSQL; SQLite deployments will silently skip migration, leaving schema inconsistent |\n| 2 | [`db.py`](mcp-context-forge/mcpgateway/db.py:4580) | 4580 | Medium | N/A | Comment inconsistency: changed `\"authheaders\"` to `\"headers\"` but codebase uses `\"authheaders\"` everywhere (50+ occurrences) |\n| 3 | [`a3c38b6c2437_fix_a2a_agents_auth_value.py`](mcp-context-forge/mcpgateway/alembic/versions/a3c38b6c2437_fix_a2a_agents_auth_value.py:44) | 44-47 | Medium | CWE-754 | Raw SQL execution without parameterization; while safe here (no user input), violates secure coding standards |\n| 4 | N/A | N/A | Low | N/A | No integration test verifies encrypted tokens decrypt correctly after migration |\n\n### Suggestions\n\n1. **Finding #1 (High)** — Add SQLite support to migration or document PostgreSQL-only limitation\n   - **Fix**: Add SQLite branch in upgrade/downgrade functions or add explicit check that raises error for SQLite\n   - **Standard**: Database migrations should handle all supported backends or explicitly fail for unsupported ones\n   - **Effort**: Low (2-4 hours)\n   - **Code**:\n   ```python\n   if bind.dialect.name == \"sqlite\":\n       # SQLite doesn't have JSON type issues, but we should still migrate for consistency\n       current_type = columns[\"auth_value\"][\"type\"]\n       if not isinstance(current_type, sa.Text):\n           op.alter_column(\"a2a_agents\", \"auth_value\", type_=sa.Text())\n   elif bind.dialect.name == \"postgresql\":\n       # existing PostgreSQL logic\n   ```\n\n2. **Finding #2 (Medium)** — Revert comment change from `\"headers\"` to `\"authheaders\"` for consistency\n   - **Fix**: Change [`db.py:4580`](mcp-context-forge/mcpgateway/db.py:4580) comment back to `\"authheaders\"` to match codebase\n   - **Standard**: Code comments should match actual implementation (50+ files use `\"authheaders\"`)\n   - **Effort**: Trivial (1 minute)\n   - **Code**: `auth_type: Mapped[Optional[str]] = mapped_column(String(20), default=None)  # \"basic\", \"bearer\", \"authheaders\", \"oauth\", \"query_param\" or None`\n\n3. **Finding #3 (Medium)** — Use parameterized queries in migration\n   - **Fix**: Replace raw SQL with SQLAlchemy expressions or use bound parameters\n   - **Standard**: OWASP recommends parameterized queries even for internal operations\n   - **Effort**: Low (1-2 hours)\n   - **Code**:\n   ```python\n   from sqlalchemy import table, column, update\n   a2a_agents = table('a2a_agents', column('auth_value'))\n   bind.execute(\n       update(a2a_agents)\n       .where(sa.or_(\n           sa.cast(a2a_agents.c.auth_value, sa.Text) == '\"\"',\n           sa.cast(a2a_agents.c.auth_value, sa.Text) == 'null'\n       ))\n       .values(auth_value=None)\n   )\n   ```\n\n4. **Finding #4 (Low)** — Add integration test for migration\n   - **Fix**: Create test that inserts A2A agent with bearer token, runs migration, verifies decryption works\n   - **Standard**: Database migrations affecting encrypted data should have integration tests\n   - **Effort**: Medium (4-6 hours)\n\n### Invariant Compliance\n\n**ContextForge Security Invariants**: All satisfied.\n\nThe PR does not violate any authentication or RBAC invariants. The change is purely a database schema fix that maintains the same encryption/decryption flow. The `auth_value` field continues to store encrypted credentials using the same `encode_auth()`/`decode_auth()` utilities.\n\n### Deny-Path Coverage\n\n**Security-sensitive changes**: Database schema change affecting encrypted authentication credentials.\n\n**Deny-path regression tests**: ⚠️ **Gap identified** — No deny-path tests exist for A2A agent authentication failures. While the change is a bug fix, it would be prudent to add tests verifying:\n- A2A agents with invalid/corrupted `auth_value` are rejected\n- A2A agents cannot be created with malformed authentication data\n- Migration handles edge cases (NULL, empty string, malformed JSON)\n\n**Recommendation**: Add deny-path tests in `tests/unit/mcpgateway/services/test_a2a_service.py` covering authentication validation failures.\n\n---\n\n## General PR Quality\n\n| Check | Status | Notes |\n| ----- | ------ | ----- |\n| Tests added/updated | ❌ | No tests added for migration or updated for schema change |\n| No hardcoded secrets | ✅ | No secrets found |\n| No debug code | ✅ | No debug code left in |\n| Docs/comments updated | ⚠️ | Migration has good comments, but comment inconsistency in [`db.py:4580`](mcp-context-forge/mcpgateway/db.py:4580) |\n| Migration present (if needed) | ✅ | Migration [`a3c38b6c2437_fix_a2a_agents_auth_value.py`](mcp-context-forge/mcpgateway/alembic/versions/a3c38b6c2437_fix_a2a_agents_auth_value.py) properly chains from `b2d9c6e4f1a7` |\n| Coding standards met | ⚠️ | Follows Black/isort, but has comment inconsistency and SQLite gap |\n\n### Detailed Quality Assessment\n\n**Strengths**:\n1. ✅ Migration is well-structured with safety checks (table/column existence)\n2. ✅ Proper use of `postgresql_using` clause to strip JSON quotes during conversion\n3. ✅ Handles NULL/empty values before type conversion\n4. ✅ Includes both upgrade and downgrade functions\n5. ✅ Migration revision chain is correct (`b2d9c6e4f1a7` → `a3c38b6c2437`)\n6. ✅ Clear docstrings explaining the issue and fix\n\n**Weaknesses**:\n1. ❌ **No tests** — Critical gap for a database migration affecting authentication\n2. ❌ **SQLite not handled** — Migration silently skips SQLite, causing schema drift\n3. ⚠️ **Comment inconsistency** — Changed `\"authheaders\"` to `\"headers\"` in comment only\n4. ⚠️ **Raw SQL** — Uses `bind.execute(sa.text(...))` instead of parameterized queries\n5. ⚠️ **No integration test** — Should verify encrypted tokens decrypt after migration\n\n**Code Quality Observations**:\n- Migration follows Alembic best practices with inspector checks\n- Type annotations are correct in [`db.py`](mcp-context-forge/mcpgateway/db.py:4581)\n- The `_prepare_a2a_agent_for_read()` helper at [`a2a_service.py:1662`](mcp-context-forge/mcpgateway/services/a2a_service.py:1662) still checks for dict type, which is now obsolete but harmless (defensive programming)\n\n---\n\n## Files Changed\n\n| File | Status | Summary |\n| ---- | ------ | ------- |\n| [`mcpgateway/alembic/versions/a3c38b6c2437_fix_a2a_agents_auth_value.py`](mcp-context-forge/mcpgateway/alembic/versions/a3c38b6c2437_fix_a2a_agents_auth_value.py) | added | New migration to convert `auth_value` from JSON to Text with quote stripping |\n| [`mcpgateway/db.py`](mcp-context-forge/mcpgateway/db.py:4581) | modified | Changed `A2AAgent.auth_value` type from `Mapped[Optional[Dict[str, str]]]` with JSON column to `Mapped[Optional[str]]` with Text column |\n\n---\n\n## Overall Verdict\n\n| Dimension | Rating |\n| --------- | ------ |\n| Issue Completion | 🟢 Complete |\n| Security Risk | 🟡 Medium |\n| PR Quality | 🟡 Needs Work |\n\n**Recommendation**: ⚠️ **Approve with fixes**\n\n### Rationale\n\nThe PR successfully addresses the core issue (#3122) by fixing the database schema mismatch that caused PostgreSQL to wrap encrypted tokens in extra quotes. The migration is well-structured and handles the data conversion safely for PostgreSQL.\n\nHowever, **three issues must be addressed before merge**:\n\n1. **High Priority**: SQLite support gap — Migration only handles PostgreSQL, leaving SQLite deployments with inconsistent schema\n2. **Medium Priority**: Comment inconsistency — Changed `\"authheaders\"` to `\"headers\"` in comment but codebase uses `\"authheaders\"` everywhere\n3. **Medium Priority**: Missing tests — No tests verify the migration works correctly or that encrypted tokens decrypt after conversion\n\n**Recommended Actions**:\n1. Add SQLite branch to migration or document PostgreSQL-only limitation\n2. Revert comment change in [`db.py:4580`](mcp-context-forge/mcpgateway/db.py:4580) to use `\"authheaders\"`\n3. Add integration test verifying A2A agent creation → migration → retrieval flow\n4. Consider adding deny-path tests for authentication validation failures\n\nOnce these issues are addressed, the PR will be ready for merge. The core fix is sound and addresses a real production issue affecting PostgreSQL deployments."
+    },
+    {
+      "id": "3928480227",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-11T10:21:08+00:00",
+      "body": "LGTM — fix is correct, consistent with codebase patterns, well-tested, no security/performance concerns. Minor cleanups applied during review."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "eef0b63a7671ea7e1d1d0eb4814e427eef98b16f",
+      "message": "Change auth_value column from JSON to TEXT\n    - PostgreSQL requires an explicit type cast.\n    - SQLite is unaffected since JSON is stored as TEXT internally.\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-03-03T13:30:04+00:00"
+    },
+    {
+      "sha": "e20ca06d93afb520f1f65c7c3ff35f4a887a6ae3",
+      "message": "Updated down_revision for the latest head\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-03-06T17:18:16+00:00"
+    },
+    {
+      "sha": "a4cd4c0f128bfa1853861666ca90517895b87005",
+      "message": "added postgress and sqlite migration tests\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-03-06T18:22:44+00:00"
+    },
+    {
+      "sha": "9c484b3a21ff533f1e08e88e87a5760abfa89e6b",
+      "message": "fix: clean up migration lint, dead code, docs, and formatting\n\n- Add pylint disable=no-member (standard for alembic migrations)\n- Remove unused _a2a_agents table ref and column/table imports\n- Fix implicit string concatenation warning (W1404)\n- Apply black formatting to test file\n- Fix manual_test_migration.md: remove duplicate separator,\n  fix postgres username mismatch (root -> postgres)\n- Add manual_test_migration.md to docs nav\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T10:20:43+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 939,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:30.415591",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:30.417533",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3256,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3256.json"
+  }
+}

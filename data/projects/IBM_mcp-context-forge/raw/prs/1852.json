@@ -1,0 +1,96 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1852,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1852"
+  },
+  "metadata": {
+    "title": "Reduce database polling load with adaptive backoff session message delivery",
+    "state": "closed",
+    "created_at": "2026-01-02T09:02:49+00:00",
+    "updated_at": "2026-01-04T21:35:11+00:00",
+    "closed_at": "2026-01-04T21:35:09+00:00",
+    "merged_at": "2026-01-04T21:35:09+00:00",
+    "author": "TS0713",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Performance Enhancement - Issue: #1675 \r\nThis PR  implements - Adaptive Polling with Exponential Backoff factor (as suggested in issue #1675 - Option A)\r\n\r\n- Start with a fast polling interval (100ms) for responsiveness\r\n- Gradually increase the interval when no messages are found\r\n- Reset to the fast interval immediately when a message arrives\r\n- Cap the maximum interval to avoid excessive latency\r\n- Exit cleanly when the session no longer exists\r\n- Tested idle SSE session scenarios, which represent the primary source of database polling, and verified a substantial (>90%) reduction in database load.\r\n- Updated test cases as per the new changes\r\n- Configured poll_interval, max_interval, backoff_factor in .env.example\r\n\r\nDefined poll_interval, backoff_factor, and max_interval in the configuration and consumed them via settings in session_registry.py\r\n\r\n\r\n## Acceptance Criteria\r\n\r\n- [x] Polling interval configurable via environment\r\n- [x] Default interval increased from 0.1s to 1.0s\r\n- [x] Adaptive backoff reduces queries during idle periods\r\n- [x] Message delivery latency remains acceptable (<2s)\r\n- [x] Database load reduced by 90% under typical usage\r\n- [x] All session registry tests pass\r\n- [x] Passes `make verify`\r\n\r\n### Additional Improvement (Included in This PR)\r\nWhile reviewing the polling loop, another potential optimization identified:\r\n\r\n### Current behavior\r\n-   Each polling iteration performs two separate database reads:\r\n-   Read pending messages (SessionMessageRecord)\r\n-   Check if the session still exists (SessionRecord)\r\n\r\n### Suggested follow-up\r\nThese can be collapsed into a single query using a LEFT OUTER JOIN, allowing the system to determine in one read whether:\r\n  - The session exists\r\n  - A pending message exists\r\n  - The session has been deleted (exit condition)\r\n\r\n### This would:\r\n  - Reduce DB round-trips further\r\n  - Improve performance under heavy load\r\n  - Maintain FIFO semantics when combined with ORDER BY message.id ASC\r\n\r\n### Per-Session Query Load\r\n\r\nEach session with database backend runs:\r\n- 10 poll iterations per second\r\n- 1-2 DB queries per iteration (read (message & session), optional remove)\r\n- **10-20 queries/second per session**\r\n\r\n### Impact at Scale\r\n\r\n| Concurrent Sessions | Queries/Minute | Database CPU Impact |\r\n|---------------------|----------------|---------------------|\r\n| 10 | 6,000 - 12,000 | Low |\r\n| 50 | 30,000 - 60,000 | Moderate |\r\n| 100 | 60,000 - 120,000 | High |\r\n| 500 | 300,000 - 600,000 | Critical |\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3625180331",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-04T21:31:27+00:00",
+      "body": "Rebased and tested"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ef682f6b11f18af455b1c81b596be4a3fd2c080e",
+      "message": "adaptive session polling implementation to reduce polling frequency - database backed\n\nSigned-off-by: Satya <tsp.0713@gmail.com>",
+      "author": "Satya",
+      "date": "2026-01-02T07:51:41+00:00"
+    },
+    {
+      "sha": "b06437295e5afa31efd60182fa886f1c6a1b6a8c",
+      "message": "pylint fix\n\nSigned-off-by: Satya <tsp.0713@gmail.com>",
+      "author": "Satya",
+      "date": "2026-01-02T09:15:50+00:00"
+    },
+    {
+      "sha": "61705185f8dc44e61318d4a791f507103c11752d",
+      "message": "Remove accidental editor artifact file\n\nSigned-off-by: Satya <tsp.0713@gmail.com>",
+      "author": "Satya",
+      "date": "2026-01-02T09:24:28+00:00"
+    },
+    {
+      "sha": "ee81363cafde398d4c91ee9475cf3517bf52e9f1",
+      "message": "use single DB read for adaptive polling that takes care of session and message existance\n\nSigned-off-by: Satya <tsp.0713@gmail.com>",
+      "author": "Satya",
+      "date": "2026-01-04T18:21:08+00:00"
+    },
+    {
+      "sha": "4baa851ffdff60926829d216213fb1d5a81af801",
+      "message": "added poll_interval, max_interval, backoff_factor to .env.example - can be configurable via .env\n\nSigned-off-by: Satya <tsp.0713@gmail.com>",
+      "author": "Satya",
+      "date": "2026-01-04T19:06:28+00:00"
+    },
+    {
+      "sha": "52f0c5e5fd0e24d5d5ae3de0c5c36be74d51ed0d",
+      "message": "fix: remove debug prints and dead code from adaptive polling\n\n- Remove debug print statements from message_check_loop\n- Remove unused counter variable\n- Remove dead code: _db_read() and _db_read_session() functions that were\n  replaced by _db_read_session_and_message()\n- Fix poll_interval default to 1.0s to match .env.example documentation\n- Replace print with logger.debug for session termination logging\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-04T21:22:39+00:00"
+    },
+    {
+      "sha": "12b0d1dfe14f484d2ae1cc2c9e07384eccc768a3",
+      "message": "docs: add session polling configuration documentation\n\n- Add detailed comments to .env.example explaining adaptive backoff\n- Document POLL_INTERVAL, MAX_INTERVAL, BACKOFF_FACTOR settings\n- Add tuning guide with use case examples\n- Add per-session database impact table\n- Include example progression showing backoff behavior\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-04T21:29:12+00:00"
+    },
+    {
+      "sha": "344da1d5cfee248527161e323119f007e45f40d5",
+      "message": "fix: update docstrings to document BaseException in Raises section\n\nThe connect_to_sse_server and connect_to_streamablehttp_server functions\ncatch and re-raise BaseException, so the docstrings must document\nBaseException instead of Exception to satisfy DAR401 checks.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-04T21:29:21+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 311,
+  "deletions": 148,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:35.996821",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:35.997474",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1852,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1852.json"
+  }
+}

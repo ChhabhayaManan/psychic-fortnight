@@ -1,0 +1,100 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3890,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3890"
+  },
+  "metadata": {
+    "title": "feat: add Redis Cluster support via REDIS_CLUSTER_MODE setting",
+    "state": "open",
+    "created_at": "2026-03-27T11:54:32+00:00",
+    "updated_at": "2026-04-28T10:46:52+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bebakouma",
+    "labels": [
+      "enhancement",
+      "performance",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## Problem\n\nWhen deploying ContextForge against a **Redis Cluster** (e.g. Bitnami `redis-cluster` Helm chart with multiple shards), the current standalone `redis.asyncio.Redis` client cannot handle `MOVED`/`ASK` redirects. This causes the application to crash-loop with `redis.exceptions.MovedError` on startup during leader election.\n\nThe error occurs because `redis.asyncio.from_url()` always creates a standalone client that connects to a single node. When a key lives on a different shard, Redis responds with a `MOVED` redirect that the standalone client cannot follow.\n\n## Solution\n\nAdd a `REDIS_CLUSTER_MODE` boolean environment variable (default: `false`). When set to `true`, the `redis_client` factory creates a `redis.asyncio.RedisCluster` instance that automatically discovers all shards and routes commands to the correct node.\n\n### Changes\n\n- **`config.py`** — new `redis_cluster_mode` setting with Field descriptor\n- **`utils/redis_client.py`** — refactored into `_create_cluster_client()` and `_create_standalone_client()` helpers; strips `/N` database path from URL in cluster mode (Redis Cluster only supports db 0); selects client type based on `redis_cluster_mode` setting\n\n### Usage\n\n```bash\nREDIS_CLUSTER_MODE=true\nREDIS_URL=redis://:password@redis-cluster:6379   # no /0\n```\n\n### Compatibility\n\n- **Backward compatible** — default is `false`, existing standalone deployments are unaffected\n- `RedisCluster` supports the same `.set()`, `.get()`, `.ping()`, `.eval()`, `.publish()`, `.pubsub()` APIs used throughout the codebase\n- PubSub works on `RedisCluster` (broadcasts to all nodes)\n- Leader election Lua script uses a single key, so it hashes to one slot (no cross-slot issues)\n\n### Environment\n\nTested against Bitnami `redis-cluster` Helm chart v12.0.2 (3 nodes) where the `redis-cluster` ClusterIP service load-balances across shards.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4058840232",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-04T20:53:28+00:00",
+      "body": "LGTM with the fixes applied. The client factory is correct, kwargs match the redis-py 7.3.0 API, the startup crash paths are guarded, and test coverage is at 100%.\n\nThe Pub/Sub limitation is documented with startup warnings and `.env.example` notes. Follow-up work for full cluster support (migrating pubsub callers, fixing cross-slot pipelines/Lua) can be tracked separately."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "cd80d721c3d81d880fc4f7b1a1a879f7734c9232",
+      "message": "feat: add Redis Cluster support via REDIS_CLUSTER_MODE setting\n\nWhen deploying against a Redis Cluster (e.g. Bitnami redis-cluster Helm\nchart), the current standalone redis.asyncio.Redis client cannot handle\nMOVED/ASK redirects, causing the application to crash-loop with\nredis.exceptions.MovedError.\n\nThis commit adds a REDIS_CLUSTER_MODE boolean setting (default: false).\nWhen enabled, the redis_client factory creates a\nredis.asyncio.RedisCluster instance instead of a standalone Redis\nclient. The cluster client automatically discovers all shards and\nroutes commands to the correct node.\n\nChanges:\n- config.py: Add redis_cluster_mode setting with Field descriptor\n- utils/redis_client.py: Add _create_cluster_client() and\n  _create_standalone_client() helpers; strip /N database path from\n  URL in cluster mode (Redis Cluster only supports db 0); select\n  client type based on redis_cluster_mode setting\n\nUsage:\n  REDIS_CLUSTER_MODE=true\n  REDIS_URL=redis://:password@redis-cluster:6379  # no /0\n\nFixes crash-loop caused by MovedError when REDIS_URL points to a\nRedis Cluster service with multiple shards.\n\nSigned-off-by: bbakouma <bakoumaema@gmail.com>",
+      "author": "bbakouma",
+      "date": "2026-03-27T11:38:52+00:00"
+    },
+    {
+      "sha": "5aef2c581d9f27ab6093f0c97e4e0c3542ed9fa9",
+      "message": "test: add unit tests for Redis Cluster support and stricter URL validation\n\n- _strip_db_from_url now raises ValueError for non-zero database\n  numbers (e.g. /1, /2) instead of silently stripping them, so\n  misconfigurations fail fast\n- Add TestStripDbFromUrl: tests for /0 stripping, no-path, slash-only,\n  and non-zero DB rejection\n- Add TestClusterMode: tests for cluster_mode=true (RedisCluster),\n  cluster_mode=false (standalone), and missing attr fallback\n- Update .env.example with REDIS_CLUSTER_MODE documentation\n\nSigned-off-by: bbakouma <bakoumaema@gmail.com>",
+      "author": "bbakouma",
+      "date": "2026-03-27T12:46:22+00:00"
+    },
+    {
+      "sha": "28091fc622a4e12d56151cb7e571edfacb34b73d",
+      "message": "fix: mask Redis password in cluster-mode log and add Helm chart value\n\nAddress reviewer feedback:\n- Security: Add _mask_redis_url() helper to redact passwords from\n  the cluster-mode log line. Prevents leaking credentials when\n  REDIS_URL contains a password (e.g. redis://:secret@host:6379).\n- Helm: Add REDIS_CLUSTER_MODE to charts/mcp-stack/values.yaml\n  (default: false) for parity with the new config setting.\n\nSigned-off-by: bbakouma <bakoumaema@gmail.com>",
+      "author": "bbakouma",
+      "date": "2026-03-30T13:33:34+00:00"
+    },
+    {
+      "sha": "8090a90d4c7fd503f148529dcd673157f4c00f74",
+      "message": "fix: use direct attribute access for redis_cluster_mode and improve test coverage\n\nReplace getattr(settings, \"redis_cluster_mode\", False) with direct\nsettings.redis_cluster_mode access — the Pydantic field always exists\nwith default=False, and getattr returns a truthy MagicMock when settings\nis mocked in tests, silently routing all tests through the cluster path.\n\n- Add redis_cluster_mode=False to all pre-existing test mocks\n- Replace missing-attr test with integration test through get_redis_client()\n- Add test for cluster mode with non-zero DB (ValueError path)\n- Add test for explicit parser_class in cluster client\n- Add tests for _mask_redis_url helper\n- Remove docstring example that triggers secret scanner false positive\n- Extract masked_url variable to avoid double _strip_db_from_url call\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T19:52:54+00:00"
+    },
+    {
+      "sha": "91c2bcd61e552f67236bccf49b9f3a0fe0ab573c",
+      "message": "fix: propagate ValueError for invalid Redis Cluster DB configuration\n\nMove cluster URL validation before the try/except block so\nmisconfigurations (e.g. REDIS_URL with /1 in cluster mode) raise\nValueError immediately at startup. The validation is scoped to\ncluster mode only — standalone Redis is unaffected and still\ndegrades gracefully on any exception.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T19:56:58+00:00"
+    },
+    {
+      "sha": "db1d32770c10172948f31c70738cc4423c2c6d4f",
+      "message": "fix: remove unsupported RedisCluster kwargs and add pubsub warning\n\nVerified against redis-py 7.3.0: RedisCluster.__init__() does NOT\naccept retry_on_timeout or parser_class (both cause TypeError).\nIt DOES accept max_connections and health_check_interval, which\nwere previously dropped.\n\nChanges:\n- Remove retry_on_timeout and parser_class from cluster kwargs\n- Add max_connections and health_check_interval to cluster kwargs\n- Drop parser_class parameter from _create_cluster_client signature\n- Add startup warning that async RedisCluster lacks publish()/pubsub()\n- Update .env.example to document /0 stripping and pubsub limitation\n- Update tests: remove parser_class passthrough test (validated broken\n  behavior), add assertions that unsupported kwargs are excluded and\n  supported kwargs are included\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T20:39:20+00:00"
+    },
+    {
+      "sha": "90190f3328206230c188630354b5ba781a811f35",
+      "message": "fix: guard session registry pubsub() for cluster mode compatibility\n\nredis.asyncio.RedisCluster does not have pubsub() or publish()\nmethods. The session registry calls pubsub() unconditionally in\ntwo places:\n- During startup initialization (line 501)\n- During session respond loop setup (line 1532)\n\nBoth would crash with AttributeError when REDIS_CLUSTER_MODE=true.\n\nAdd hasattr guards so both paths degrade with a warning instead of\ncrashing. The three publish() calls (lines 654, 1205, 1311) are\nalready wrapped in try/except Exception blocks and degrade safely.\n\nCross-worker session events are disabled in cluster mode until\npubsub callers are migrated to a cluster-compatible mechanism.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T20:44:09+00:00"
+    },
+    {
+      "sha": "bfee3f3a58c51e71001364fadb2fc99fd48c1626",
+      "message": "Merge branch 'main' into feat/redis-cluster-support",
+      "author": "bebakouma",
+      "date": "2026-04-05T03:54:25+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 396,
+  "deletions": 27,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:35.111035",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:35.111717",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3890,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3890.json"
+  }
+}

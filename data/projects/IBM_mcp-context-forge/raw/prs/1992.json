@@ -1,0 +1,128 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1992,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1992"
+  },
+  "metadata": {
+    "title": "Filter by team_id in partials endpoints",
+    "state": "closed",
+    "created_at": "2026-01-09T07:23:52+00:00",
+    "updated_at": "2026-01-11T15:21:08+00:00",
+    "closed_at": "2026-01-11T15:21:06+00:00",
+    "merged_at": "2026-01-11T15:21:06+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n---\r\n\r\n## 📌 Summary\r\n\r\nImplements comprehensive team-based filtering across all admin UI endpoints, fixing a critical variable shadowing bug and adding team context to HTMX partials, search endpoints, and ID list endpoints.\r\n\r\n## 💡 Fix Description\r\n\r\n### Team Filtering Implementation\r\n\r\nAdded `team_id` query parameter support to **18 endpoints** across 6 resource types:\r\n\r\n- 6 Partial Endpoints\r\n- 6 ID List Endpoints\r\n- 6 Search Endpoints\r\n\r\n**HTMX Templates:** Updated all 8 HTMX initial load triggers in `admin.html` to include `team_id` when present\r\n\r\n**JavaScript:** Updated 6 server-side search functions and 4 ID fetching functions to pass `team_id`\r\n\r\n**Manual HTMX Trigger:** Added code in `showTab()` to manually trigger HTMX load for gateways tab when switching tabs (HTMX only auto-triggers for initially visible elements).\r\n\r\n#### Filtering Logic\r\n\r\n**When `team_id` is specified** (team-scoped view):\r\n\r\n- Show ONLY resources belonging to that specific team\r\n- Validate user is a team member; return empty results if not\r\n- Use `query.where(DbResource.team_id == team_id)` for precise filtering\r\n- Uses SQLAlchemy's `false()` for security (prevents unauthorized access)\r\n\r\n**When team_id is NOT specified** (All Teams view):\r\n\r\n- Show all accessible resources: user-owned + team-shared + public\r\n- Apply standard multi-condition access logic with OR clauses\r\n\r\n### Bug Fixes\r\n\r\n#### Variable Shadowing\r\n\r\n**Fixed:** Variable shadowing in `admin_ui()` function that caused phantom `team_id` values\r\n\r\n**Problem:** In the loop that builds `user_teams`, the code used `team_id` as a local variable, which shadowed the function parameter. On the last loop iteration (most recently created team), this overwrote the `team_id` parameter from None to that team's ID, causing unexpected filtering.\r\n\r\n```python\r\n# Before\r\nfor team in raw_teams:\r\n    team_id = str(team.id)  # Shadows function parameter!\r\n    \r\n# After (fixed)  \r\nfor team in raw_teams:\r\n    current_team_id = str(team.id)  # No shadowing\r\n```\r\n\r\n**Impact:** Users navigating to `/admin/` without a team filter would incorrectly see only resources from the last created team instead of all accessible resources.\r\n\r\n#### Cache Invalidation\r\n\r\nAdded auth cache invalidation in `TeamManagementService.create_team()`:\r\n\r\n- `await auth_cache.invalidate_user_teams(created_by)`\r\n- `await auth_cache.invalidate_team_membership(created_by)`\r\n- `await auth_cache.invalidate_user_role(created_by, str(team.id))`\r\n\r\n**Why:** Without this, the auth cache doesn't know the user belongs to the newly created team, causing immediate access issues.\r\n\r\n### Testing\r\n\r\nAdded comprehensive E2E test suite in `tests/e2e/test_admin_apis.py`:\r\n\r\n- `test_tools_partial_with_team_id` - Verify partial HTML filtering\r\n- `test_tools_ids_with_team_id` - Verify ID list filtering\r\n- `test_tools_search_with_team_id` - Verify search filtering\r\n- `test_unauthorized_team_access` - Security: prevent unauthorized team access\r\n- `test_resources_partial_with_team_id` - Resources filtering\r\n- `test_prompts_partial_with_team_id` - Prompts filtering\r\n\r\n**Coverage:** Tests verify filtering works correctly across create/read operations and validates security (users can't access teams they're not members of).\r\n\r\n### Backwards Compatibility\r\n✅ **Fully backwards compatible** - team_id parameter is optional. Existing API consumers without team awareness continue to work with \"All Teams\" view.\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |   pass    |\r\n| Unit tests                            | `make test`          |   pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3647842796",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-11T15:03:55+00:00",
+      "body": "\r\n## Summary\r\nAdds team-based filtering to admin UI partial endpoints, enabling users to view resources scoped to a specific team. Includes security fixes for visibility enforcement and test improvements.\r\n\r\n## I made the following changes to this PR:\r\n\r\n### 1. Security Fix: Visibility Check in Team-Scoped Filtering (`69198ce4`)\r\n\r\n**Problem**: When filtering by `team_id`, the original implementation showed ALL team resources including `visibility=private` items owned by other team members. This violated the RBAC model where private resources should only be visible to their owner.\r\n\r\n**Solution**: Added visibility constraints to all team-filtered endpoints:\r\n\r\n```python\r\n# Before (vulnerable)\r\nif team_id:\r\n    query = query.where(DbTool.team_id == team_id)\r\n\r\n# After (secure)\r\nif team_id:\r\n    if team_id in team_ids:\r\n        team_access = [\r\n            and_(DbTool.team_id == team_id, DbTool.visibility.in_([\"team\", \"public\"])),\r\n            and_(DbTool.team_id == team_id, DbTool.owner_email == user_email),\r\n        ]\r\n        query = query.where(or_(*team_access))\r\n    else:\r\n        query = query.where(false())  # Unauthorized team access\r\n```\r\n\r\n**Affected Endpoints** (18 total):\r\n- 6 partial endpoints: servers, tools, prompts, gateways, resources, a2a\r\n- 12 IDs/search endpoints: all corresponding `/ids` and `/search` routes\r\n\r\n### 2. Bug Fix: URL Parameter Typo (`d9e2fc05`)\r\n\r\n**Problem**: `getCurrentTeamId()` fallback used `teamid` instead of `team_id`:\r\n\r\n```javascript\r\n// Before (broken)\r\nconst teamId = urlParams.get(\"teamid\");\r\n\r\n// After (fixed)\r\nconst teamId = urlParams.get(\"team_id\");\r\n```\r\n\r\n**Impact**: When Alpine.js wasn't available (initial load race, test harness), the fallback silently dropped team filtering, causing cross-team data leakage in UI selectors.\r\n\r\n### 3. Test Improvements (`d9e2fc05`)\r\n\r\n**Updated test comments** to reflect strict team scoping (removed outdated OR-logic references):\r\n```python\r\n# Before\r\n# Note: team2 tool also appears because user owns it (API uses OR logic)\r\n\r\n# After\r\nassert team2_tool_data[\"name\"] not in tool_names, \"team2 tool should NOT appear when filtering by team1\"\r\n```\r\n\r\n**Added negative assertions** to ensure team isolation:\r\n- `test_tools_ids_with_team_id`\r\n- `test_tools_search_with_team_id`\r\n- `test_resources_partial_with_team_id`\r\n- `test_prompts_partial_with_team_id`\r\n- `test_servers_partial_with_team_id`\r\n- `test_gateways_partial_with_team_id`\r\n\r\n## Design Decisions\r\n\r\n### Strict Team Scoping\r\nWhen a team is selected, ONLY items from that team are shown. Global/public items without a team assignment are NOT included. Users must use \"All Teams\" view to see unfiltered results.\r\n\r\n### Visibility Rules in Team-Scoped View\r\n| Visibility | Shown to Team Members | Shown to Resource Owner |\r\n|------------|----------------------|-------------------------|\r\n| `public` | Yes | Yes |\r\n| `team` | Yes | Yes |\r\n| `private` | No | Yes |\r\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f62b9307f946c624c5c11602223c48718345deea",
+      "message": "Add filtering by team_id to partials\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-08T05:44:45+00:00"
+    },
+    {
+      "sha": "ca452eb67b6deb56dbf826ebe5db6bd84c4c456c",
+      "message": "Implement team_id filtering in ids, search endpoints\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-08T06:23:32+00:00"
+    },
+    {
+      "sha": "af4e54b6ba4781027a77b85f7f1966aca8106e00",
+      "message": "Fix cache issue in create_team and add tests\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-08T08:40:52+00:00"
+    },
+    {
+      "sha": "769bbe3bd265239c540aa043a28f05185e462ea5",
+      "message": "Fix failing tests\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-08T09:52:18+00:00"
+    },
+    {
+      "sha": "8b5a2f92ab65a34126b33de2d674d070353e2330",
+      "message": "Fix potential issues with object expiry\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-08T10:44:39+00:00"
+    },
+    {
+      "sha": "5a049319a8b82d70231813d86cdcb271a0420bf5",
+      "message": "Fix team_id bug\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-09T07:10:22+00:00"
+    },
+    {
+      "sha": "a28a2883bdeeefb29a894f9a561f1c3913348400",
+      "message": "Remove extra logging\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-09T07:17:30+00:00"
+    },
+    {
+      "sha": "e9ff382694ecefb82ebf0cec52061ddaaa0836a6",
+      "message": "lint-web fix\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-09T07:57:00+00:00"
+    },
+    {
+      "sha": "33b40701b372adbb2267d2376674cc912dffb411",
+      "message": "linting fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-09T08:11:36+00:00"
+    },
+    {
+      "sha": "5e44177e218049ddb310b43c0767251678d76f2a",
+      "message": "More pylint fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-09T08:15:24+00:00"
+    },
+    {
+      "sha": "f10181fc78d701fbac30802ecc33e854a33f4b18",
+      "message": "linting fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-09T11:28:01+00:00"
+    },
+    {
+      "sha": "69198ce478de983f24e4052e7aaf138711942e38",
+      "message": "fix: Add visibility check to team-scoped filtering in admin endpoints\n\nWhen filtering by team_id, the partial, IDs, and search endpoints now\nproperly enforce visibility constraints. This ensures that:\n\n- Team members can only see resources with \"team\" or \"public\" visibility\n- Users can still see their own resources (including \"private\") in team view\n- Unauthorized team access returns empty results consistently\n\nAffected endpoints:\n- All 6 partial endpoints (servers, tools, prompts, gateways, resources, a2a)\n- All 12 IDs and search endpoints\n\nAlso adds test coverage for servers, gateways, and visibility enforcement.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T14:41:20+00:00"
+    },
+    {
+      "sha": "d9e2fc05b735e2063914258ef04f0af140124494",
+      "message": "fix: Correct team_id URL param fallback and update test assertions\n\n- Fix typo in getCurrentTeamId(): \"teamid\" -> \"team_id\" for URL fallback\n- Update test comments to reflect strict team scoping (remove OR logic refs)\n- Add negative assertions ensuring team2 items don't appear when filtering\n  by team1 (tools, prompts, resources, servers, gateways)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T14:59:05+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 1119,
+  "deletions": 200,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:08.812616",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:08.813307",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1992,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1992.json"
+  }
+}

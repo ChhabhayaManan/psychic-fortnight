@@ -1,0 +1,80 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4656,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4656"
+  },
+  "metadata": {
+    "title": "fix: tool validation hardening — name length limit, skipped-tool feed…",
+    "state": "closed",
+    "created_at": "2026-05-07T13:58:43+00:00",
+    "updated_at": "2026-05-08T08:22:08+00:00",
+    "closed_at": "2026-05-08T08:22:06+00:00",
+    "merged_at": "2026-05-08T08:22:06+00:00",
+    "author": "madhu-mohan-jaishankar",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4650\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes three gaps in MCP tool validation that caused silent failures or incorrect rejections during gateway registration:\r\n\r\n**Bug A — False-positive forbidden character rejections**\r\n`\"> \"` and `\"< \"` were included in the default `validation_forbidden_chars` set, causing tool names containing `>` or `<` (valid in some MCP server naming conventions) to be incorrectly rejected. Removed these two entries from the defaults in `config.py`.\r\n\r\n**Bug B — Missing tool name length enforcement**\r\nThe MCP spec caps tool names at 128 characters, but no length check existed. Added `validation_max_tool_name_length = 128` to `config.py` and a corresponding validator in `common/validators.py` (`ToolCreate`) that raises a `ValidationError` when exceeded.\r\n\r\n**Bug C — Skipped tools were silently dropped**\r\nWhen one or more tools failed validation during gateway registration, those tools were silently discarded with no feedback to the caller and no server-side log entry.\r\n- Added `skipped_tools: List[str]` field to `GatewayRead` schema (`schemas.py`)\r\n- `register_gateway` in `gateway_service.py` now populates `skipped_tools` with per-tool error messages and emits a `logger.warning` listing each skipped tool\r\n- REST API (main.py) and Admin API (`admin.py`) return `skipped_tools` in the success response and handle `DataError` (DB-level data violations) with a clean 400 via `ErrorFormatter.format_database_error`\r\n- Admin UI (`utils.js`, `formSubmitHandlers.js`) shows a warning modal listing skipped tools when `skippedTools` is non-empty in the response\r\n<img width=\"1920\" height=\"985\" alt=\"image\" src=\"https://github.com/user-attachments/assets/4ab2de44-9b08-41c0-a200-0c24d318ad7c\" />\r\n\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint-quick` | ✅ Passed |\r\n| Unit tests                | `make test`     | ✅ 297 passed, 1 skipped |\r\n| Pre-commit hooks          | `pre-commit run --files ...` | ✅ All passed |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make lint-fix` + `pre-commit`)\r\n- [x] Tests added/updated for changes (`test_gateway_service.py`, `test_main.py`, `test_schemas_validators_extra.py`)\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n- `skipped_tools` is serialized as `skippedTools` (camelCase) in JSON responses via `alias_generator=to_camel_case` on `GatewayRead`.\r\n- `DataError` is a defense-in-depth catch for DB-level rejections (e.g. a value exceeding a column constraint that bypassed application-layer validation). The primary guard for Bug B is the `ToolCreate` Pydantic validator.\r\n- The 128-char limit and forbidden chars list are both configurable via `config.py` (`validation_max_tool_name_length`, `validation_forbidden_chars`).",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "d22ea1f7551b6a0ad00bfe72a5a89c2f9f5ca087",
+      "message": "fix: tool validation hardening — name length limit, skipped-tool feedback & server logging\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-05-07T13:44:30+00:00"
+    },
+    {
+      "sha": "5500835a4b583526532317b1100f551cb3424888",
+      "message": "fix: update tests\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-05-07T16:15:18+00:00"
+    },
+    {
+      "sha": "0bf1fdb5007e53bc076a745cf8f76a910fda84fb",
+      "message": "fix: update tests\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-05-07T16:50:46+00:00"
+    },
+    {
+      "sha": "12062130cc306d8beee959124fac56925857bbdc",
+      "message": "fix: update secrets baseline line numbers\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-05-07T17:12:54+00:00"
+    },
+    {
+      "sha": "369f49950bb21e6fdcd068d4a3f895872d195711",
+      "message": "fix: update validators doctest for new error message\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-05-07T17:16:02+00:00"
+    },
+    {
+      "sha": "9dc55308f3026eb469000d8fb6e8687bf552c5d7",
+      "message": "fix: prevent skipped tools modal XSS\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-08T07:17:10+00:00"
+    },
+    {
+      "sha": "f5a282d7139b7c86c547bad27da46c83ce022227",
+      "message": "fix: isolate security logging tests\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-08T07:50:24+00:00"
+    }
+  ],
+  "files_changed": 26,
+  "additions": 452,
+  "deletions": 216,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:05.033940",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:05.034563",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4656,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4656.json"
+  }
+}

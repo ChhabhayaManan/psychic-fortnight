@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4594,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4594"
+  },
+  "metadata": {
+    "title": "fix(auth): handle OAuth scope claim as both string and list types",
+    "state": "closed",
+    "created_at": "2026-05-05T09:18:12+00:00",
+    "updated_at": "2026-05-10T11:04:57+00:00",
+    "closed_at": "2026-05-10T11:04:55+00:00",
+    "merged_at": "2026-05-10T11:04:55+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "bug",
+      "ica",
+      "SHOULD"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4593\r\n**Jira Issue:** https://jsw.ibm.com/browse/ICACF-40\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixed OAuth token scope validation failure that caused \"Failed to fetch tools after OAuth: 'list' object has no attribute 'split'\" error when connecting to MCP servers (e.g., Gamma) that return OAuth scopes as a list instead of a space-separated string.\r\n\r\n**Root Cause:** The code assumed OAuth `scope`/`scp` claims would always be strings, but some OAuth providers return them as lists, which is valid per OAuth 2.0 specifications.\r\n\r\n**Solution:** Updated scope handling in two critical locations to accept both string and list formats:\r\n1. JWT token claim validation (`_normalize_scope()`)\r\n2. OAuth token response processing (`exchange_code_for_tokens()`)\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n**Test Results:**\r\n- `test_token_validation_service.py`: 46 tests pass (including 5 new tests for list input)\r\n- `test_oauth_manager.py`: 112 tests pass\r\n- `test_gateway_service_oauth_comprehensive.py`: 29 tests pass\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Files Changed\r\n\r\n**1. `mcpgateway/services/token_validation_service.py`**\r\n- Updated `_normalize_scope()` to handle both `str` and `list` inputs\r\n- Added type flexibility: `scope_input: Any` instead of `scope_str: str`\r\n- Gracefully handles invalid types by returning empty set\r\n\r\n**2. `mcpgateway/services/oauth_manager.py`**\r\n- Updated `exchange_code_for_tokens()` to handle scope as string or list\r\n- Added explicit type checking before calling `.split()`\r\n- Ensures `store_tokens()` always receives `List[str]`\r\n\r\n**3. `tests/unit/mcpgateway/services/test_token_validation_service.py`**\r\n- Added 5 new test cases for list input scenarios:\r\n  - `test_list_input_simple_scopes`\r\n  - `test_list_input_uri_prefixed_scopes`\r\n  - `test_empty_list`\r\n  - `test_mixed_list_with_uri_and_simple`\r\n  - `test_invalid_input_type`\r\n\r\n### Impact\r\n- **Before:** OAuth authorization succeeded but tool fetching failed with AttributeError\r\n- **After:** Both string and list scope formats are handled correctly\r\n- **Compatibility:** Maintains backward compatibility with existing OAuth providers that return strings",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "6a1ad6f223785d56b1ea7a0520cd1f5633621bd8",
+      "message": "fix OAuth token scope validation to spli both str and list types\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-05T09:14:46+00:00"
+    },
+    {
+      "sha": "79495ebfd8e7ea2eb2289dd55f8cb47c3dd6cbbc",
+      "message": "improve testing coverage\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-05T10:08:13+00:00"
+    },
+    {
+      "sha": "2123526b44ded7b12b4efdb90190208789f6edba",
+      "message": "fix pre-commit issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-05T11:34:56+00:00"
+    },
+    {
+      "sha": "dcadc008d1bbefdeeb5631cdf62878e4e91b4dff",
+      "message": "fix: filter non-string scope items and add deny-path regression tests\n\n- _normalize_scope() filters non-string list elements\n- oauth_manager sanitizes list scopes before storage\n- validate_oauth_token_claims() uses None sentinel for empty lists\n- Add deny-path tests for list scope mismatch and empty list\n- Restore test_complete_authorization_code_flow_scope_invalid_type\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T10:33:33+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 270,
+  "deletions": 9,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:48.149149",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:48.149912",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4594,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4594.json"
+  }
+}

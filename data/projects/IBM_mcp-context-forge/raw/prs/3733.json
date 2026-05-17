@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3733,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3733"
+  },
+  "metadata": {
+    "title": "fix(llmchat): mark tool/parsing errors as recoverable in streaming",
+    "state": "closed",
+    "created_at": "2026-03-19T05:01:10+00:00",
+    "updated_at": "2026-03-21T22:43:34+00:00",
+    "closed_at": "2026-03-21T22:43:34+00:00",
+    "merged_at": "2026-03-21T22:43:34+00:00",
+    "author": "kimsehwan96",
+    "labels": [
+      "bug",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nClose: #3763 \r\n\r\n---\r\n\r\n## 📝 Summary\r\nWhen a tool invocation fails or a response parsing error occurs during LLM Chat streaming, the frontend disconnects the session and asks the user to reconnect. This happens because `chat_events()` wraps all exceptions — including `ConnectionError` and `TimeoutError` — into a single `RuntimeError`, which the router always marks as `recoverable: False`.\r\n\r\nThis PR lets `ConnectionError`/`TimeoutError` propagate with their original type so the router's existing handlers catch them correctly. The remaining `RuntimeError`s (tool failures, parsing errors, model issues) are now marked `recoverable: True` since the session is still valid.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    pass    |\r\n| Unit tests                | `make test`     |    pass    |\r\n| Coverage ≥ 80%            | `make coverage` |   pass     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n<img width=\"1161\" height=\"1020\" alt=\"스크린샷 2026-03-19 오전 10 49 34\" src=\"https://github.com/user-attachments/assets/1d0a9aa3-aa27-45fa-9909-4970427f345b\" />\r\n\r\n**Before:** any error during streaming → `RuntimeError(\"Chat processing error: ...\")` → `recoverable: False` → session killed\r\n\r\n\r\n<img width=\"1145\" height=\"1125\" alt=\"스크린샷 2026-03-19 오후 1 36 21\" src=\"https://github.com/user-attachments/assets/9b32eb23-90c7-47aa-9d21-f10905325684\" />\r\n\r\n**After:** `ConnectionError`/`TimeoutError` → re-raised as-is → caught by existing router handlers. \r\nEverything else → `RuntimeError` → `recoverable: True` → error shown but session stays alive.\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3987009290",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-21T22:28:04+00:00",
+      "body": "LGTM — the fix correctly separates recoverable (tool/parsing/model) errors from non-recoverable (session/connection) errors in the streaming path. Added ChatProcessingError to close the race condition gap, plus full differential test coverage. Ready to merge."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ff024259b7b3071a5458a2d79397420a852a0b59",
+      "message": "fix(llmchat): mark tool/parsing errors as recoverable in streaming\n\nConnectionError and TimeoutError are now re-raised directly from\nchat_events() so the router can handle them with their original\ntype. Remaining RuntimeErrors (tool failures, parsing errors, model\nconfig issues) are marked recoverable so the frontend keeps the\nsession alive instead of forcing a reconnect.\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-03-19T04:49:59+00:00"
+    },
+    {
+      "sha": "4365ffc756bc4783bd7db2e24e28b4c7a48fedfc",
+      "message": "test(llmchat): assert recoverable flag and add service-layer error propagation tests\n\nVerify that token_streamer sets the correct recoverable value for each\nerror type (RuntimeError→true, ConnectionError→false, TimeoutError→true,\ngeneric→false).  Add service-level tests confirming ConnectionError and\nTimeoutError propagate from chat_events() without being wrapped as\nRuntimeError.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T21:53:22+00:00"
+    },
+    {
+      "sha": "fdab540c28df91154914f0f88a471d0d0934c7f7",
+      "message": "fix(llmchat): add ConnectionError/TimeoutError to chat_events docstring\n\nFlake8 DAR401 flagged the missing exception types in the Raises section\nafter the new except clause was added.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T22:17:17+00:00"
+    },
+    {
+      "sha": "be557797cc3cddda03ec30ce843ca23be05df106",
+      "message": "fix(llmchat): distinguish recoverable ChatProcessingError from fatal RuntimeError\n\nIntroduce ChatProcessingError(RuntimeError) for tool/parsing/model\nfailures that leave the session intact.  The router now catches\nChatProcessingError as recoverable and plain RuntimeError (e.g.\n\"not initialized\") as non-recoverable, preventing a race where a\nconcurrent disconnect could leave the frontend on a dead session.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T22:23:14+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 94,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:57.937807",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:57.938948",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3733,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3733.json"
+  }
+}

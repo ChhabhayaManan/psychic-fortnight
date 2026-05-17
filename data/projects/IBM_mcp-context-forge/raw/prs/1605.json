@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1605,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1605"
+  },
+  "metadata": {
+    "title": "postgresql schema configuration support",
+    "state": "closed",
+    "created_at": "2025-12-15T16:22:53+00:00",
+    "updated_at": "2025-12-15T18:48:27+00:00",
+    "closed_at": "2025-12-15T18:48:25+00:00",
+    "merged_at": "2025-12-15T18:48:25+00:00",
+    "author": "MohanLaksh",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 📝 **Feature / Enhancement**: PostgreSQL Schema Configuration Support\r\n\r\n\r\n## 📋 Summary\r\n\r\nImplements PostgreSQL schema configuration support via `search_path` parameter in `DATABASE_URL`, enabling deployment in enterprise environments with restricted `public` schema access.\r\n\r\n**Closes:** #1535\r\n\r\n---\r\n\r\n## 🎯 Problem Statement\r\n\r\nEnterprise PostgreSQL environments often restrict access to the `public` schema for security reasons. MCP Gateway previously could only use the default `public` schema, preventing deployment in such environments without database-level workarounds.\r\n\r\n---\r\n\r\n## ✨ Solution\r\n\r\nAdded support for custom PostgreSQL schemas by extracting and applying the `options` query parameter from `DATABASE_URL`. Users can now specify `search_path` to use custom schemas.\r\n\r\n### Example Usage\r\n\r\n```bash\r\n# Single custom schema\r\nexport DATABASE_URL=\"postgresql://user:pass@host:5432/db?options=-c%20search_path=mcp_gateway\"\r\n\r\n# Multiple schemas (searches mcp_gateway first, then public)\r\nexport DATABASE_URL=\"postgresql://user:pass@host:5432/db?options=-c%20search_path=mcp_gateway,public\"\r\n```\r\n\r\n---\r\n\r\n## 🔧 Changes Made\r\n\r\n### Core Implementation\r\n\r\n#### 1. `mcpgateway/db.py` (lines 68-93)\r\n- Added logic to extract `options` parameter from `DATABASE_URL`\r\n- Applied options to PostgreSQL connections via `connect_args`\r\n- Added logging when options are applied\r\n- Maintained full backward compatibility\r\n\r\n```python\r\n# Extract and apply PostgreSQL options from URL query parameters\r\nurl_options = url.query.get(\"options\")\r\nif url_options:\r\n    connect_args[\"options\"] = url_options\r\n    logger.info(f\"PostgreSQL connection options applied: {url_options}\")\r\n```\r\n\r\n#### 2. `mcpgateway/config.py` (line 157)\r\n- Enhanced `database_url` field with comprehensive documentation\r\n- Added usage examples for PostgreSQL with custom schema\r\n- Referenced Issue #1535 for context\r\n\r\n#### 3. `pyproject.toml` (lines 572-581)\r\n- Registered `integration` pytest marker\r\n- Registered `postgresql` pytest marker\r\n- Resolved all pytest warnings\r\n\r\n### Documentation\r\n\r\n#### 4. `docs/docs/deployment/postgresql-schema-configuration.md` (283 lines)\r\nComprehensive user guide including:\r\n- Configuration examples (Docker, Kubernetes, development)\r\n- Prerequisites and schema setup instructions\r\n- Migration guide from public schema\r\n- Troubleshooting section\r\n- Security considerations\r\n- Technical implementation details\r\n\r\n#### 5. `tests/unit/mcpgateway/test_postgresql_schema_config.py` (201 lines)\r\n- 14 comprehensive unit tests covering:\r\n  - URL parsing with/without options\r\n  - Multiple schema configurations\r\n  - URL encoding variations\r\n  - Connect args generation\r\n  - Backward compatibility\r\n  - SQLite/MySQL compatibility\r\n- 2 integration tests (require PostgreSQL instance)\r\n- Parametrized tests for various schema names\r\n\r\n## 🔒 Security Considerations\r\n\r\n- ✅ **Schema Isolation**: Provides logical separation from other applications\r\n- ✅ **Permission Control**: Enables schema-level access restrictions\r\n- ✅ **No New Attack Surface**: Uses standard PostgreSQL features\r\n- ✅ **Audit Trail**: Schema-level permissions simplify access auditing\r\n\r\n---\r\n\r\n## 🔄 Backward Compatibility\r\n\r\n- ✅ **No Breaking Changes**: Existing deployments work without modifications\r\n- ✅ **Opt-in Feature**: Only activated when `options` parameter is provided\r\n- ✅ **Graceful Degradation**: SQLite and MySQL ignore the parameter\r\n- ✅ **Default Behavior Unchanged**: PostgreSQL uses default search_path when not specified\r\n\r\n---\r\n\r\n## 📚 Documentation\r\n\r\n### User Documentation\r\n- Complete guide: `docs/docs/deployment/postgresql-schema-configuration.md`\r\n- Configuration examples for Docker, Kubernetes, and development\r\n- Prerequisites and setup instructions\r\n- Troubleshooting guide\r\n- Security best practices\r\n\r\n\r\n## 📦 Files Changed\r\n\r\n### Modified (3 files)\r\n- `mcpgateway/db.py` - Core implementation\r\n- `mcpgateway/config.py` - Enhanced documentation\r\n- `pyproject.toml` - Pytest markers registration\r\n\r\n### Added (2 files)\r\n- `docs/docs/deployment/postgresql-schema-configuration.md` - User guide\r\n- `tests/unit/mcpgateway/test_postgresql_schema_config.py` - Unit tests\r\n\r\n---\r\n## 🔍 Technical Details\r\n\r\n### How It Works\r\n1. SQLAlchemy's `make_url()` parses the `DATABASE_URL`\r\n2. The `options` query parameter is extracted\r\n3. Options are passed to psycopg2 via `connect_args` dictionary\r\n4. PostgreSQL applies `search_path` setting for all connections\r\n5. All table operations automatically use the specified schema\r\n\r\n### Supported Databases\r\n- ✅ **PostgreSQL**: Full support via `options` parameter\r\n- ⚠️ **SQLite**: Ignores `options` parameter (no effect)\r\n- ⚠️ **MySQL/MariaDB**: Ignores `options` parameter (use database name)\r\n\r\n### Alembic Compatibility\r\n- ✅ Migrations automatically respect `search_path` setting\r\n- ✅ Tables created in first schema in `search_path`\r\n- ✅ No special configuration needed\r\n\r\n---",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3579523477",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-15T18:09:31+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "498d1bab8b3c1d4151f25c98c32fed9d7cd0aba8",
+      "message": "postgresql schema configuration support\n\nSigned-off-by: Mohan Lakshmaiah <mohalaks@in.ibm.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2025-12-15T16:09:10+00:00"
+    },
+    {
+      "sha": "a6ddfd19a56dfd30c3c410f5d63e4ad01aa3015f",
+      "message": "linting fixes\n\nSigned-off-by: Mohan Lakshmaiah <mohalaks@in.ibm.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2025-12-15T16:23:50+00:00"
+    },
+    {
+      "sha": "2b11fcb56a43a4120a1beb6ca45b97d192cdbf7b",
+      "message": "fix: cleanup test file formatting\n\n- Remove unused imports (MagicMock, patch)\n- Fix file path in docstring\n- Remove trailing comment\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-15T17:43:04+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 482,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:21:39.237727",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:21:39.239750",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1605,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1605.json"
+  }
+}

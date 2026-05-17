@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3729,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3729"
+  },
+  "metadata": {
+    "title": "[EXPERIMENTAL][ADR-044] feat(grpc-uds): pure tonic handlers — eliminate Axum dispatch overhead",
+    "state": "open",
+    "created_at": "2026-03-18T19:28:50+00:00",
+    "updated_at": "2026-04-09T21:17:44+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "gandhipratik203",
+    "labels": [
+      "experimental",
+      "mcp-protocol",
+      "rust",
+      "performance",
+      "COULD"
+    ],
+    "milestone": "Release 1.3.0",
+    "assignees": []
+  },
+  "description": "## Summary\n\nCloses #3730\n\nExperiment to explore the ideas in ADR-044 using a pure tonic dispatch strategy — companion to #3726 which takes the Axum dispatch approach. Together these two PRs represent two different ways of implementing the same gRPC-over-UDS boundary.\n\nThis PR's approach:\n- `McpRuntimeService` holds `AppState` directly and calls `rpc_inner`, `transport_get_inner`, `transport_delete_inner` without re-encoding to HTTP\n- Removes the `proto→http::Request→Tower/Axum→http::Response→proto` round-trip from every RPC call\n- Removes explicit `tower` optional dependency (was redundant via tonic's transitive dep)\n\n## ADR-044 Goals — What This Experiment Covers\n\n> Click to see which goals this implementation demonstrates, which are partial, and which remain future work.\n\n<details>\n<summary>ADR-044 goal coverage for this approach (pure tonic dispatch)</summary>\n\n### ✅ Demonstrated\n\n**Typed contract via protobuf**\nThe `.proto` file is the single source of truth. Python and Rust both generate stubs from it. If a field is added or a method renamed, both sides fail to compile before anything ships. The HTTP/JSON IPC boundary had no schema — a wrong header name would silently do nothing.\n\n**Language-neutral boundary**\nThe `McpRuntime` proto contract does not care what is on either side. A Go module, a Java module, or a second Rust service could plug into the same contract today without any changes to the Python gateway. The HTTP/JSON IPC was Python-to-Rust only and relied on undocumented internal headers.\n\n**Native streaming RPCs**\n`InvokeStream` is a proper gRPC server-streaming RPC — not HTTP chunked encoding over a socket. The Python side gets an async iterator, the Rust side yields chunks. Backpressure, framing, and cancellation are handled correctly by construction.\n\n**Unix Domain Socket — no TCP overhead**\nAll traffic stays in kernel memory. No TCP handshake, no loopback routing, no port allocation. HTTP/2 multiplexing means multiple concurrent RPCs share one connection rather than opening new connections per request.\n\n**Clean process boundary — crash isolation**\nIf the Rust sidecar panics, Python keeps running and the gRPC channel reconnects. The proto contract is the explicit, versioned API surface — not an internal HTTP path that could drift silently.\n\n**Aligns with the existing plugin gRPC pattern**\nThe external plugin framework in `mcpgateway/plugins/framework/external/grpc/` already uses gRPC. The MCP runtime boundary now uses the same pattern — one mental model for module boundaries across the platform.\n\n---\n\n### ⚠️ Partially demonstrated\n\n**Independent scaling of modules**\nThe process boundary exists — Rust is a separate binary on a separate socket. But in the current container setup they are co-located. The groundwork is there; exploiting it requires running the sidecar as a separate container or pod.\n\n**Structured auth context propagation**\nThe `AuthContext` proto message is a better contract than the `x-contextforge-auth-context` header string used in HTTP/JSON IPC. The current implementation encodes it as base64 JSON inside the proto field — which works, but does not yet use the proto's ability to carry it as proper typed fields.\n\n---\n\n### ❌ Not yet demonstrated\n\n**Catalog change subscriptions and session broadcast**\nADR-044 specifically calls out streaming RPCs for catalog change notifications and session broadcast patterns. `InvokeStream` currently handles only SSE relay. The push patterns the ADR envisioned are not implemented.\n\n**Multi-language beyond Python and Rust**\nThe value of language-neutral codegen becomes concrete when a third language plugs into the same contract. Right now it is two languages that could have communicated over HTTP just fine. The payoff is visible only when a Go or Java module joins.\n\n</details>\n\n## Approach difference vs #3726\n\n| | #3726 (Axum dispatch) | This PR (pure tonic) |\n|---|---|---|\n| `McpRuntimeService` holds | `Router` | `AppState` |\n| Hot path | proto → `http::Request` → Tower oneshot → Axum → `http::Response` → proto | proto → `HeaderMap` + `Uri` + `Bytes` → `rpc_inner()` → proto |\n| `proto_to_http_request` | exists | removed |\n| `router.clone()` per call | yes | gone |\n| Tower dispatch | yes | gone |\n\n## Benchmark (125 users / 60s, same config as #3726)\n\n| Metric | Python | HTTP/JSON IPC | gRPC-UDS #3726 (Axum dispatch) | gRPC-UDS this PR (pure tonic) |\n|--------|--------|--------------|-------------------------------|-------------------------------|\n| RPS | 512 | 1,930 | 1,690 | **1,778** |\n| Avg latency | 167ms | 2.84ms | 11.51ms | **8.71ms** |\n| p99 | 610ms | 11ms | 79ms | **37ms** |\n| Failures | 24 | 0 ✅ | 0 ✅ | 0 ✅ |\n\n+88 RPS and p99 halved (79ms → 37ms) vs the Axum dispatch approach. HTTP/JSON IPC still leads because Axum speaks HTTP natively — the irreducible cost here is protobuf serialization on both sides of the socket, which is unavoidable in gRPC.\n\n## Why HTTP/JSON IPC still leads\n\nThe remaining gap is structural to gRPC — protobuf serialization on Python ingress and Rust egress is unavoidable. The value of this transport is the typed contract, language-neutral codegen, and native streaming RPC — not raw single-request throughput. ADR-044 explicitly acknowledges this trade-off.\n\n<details>\n<summary>Flow diagrams: HTTP/JSON IPC vs gRPC-UDS pure tonic</summary>\n\n---\n\n**HTTP/JSON IPC**\n\n```\nPython gateway                  Unix socket              Rust sidecar\n─────────────────────────────────────────────────────────────────────\n\n  [incoming MCP request]\n        │\n        │  Build HTTP request\n        │  (headers already exist,\n        │   body already bytes)\n        │\n        ▼\n  ┌─────────────┐\n  │  httpx      │ ──── raw HTTP bytes ──────────────────► Axum router\n  │  AsyncClient│                                              │\n  └─────────────┘                                              │\n                                                         (Axum speaks\n                                                          HTTP natively,\n        ◄──────────── raw HTTP response bytes ───────────  no conversion)\n        │\n  [send response to client]\n```\n\n---\n\n**gRPC-UDS IPC (pure tonic — this PR)**\n\n```\nPython gateway                  Unix socket              Rust sidecar\n─────────────────────────────────────────────────────────────────────\n\n  [incoming MCP request]\n        │\n        │  1. Serialize to protobuf          ← still needed\n        │     (headers map, body bytes,\n        │      auth context, session id...)\n        │\n        ▼\n  ┌─────────────┐\n  │  grpc.aio   │ ──── protobuf bytes ──────────────────► tonic server\n  │  stub       │                                              │\n  └─────────────┘                                    2. Deserialize protobuf\n                                                        into HeaderMap\n                                                        + Uri + Bytes\n                                                              │\n                                                              │  ← no http::Request\n                                                              │  ← no Tower dispatch\n                                                              │  ← no router.clone()\n                                                              │\n                                                              ▼\n                                                         rpc_inner()\n                                                         directly\n                                                              │\n                                                     3. Serialize response\n                                                        headers + body\n                                                        to protobuf\n                                                              │\n        ◄──────────────── protobuf bytes ─────────────────────\n        │\n  4. Deserialize protobuf                             ← still needed\n        │\n  [send response to client]\n```\n\nOld gRPC path had 6 steps with overhead. This has 4. Removed: `http::Request` construction, Tower `oneshot` dispatch, `router.clone()` per call.\n\n</details>",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "f3f1d19122eb7b6112080e26919c52907d22040b",
+      "message": "feat(grpc-uds): implement gRPC-over-UDS internal IPC for Rust MCP runtime (ADR-044)\n\nReplace the HTTP/JSON Python→Rust sidecar boundary with a typed protobuf\ncontract over a Unix Domain Socket, as described in ADR-044.\n\nRust side:\n- Add proto/mcp_runtime.proto defining the McpRuntime service (Invoke,\n  InvokeStream, CloseSession, HealthCheck RPCs)\n- Add src/grpc.rs implementing McpRuntimeService using tonic; handlers\n  convert proto McpRequest into http::Request and call the existing Axum\n  router directly as a Tower service — no additional network hop\n- Add build.rs to compile the proto via tonic-build at build time\n- Gate all new deps behind the grpc-uds Cargo feature flag\n- Add MCP_RUST_GRPC_UDS env var to RuntimeConfig (src/config.rs)\n- Wire serve_grpc_uds into run() alongside the existing Axum servers\n\nPython side:\n- Add mcpgateway/transports/grpc_gen/ with generated pb2 stubs\n- Add rust_mcp_runtime_grpc_proxy.py: async gRPC proxy implementing the\n  same ASGI interface as RustMCPRuntimeProxy but using grpc.aio over UDS\n- Add experimental_rust_mcp_runtime_grpc_uds config setting\n- Wire RustMCPRuntimeGrpcProxy into main.py: selected when\n  MCP_RUST_GRPC_UDS is set; HTTP proxy remains the default\n\nTests:\n- Add 15 unit tests covering header stripping, request construction,\n  POST/GET/DELETE ASGI flows, fallback paths, and 502 error handling\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-17T22:08:39+00:00"
+    },
+    {
+      "sha": "3de3372bf62abf8b49bfdc8d2f7f68aca6643cd5",
+      "message": "feat(containerfile): add ENABLE_RUST_MCP_GRPC_UDS build arg for grpc-uds feature\n\nExtends the Containerfile.lite cargo build logic to conditionally compile\nthe Rust MCP runtime with the grpc-uds Cargo feature when\n--build-arg ENABLE_RUST_MCP_GRPC_UDS=true is passed. Features are combined\nso rmcp-upstream-client and grpc-uds can be enabled together.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-17T22:23:53+00:00"
+    },
+    {
+      "sha": "3da82e194e3fc3bdcf4d4e8aa7887ad9e093e31d",
+      "message": "fix(containerfile): install protoc in builder image when grpc-uds feature is enabled\n\ntonic-build requires protoc at compile time to generate code from the\nproto file. Install the official protobuf release binary from GitHub\nbefore the cargo build step when ENABLE_RUST_MCP_GRPC_UDS=true.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-17T22:34:51+00:00"
+    },
+    {
+      "sha": "cbaa8a6862c04fccf48e963f16057d1867df0e6b",
+      "message": "fix(grpc-uds): wire ENABLE_RUST_MCP_GRPC_UDS_BUILD through make chain and fix socket setup\n\n- Makefile: propagate ENABLE_RUST_MCP_GRPC_UDS_BUILD through\n  docker-prod-rust-no-cache → container-build, add docker-prod-rust-grpc-uds\n  convenience target, add GRPC_UDS_ARG to container-build\n- docker-compose.yml: pass MCP_RUST_GRPC_UDS and\n  EXPERIMENTAL_RUST_MCP_RUNTIME_GRPC_UDS into gateway containers\n- docker-entrypoint.sh: unset MCP_RUST_GRPC_UDS when empty (prevents\n  clap empty-string parse error) and mkdir -p the socket directory\n- mcp_runtime_pb2_grpc.py: lower GRPC_GENERATED_VERSION to 1.78.0 to\n  match grpcio installed in the image\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-18T14:47:23+00:00"
+    },
+    {
+      "sha": "1c1d629818c213e382beb9c921643c8345f38afb",
+      "message": "refactor(grpc-uds): replace Axum Tower dispatch with direct _inner handler calls\n\nEliminates the proto→http::Request→Tower/Axum→http::Response→proto\nround-trip that was the source of gRPC-UDS overhead vs HTTP/JSON IPC.\n\nMcpRuntimeService now holds AppState instead of Router. The tonic\nservice methods (invoke, invoke_stream, close_session) call rpc_inner,\ntransport_get_inner, and transport_delete_inner directly, passing\nHeaderMap + Uri + Bytes constructed from the proto fields — no HTTP\nencoding on the hot path.\n\nChanges:\n- grpc.rs: remove proto_to_http_request, Tower oneshot dispatch; add\n  build_headers/build_uri helpers; serve_grpc_uds takes AppState\n- lib.rs: mark _inner fns pub(crate); pass state.clone() to gRPC spawn;\n  fix build_public_router to clone state so it remains available\n- Cargo.toml: remove explicit tower optional dep (was redundant via tonic)\n- tests/runtime.rs + lib.rs test_config: add missing grpc_uds_path field\n  (pre-existing compile error when running tests with grpc-uds feature)\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-18T18:42:11+00:00"
+    }
+  ],
+  "files_changed": 18,
+  "additions": 1568,
+  "deletions": 9,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:55.293796",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:55.295065",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3729,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3729.json"
+  }
+}

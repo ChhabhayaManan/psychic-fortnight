@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3703,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3703"
+  },
+  "metadata": {
+    "title": "refactor: introduce LLM provider adapter ABC with Portkey gateway support",
+    "state": "open",
+    "created_at": "2026-03-17T09:26:49+00:00",
+    "updated_at": "2026-04-22T10:31:33+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "experimental",
+      "rust",
+      "COULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\n- Introduces an Abstract Base Class (`LLMProviderAdapter`) for LLM provider HTTP proxy adapters, consolidating provider-specific wire-format logic that was previously scattered across ~6 `if/elif` chains in `llm_proxy_service.py`\r\n- Adds concrete adapter implementations for OpenAI, Azure OpenAI, Anthropic, Ollama (native + OpenAI-compat), and Portkey\r\n- Adds a registry/factory (`get_adapter`, `get_portkey_adapter`) that maps `LLMProviderType` to adapter instances\r\n- Adds Portkey external LLM gateway runtime support (original PR scope)\r\n- Reduces `llm_proxy_service.py` from ~987 lines to ~456 lines by extracting provider-specific logic into self-contained adapter classes\r\n\r\n## Architecture\r\n\r\n```\r\n                      ┌─────────────────────┐\r\n                      │  LLMProviderAdapter  │  (ABC)\r\n                      │─────────────────────│\r\n                      │  build_request()     │\r\n                      │  transform_response()│\r\n                      │  transform_stream()  │\r\n                      │  uses_sse_framing    │\r\n                      └──────────┬──────────┘\r\n           ┌──────────┬─────────┼─────────┬──────────┐\r\n           │          │         │         │          │\r\n      OpenAI    Anthropic    Azure    Ollama    Portkey\r\n      Adapter    Adapter    Adapter   Adapter   Adapter\r\n```\r\n\r\n### Adapter classes\r\n\r\n| Adapter | Extends | Provider types |\r\n|---------|---------|----------------|\r\n| `OpenAIAdapter` | ABC | openai, openai_compatible, cohere, mistral, groq, together |\r\n| `AzureOpenAIAdapter` | OpenAI | azure_openai |\r\n| `AnthropicAdapter` | ABC | anthropic |\r\n| `OllamaNativeAdapter` | ABC | ollama (native /api/chat) |\r\n| `OllamaOpenAICompatAdapter` | OpenAI | ollama (/v1 endpoint) |\r\n| `PortkeyAdapter` | OpenAI | portkey (+ gateway routing) |\r\n\r\n### Key design decisions\r\n\r\n- **Stateless singletons**: Adapters are reused across requests (no per-request state)\r\n- **Injected `get_api_key`**: Adapters receive API key decryption as a callable, keeping them decoupled from `LLMProxyService` internals\r\n- **Gateway routing stays separate**: `should_route_provider_via_llm_gateway()` remains in `llm_provider_service.py` — it's an orthogonal routing decision, not a wire-format concern\r\n- **LangChain path untouched**: `mcp_client_chat_service.py` is a different concern (creating SDK objects, not HTTP requests)\r\n\r\n### New files\r\n\r\n```\r\nmcpgateway/services/llm_adapters/\r\n    __init__.py, base.py, registry.py,\r\n    openai_adapter.py, azure_openai_adapter.py,\r\n    anthropic_adapter.py, ollama_adapter.py, portkey_adapter.py\r\n\r\ntests/unit/mcpgateway/services/llm_adapters/\r\n    test_openai_adapter.py, test_azure_openai_adapter.py,\r\n    test_anthropic_adapter.py, test_ollama_adapter.py,\r\n    test_portkey_adapter.py, test_registry.py\r\n```\r\n\r\n### Modified files\r\n\r\n- `mcpgateway/services/llm_proxy_service.py` — replaced if/elif chains with adapter dispatch, removed extracted private methods\r\n- `tests/unit/mcpgateway/services/test_llm_proxy_service.py` — updated tests to call adapters directly instead of deleted private methods\r\n\r\n## Test plan\r\n\r\n- [ ] 66 new adapter unit tests pass (`tests/unit/mcpgateway/services/llm_adapters/`)\r\n- [ ] 76 existing proxy service tests pass (behavioral no-ops verified at each phase)\r\n- [ ] Full unit suite passes\r\n- [ ] Formatting clean (`make autoflake isort black`)\r\n\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "ab638c121a7b6492c460f6b791a4bdca735728fd",
+      "message": "feat: add Portkey external LLM gateway runtime\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-17T09:24:01+00:00"
+    }
+  ],
+  "files_changed": 24,
+  "additions": 1786,
+  "deletions": 23,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:41.925037",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:41.927437",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3703,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3703.json"
+  }
+}

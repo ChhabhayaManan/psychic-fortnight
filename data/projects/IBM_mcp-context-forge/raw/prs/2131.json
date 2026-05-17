@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2131,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2131"
+  },
+  "metadata": {
+    "title": "2108 enable pagination",
+    "state": "closed",
+    "created_at": "2026-01-16T16:01:32+00:00",
+    "updated_at": "2026-01-20T04:15:29+00:00",
+    "closed_at": "2026-01-20T04:15:27+00:00",
+    "merged_at": "2026-01-20T04:15:27+00:00",
+    "author": "gcgoncalves",
+    "labels": [],
+    "milestone": "Release 1.0.0-BETA-2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "🐛 Bug-fix PR\r\n\r\n📌 Summary\r\nAdmin UI pagination was not functioning correctly - page size dropdown had no effect, page state was not preserved in URLs, and\r\nthe \"Show Inactive\" toggle was not synchronized with pagination requests. This prevented users from effectively browsing large\r\ndatasets and sharing filtered views.\r\n\r\n🔁 Reproduction Steps\r\n1. Navigate to Admin UI → Servers (or any other table)\r\n2. Change page size dropdown from 10 to 50\r\n3. Bug: Table still loads only 20 items (hardcoded value)\r\n4. Navigate to page 2\r\n5. Bug: URL doesn't update with page state\r\n6. Refresh browser\r\n7. Bug: Returns to page 1 instead of page 2\r\n8. Toggle \"Show Inactive\" checkbox\r\n9. Navigate to next page\r\n10. Bug: Inactive items still shown (toggle state not sent to backend)\r\n\r\n🐞 Root Cause\r\n1. Hardcoded pagination: Initial table loads used hx-get attributes with hardcoded page=1&per_page=20, ignoring URL querystring parameters\r\n2. No URL state management: pagination_controls.html didn't read from or write to browser URL querystring\r\n3. Disconnected toggle: \"Show Inactive\" checkbox state was not synchronized with pagination requests\r\n4. Template escaping: Jinja2 auto-escaping converted Alpine.js operators (>, <, &&) to HTML entities (&gt;, &lt;, &amp;&amp;), breaking Alpine.js logic\r\n\r\n💡 Fix Description\r\nFrontend-only changes (no backend modifications required):\r\n\r\n1. URL State Management (`admin.html`):\r\n- Added getPaginationParams() helper to read page_number (default: 1) and page_size (default: 10) from URL\r\n- Added buildTableUrl() helper to construct table URLs with querystring values\r\n\r\n2. Table Initialization:\r\n- Updated all 6 tables (servers, tools, gateways, resources, prompts, a2a-agents) to use buildTableUrl() for initial loads\r\n- Tables now respect both URL parameters and \"Show Inactive\" checkbox state\r\n\r\n3. Pagination Controls (`pagination_controls.html`):\r\n- Added init() to read page_size from URL on component initialization\r\n- Modified loadPage() to update browser URL with page_number and page_size\r\n- Dynamically reads \"Show Inactive\" checkbox state and includes in backend requests\r\n\r\n4. Template Fixes:\r\n- Wrapped {% include 'pagination_controls.html' %} with {% autoescape false %} in all 6 partial templates\r\n- Prevents Jinja2 from breaking Alpine.js template syntax\r\n\r\n🧪 Verification\r\n| Check                             | Command             | Status     |\r\n|-----------------------------------|---------------------|------------|\r\n| Lint suite                        | make lint           |            |\r\n| Unit tests                        | make test           |            |\r\n| Coverage ≥ 90 %                   | make coverage       |            |\r\n| Manual regression no longer fails | Tested all 6 tables |            |",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3680270670",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-20T04:05:54+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a8ebaee086c53130a307cef198d72d6b95c7b052",
+      "message": "Fix pagination URL state management with namespaced params\n\n- Add helper functions to read/write namespaced pagination params per table\n  (e.g., servers_page, servers_size, servers_inactive)\n- Update all 6 admin tables to use namespaced params for initial load\n- Enhance pagination controls to sync browser URL on navigation\n- Include include_inactive filter state in URL for full shareability\n- Sync checkbox state from URL on page load (shareable links work correctly)\n- Update URL when Show Inactive checkbox is toggled\n- Fix checkbox ID mapping for -table-body targets\n- Fix Jinja2 auto-escaping in partial templates for Alpine.js compatibility\n\nURL parameter naming:\n- Each table has its own namespace: {table}_page, {table}_size, {table}_inactive\n- Example: ?servers_page=2&servers_size=50&servers_inactive=true\n- URL state takes precedence over checkbox state for proper link sharing\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-01-16T15:40:45+00:00"
+    },
+    {
+      "sha": "a9edf1db34f92140b744276ba563431fbe27d8b5",
+      "message": "fix: add table_name to inline pagination includes\n\nInline pagination_controls.html includes in admin.html were missing\nthe table_name variable, causing Alpine.js to initialize them with\nempty tableName. This resulted in updateBrowserUrl() returning early\nand not writing the correct namespaced URL params for each table.\n\nAdded table_name to all four inline includes:\n- servers: table_name = 'servers'\n- tools: table_name = 'tools'\n- gateways: table_name = 'gateways'\n- agents: table_name = 'agents'\n\nAlso wrapped includes with autoescape false for Alpine.js compatibility.\n\nCloses #2108\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T03:46:03+00:00"
+    },
+    {
+      "sha": "eb041c4ebb3af0224de31614b4be5cb999577620",
+      "message": "fix: address ChatGPT review findings for pagination\n\n1. admin.js: Update global include_inactive handler to support namespaced\n   params with legacy fallback. Removed the change handler that wrote\n   legacy include_inactive (conflicts with namespaced params).\n\n2. admin.html: updateInactiveUrlState now resets *_page to 1 when\n   toggling inactive checkbox, preventing stale page numbers in URL.\n\n3. Add table_name to templates that were missing it:\n   - users_partial.html: table_name = 'users'\n   - teams_partial.html: table_name = 'teams'\n   - tools_with_pagination.html: table_name = 'tools'\n   - metrics_top_performers_partial.html: table_name = 'metrics_' + entity_type\n\nAll templates now wrapped with autoescape false for Alpine.js compatibility.\n\nCloses #2108\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T03:59:19+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 200,
+  "deletions": 40,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:33.800590",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:33.801531",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2131,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2131.json"
+  }
+}

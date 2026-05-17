@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2191,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2191"
+  },
+  "metadata": {
+    "title": "Fixed inconsistent teams claim structure in Auth tokens",
+    "state": "closed",
+    "created_at": "2026-01-19T17:24:53+00:00",
+    "updated_at": "2026-01-20T13:10:32+00:00",
+    "closed_at": "2026-01-20T13:01:32+00:00",
+    "merged_at": "2026-01-20T13:01:32+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n\r\n## 📌 Summary\r\n\r\nCloses #1486 (Details: https://github.com/IBM/mcp-context-forge/issues/1486#issuecomment-3561522791)\r\n\r\nRefactored the `/auth/login` token generation to align the teams claim structure with the `/tokens` endpoint. Previously, login tokens returned teams as a list of dictionaries, while API tokens returned them as a list of strings (IDs). This change ensures consistency across all token types by standardizing on a list of team IDs.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Generate an API token via `POST /tokens`. Inspect the JWT: teams is [\"team_id_1\", \"team_id_2\"].\r\n2. Login via `POST /auth/login`. Inspect the JWT: teams was [{\"id\": ..., \"name\": ...}].\r\n3. Note the schema mismatch and potential ValueError when the code attempted to cast UUID team IDs to integers during login token creation.\r\n\r\n## 🐞 Root Cause\r\nTwo issues were identified in `mcpgateway/routers/email_auth.py` within create_access_token:\r\n\r\n1. Structure Mismatch: The code assigned the full safe_teams list of dictionaries to the teams claim, instead of just extraction the IDs.\r\n2. Type Error: The code attempted to cast team.id (a UUID string) to an int, which is invalid for UUID keys.\r\n\r\n## 💡 Fix Description\r\nModified `mcpgateway/routers/email_auth.py`:\r\n\r\n1. UUID Support: Changed the safe_teams mapping to cast id to str() instead of int().\r\n2. Claim Standardization: Updated the teams payload assignment to extract only the IDs ([t[\"id\"] for t in safe_teams]), matching the format used in TokenCatalogService.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3682075396",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-20T13:00:18+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "cb3d16ffbc2e661abb9a15bfbef1ecd13e113b7f",
+      "message": "token generation consistency\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-19T17:19:05+00:00"
+    },
+    {
+      "sha": "87a5691e3c48cd9fa7b9205129712c4e232cc31b",
+      "message": "test: Add regression test for teams claim format in login tokens\n\nAdd tests to verify that login tokens emit teams as List[str] (team IDs\nonly) to match /tokens behavior. This prevents regression of issue #1486\nwhere UUID team IDs were incorrectly cast to int.\n\nTests added:\n- test_create_access_token_teams_are_list_of_strings\n- test_create_access_token_admin_omits_teams\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T12:16:51+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 130,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:49.866315",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:49.867851",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2191,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2191.json"
+  }
+}

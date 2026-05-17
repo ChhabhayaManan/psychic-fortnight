@@ -1,0 +1,73 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3595,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3595"
+  },
+  "metadata": {
+    "title": "fix: SSE resource subscribe endpoint yielding raw dicts instead of SSE-formatted strings",
+    "state": "closed",
+    "created_at": "2026-03-10T17:54:27+00:00",
+    "updated_at": "2026-03-11T20:17:32+00:00",
+    "closed_at": "2026-03-11T20:17:29+00:00",
+    "merged_at": "2026-03-11T20:17:29+00:00",
+    "author": "marekdano",
+    "labels": [
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nFound this bug while executing manual tests on Resources https://github.com/IBM/mcp-context-forge/issues/2419\r\n\r\nThe POST /resources/subscribe SSE endpoint at main.py:4864 passes resource_service.subscribe_events() directly to StreamingResponse. However, subscribe_events() yields raw Python dicts, while StreamingResponse expects an async generator of strings or bytes.\r\n\r\nThis causes the SSE connection to remain open (HTTP 200) but no events are ever written to the stream. Clients stay connected but never receive resource change notifications (resource_updated, resource_added, resource_deleted, etc.) over SSE.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Terminal 1 — open SSE stream (should stay open now):\r\n```bash\r\ncurl -N -X POST \"http://localhost:8080/resources/subscribe\" \\\r\n      -H \"Authorization: Bearer $TOKEN\" \\\r\n      -H \"Accept: text/event-stream\"\r\n```\r\n\r\n2.  Terminal 2 — update the resource to trigger a notification:\r\n```bash\r\ncurl -s -X PUT \"http://localhost:8080/resources/$RESOURCE_ID\" \\\r\n      -H \"Authorization: Bearer $TOKEN\" \\\r\n      -H \"Content-Type: application/json\" \\\r\n      -d '{\r\n        \"resource\": {\r\n          \"uri\": \"file:///config/settings.json\",\r\n          \"name\": \"config-file\",\r\n          \"description\": \"Updated settings\",\r\n          \"mimeType\": \"application/json\",\r\n          \"content\": \"{\\\"theme\\\": \\\"light\\\", \\\"lang\\\": \\\"fr\\\"}\"\r\n        },\r\n        \"visibility\": \"public\"\r\n      }' | jq .\r\n```\r\n\r\n3. Terminal 1 should now show (but does not show):\r\n```bash\r\ndata: {\"type\":\"resource_updated\",\"data\":{\"id\":\"...\",\"uri\":\"file:///config/settings.json\",...},\"timestamp\":\"...\"}\r\n```\r\n\r\n## 🐞 Root Cause\r\n\r\nThe `EventService` already has a correct `event_generator()` method that formats events as `data: {...}\\n\\n`, but it was not being used by this endpoint.\r\n\r\n## 💡 Fix Description\r\n\r\nWrap the async generator in an SSE formatter that serializes each event dict to the standard SSE `data: {...}\\n\\n` format before yielding to StreamingResponse:\r\n\r\n```bash\r\n  async def sse_generator():\r\n      async for event in resource_service.subscribe_events(user_email=user_email, token_teams=token_teams):\r\n          yield f\"data: {orjson.dumps(event).decode()}\\n\\n\"\r\n\r\n  return StreamingResponse(sse_generator(), media_type=\"text/event-stream\")\r\n```\r\n\r\nThis aligns with the pattern used by `EventService.event_generator()` and the SSE specification (each event prefixed with `data:` and terminated with `\\n\\n`).\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |   ✅     |\r\n| Unit tests                            | `make test`          |   ✅     |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3928716702",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-11T10:58:14+00:00",
+      "body": "PR #3595 review complete. **Recommendation: ✅ Approve**\n\n## Summary\n\nThis PR fixes a critical SSE protocol compliance bug in the `/resources/subscribe` endpoint. The implementation is clean, well-tested, and maintains all security controls.\n\n## Key Findings\n\n**✅ Strengths:**\n- Correctly implements SSE format: `data: {json}\\n\\n`\n- Comprehensive test coverage with new `test_subscribe_resource_events_sse_format`\n- Maintains existing authentication/authorization via `@require_permission(\"resources.read\")`\n- Uses efficient `orjson` serialization\n- No security vulnerabilities introduced\n"
+    },
+    {
+      "id": "3932253260",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-11T20:09:16+00:00",
+      "body": "LGTM. The fix is correct — `resource_service.subscribe_events()` yields raw dicts, and `StreamingResponse` needs strings. The SSE formatting pattern (`data: {orjson.dumps(event).decode()}\\n\\n`) is consistent with the roots subscribe endpoint and `EventService.event_generator()`. No security or performance concerns. Tests cover both the endpoint contract and the wire format."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "03567f4f3e51a0ef5ea5681e717fbc4a1031fb30",
+      "message": "fix: SSE resource subscribe endpoint yielding raw dicts instead of SSE-formatted strings\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-10T17:44:30+00:00"
+    },
+    {
+      "sha": "4e4bd8561177f93463fa02057798e80654df0a94",
+      "message": "fix: lint issue in main.py\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-10T18:14:50+00:00"
+    },
+    {
+      "sha": "5e08f2ccbc0847fecef85143d54e4166c31b2bf8",
+      "message": "fix: move orjson import to module level and align docstring style\n\nMove the orjson import from inside test function to module-level imports\n(PEP 8 compliance). Align sse_generator() docstring with the existing\ngenerate_events() pattern used by the roots subscribe endpoint.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T17:56:35+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 43,
+  "deletions": 11,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:04.865239",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:04.865796",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3595,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3595.json"
+  }
+}

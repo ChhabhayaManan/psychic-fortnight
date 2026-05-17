@@ -1,0 +1,70 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4356,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4356"
+  },
+  "metadata": {
+    "title": "fix(rpc): return -32601 for unknown JSON-RPC methods instead of -32000",
+    "state": "closed",
+    "created_at": "2026-04-21T05:27:20+00:00",
+    "updated_at": "2026-05-05T17:53:12+00:00",
+    "closed_at": "2026-05-05T17:53:05+00:00",
+    "merged_at": "2026-05-05T17:53:05+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "mcp-protocol",
+      "ica"
+    ],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## 📌 Summary\r\nJSON-RPC clients that branch on error codes (e.g. \"try a different server on -32601\") could not distinguish \"method not found\" from a generic internal server error because the gateway mapped all unrecognized methods to `-32000`. This PR aligns the gateway with JSON-RPC 2.0 § 5.1 by returning the spec-mandated `-32601 Method not found`.\r\n\r\n## 🔗 Related Issue\r\nCloses: #4307\r\n\r\n## 🔁 Reproduction Steps\r\nSee [#4307](https://github.com/IBM/mcp-context-forge/issues/4307).\r\n\r\n1. POST a JSON-RPC request with an unknown method to `/mcp/`:\r\n   ```json\r\n   {\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"definitely/not/a/real/method\", \"params\": {}}\r\n   ```\r\n2. Observe the response carries `\"code\": -32000` — incorrect per spec.\r\n3. Run the compliance test:\r\n   ```bash\r\n   pytest tests/protocol_compliance/test_jsonrpc_envelope.py::test_method_not_found_returns_32601 -v\r\n   ```\r\n   Before this fix the test was marked `xfail`.\r\n\r\n## 🐞 Root Cause\r\nIn `mcpgateway/main.py`, the `else` branch of `_handle_rpc_authenticated` handles unrecognised methods by attempting to invoke them as a tool. The bare `except Exception` fallthrough raised `JSONRPCError(-32000, \"Invalid method\",params)` for every failure, including the normal \"tool not found\" path, losing the spec-defined error code distinction.\r\n\r\n## 💡 Fix Description\r\n- Added a specific `except ToolNotFoundError` handler before the generic `except Exception` in the tool-invocation fallback block.\r\n  - `ToolNotFoundError` → `JSONRPCError(-32601, f\"Method not found: {method}\", {})` (spec-mandated)\r\n  - Unexpected exceptions → `JSONRPCError(-32603, \"Internal error\", {})` (truly unexpected)\r\n- Removed the `@pytest.mark.xfail` decorator from `tests/protocol_compliance/test_jsonrpc_envelope.py::test_method_not_found_returns_32601`\r\n  (GAP-012 closure).\r\n\r\n## 🧪 Verification\r\n\r\n| Check                             | Command                                                                                             | Status |\r\n|-----------------------------------|-----------------------------------------------------------------------------------------------------|--------|\r\n| Lint suite                        | `make lint`                                                                                         |        |\r\n| Unit tests                        | `make test`                                                                                         |        |\r\n| Coverage ≥ 90 %                   | `make coverage`                                                                                     |        |\r\n| Compliance test no longer xfail   | `pytest tests/protocol_compliance/test_jsonrpc_envelope.py::test_method_not_found_returns_32601 -v` |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec (JSON-RPC 2.0 § 5.1 reserved error codes)\r\n- [x] No breaking change to MCP clients (error code change is a spec correction, clients\r\n      relying on `-32000` for method-not-found were already working against incorrect behavior)\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4229813736",
+      "author": "brian-hussey",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-05T16:18:59+00:00",
+      "body": "@shoummu1 Thank you for your submission, this corrects the adherence to the json rpc spec and clearly identifies the failure case.\n\nI'd suggest for a future change to cover a minor gap in testing the explicitly test the `ToolNotFoundError` that you've introduced. But this is not blocking at the moment and I'll approve this change, rebase it and merge it now."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a5f69b1db5e4691fcfe6eb2ab8774da1ae8fe34b",
+      "message": "fix(rpc): return -32601 for unknown JSON-RPC methods instead of -32000\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-04-20T05:29:26+00:00"
+    },
+    {
+      "sha": "cfc21344787dd3aceb7a19013d4dcfd4df30527c",
+      "message": "test(rpc): update assertions to expect -32601/-32603 instead of -32000\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-04-21T05:48:57+00:00"
+    },
+    {
+      "sha": "b35f64013dc2fa913ec2fc66c1d7a4a03c3d8734",
+      "message": "Update secrets.baseline\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-05-05T16:36:30+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 15,
+  "deletions": 18,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:44.346881",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:44.348188",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4356,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4356.json"
+  }
+}

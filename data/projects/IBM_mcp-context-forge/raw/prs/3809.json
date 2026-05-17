@@ -1,0 +1,187 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3809,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3809"
+  },
+  "metadata": {
+    "title": "feat(rate-limiter): pluggable algorithms with Rust-backed execution engine, benchmarks, and validation",
+    "state": "closed",
+    "created_at": "2026-03-23T21:30:45+00:00",
+    "updated_at": "2026-04-02T15:51:07+00:00",
+    "closed_at": "2026-04-02T15:51:05+00:00",
+    "merged_at": "2026-04-02T15:51:05+00:00",
+    "author": "gandhipratik203",
+    "labels": [
+      "enhancement",
+      "performance",
+      "plugins",
+      "wxo",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai",
+      "gandhipratik203"
+    ]
+  },
+  "description": "## Summary\n\nConsolidates and extends the rate limiter plugin with a Rust-backed execution engine, carrying forward the Python-side foundation work from #3783 (pluggable algorithms, tenant isolation, correctness fixes) and replacing the Python algorithm/backend implementation with a high-performance Rust engine for both `memory` and `redis` backends.\n\nThe Rust engine is the **preferred** execution path — all algorithm execution, backend dispatch, result aggregation, and response construction live in Rust when the `rate_limiter_rust` PyO3 extension is installed. Python retains ownership of plugin lifecycle, hook integration, request-context extraction, and config validation. The full Python algorithm and backend implementation is retained as a fallback when the Rust extension is unavailable or when `RATE_LIMITER_FORCE_PYTHON=1` is set.\n\nThe Rust engine exposes a high-level `check()` API that reduces the Python-Rust boundary to a single call returning pre-built response dicts. This keeps the existing plugin integration model intact while reducing request-path overhead and preserving shared-counter semantics for multi-instance deployments.\n\n---\n\n## Gaps closed\n\n### Python foundation\n\n**Gap 1 (HIGH)** — No algorithm choice: only `fixed_window` was available — no way to handle boundary bursts or bursty workloads. Fixed by introducing a strategy pattern with three selectable algorithms (`fixed_window`, `sliding_window`, `token_bucket`) configurable via the `algorithm:` field. All three run on both `memory` and `redis` backends; the Redis backend was extended with atomic Lua scripts for `sliding_window` and `token_bucket` to maintain cluster-wide enforcement across instances.\n\n`test_fixed_window_burst_at_boundary` (xfail) documents the boundary burst as a known trade-off for users who stay on `fixed_window`; `sliding_window` eliminates it entirely.\n\n**Gap 2 (HIGH)** — `by_tenant` cross-throttle: `tenant_id=None` fell back to a shared `\"tenant:default\"` bucket, causing unrelated users to throttle each other across the entire deployment. Fixed in two places: (1) the plugin now skips the `by_tenant` check entirely when `tenant_id` is `None` instead of inventing a phantom bucket; (2) `mcpgateway/auth.py` now propagates `request.state.team_id` → `global_context.tenant_id` unconditionally via `_propagate_tenant_id()`, called at all four return paths in `get_current_user()`, so single-team API tokens correctly populate tenant context for rate limiting regardless of the `include_user_info` setting.\n\n**Gap 3 (MEDIUM)** — Sliding window memory leak in `sweep()`: stale-but-non-empty timestamp lists were never evicted from `_store` because `sweep()` only removed empty lists. Fixed by embedding the window size in each store key (`\"{key}:{window}\"`) so staleness is computable at sweep time, and rewriting `sweep()` to evict any key where all timestamps fall outside the window.\n\n### Rust execution engine\n\n**Gap 4 (HIGH)** — Python hot path overhead: every request still paid Python-side rate evaluation costs, including per-dimension orchestration, repeated backend calls, and response metadata construction via individual PyO3 attribute accesses. Fixed by introducing a Rust `RateLimiterEngine` with a single `check()` call per hook invocation. The engine builds dimension keys internally from its pre-parsed config, evaluates all active dimensions in one batch, and returns pre-built Python dicts for HTTP headers and plugin metadata — eliminating ~18-25 PyO3 boundary crossings per request (depending on the number of active dimensions).\n\n**Gap 5 (HIGH)** — Rust acceleration was limited to the in-memory backend: Redis-backed deployments, which are the correctness-critical path for multi-instance enforcement, still relied on the Python backend. Fixed by adding a Redis backend to the Rust engine. Rust now owns the Redis connection and executes batch Lua scripts directly, preserving shared-counter behavior across replicas.\n\n**Gap 6 (MEDIUM)** — Rate-limit computation, response shaping, and plugin policy handling were still interleaved in the Python implementation. Fixed by making the Python wrapper policy-only: it validates config, normalizes context, and invokes the engine. Algorithm execution, backend dispatch, result aggregation, and response dict construction now all live in Rust. The Python hot path is reduced to a single `check()` call plus result dispatch.\n\n**Gap 7 (LOW)** — The Rust+Redis path needed end-to-end proof under a real multi-instance deployment. Validated with the backend-correctness load test against 3 gateways behind nginx with Redis shared state. Result: `60` allowed, `60` rate-limited, `49.6%` blocked, matching the expected `~50%` shared-counter behavior.\n\n---\n\n## Additional hardening\n\n- **`_parse_rate` robustness** — was `rate.split(\"/\")` with no error handling; now uses `maxsplit=1` + `try/except` with a clear message showing the bad input\n- **`prompt_pre_fetch` normalisation** — `prompt_id` now normalised with `.strip().lower()`, consistent with how `tool_pre_invoke` handles tool names\n- **`_normalised_by_tool` pre-computed** — `by_tool` key lowercasing was re-done on every hook call; now computed once at init in `_validate_config`\n- **Unconditional tenant propagation** — `_propagate_tenant_id()` copies `request.state.team_id` → `global_context.tenant_id` at every `get_current_user()` return path, not just inside `_inject_userinfo_instate()` which is gated by `include_user_info` (default `False`)\n- **Sliding-window `Retry-After >= 1`** — `int` truncation of `(oldest_ts + window - now)` could produce `0` when the oldest timestamp plus the window rounded down to `int(now)`, telling clients to retry immediately while still over limit; fixed on both memory and Redis paths with `max(1, reset_in)`\n- **Token-bucket first-request memory/Redis parity** — the memory path hard-coded `time_to_full = window` on first request, while Redis derived it from `tokens_needed / refill_rate`, causing metadata divergence between backends (e.g. `60` vs `~6` for a `10/m` limit); both paths now use `tokens_needed / refill_rate`\n- **Config pre-parsing at startup** — rate strings are parsed once during plugin initialization so the request path does not re-parse limits on every hook invocation\n- **Rolling-upgrade compatibility** — the Rust Redis backend uses the same key format as the Python Redis backend so both implementations share counters correctly during mixed deployments\n- **Async Redis execution path** — Redis-backed Rust evaluation now uses a multiplexed async Redis connection and an async PyO3 boundary so Python async hooks can await the Redis path directly\n- **Rust engine preferred with Python fallback** — when the `rate_limiter_rust` PyO3 extension is installed, the Rust engine handles all rate evaluation; when unavailable or when `RATE_LIMITER_FORCE_PYTHON=1` is set, the plugin falls back to the full Python algorithm and backend implementation\n- **`RATE_LIMITER_FORCE_PYTHON` env var** — allows operators to force the Python backend for A/B comparisons or debugging; Makefile targets `benchmark-rate-limiter-capacity-rust` and `benchmark-rate-limiter-capacity-python` exercise both paths\n- **Reduced lock contention on memory hot path** — the Rust `MemoryStore` now acquires one read lock on the outer map + one write lock on the per-key state per steady-state request (previously two outer read locks), eliminating a redundant lock cycle\n- **Response construction in Rust** — HTTP headers and plugin metadata dicts are built inside the Rust engine after GIL reacquisition, replacing ~18-25 individual PyO3 attribute accesses from the Python side (depending on dimension count)\n\n---\n\n## Architecture\n\nThe plugin now delegates all rate evaluation to Rust:\n\n- Python owns plugin lifecycle, hook integration, config validation, and request-context extraction\n- Rust owns dimension selection, algorithm execution, backend dispatch, result aggregation, and response dict construction\n- Backend selection is an engine concern:\n  - `memory` → Rust in-process store via the existing sync engine path\n  - `redis` → Rust async Redis execution via a multiplexed connection + batch Lua execution\n- When the `rate_limiter_rust` PyO3 extension is installed, Rust handles all rate evaluation; otherwise the plugin falls back to the Python backend\n\n<details>\n<summary>Plugin internals: request flow, wrapper responsibilities, Rust engine, backends, and response shaping</summary>\n\n```text\n┌──────────────────────────────────────────────────────────────────────┐\n│                         RateLimiterPlugin                           │\n│                                                                      │\n│  Hooks:  tool_pre_invoke            prompt_pre_fetch                │\n│          (tool name + context)      (prompt_id + context)           │\n└─────────────────────────────┬────────────────────────────────────────┘\n                              │\n                              │  Python responsibilities:\n                              │  - validate config (at init)\n                              │  - normalize by_tool keys (at init)\n                              │  - extract user / tenant / tool|prompt\n                              ▼\n┌──────────────────────────────────────────────────────────────────────┐\n│                     RustRateLimiterEngine wrapper                    │\n│                        (PyO3 boundary)                               │\n│                                                                      │\n│  Python calls the Rust engine once per request:                     │\n│  - check(user, tenant, tool, now_unix) for memory                   │\n│  - await check_async(user, tenant, tool, now_unix) for redis        │\n│                                                                      │\n│  Returns: (allowed, headers_dict, meta_dict)                        │\n│  Rust builds dimension keys, evaluates, and constructs response     │\n│  dicts internally — no per-attribute PyO3 accesses needed.          │\n└─────────────────────────────┬────────────────────────────────────────┘\n                              │\n                              ▼\n┌──────────────────────────────────────────────────────────────────────┐\n│                        RateLimiterEngine (Rust)                      │\n│                                                                      │\n│  Owns:                                                               │\n│  - parsed config (by_user, by_tenant, by_tool)                      │\n│  - dimension key construction (user:X, tenant:Y, tool:Z)            │\n│  - backend selection + dispatch                                      │\n│  - algorithm execution                                               │\n│  - per-dimension result calculation                                  │\n│  - aggregated EvalResult (most restrictive dimension)               │\n│  - HTTP header dict construction (X-RateLimit-*, Retry-After)       │\n│  - plugin metadata dict construction (remaining, reset_in, dims)    │\n└─────────────────────────────┬────────────────────────────────────────┘\n                              │\n              ┌───────────────┴────────────────┐\n              │                                │\n              ▼                                ▼\n┌───────────────────────────────┐   ┌──────────────────────────────────┐\n│      Memory backend (Rust)    │   │       Redis backend (Rust)      │\n│                               │   │                                  │\n│  in-process counters          │   │  owns multiplexed Redis conn   │\n│  fixed_window                 │   │  batch Lua execution            │\n│  sliding_window               │   │  shared counters across replicas│\n│  token_bucket                 │   │  compatible key format with     │\n│  single read-lock hot path    │   │  Python Redis backend           │\n└───────────────────────────────┘   └──────────────────────────────────┘\n                              │\n                              ▼\n┌──────────────────────────────────────────────────────────────────────┐\n│                     Python result dispatch                           │\n│                                                                      │\n│  allowed -> PromptPrehookResult / ToolPreInvokeResult + headers     │\n│  blocked -> PluginViolation(429) + headers + meta                   │\n│                                                                      │\n│  (headers and meta are pre-built dicts from Rust — no conversion)   │\n└──────────────────────────────────────────────────────────────────────┘\n```\n\n</details>\n\n---\n\n## Test results\n\nValidation for this PR is intentionally comprehensive: unit tests, Rust tests, micro-benchmarks, hook-path A/B comparisons, multi-instance Redis correctness, sustained load tests, algorithm comparison, and Fyre VM deployment validation are all included below.\n\nThe highest-signal correctness and unit-test summaries remain visible. The more detailed benchmark and deployment sections are preserved in expandables so the data stays in the PR without dominating the main narrative.\n\n### Test results summary\n\n| # | Area | Headline result |\n|---|---|---|\n| 1 | Backend correctness | `49.6%` blocked vs expected `~50%`, `0` infra failures |\n| 2 | Rust micro-benchmarks | `17-21 ns` single-key, `49 ns` three-dimension |\n| 3 | Hook-path comparison | `1.7x-1.9x` for most 3-dim memory paths, `28x` for `sliding_window` |\n| 4 | Redis capacity benchmark | p99 `60 ms` vs `100 ms`, `28%` less gateway memory |\n| 5 | Multi-user scale test | `47.6%` blocked, `0` infra failures across `28,650` requests |\n| 6 | Algorithm comparison | All 3 algorithms at `~47-49%` blocked across `~28,600` requests each |\n| 7 | Fyre VM validation | Rust engine validated on x86 Fyre |\n| 8 | Unit test suite | `93` plugin tests passed, `47/47` Rust tests passed |\n\n### 1. Backend correctness (multi-instance Redis)\n\nMulti-instance Redis correctness matched the expected shared-counter behavior: `49.6%` blocked, `0` infrastructure failures, and an exact `60` allowed / `60` rate-limited split in the single-user validation run.\n\n<details>\n<summary>Full backend correctness results</summary>\n\nTopology: `nginx → 3 gateways → shared Redis`, 1 user at 60 req/min against a 30/min limit.\n\n| Metric | Result |\n|---|---|\n| Total tool calls | `121` |\n| Allowed | `60` |\n| Rate-limited | `60` |\n| Blocked percentage | `49.6%` |\n| Infrastructure failures | `0` |\n| Avg response time | `49.7 ms` |\n| p90 / p99 | `76 ms` / `88 ms` |\n\n**Verdict:** `REDIS BACKEND — limit correctly enforced`. The shared Redis counter produced the expected ~50% blocked rate across three gateway instances. Zero infrastructure failures.\n\n</details>\n\n### 2. Rust micro-benchmarks (criterion, Apple Silicon M-series, release build)\n\nCriterion benchmarks on Apple Silicon show nanosecond-scale in-process memory-backend costs: 17-21 ns for single-key operations, 49 ns for three-dimension evaluation, and 16-67 µs in the contention scenarios included here.\n\n<details>\n<summary>Full micro-benchmark results</summary>\n\nIn-process memory backend, direct `MemoryStore` calls (no PyO3 overhead):\n\n| Benchmark | Median latency | Notes |\n|---|---|---|\n| `fixed_window/single_key` | **19 ns** | single dimension, window reset each iteration |\n| `token_bucket/single_key` | **21 ns** | |\n| `sliding_window/single_key` | **17 ns** | |\n| `fixed_window/three_dims` | **49 ns** | user + tenant + tool in one call |\n| `fixed_window/hot_counter` | **16 ns** | counter near limit (steady-state path) |\n| `fixed_window/blocked_path` | **16 ns** | counter past limit (reject path) |\n| `fixed_window/many_keys_10k` | **185 ns** | HashMap with 10,000 distinct keys |\n| `fixed_window/concurrent_2t` | **22 µs** | 2 threads via `std::thread::scope` |\n| `fixed_window/concurrent_4t` | **35 µs** | 4 threads |\n| `fixed_window/concurrent_8t` | **67 µs** | 8 threads |\n\n</details>\n\n### 3. Hook-path comparison (Python pytest-benchmark, memory backend)\n\nMeasured per-hook Python→Rust round-trip overhead via `pytest-benchmark`, comparing the Rust engine `check()` path against the older Python-only algorithm+backend stack. Numbers reflect the full hook path including PyO3 crossing, dict construction, and Python result dispatch.\n\n<details>\n<summary>Full hook-path comparison results</summary>\n\nAll benchmarks: `fixed_window`, `sliding_window`, `token_bucket` × single dimension, three dimensions.\n\n| Config | Python mean | Rust mean | Speedup |\n|---|---|---|---|\n| `fixed_window` / 1 dim | 5.1 µs | 2.8 µs | 1.8× |\n| `fixed_window` / 3 dim | 13.2 µs | 7.2 µs | 1.8× |\n| `sliding_window` / 1 dim | 14.3 µs | 2.9 µs | 4.9× |\n| `sliding_window` / 3 dim | 81.3 µs | 2.9 µs | **28×** |\n| `token_bucket` / 1 dim | 5.6 µs | 2.8 µs | 2.0× |\n| `token_bucket` / 3 dim | 14.9 µs | 7.8 µs | 1.9× |\n\nThe `sliding_window` improvement is the most dramatic because the Python implementation walks and filters timestamp lists in pure Python on every check, while Rust uses a `VecDeque` with amortized O(1) front pops.\n\n</details>\n\n### 4–8. Remaining validation\n\n<details>\n<summary>Redis capacity benchmark, multi-user scale, algorithm comparison, Fyre VM, unit tests</summary>\n\n**4. Redis capacity benchmark** — p99 latency `60 ms` (vs `100 ms` Python), `28%` less gateway RSS. Three gateways, shared Redis, 100 users at 0.25 rps for 5 minutes.\n\n**5. Multi-user scale test** — `47.6%` blocked across `28,650` requests with `0` infrastructure failures. 100 concurrent users, 5-minute sustained load.\n\n**6. Algorithm comparison** — All three algorithms (`fixed_window`, `sliding_window`, `token_bucket`) converged to `~47-49%` blocked across `~28,600` requests each, confirming equivalent enforcement behavior.\n\n**7. Fyre VM validation** — Rust engine validated on x86 Fyre VM deployment.\n\n**8. Unit test suite** — `93` Python plugin tests passed, `47/47` Rust tests passed.\n\n</details>",
+  "comments": [
+    {
+      "id": "2982698574",
+      "author": "lucarlig",
+      "created_at": "2026-03-24T16:05:57+00:00",
+      "body": "This propagation only works when `request.state.team_id` is populated, but the session-token path still leaves `team_id` as `None` (`team_id` is only assigned for non-session tokens later in this file). As a result, session-authenticated users still arrive here with `tenant_id=None`, so `by_tenant` limiting is silently skipped for that flow. Please either populate a single resolved team for session auth before this point or document/test that `by_tenant` is intentionally unavailable for session tokens."
+    },
+    {
+      "id": "3001846245",
+      "author": "dima-zakharov",
+      "created_at": "2026-03-27T16:03:01+00:00",
+      "body": "```suggestion\n     if count >= limit then\n        -- Only fetch oldest when blocked (for Retry-After header)\n        local oldest = redis.call('ZRANGE', KEYS[i], 0, 0, 'WITHSCORES')\n        local oldest_ts = 0\n        if #oldest > 0 then oldest_ts = tonumber(oldest[2]) end\n        results[i] = {0, count, oldest_ts}\n     else\n         redis.call('ZADD', KEYS[i], now, member)\n         count = count + 1\n         local oldest = redis.call('ZRANGE', KEYS[i], 0, 0, 'WITHSCORES')\n         local oldest_ts = 0\n```\n\n## Impact\n         \n| Scenario | Before | After | Improvement |\n|----------|--------|-------|-------------|\n| **Allowed request** | 2 × `ZRANGE` | 1 × `ZRANGE` | 50% reduction |\n| **Blocked request** | 1 × `ZRANGE` | 1 × `ZRANGE` | Same |\n\n**Expected overall savings:** ~25-40% reduction in Redis operations for sliding window algorithm (assuming 50-80% allowed requests in normal traffic).\n\n---\n\n\n\nThe oldest timestamp is only needed for the `Retry-After` header, which is:\n- **Included** when the request is **blocked** (HTTP 429 response)\n- **Stripped** when the request is **allowed** (successful response)\n\nBy moving `ZRANGE` inside each branch:\n- **Blocked path:** Fetch oldest timestamp once (same as before)\n- **Allowed path:** Fetch oldest timestamp once (was: twice)\n"
+    },
+    {
+      "id": "3004496316",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-28T08:28:01+00:00",
+      "body": "Thanks Dima, good catch. Applied — the unconditional `ZRANGE` before the `if/else` is now moved inside each branch so the allowed path only fetches oldest once (after `ZADD`)."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4000458444",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-24T16:05:57+00:00",
+      "body": "I found one issue to address before merge: the new `tenant_id` propagation still does not make `by_tenant` limits work for session-authenticated users."
+    },
+    {
+      "id": "4020431902",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-27T11:05:04+00:00",
+      "body": "Rust-side review only.\n\nRequesting changes for four issues found in `plugins_rust/rate_limiter`:\n\n1. `plugins_rust/rate_limiter/src/memory.rs`: inactive sliding-window keys are never reclaimed. `sweep()` only removes entries when the deque is already empty, but stale timestamps are only drained during `check_and_increment()`. A key that goes cold after traffic will keep its non-empty deque forever, so the Rust memory backend leaks inactive sliding-window identities.\n\n2. `plugins_rust/rate_limiter/src/memory.rs`: the blocked memory token-bucket path rounds `Retry-After` down instead of up. For rates where a token refill takes a fractional number of seconds, clients can be told to retry before a token is actually available, which diverges from the Python and Redis paths.\n\n3. `plugins_rust/rate_limiter/src/memory.rs`: fixed-window entries now linger for up to an hour instead of expiring when their configured window elapses. On short windows and high-cardinality traffic, this is a memory regression versus the existing Python behavior.\n\n4. `plugins_rust/rate_limiter/benches/rate_limiter.rs`: `cargo clippy --all-targets --all-features -- -D warnings` currently fails on the new benchmark target because of the manual modulo check at `iteration % LIMIT == 0`. That means the Rust crate does not pass the stricter lint gate described for this area.\n\nI verified that `cargo test` passes in `plugins_rust/rate_limiter`, but the above issues should be addressed before merge.\n"
+    },
+    {
+      "id": "4021192423",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-27T13:31:43+00:00",
+      "body": "1. The Rust Redis fast path is losing sub-second timing by passing `int(time.time())` into the engine, which changes `sliding_window` and `token_bucket` behavior versus the Python Redis path. Can you preserve fractional time for rate calculations and add a parity test for sub-second requests?\r\n\r\n2. The Rust reset/retry calculations are still off by one second in a few places, so `Retry-After` / `X-RateLimit-Reset` can be later than the Python behavior on exact-second boundaries. Can you align the rounding logic with the Python implementation and add exact header-parity coverage?"
+    },
+    {
+      "id": "4021711510",
+      "author": "lucarlig",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-27T14:50:56+00:00",
+      "body": ""
+    },
+    {
+      "id": "4021741027",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-27T14:55:26+00:00",
+      "body": ""
+    },
+    {
+      "id": "4022152084",
+      "author": "dima-zakharov",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-27T16:03:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "4022164546",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-27T16:05:24+00:00",
+      "body": ""
+    },
+    {
+      "id": "4025242089",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-28T08:28:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "4028801305",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-30T08:10:28+00:00",
+      "body": "Github show that no new commits after review. "
+    },
+    {
+      "id": "4029137855",
+      "author": "lucarlig",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-30T09:10:46+00:00",
+      "body": ""
+    },
+    {
+      "id": "4051592613",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-02T15:50:53+00:00",
+      "body": "Approving as this has undergone several rounds of review and has now passed all CI checks."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0bf268e7eb8657feff28720383583fcaf7326713",
+      "message": "feat(rate-limiter): pluggable algorithms, tenant isolation fix, and scale load test\n\n- Add pluggable algorithm strategy: fixed_window, sliding_window, token_bucket\n- Add Redis backend for shared cross-instance rate limiting\n- Fix tenant isolation: skip by_tenant when tenant_id is None\n- Fix sliding window: sweep expired timestamps before counting\n- Fix backend validation: restore _validate_config check\n- Fix token bucket memory path: apply max(1,...) guard to reset timestamp\n- Add Redis integration tests for all three algorithms\n- Add direct regression tests for get_current_user tenant_id fallback\n- Add scale load test with Redis memory timeline and live algorithm detection\n- Add RL_PACE_MULTIPLIER for near-limit pace testing and boundary burst detection\n- Remove redundant algorithm locustfile; scale file is canonical\n- Correct stale comments and README limitations\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-22T14:52:28+00:00"
+    },
+    {
+      "sha": "7b877681466f3e7005632f3bd1d5c19d630e6efc",
+      "message": "feat(rate-limiter): add Rust-backed engine, check() API, benchmarks, and validation\n\n- Rust-backed sliding window engine with pyo3-log integration\n- check() API with tenant propagation, sweep/retry-after support\n- Eliminate redundant ZRANGE in sliding window Lua script\n- Fix detect-secrets baseline for rate limiter load tests\n- Clarify memory backend is single-instance only in docs\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-28T19:34:48+00:00"
+    },
+    {
+      "sha": "8e632ea06fef642c18b537867e08a9b5923ad19b",
+      "message": "chore: regenerate detect-secrets baseline after rebase\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-28T19:46:59+00:00"
+    },
+    {
+      "sha": "861736740aa8da806470493af184e6c3f327220b",
+      "message": "refactor(rate-limiter): review fixes, Redis hardening, key-format parity tests\n\n- Extract _dispatch_hook() shared by prompt_pre_fetch and tool_pre_invoke,\n  reducing each hook to a single-line wrapper\n- Elevate Redis val_i64/val_f64 parse-error logging from warn to error so\n  silent fail-open degradation surfaces in operator dashboards\n- Clamp sliding-window reset_timestamp with .max(1) so it is always strictly\n  in the future even when the oldest entry expires in < 1 s\n- Add 5 s tokio::time::timeout around Redis connection establishment to\n  prevent indefinite blocking on network partition\n- Replace silent except-pass in EVALSHA SHA tracking with logger.debug\n- Document dual Lua-script invariant (rolling-upgrade key-format parity)\n  in both Python RedisBackend docstring and Rust redis_backend.rs header\n- Add 7 parametrized test_redis_key_format_parity_* tests validating that\n  Python and Rust produce identical Redis keys for the same inputs\n- Revert unrelated .pyi stub changes for encoded_exfil_detection, pii_filter,\n  retry_with_backoff, and secrets_detection\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-02T11:55:50+00:00"
+    },
+    {
+      "sha": "3e014d10f3afd14e81552409b5fd62be916c1ad7",
+      "message": "fix: strip trailing whitespace in pyi stubs, remove accidental .claude/ralph-loop.local.md\n\n- Remove plugins_rust/rate_limiter/.claude/ralph-loop.local.md which\n  was accidentally committed — this is a local Claude Code loop state\n  file and should never have been checked in.\n- Fix trailing whitespace in plugins_rust/rate_limiter/python/\n  rate_limiter_rust/__init__.pyi docstrings to pass pre-commit hooks.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-02T15:15:25+00:00"
+    },
+    {
+      "sha": "da800e56f411288ef8753a522322454da4d17598",
+      "message": "chore: regenerate detect-secrets baseline for new exfil test strings\n\nUpdate .secrets.baseline after adding test_extra_sensitive_keywords\nin plugins_rust/encoded_exfil_detection/src/lib.rs:969 which contains\na fake credential string that triggers the Secret Keyword detector.\nAll new entries are false positives (test data).\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-02T15:26:13+00:00"
+    },
+    {
+      "sha": "af3fdc72b55cce2453788fd024d8f0eb735bdf57",
+      "message": "chore: audit new detect-secrets baseline entries as false positives\n\nThe baseline regeneration reset is_secret to null for entries whose\nline numbers shifted. Mark all 17 unaudited entries as is_secret=false\n(test data, example configs, fake credentials) to pass the\n--fail-on-unaudited pre-commit check.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-02T15:31:13+00:00"
+    }
+  ],
+  "files_changed": 31,
+  "additions": 17171,
+  "deletions": 17357,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:11.765487",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:11.766838",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3809,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3809.json"
+  }
+}

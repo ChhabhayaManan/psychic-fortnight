@@ -1,0 +1,161 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4203,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4203"
+  },
+  "metadata": {
+    "title": "feat(ui): Bundle Htmx from package.json",
+    "state": "closed",
+    "created_at": "2026-04-14T15:32:34+00:00",
+    "updated_at": "2026-04-22T09:41:34+00:00",
+    "closed_at": "2026-04-22T09:41:14+00:00",
+    "merged_at": "2026-04-22T09:41:14+00:00",
+    "author": "gcgoncalves",
+    "labels": [
+      "chore",
+      "ui",
+      "merge-queue"
+    ],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4165\r\n\r\n---\r\n\r\n## 📝 Summary\r\nMigrate HTMX to 2.0.3, and move from the CDN to package.json, bundled with vite.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [X] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [-] Tests added/updated for changes\r\n- [X] Documentation updated (if applicable)\r\n- [X] No secrets or credentials committed\r\n",
+  "comments": [
+    {
+      "id": "3093731572",
+      "author": "marekdano",
+      "created_at": "2026-04-16T13:58:23+00:00",
+      "body": "```suggestion\nAll 14 external CDN resources are protected with SRI hashes:\n```"
+    },
+    {
+      "id": "3093734981",
+      "author": "marekdano",
+      "created_at": "2026-04-16T13:58:48+00:00",
+      "body": "```suggestion\n**Protected Resources** (14 total):\n```"
+    },
+    {
+      "id": "3093745054",
+      "author": "marekdano",
+      "created_at": "2026-04-16T14:00:09+00:00",
+      "body": "```suggestion\n    { name:\"HTMX + Alpine.js\", ver:\"2.0.3 + CDN\", note:\"Admin UI (HTMX bundled via Vite, Alpine from CDN)\" }\n```\nThe updated line lost its 4-space indent, breaking the visual structure of the TECH_STACK JavaScript array literal.\nRe-indent to match surrounding entries: `    { name:\"HTMX + Alpine.js\"...}`."
+    },
+    {
+      "id": "3111775776",
+      "author": "marekdano",
+      "created_at": "2026-04-20T15:26:01+00:00",
+      "body": "```suggestion\n              hx-post=\"{{ root_path }}/admin/users\"\n```\n`hx-swap=\"innerHTML\"` is no line 6204"
+    },
+    {
+      "id": "3111779988",
+      "author": "marekdano",
+      "created_at": "2026-04-20T15:26:42+00:00",
+      "body": "```suggestion\n              hx-post=\"{{ root_path }}/admin/teams\"\n```\n`hx-swap=\"innerHTML\"` is on the line 14132"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4117155019",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-15T22:08:21+00:00",
+      "body": "Thanks for pushing this migration through. Moving HTMX into the bundled frontend path is a good direction, and the `hx-on` event syntax updates look like the right kind of cleanup for HTMX 2.x. I did notice two blocking issues worth tightening before merge:\n\n1. `mcpgateway/templates/admin.html`\n`mcpgateway/templates/users_partial.html`\nA number of elements now have duplicate `hx-swap` attributes, and in several places the new one conflicts with the existing value (`innerHTML` added alongside `outerHTML`). That creates invalid HTML and can change runtime behavior in subtle ways depending on which attribute the browser keeps. For example, some list refresh and row-action flows that previously replaced the whole element may now only replace inner content. I think these need to be normalized case by case rather than bulk-appending `hx-swap=\"innerHTML\"`.\n\n2. `scripts/cdn_resources.py`\n`scripts/download-cdn-assets.sh`\nThe PR says it closes `#4165`, but these two sync points still reference CDN-hosted HTMX `1.9.12`. Since the new approach is “HTMX bundled via npm/Vite,” leaving these unchanged means the air-gapped download path and the SRI source-of-truth are still out of sync with the implementation. I’d suggest either updating/removing the HTMX entries here as part of this PR, or narrowing the PR/issue linkage so it doesn’t claim the full migration is complete yet."
+    },
+    {
+      "id": "4121458457",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-16T14:01:53+00:00",
+      "body": "#### Findings\n\n- `mcpgateway/templates/admin.html` — 17 locations (lines 2392, 2503, 3417, 3508, 4437, 4689, 4980, 5072, 6409, 6742, 6783, 6889, 8052, 8116, 8132, 8148, 8164)\n  - **Issue**: `hx-swap=\"innerHTML\"` was appended to the `hx-get` line, but each element already has `hx-swap=\"outerHTML\"` on a subsequent line. HTML parsers drop duplicate attributes and keep the first occurrence, so all 17 elements now silently use `innerHTML` instead of the intended `outerHTML`. Affected: all table refresh checkboxes (servers, tools, resources, prompts, gateways, agents, tokens), all pagination controls, users-list-container, and all metrics top-performers containers.\n  - **Suggestion**: Remove the `hx-swap=\"innerHTML\"` additions from those 17 hx-get lines. The existing `hx-swap=\"outerHTML\"` lines are correct and should be left as-is.\n\n- `mcpgateway/templates/admin.html:14602`\n  - **Issue:** A JS comment still references the old syntax: `// The handlers are attached via HTMX's hx-on::after-swap attribute`.\n  - **Suggestion:** Update to `hx-on:htmx:after-swap` for accuracy."
+    },
+    {
+      "id": "4127789823",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-17T09:58:32+00:00",
+      "body": "### Overview\n\nThis PR migrates HTMX from CDN-loaded 1.9.12 to npm-bundled 2.0.3 via Vite. It removes the air-gapped CDN fallback path for HTMX, updates event handler syntax to HTMX 2.x's namespaced format, and cleans up SRI hash tracking for the now-bundled library. Closes #4165.\n\nThe motivation is solid: bundling HTMX simplifies air-gapped deployments, removes runtime CDN dependency, and standardizes tooling.\n\n---\n\n### Strengths\n\n- **Clean CDN removal**: `sri_hashes.json`, `scripts/cdn_resources.py`, and the conditional CDN/air-gap loading block in `admin.html` are all properly cleaned up — no dangling references found.\n- **Correct event syntax migration**: `hx-on::after-swap` → `hx-on:htmx:after-swap` (and `before-request`, `response-error`) is exactly right for HTMX 2.0 compatibility.\n- **Build config is correct**: Removing HTMX from `vite.config.js` `external` and `globals` is the right move to allow bundling.\n- **Documentation breadth**: Updates span README, ADR, deployment, building, release, security, and UI docs consistently.\n- **Duplicate `hx-swap` fix addressed**: The 17 duplicate `hx-swap=\"innerHTML\"` vs `hx-swap=\"outerHTML\"` conflicts were identified in review and fixed in a follow-up commit.\n\n---\n\n### Issues\n\n#### Blocking\n\n**1. Alpine.js inconsistency with HTMX bundling strategy**\n\n`package.json` lists both `alpinejs` and `htmx.org` as dependencies, but `vite.config.js` still externalizes Alpine.js. This means:\n- HTMX: bundled into `bundle-[hash].js` ✓\n- Alpine: listed in `package.json` but loaded externally from CDN\n\nThis is likely intentional, but the PR doesn't document *why* the two libraries are treated differently. If Alpine is still CDN-loaded, the air-gapped deployment benefit only applies to HTMX. Either:\n- Bundle Alpine too (consistent with the stated goal), or\n- Add a comment in `vite.config.js` and a note in the PR explaining the split strategy\n\n**2. `window.htmx = htmx` in `admin.js` — global pollution without guard**\n\n```javascript\nimport htmx from 'htmx.org';\nwindow.htmx = htmx;\n```\n\nThis unconditionally overwrites `window.htmx` on every page load. If any other script (e.g., Alpine plugins, third-party extensions) loads independently and also sets `window.htmx`, whichever runs last wins. At minimum this should be:\n\n```javascript\nwindow.htmx = window.htmx || htmx;\n```\n\nOr, more defensively, import HTMX directly in each module that needs it rather than relying on the global.\n\n#### Non-blocking Suggestions\n\n**3. Version pinning — `^2.0.3` is too loose**\n\nHTMX 2.x introduced breaking changes from 1.x. Pinning to `^2.0.3` allows any `2.x.x` upgrade which could re-introduce breaking syntax changes. Recommend exact version or `~2.0.3` (patch-only) until the project's test coverage can reliably catch HTMX regressions:\n\n```json\n\"htmx.org\": \"2.0.3\"\n```\n\n**4. SRI trade-off not documented in the ADR**\n\nThe ADR at `docs/docs/architecture/adr/014-security-headers-cors-middleware.md` is updated to reduce the CDN resource count from 15 to 14. But bundling HTMX means you lose the SRI integrity check you previously had. For a security-conscious project, the ADR should note this trade-off explicitly: bundled assets are integrity-protected at build time (via content-hash filenames), which is equivalent for deployment integrity but differs from runtime CDN SRI validation.\n\n---\n\n### Security Considerations\n\n- **Positive**: Removing CDN for HTMX eliminates one external network dependency at runtime and closes a potential CDN supply-chain vector.\n- **Trade-off**: HTMX integrity is now verified at build time (Vite content-hash) rather than at browser load time (SRI). This is acceptable but should be documented.\n- **Alpine still CDN-loaded**: If Alpine remains on CDN, the CSP `script-src` policy must continue to include the Alpine CDN host with SRI. Verify `sri_hashes.json` still includes Alpine.\n"
+    },
+    {
+      "id": "4141286912",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-20T15:27:35+00:00",
+      "body": ""
+    },
+    {
+      "id": "4141540120",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-20T16:00:33+00:00",
+      "body": " - All `hx-on::` → `hx-on:htmx:` event handler renames are complete and consistent across all four template files.\n  - CDN script block and air-gapped fallback path cleanly removed from `admin.html`.\n  - `vite.config.js` globals/external entries for HTMX correctly removed.\n  - SRI hash entry removed from `sri_hashes.json`, test updated accordingly.\n  - `cdn_resources.py` cleaned up.\n  - Documentation comprehensively updated across `README` and all relevant docs pages.\n  - .secrets.baseline correctly regenerated.\n\nLGTM 🚀 "
+    },
+    {
+      "id": "4147760400",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-21T12:51:31+00:00",
+      "body": "LGTM 🚀 "
+    },
+    {
+      "id": "4153648530",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-22T09:41:34+00:00",
+      "body": "Approved based on other team member's review."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "5a403ce7054d57b408c37e86e8795c71ff40df59",
+      "message": "HTMX migration 1.9 -> 2.0\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-14T14:56:19+00:00"
+    },
+    {
+      "sha": "f17ba194839e7423a6f4956bacc5b215416f5034",
+      "message": "Move HTMX to package.json\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-14T15:19:08+00:00"
+    },
+    {
+      "sha": "745f00f119866bde95b974d9781782f6386cb1ab",
+      "message": "Update documentation\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-14T15:24:25+00:00"
+    },
+    {
+      "sha": "b210c0ed0e2b46c3ba57f435cf3db9a3cf239bcf",
+      "message": "Fix failing tests\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-15T11:05:40+00:00"
+    },
+    {
+      "sha": "eb2523cbb46d257d88face8ce19b97b79c45881b",
+      "message": "Remove duplicate swap targets\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-16T13:11:08+00:00"
+    },
+    {
+      "sha": "140f602baf4469def04d8671bc50c5e42d82abfa",
+      "message": "Address suggestions\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-16T14:26:53+00:00"
+    }
+  ],
+  "files_changed": 21,
+  "additions": 46,
+  "deletions": 58,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:05.897006",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:05.897690",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4203,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4203.json"
+  }
+}

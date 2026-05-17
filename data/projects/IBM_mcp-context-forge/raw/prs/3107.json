@@ -1,0 +1,55 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3107,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3107"
+  },
+  "metadata": {
+    "title": "fix: access control hardening and behavior consistency (h-batch-3)",
+    "state": "closed",
+    "created_at": "2026-02-22T21:43:05+00:00",
+    "updated_at": "2026-02-23T09:58:18+00:00",
+    "closed_at": "2026-02-22T22:20:44+00:00",
+    "merged_at": "2026-02-22T22:20:44+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "security",
+      "revisit"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\nThis PR hardens access-control and ownership-scope behavior across RPC, resource reads, OAuth gateway sync, and import sanitization, with focused regression coverage for allow/deny paths.\n\n## Changes\n- C-05\n  - Enforced `tools.execute` for backward-compatible JSON-RPC tool invocation (`method=<tool_name>`) in addition to `tools/call`.\n  - Added regression tests for deny and allow paths.\n\n- C-18\n  - Added scoped ownership enforcement to `GET /resources/{resource_id}/info`.\n  - Kept fail-closed ownership behavior aligned for ID-based access checks.\n  - Added regression coverage for deny behavior.\n\n- C-19\n  - Maintained root-management RBAC alignment (`admin.system_config`) across root routes.\n\n- C-20\n  - Unified OAuth fetch-tools scope resolution with normalized token-team semantics.\n  - Preserved public-only semantics for empty-team tokens while preventing unrestricted fallback.\n  - Added allow/deny regression tests.\n\n- C-35\n  - Kept server SSE existence + scope checks consistent with deterministic `404`/`403` behavior.\n\n- C-39\n  - Expanded import field sanitization for scoped entities to drop untrusted `team_id`, `owner_email`, `visibility`, and `team` values before persistence.\n  - Added regression coverage.\n\n- Token helper consistency\n  - Updated JWT rich-token creation to distinguish omitted `teams` from explicit `teams: null`.\n  - Preserves intended scoped-token semantics for admin and public-only flows.\n  - Added unit coverage for omitted vs explicit-null teams behavior and CLI admin token generation path.\n\n## Validation\n- Targeted regressions:\n  - `uv run pytest -q tests/unit/mcpgateway/test_main.py::TestRPCEndpoints::test_rpc_legacy_tool_invocation_requires_tools_execute tests/unit/mcpgateway/test_main_extended.py::TestRpcHandling::test_handle_rpc_backward_compat_tool_requires_execute_permission tests/unit/mcpgateway/test_main_extended.py::TestRpcHandling::test_handle_rpc_backward_compat_tool_allows_when_authorized tests/unit/mcpgateway/test_main_extended.py::TestRemainingCoverageGaps::test_get_resource_info_success_and_not_found tests/unit/mcpgateway/test_main_extended.py::TestRemainingCoverageGaps::test_get_resource_info_denies_when_scope_enforcement_fails tests/unit/mcpgateway/routers/test_oauth_router.py::TestOAuthRouter::test_fetch_tools_after_oauth_cached_public_only_admin_token_stays_scoped tests/unit/mcpgateway/routers/test_oauth_router.py::TestOAuthRouter::test_fetch_tools_after_oauth_cached_public_only_admin_token_allow_path tests/unit/mcpgateway/services/test_import_service.py::test_sanitize_import_scope_fields_removes_team_and_owner tests/unit/mcpgateway/services/test_import_service.py::test_process_entities_strips_untrusted_scope_fields_before_processing tests/unit/mcpgateway/test_rpc_backward_compatibility.py`\n  - Result: pass\n\n- Full affected unit modules:\n  - `uv run pytest -q tests/unit/mcpgateway/test_main.py tests/unit/mcpgateway/test_main_extended.py tests/unit/mcpgateway/routers/test_oauth_router.py tests/unit/mcpgateway/services/test_import_service.py tests/unit/mcpgateway/test_rpc_backward_compatibility.py`\n  - Result: pass\n\n- Token helper tests:\n  - `uv run pytest -q tests/unit/mcpgateway/utils/test_create_jwt_token.py`\n  - Result: pass\n\n- Playwright checks relevant to entity delete behavior:\n  - `uv run pytest -q tests/playwright/entities/test_entity_lifecycle.py::TestToolLifecycle::test_delete_tool tests/playwright/entities/test_entity_lifecycle.py::TestResourceLifecycle::test_delete_resource tests/playwright/entities/test_entity_lifecycle.py::TestPromptLifecycle::test_delete_prompt tests/playwright/entities/test_entity_lifecycle.py::TestServerLifecycle::test_delete_server`\n  - Result: pass\n\n- Scope matrix check:\n  - `uv run pytest -q tests/playwright/security/test_token_scope_matrix.py::TestTokenTeamsMatrix::test_teams_claim_matrix_controls_visibility`\n  - Result: pass\n\n- Quality gates:\n  - `make flake8` (pass)\n  - `make pylint` (pass, 10.00/10)\n\n## Changelog\n- Updated `CHANGELOG.md` under `1.0.0-RC2` to capture the hardening details and token-helper semantics update.\n\nRefs: C-05, C-18, C-19, C-20, C-35, C-39\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "d16ec385bb50a64f6973aa05ed992f6f7a3a9732",
+      "message": "fix: access control hardening and behavior consistency\n\n- C-05: require tools.execute for both tools/call and legacy JSON-RPC tool invocation paths\n\n- C-18: enforce scoped access on GET /resources/{resource_id}/info and maintain fail-closed ID ownership checks\n\n- C-19: align root management endpoints with admin.system_config authorization requirements\n\n- C-20: harden OAuth fetch-tools scope resolution and ownership checks with normalized token-team semantics\n\n- C-35: validate server existence and scoped access before SSE setup, preserving deterministic 404/403 behavior\n\n- C-39: sanitize imported scoped fields (team_id, owner_email, visibility, team) before persistence\n\n- C-18: harden JWT rich-token teams semantics by distinguishing omitted teams from explicit teams=null\n\n- add/update regression tests for allow/deny coverage across RPC, OAuth, resource info, import sanitization, and token helpers\n\n- update CHANGELOG and local issue evidence/index entries for the hardening follow-up\n\nRefs: C-05 C-18 C-19 C-20 C-35 C-39\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-22T21:39:38+00:00"
+    },
+    {
+      "sha": "ea270cefe06457086aec2d4ff710c9e7dfdf9c83",
+      "message": "Update tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-22T22:03:55+00:00"
+    }
+  ],
+  "files_changed": 14,
+  "additions": 848,
+  "deletions": 109,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:07.286361",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:07.289633",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3107,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3107.json"
+  }
+}

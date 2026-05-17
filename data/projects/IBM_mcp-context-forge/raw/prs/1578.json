@@ -1,0 +1,100 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1578,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1578"
+  },
+  "metadata": {
+    "title": "Enabling HTTPS with Encrypted SSL Keys via Passphrase Support",
+    "state": "closed",
+    "created_at": "2025-12-11T09:13:32+00:00",
+    "updated_at": "2025-12-12T05:00:58+00:00",
+    "closed_at": "2025-12-12T05:00:56+00:00",
+    "merged_at": "2025-12-12T05:00:56+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nCloses #1577\r\n\r\nThis PR adds support for SSL certificates with passphrase-protected private keys in both production (Gunicorn) and development (Uvicorn) environments. Previously, only unencrypted SSL keys were supported, causing server crashes when attempting to use passphrase-protected keys for HTTPS configuration.\r\n\r\nMany organizations require passphrase-protected private keys as a security best practice. This PR enables MCP Gateway to work in such environments while maintaining full backward compatibility.\r\n\r\n\r\n## 🐞 Root Cause\r\nGunicorn's `--certfile` and `--keyfile` command-line options do not support passphrase-protected private keys. When a passphrase-protected key is provided, Gunicorn cannot decrypt it and fails to start.\r\n\r\n**Location of issue:**\r\n- `run-gunicorn.sh`: No mechanism to handle passphrases\r\n- `gunicorn.config.py`: No SSL key decryption logic\r\n- Missing utility to decrypt passphrase-protected keys\r\n\r\n\r\n## 💡 Fix Description\r\n### Key Design Points\r\n\r\n1. **SSL Key Manager Utility** (`mcpgateway/utils/ssl_key_manager.py`)\r\n   - Decrypts passphrase-protected keys using `cryptography` library\r\n   - Writes decrypted key to secure temporary file (0o600 permissions)\r\n   - Automatic cleanup via `atexit` handler\r\n   - Returns original path for unencrypted keys (zero overhead)\r\n\r\n2. **Environment Variable Support** (`run-gunicorn.sh`)\r\n   - Added `KEY_FILE_PASSWORD` environment variable\r\n   - Alternative `CERT_PASSPHRASE` for compatibility\r\n   - Exports `SSL_KEY_PASSWORD` for Python to access\r\n   - Enhanced user feedback (shows passphrase status without exposing value)\r\n\r\n3. **Gunicorn Integration** (`gunicorn.config.py`)\r\n   - Added `on_starting` hook to handle key decryption before workers spawn\r\n   - Checks `SSL` and `SSL_KEY_PASSWORD` environment variables\r\n   - Updates Gunicorn's keyfile config to use decrypted temporary file\r\n   - Proper error handling with informative messages\r\n\r\n4. **Developer Experience** (`Makefile`)\r\n   - `make certs-passphrase`: Generate passphrase-protected certificates\r\n   - `make certs-remove-passphrase`: Convert encrypted key to unencrypted\r\n   - Updated help documentation\r\n\r\n5. **Docker Support** (`docker-compose.yml`)\r\n   - Added `KEY_FILE_PASSWORD` environment variable example\r\n   - Clear documentation for SSL setup with/without passphrases\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3570296045",
+      "author": "madhav165",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-12T04:59:55+00:00",
+      "body": "Tested in a call with Sunish (Verizon)"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "41edfbe92a7f5aec4af1b8679504d7ed61c03013",
+      "message": "added ssl key manager\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-11T06:43:15+00:00"
+    },
+    {
+      "sha": "9cd8758d59c4d617c205651d3623151a51065d99",
+      "message": "update gunicorn config to support ssl cert passphrase\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-11T06:44:59+00:00"
+    },
+    {
+      "sha": "e332ed9ac3d1bb1cf561d5a02a7c7560be6db4d8",
+      "message": "update dockercompose with passphrase varaible\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-11T06:50:00+00:00"
+    },
+    {
+      "sha": "73341d1fb555cce0ca60beb97074f6da2f9e4a68",
+      "message": "targets supporitng certs with passphrase\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-11T06:51:24+00:00"
+    },
+    {
+      "sha": "05af4f8706482d82d9cecb56bd63ad37ab1bf619",
+      "message": "check passphrase\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-11T06:58:36+00:00"
+    },
+    {
+      "sha": "652bc0a2e84bd7577fc09fe0569d927fa216b411",
+      "message": "fix location\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-11T07:20:02+00:00"
+    },
+    {
+      "sha": "c5ff0102db886a441dc72b77f44d3d1c3efe6989",
+      "message": "update test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-11T08:38:17+00:00"
+    },
+    {
+      "sha": "33e9ba88bb2e8faae7a6cb43bb975012e26c7b05",
+      "message": "Signed-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-11T08:38:42+00:00"
+    },
+    {
+      "sha": "cacea62b97799f7f187aab9618e46b06254d0092",
+      "message": "linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-11T09:21:08+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 558,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:21:28.397083",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:21:28.397799",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1578,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1578.json"
+  }
+}

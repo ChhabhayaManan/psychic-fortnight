@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4447,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4447"
+  },
+  "metadata": {
+    "title": "fix(oauth): handle missing expires_in in OAuth token response (supersedes #3992)",
+    "state": "closed",
+    "created_at": "2026-04-26T16:10:44+00:00",
+    "updated_at": "2026-04-26T16:27:57+00:00",
+    "closed_at": "2026-04-26T16:27:55+00:00",
+    "merged_at": "2026-04-26T16:27:55+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\nCloses #3989\nSupersedes #3992 (couldn't push amendments to the contributor's fork)\n\n---\n\n## 📝 Summary\n\nPicks up @ecthelion77's original fix in #3992 for the \\`TypeError\\` raised when an OAuth provider omits \\`expires_in\\` from its token response (RFC 6749 §5.1 marks it RECOMMENDED, not REQUIRED — e.g. GitHub OAuth Apps), then layers in review-driven hardening:\n\n- **Original fix (commit 1, by @ecthelion77)**: when \\`expires_in\\` is absent, store \\`expires_at\\` as \\`NULL\\` instead of crashing.\n- **Hardening (commit 2)**:\n  - New \\`parse_expires_in()\\` validator that rejects negative, malformed, or non-scalar values with a clean \\`OAuthError\\` instead of letting \\`ValueError\\` bubble.\n  - Refresh path uses the same parser, so initial-auth and refresh agree on what \\\"missing \\`expires_in\\`\\\" means (was hardcoded to \\`3600\\` fallback, creating path-dependent semantics).\n  - \\`cleanup_expired_tokens\\` now ages out \\`NULL\\`-expiry rows so they don't accumulate forever (covers the SQL three-valued logic gotcha — \\`NULL < cutoff\\` evaluates to \\`NULL\\`).\n  - \\`_is_token_expired\\` docstring documents the \\`NULL\\` contract and cross-references the cleanup policy.\n  - Removed now-dead \\`OAUTH_DEFAULT_TIMEOUT\\` from \\`config.py\\`, \\`.env.example\\`, helm chart (\\`values.yaml\\`/\\`values.schema.json\\`/\\`README.md\\`), 4 docs files, and 3 test mocks.\n  - Lazy \\`%\\`-style logging on new lines; dropped redundant \\`int()\\` cast.\n- **Second-pass review fixes (commit 3)**:\n  - Refresh path now **preserves prior TTL** (\\`expires_at - updated_at\\`) when the refresh response omits \\`expires_in\\`, instead of clearing \\`expires_at\\` to \\`NULL\\` and silently stopping all future proactive refreshes. Falls back to \\`NULL\\` only when there was no prior TTL to preserve (genuine no-expiry providers).\n  - \\`cleanup_expired_tokens\\` ages \\`NULL\\`-expiry rows by \\`updated_at\\` (advances on re-auth), not \\`created_at\\` (which would delete recently re-authorized tokens).\n  - \\`parse_expires_in\\` rejects non-integer floats per RFC, and sign-checks the original numeric **before** \\`int()\\` truncation (so \\`-0.5\\` correctly raises \\\"negative\\\" instead of silently becoming \\`0\\`).\n\n---\n\n## 🏷️ Type of Change\n- [x] Bug fix\n- [ ] Feature / Enhancement\n- [ ] Documentation\n- [ ] Refactor\n- [ ] Chore (deps, CI, tooling)\n\n---\n\n## 🧪 Verification\n\n| Check                     | Command                                           | Status |\n|---------------------------|---------------------------------------------------|--------|\n| OAuth scope unit tests    | \\`pytest tests/unit/mcpgateway/services/test_token_storage_service.py tests/unit/mcpgateway/services/test_oauth_manager.py tests/unit/mcpgateway/services/test_oauth_manager_pkce.py tests/unit/mcpgateway/test_oauth_manager.py\\` | ✅ 390 passed |\n| Plugin scope unit tests   | \\`pytest tests/integration/test_encoded_exfil.py tests/integration/test_rate_limiter.py tests/unit/mcpgateway/plugins/...\\` | ✅ 292 passed, 63 skipped (integration), 2 xfail |\n| Doctests                  | \\`pytest --doctest-modules mcpgateway/services/oauth_manager.py mcpgateway/services/token_storage_service.py\\` | ✅ 12 passed |\n| black / isort             | \\`make black isort\\`                                | ✅ clean |\n| ruff                      | \\`uv tool run ruff check\\` on touched files         | ✅ no new findings (4 pre-existing F841 in untouched test code) |\n| bandit                    | \\`uv tool run bandit -ll\\` on touched files         | ✅ no new findings |\n| pylint                    | \\`uv tool run pylint\\` on touched files             | ✅ score 7.04 → 9.72 |\n\n---\n\n## ✅ Checklist\n- [x] Code formatted (\\`make black isort pre-commit\\`)\n- [x] Tests added/updated for changes (~17 new unit + integration tests, including parametrized edge cases for \\`parse_expires_in\\` and the new TTL-preservation refresh path)\n- [x] Documentation updated (4 docs files updated to remove dead \\`OAUTH_DEFAULT_TIMEOUT\\` references; \\`_is_token_expired\\` and \\`cleanup_expired_tokens\\` docstrings expanded with the new \\`NULL\\`-expiry contract)\n- [x] No secrets or credentials committed\n\n---\n\n## 📓 Notes\n\n**Original author credit:** The first commit is signed by @ecthelion77 from #3992 — please give them the merge attribution. The branch is rebased onto current \\`main\\`; the second and third commits are the review-driven refinements described above.\n\n**Why a new PR?** PR #3992 came from a fork I lack push access to (\\`maintainerCanModify\\` is set on the PR, but cross-repo push requires either SSH collaborator access on the fork or HTTPS-token auth that the upstream maintainer permission alone doesn't grant). Rather than ask @ecthelion77 to apply the changes manually, I'm opening this PR with the rebased + amended history. Once this is reviewed/merged, #3992 should be closed in favor of it.\n\n**Behavior changes worth highlighting in the changelog** (none are silent breaking changes for callers, but operators should know):\n- \\`OAUTH_DEFAULT_TIMEOUT\\` config knob removed (was dead after the fix).\n- Tokens with no provider-supplied \\`expires_in\\` are now stored with \\`expires_at = NULL\\` (treated as never-expires locally) and aged out of \\`oauth_tokens\\` after \\`max_age_days\\` from \\`updated_at\\`.\n- Refresh responses missing \\`expires_in\\` now preserve the prior TTL instead of either crashing (pre-fix) or clearing the expiry to \\`NULL\\` (intermediate state never released).",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "80293775a86bf89bb669dffbbaa96331269fcd12",
+      "message": "fix(oauth): handle missing expires_in in OAuth token response\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-14T14:55:46+00:00"
+    },
+    {
+      "sha": "e8176daa87e90ee3aaab51bd69f851c12eb52727",
+      "message": "fix(oauth): tighten expires_in handling and prune dead config\n\nBuilds on the missing-expires_in fix (issue #3989) with review feedback:\n\n- Add parse_expires_in() helper (oauth_manager.py) that validates\n  absent/numeric/string/zero values and raises OAuthError on negative,\n  non-numeric, or non-scalar inputs\n- Refresh path now uses the same helper so initial-auth and refresh\n  agree on what 'missing expires_in' means (was hardcoded 3600s)\n- cleanup_expired_tokens ages out NULL-expires_at rows via created_at\n- _is_token_expired docstring documents the NULL-expiry contract\n- Remove now-dead OAUTH_DEFAULT_TIMEOUT from config, env example,\n  helm chart, docs, and test mocks\n- Lazy %-style logging; drop redundant int() cast\n- Add unit + integration tests for all new branches\n\nRefs: #3989\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T14:18:56+00:00"
+    },
+    {
+      "sha": "a611f35568eeaa07f12b66e33542566eecf4a2fd",
+      "message": "fix(oauth): preserve TTL on refresh, age via updated_at, reject fractional floats\n\nAddresses Oracle second-pass review findings on dd3c25f9:\n\n- _refresh_access_token: when the refresh response omits expires_in,\n  preserve the prior TTL by computing (expires_at - updated_at) from the\n  existing record instead of clearing expires_at to NULL. Clearing it\n  caused proactive refresh to stop after the first such response, since\n  _is_token_expired returns False for NULL. Falls back to NULL only when\n  the token had no prior expiry (genuine no-expiry providers like GitHub\n  OAuth Apps). New _preserve_prior_ttl() module-level helper handles\n  timezone-naive timestamps and non-positive deltas.\n\n- cleanup_expired_tokens: NULL-expiry rows now age via updated_at, not\n  created_at. store_tokens advances updated_at on re-authorization, so\n  using created_at would delete tokens that were re-authorized recently\n  but originally created more than max_age_days ago.\n\n- parse_expires_in: tighten validation against int() truncation. Previously\n  expires_in=-0.5 would silently pass as 0 because int(-0.5) == 0 (Python\n  truncates toward zero). Now: sign-check the original numeric before\n  conversion, and reject non-integer floats (RFC 6749 §5.1 specifies\n  integer seconds). Order matters - sign check fires first since 'negative'\n  is the more fundamental violation.\n\nTests:\n- test_refresh_without_expires_in_clears_expiry replaced by:\n  test_refresh_without_expires_in_preserves_prior_ttl (asserts new TTL\n  ~= prior TTL after refresh) and\n  test_refresh_without_expires_in_no_prior_ttl_stays_none.\n- test_cleanup_expired_tokens_targets_null_expires_at now asserts the\n  query uses updated_at AND does NOT use created_at.\n- test_parse_expires_in_negative_raises extended with -0.5 and -3600.7.\n- New test_parse_expires_in_non_integer_float_raises covers 3600.5, 0.5,\n  3600.7.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T14:32:15+00:00"
+    }
+  ],
+  "files_changed": 16,
+  "additions": 587,
+  "deletions": 122,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:11.666911",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:11.667393",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4447,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4447.json"
+  }
+}

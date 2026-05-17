@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4259,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4259"
+  },
+  "metadata": {
+    "title": "fix(oauth): parse form-encoded responses in `refresh_token()`",
+    "state": "closed",
+    "created_at": "2026-04-16T23:18:41+00:00",
+    "updated_at": "2026-04-17T07:42:49+00:00",
+    "closed_at": "2026-04-17T07:42:49+00:00",
+    "merged_at": "2026-04-17T07:42:49+00:00",
+    "author": "kimsehwan96",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4258\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\n`OAuthManager.refresh_token()` in `mcpgateway/services/oauth_manager.py` assumed the token endpoint always returns JSON, but GitHub's OAuth token endpoint returns `application/x-www-form-urlencoded` by default. Without an `Accept: application/json` header, `response.json()` raised `JSONDecodeError: Expecting value: line 1 column 1 (char 0)`, silently failing the refresh, letting the access token expire, and driving gateways offline on the next health check.\r\n\r\nThis PR applies the **same content-type branch already used in the three other token-fetching paths** in the same file (`_client_credentials_flow` at L274, `_password_flow` at L360, and the two authorization code exchanges at L458 and L1235) so `refresh_token()` handles both JSON and form-encoded responses uniformly.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    pass    |\r\n| Unit tests                | `make test`     |    pass    |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n### Root cause (file reference)\r\n\r\n`mcpgateway/services/oauth_manager.py`, `OAuthManager.refresh_token()`, around L1327:\r\n\r\n```python3\r\n  # Before\r\n  response = await client.post(token_url, data=token_data, timeout=self.request_timeout)\r\n  if response.status_code == 200:\r\n      token_response = response.json()  # ← raises on GitHub (form-encoded body)\r\n\r\n  # After — aligns with _client_credentials_flow / authorization_code paths\r\n  if response.status_code == 200:\r\n      content_type = response.headers.get(\"content-type\", \"\")\r\n      if \"application/x-www-form-urlencoded\" in content_type:\r\n          text_response = response.text\r\n          token_response = {}\r\n          for pair in text_response.split(\"&\"):\r\n              if \"=\" in pair:\r\n                  key, value = pair.split(\"=\", 1)\r\n                  token_response[key] = value\r\n      else:\r\n          try:\r\n              token_response = response.json()\r\n          except Exception as e:\r\n              logger.warning(f\"Failed to parse JSON response: {e}\")\r\n              token_response = {\"raw_response\": response.text}\r\n      ...\r\n```",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "97972ddb0211bd62a678300693d574f869aa31d2",
+      "message": "fix(oauth): parse form-encoded responses in refresh_token()\n\nToken endpoints that respond with application/x-www-form-urlencoded\n(e.g. GitHub's /login/oauth/access_token) caused response.json() to\nraise JSONDecodeError, silently failing token refresh and driving\ngateways offline after access-token expiry.\n\nApply the same content-type branch used in the three other token\nfetching paths in this module (_client_credentials_flow, _password_flow,\nand the two authorization code exchanges) so refresh_token() handles\nboth JSON and form-encoded responses.\n\nAdd unit tests covering:\n- happy path for form-encoded responses (asserts response.json() is\n  not invoked to prove the form-encoded branch is actually taken)\n- negative path for unexpected content-type (raw fallback then\n  OAuthError for missing access_token)\n- regression guard: set content-type on the existing success test\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-04-16T23:15:22+00:00"
+    },
+    {
+      "sha": "9743ff5694a62b0ea7fdcf3162a9269c50b191e3",
+      "message": "refactor(oauth): consolidate token-response parsing and prevent secret leaks\n\nPull the JSON / form-encoded response parsing duplicated across five\ntoken-fetching paths (_client_credentials_flow, _password_flow, both\nauthorization-code exchanges, and refresh_token) into a single\n_parse_token_response() helper, and add a _redact_token_response()\nhelper that all five \"No access_token\" OAuthError sites and the\nrefresh_token 4xx path use to bound what reaches logs and exception\nmessages.\n\nParsing improvements (apply to all five paths via the helper):\n\n- Treat the content-type header case-insensitively per RFC 7231 §3.1.1.1\n  so providers sending \"Application/X-WWW-Form-Urlencoded\" no longer\n  fall through to the JSON branch.\n- URL-decode form-encoded values via urllib.parse.parse_qsl, so a value\n  like \"scope=repo%3Astatus\" is delivered to callers as \"repo:status\".\n- Narrow the parse-failure except clause from bare Exception to\n  ValueError (covers JSONDecodeError and UnicodeDecodeError) so that\n  unrelated failures such as httpx.ResponseNotRead surface instead of\n  being silently captured as raw_response.\n- Log parse failures with diagnostic context (status, content-type,\n  body bytes) and exc_info=True to aid operator debugging.\n- Detect garbage form bodies: parse_qsl runs without keep_blank_values\n  so an HTML page with no \"=\" parses to {} and falls through to the\n  raw_response capture, and any non-empty parse whose keys aren't\n  OAuth-parameter shaped (e.g. <meta charset=...>) is rejected the\n  same way.\n- Tolerate undecodable bodies via a new _safe_response_text() helper\n  that returns \"<undecodable body, N bytes>\" when response.text raises\n  UnicodeDecodeError or LookupError.\n\nSecret-leak prevention (everywhere a token-shaped dict reaches an\nOAuthError or log line):\n\n- Redact known credential-bearing keys (access_token, refresh_token,\n  id_token, client_secret, password) to \"[REDACTED]\".\n- Scrub URL/form-style \"<key>=<value>\" patterns inline so that secrets\n  embedded in HTML hrefs, form actions, or stack traces are neutered\n  even when the surrounding string fits inside the truncation window.\n- Cap any string value at 256 chars with a \"... [truncated, N chars\n  total]\" marker so HTML error pages and verbose stack traces don't\n  swamp logs.\n- Route the refresh_token 4xx error path through the same parse +\n  redact pipeline (it previously surfaced raw response.text in both\n  the OAuthError and the failure-status warning).\n- refresh_token's \"No access_token\" OAuthError now matches the sibling\n  flows by echoing the (redacted) parsed payload for diagnostics.\n\nTests cover mixed-case content-type, URL-decoded values, JSON-branch\nJSONDecodeError + UnicodeDecodeError fallbacks, missing content-type\nheader, empty form body, garbage form bodies, undecodable bodies,\nsensitive-key redaction, raw_response truncation, URL-param scrubbing,\n4xx echoed-secret redaction, and 4xx oversized HTML truncation. The\ntwo pre-existing 4xx tests are tightened to assert the parsed error\nfield appears in the OAuthError so a regression that loses the body\nwould be caught.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-17T06:42:59+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 592,
+  "deletions": 166,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:21.199387",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:21.200433",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4259,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4259.json"
+  }
+}

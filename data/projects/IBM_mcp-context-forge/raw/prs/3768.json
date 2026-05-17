@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3768,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3768"
+  },
+  "metadata": {
+    "title": "feat(rate-limiter): pluggable algorithms, Redis token bucket, and load test harness",
+    "state": "closed",
+    "created_at": "2026-03-20T16:05:13+00:00",
+    "updated_at": "2026-03-21T21:17:58+00:00",
+    "closed_at": "2026-03-21T21:17:58+00:00",
+    "merged_at": null,
+    "author": "gandhipratik203",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\nCloses #[rate-limiter-algorithms-issue]\n\n---\n\n## 📝 Summary\n\nThis PR extends the rate limiter plugin with a **pluggable algorithm strategy**, a **Redis backend for token bucket**, and a **load test harness** for benchmarking algorithm behaviour at scale.\n\n### Problem Statement\nThe original rate limiter used a single fixed-window counting strategy. This meant:\n- **No burst absorption** — short client spikes were rejected immediately\n- **Boundary burst exposure** — up to 2× the configured limit could slip through at window resets\n- **Silent under-enforcement in multi-instance deployments** — `token_bucket` stored state in process memory, so 3 gateway instances behind a load balancer effectively tripled the configured limit\n- **No load test coverage** for multi-instance correctness or Redis memory divergence across algorithms\n\n### Solution\n- **Three selectable algorithms** via `algorithm:` in plugin config — `fixed_window`, `sliding_window`, `token_bucket`\n- **Redis backend for `token_bucket`** — atomic Lua script stores `{tokens, last_refill}` per key, one round-trip per check, true cluster-wide enforcement across all gateway instances\n- **Algorithm comparison load test** — live gateway CPU/memory + Redis memory timeline, one run per algorithm\n- **Scale divergence load test** — 100 unique users, each with their own Redis key, shows memory growth rate diverging by algorithm at scale\n\n### Key Components\n- **`rate_limiter.py`** — `AlgorithmBackend` strategy pattern; `FixedWindowBackend`, `SlidingWindowBackend`, `TokenBucketBackend` (memory + Redis); atomic Lua scripts for all three Redis paths\n- **`locustfile_rate_limiter_algorithms.py`** — single-user algorithm comparison with docker stats + Redis memory polling\n- **`locustfile_rate_limiter_scale.py`** — N-user scale test showing Redis memory divergence (fixed_window O(N) vs sliding_window O(N×W))\n- **`Makefile`** — `benchmark-rate-limiter-algorithms` and `benchmark-rate-limiter-scale` targets\n- **`README.md`** — updated with algorithm trade-off table, Redis backend docs, and per-algorithm examples\n\n---\n\n## 🏷️ Type of Change\n- [ ] Bug fix\n- [x] Feature / Enhancement\n- [ ] Documentation\n- [ ] Refactor\n- [ ] Chore (deps, CI, tooling)\n\n---\n\n## 🧪 Verification\n\n| Check | Command | Status |\n|---|---|---|\n| Lint suite | `make lint` | |\n| Unit tests | `make test` | |\n| Coverage ≥ 80% | `make coverage` | |\n| Algorithm benchmark | `RL_ALGORITHM=fixed_window make benchmark-rate-limiter-algorithms` | |\n| Scale benchmark | `RL_ALGORITHM=sliding_window make benchmark-rate-limiter-scale` | |\n\n---\n\n## ✅ Checklist\n- [ ] Code formatted (`make black isort pre-commit`)\n- [ ] Tests added/updated for changes\n- [ ] Documentation updated (if applicable)\n- [ ] No secrets or credentials committed\n\n---\n\n## 📓 Notes\n`token_bucket` with `backend: redis` stores `{tokens, last_refill}` per key using an atomic Lua script — one round-trip per check, no race condition. All three algorithms support both `memory` and `redis` backends. The `redis_fallback: true` option falls back to in-process memory if Redis is unavailable, so no requests are blocked due to Redis downtime.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "7869f46ac46c05cb23128c0ff2080d4a6c2b297a",
+      "message": "test(rate-limiter): harden rate limiter plugin — gaps #1-#8\n\nCloses #3740\n\n## What changed\n\n### Plugin fixes (plugins/rate_limiter/rate_limiter.py)\n- Config validation at __init__: _validate_config() parses all rate\n  strings at startup — bad config raises immediately, not mid-request\n- Graceful degradation: both hooks wrapped in try/except; unexpected\n  errors are logged and the request is allowed through (permissive)\n- prompt_pre_fetch now enforces by_tool limits using prompt_id as key\n- MemoryBackend: asyncio.Lock makes counter increments atomic\n- MemoryBackend: background TTL sweep evicts expired windows (0.5s interval)\n- RedisBackend: atomic INCR+EXPIRE via Lua script; shared state across\n  all gateway instances; native TTL expiry; falls back to memory on error\n\n### Test additions (tests/unit/.../test_rate_limiter.py)\n- Gap tests: 4 xfail -> pass (shared state, eviction, prompt by_tool,\n  graceful degradation); 1 xfail remains (fixed window burst, deferred)\n- Edge case tests: malformed/unsupported config raises at init (not\n  request time); runtime errors degrade gracefully via mock injection\n- Redis backend test uses injected FakeRedis — no live server required\n\n### Config changes\n- plugins/config.yaml: RateLimiterPlugin enabled with enforce mode\n- tests/performance/plugins/config.yaml: RateLimiterPlugin set to\n  permissive for inclusion in cProfile benchmark runs\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-19T16:23:15+00:00"
+    },
+    {
+      "sha": "266f9af54203b769059ea638d264129e140f2404",
+      "message": "chore(config): enable Redis backend for RateLimiterPlugin in plugins/config.yaml\n\nSwitch the default stack config from in-memory to Redis-backed rate limiting.\nThis ensures the 30/m per-user limit is enforced as a true shared limit across\nall gateway instances rather than 30/m per process.\n\nValidated via Redis MONITOR: all 3 gateway instances atomically increment the\nsame rl:user:<id>:60 counter via the Lua INCR+EXPIRE script.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-19T19:07:58+00:00"
+    },
+    {
+      "sha": "9dd852728848b17bb88fbe4b0bc59d667f6be069",
+      "message": "test(rate-limiter): add benchmark-rate-limiter load test for multi-instance correctness\n\nAdds locustfile_rate_limiter.py and a make benchmark-rate-limiter target to\ndemonstrate the multi-instance rate limit enforcement gap and its fix.\n\nThe test sends 1 req/s (60 req/min = 2x the 30/m limit) through 3 gateway\ninstances. With a memory backend each instance only sees ~20 req/min and\nnever fires the limiter (~0% failures). With the Redis backend the shared\ncounter reaches 30/min and blocks ~50% of requests — clearly showing the fix\nworks across instances.\n\nExpected results:\n  Memory backend:  ~0% blocked  (each instance sees 20 req/min < 30/m limit)\n  Redis backend:  ~50% blocked  (shared counter: 60 req/min > 30/m limit)\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-19T20:28:37+00:00"
+    },
+    {
+      "sha": "364f98335af5945437f1f62f2c2ee25f69ab6d60",
+      "message": "test(rate-limiter): add hardening tests, bypass resistance, PII fix, and updated docs\n\n- Add 22 new unit tests (70 passed total, 4 xfailed):\n  - Permissive vs enforce mode through PluginExecutor\n  - Redis fallback: memory takeover when Redis is down, limit still enforced, no-fallback graceful degradation\n  - Cross-tenant isolation: independent counters, no counter bleed between tenants\n  - Header accuracy: Retry-After bounds, X-RateLimit-Reset future/consistency, Remaining decrement\n  - Bypass resistance: None/whitespace user identity, tool name case sensitivity and whitespace (documented as xfail gaps)\n  - PII: violation description must not contain user or tenant identifiers\n\n- Fix PII leak in violation description: remove user/tenant from description string\n  in both prompt_pre_fetch and tool_pre_invoke — identifiers appeared in log output\n  via permissive-mode manager warning and enforce-mode PluginViolationError message\n\n- Rewrite plugins/rate_limiter/README.md: was describing the old pre-fix\n  implementation (in-memory only, no Redis, Redis as TODO). Now documents\n  both backends, full config reference, response headers, examples, and\n  accurate limitations table\n\n- Update plugin-manifest.yaml description to reflect Redis backend support\n\nCloses #3740\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-19T22:31:49+00:00"
+    },
+    {
+      "sha": "50b1d99e4202b66a670feb6bbea9e55e08f304ff",
+      "message": "feat(rate-limiter): pluggable algorithm strategy — fixed window, sliding window, token bucket\n\nAdds a strategy pattern for rate counting algorithms, selectable via\n`algorithm:` in plugin config. All three are fully tested (84 pass, 4 xfail).\n\nAlgorithms:\n- fixed_window (default): existing fixed-window counter; unchanged behaviour\n- sliding_window: per-key timestamp log, no boundary burst; Redis-native\n  via ZADD+ZREMRANGEBYSCORE+ZCARD+EXPIRE Lua script\n- token_bucket: refills at steady rate, allows short bursts up to capacity;\n  memory-only (falls back from Redis with a warning)\n\nImplementation:\n- Each algorithm is a small class (allow/sweep) — MemoryBackend delegates\n  all counting to the injected algorithm instance\n- RedisBackend selects between _LUA_FIXED and _LUA_SLIDING based on algorithm\n- Per-instance backends (module-level singleton removed); asyncio.Lock and\n  sweep task are per-backend, not global\n- RateLimiterConfig gets algorithm field (validated at __init__)\n- PII removed from violation description (user/tenant no longer logged)\n\nTests: 14 new algorithm tests covering enforcement, burst behaviour, header\naccuracy, Redis fallback, and instance isolation. All bypass-resistance xfails\nand prior xfails remain documented.\n\nREADME: documents algorithm field, comparison table, per-algorithm notes,\nRedis Lua scripts, two new examples, updated limitations table.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-19T23:30:24+00:00"
+    },
+    {
+      "sha": "cc2ab3a561a64e46fec2633ade0593bd8376b25e",
+      "message": "feat(rate-limiter): pluggable algorithms, Redis backend, and load test harness\n\n- Add sliding_window and token_bucket algorithms alongside fixed_window;\n  selection via algorithm config field\n- Add Redis backend with atomic Lua scripts for all three algorithms —\n  one round-trip per check, no race conditions\n- Fix Lua sliding window bugs: check-before-ZADD so blocked requests do\n  not inflate the sorted set; unique member per entry to prevent timestamp\n  collisions\n- Normalise user, tenant, and tool identities (.strip().lower()) for\n  consistent key generation across both hooks\n- Align RedisBackend token-bucket reset_timestamp with memory backend;\n  compute time_to_full from remaining tokens\n- Pre-compute normalised by_tool dict once at init (_normalised_by_tool)\n- Harden _parse_rate with maxsplit=1 and clear error messages\n- Remove dead _store/_allow module-level stubs\n- Add load test harnesses: algorithm comparison and Redis/memory scale tests\n- Add comprehensive unit and integration test coverage for all algorithms,\n  backends, hooks, and edge cases\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-21T20:44:56+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 5735,
+  "deletions": 247,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:04.629566",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:04.631818",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3768,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3768.json"
+  }
+}

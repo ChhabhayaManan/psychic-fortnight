@@ -1,0 +1,140 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3141,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3141"
+  },
+  "metadata": {
+    "title": "refactor(plugins): decouple plugin framework from gateway settings",
+    "state": "closed",
+    "created_at": "2026-02-24T09:18:54+00:00",
+    "updated_at": "2026-02-24T21:41:28+00:00",
+    "closed_at": "2026-02-24T21:41:26+00:00",
+    "merged_at": "2026-02-24T21:41:26+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "plugins",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #2829 due to repository maintenance. Your code and branch are intact. @araujof please verify everything looks good.\n\n## Description\r\n\r\nIntroduces a self-contained `PluginsSettings` configuration class for the plugin framework, eliminating all `os.environ` reads and imports from `mcpgateway.config.settings` and `mcpgateway.services.http_client_service`. The plugin framework now owns its configuration and can operate independently of the gateway.\r\n\r\nCloses: #2831 \r\n\r\n### Problem\r\n\r\nMultiple plugin framework modules imported `settings` from `mcpgateway.config`, the MCP client imported HTTP helpers from `mcpgateway.services.http_client_service`, and every `from_env()` factory method in `models.py` read `os.environ` directly with hand-rolled boolean parsing. This created tight coupling from the plugin framework back into the gateway — the opposite of the desired direction for ADR-019 modular architecture.\r\n\r\n### Solution\r\n\r\n- Created `mcpgateway/plugins/framework/settings.py` with a `PluginsSettings` class using `pydantic_settings` and the `PLUGINS_` env var prefix\r\n- Consolidated **all** plugin-related env var reads into `PluginsSettings`: core config, HTTP client tuning, SSL/TLS (mTLS client, server SSL, gRPC client/server TLS), server bind, transport runtime, Unix socket, and CLI options\r\n- Replaced `get_http_timeout()` and `get_default_verify()` calls in the MCP client with direct usage of `settings.httpx_*` and `settings.skip_ssl_verify`\r\n- Migrated all `from_env()` factory methods in `models.py` (`MCPClientTLSConfig`, `MCPServerTLSConfig`, `MCPServerConfig`, `GRPCClientTLSConfig`, `GRPCServerTLSConfig`, `GRPCServerConfig`, `UnixSocketServerConfig`) from raw `os.environ` reads to `PluginsSettings`\r\n- Removed duplicate `_parse_bool()` static methods from `MCPTransportTLSConfigBase` and `MCPServerConfig` (pydantic handles type coercion)\r\n- Updated `get_plugin_manager()`, `cli.py`, and all external server runtimes (MCP, gRPC, Unix) to use the framework's own settings\r\n- Added `settings.plugins` property on `LazySettingsWrapper` so gateway code accesses plugin settings via `settings.plugins.enabled` instead of `settings.plugins_enabled`\r\n- Simplified gateway services (`main.py`, `admin.py`, `prompt_service.py`, `resource_service.py`, `tool_service.py`) by replacing manual `os.getenv(\"PLUGINS_ENABLED\")` parsing with `settings.plugins.enabled`\r\n- Removed `plugins_enabled` and `plugin_config_file` fields from gateway `Settings` class\r\n- Removed unused `PYTHON` constant from `constants.py`\r\n- Standardized env var naming: `PLUGIN_CONFIG_FILE` → `PLUGINS_CONFIG_FILE` (legacy name supported via `AliasChoices` for backwards compatibility)\r\n\r\n### Configuration mapping\r\n\r\nField names are chosen so that the `PLUGINS_` env prefix produces clean env var names (e.g., field `enabled` → `PLUGINS_ENABLED`).\r\n\r\n| Gateway env var | Plugin framework env var | Default | Notes |\r\n|---|---|---|---|\r\n| `PLUGINS_ENABLED` | `PLUGINS_ENABLED` | `false` | Shared |\r\n| `PLUGIN_CONFIG_FILE` | `PLUGINS_CONFIG_FILE` | `plugins/config.yaml` | Legacy alias supported |\r\n| `HTTPX_CONNECT_TIMEOUT` | `PLUGINS_HTTPX_CONNECT_TIMEOUT` | `5.0` | Scoped to plugins |\r\n| `HTTPX_READ_TIMEOUT` | `PLUGINS_HTTPX_READ_TIMEOUT` | `120.0` | Scoped to plugins |\r\n| `SKIP_SSL_VERIFY` | `PLUGINS_SKIP_SSL_VERIFY` | `false` | Scoped to plugins |\r\n| `PLUGINS_CLI_COMPLETION` | `PLUGINS_CLI_COMPLETION` | `false` | Shared |\r\n| `PLUGINS_CLI_MARKUP_MODE` | `PLUGINS_CLI_MARKUP_MODE` | (none) | Shared |\r\n| _(various `PLUGINS_*`)_ | _(see `PluginsSettings` for full list: mTLS, server SSL, gRPC TLS, server bind, transport, Unix socket)_ | | |\r\n\r\n## Changes\r\n\r\n### Core\r\n\r\n| File | Change |\r\n|------|--------|\r\n| `mcpgateway/plugins/framework/settings.py` | **New** — `PluginsSettings` class with `PLUGINS_` env prefix covering all plugin framework configuration (HTTP client, TLS/mTLS, server bind, transport, CLI) |\r\n| `mcpgateway/plugins/framework/models.py` | Migrated all 7 `from_env()` factory methods from `os.environ` reads to `PluginsSettings`; removed duplicate `_parse_bool()` methods |\r\n| `mcpgateway/plugins/framework/__init__.py` | `get_plugin_manager()` uses `mcpgateway.plugins.framework.settings` instead of `mcpgateway.config` |\r\n| `mcpgateway/plugins/framework/external/mcp/client.py` | Replaced `mcpgateway.config.settings` and `mcpgateway.services.http_client_service` imports with framework settings; `httpx.Timeout` built from `settings.httpx_*` values |\r\n| `mcpgateway/plugins/framework/constants.py` | Removed unused `PYTHON` constant |\r\n| `mcpgateway/plugins/tools/cli.py` | Replaced `mcpgateway.config.settings` with `mcpgateway.plugins.framework.settings` |\r\n\r\n### External server runtimes\r\n\r\n| File | Change |\r\n|------|--------|\r\n| `mcpgateway/plugins/framework/external/mcp/server/runtime.py` | `PLUGINS_TRANSPORT` env var read replaced with `PluginsSettings().transport` |\r\n| `mcpgateway/plugins/framework/external/mcp/server/server.py` | `PLUGINS_CONFIG_PATH` env var read replaced with `PluginsSettings().config_path` |\r\n| `mcpgateway/plugins/framework/external/grpc/server/runtime.py` | `PLUGINS_CONFIG_PATH` env var read replaced with `PluginsSettings().config_path` |\r\n| `mcpgateway/plugins/framework/external/unix/server/runtime.py` | `PLUGINS_CONFIG_PATH` and `UNIX_SOCKET_PATH` env var reads replaced with `PluginsSettings()` |\r\n\r\n### Gateway integration\r\n\r\n| File | Change |\r\n|------|--------|\r\n| `mcpgateway/config.py` | Removed `plugins_enabled` and `plugin_config_file` fields from `Settings`; added `settings.plugins` property on `LazySettingsWrapper` |\r\n| `mcpgateway/main.py` | Replaced manual `os.getenv(\"PLUGINS_ENABLED\")` parsing with `settings.plugins.enabled` / `settings.plugins.config_file` |\r\n| `mcpgateway/admin.py` | `settings.plugins_enabled` → `settings.plugins.enabled` |\r\n| `mcpgateway/services/prompt_service.py` | Replaced manual env var parsing with `settings.plugins.enabled` / `settings.plugins.config_file` |\r\n| `mcpgateway/services/resource_service.py` | Replaced manual env var parsing with `settings.plugins.enabled` / `settings.plugins.config_file` |\r\n| `mcpgateway/services/tool_service.py` | Replaced manual env var parsing with `settings.plugins.enabled` / `settings.plugins.config_file` |\r\n| `mcpgateway/tools/builder/common.py` | `PLUGIN_CONFIG_FILE` → `PLUGINS_CONFIG_FILE` in K8s manifest generation |\r\n\r\n### Documentation and configuration\r\n\r\n| File | Change |\r\n|------|--------|\r\n| `.env.example` | Consolidated all `PLUGINS_*` env vars into a single \"Plugin Framework Settings\" section with descriptions |\r\n| `docs/docs/manage/configuration.md` | Added \"Plugin Framework (Standalone) Settings\" reference table |\r\n| `docs/docs/using/plugins/index.md` | Updated quick-start with `PLUGINS_CONFIG_FILE`; added standalone settings note |\r\n| `docs/docs/using/plugins/grpc-transport.md` | Added `PLUGINS_CONFIG_FILE` alongside `PLUGIN_CONFIG_FILE` |\r\n| `docs/docs/architecture/adr/019-modular-architecture-split.md` | Added `PLUGINS_CONFIG_FILE` |\r\n| `charts/mcp-stack/values.yaml` | Renamed `PLUGIN_CONFIG_FILE` → `PLUGINS_CONFIG_FILE`; added standalone framework settings |\r\n| `charts/mcp-stack/templates/deployment-mcpgateway.yaml` | Updated volume mount to prefer `PLUGINS_CONFIG_FILE` with fallback |\r\n| `charts/mcp-stack/README.md` | Updated Helm values table |\r\n| `plugins/AGENTS.md` | `PLUGIN_CONFIG_FILE` → `PLUGINS_CONFIG_FILE` |\r\n| `plugins/README.md` | Added `PLUGINS_CONFIG_FILE` |\r\n| `AGENTS.md` | `PLUGIN_CONFIG_FILE` → `PLUGINS_CONFIG_FILE` |\r\n\r\n### Tests\r\n\r\n| File | Change |\r\n|------|--------|\r\n| `tests/unit/.../framework/test_settings.py` | **New** — 23 tests: default values, `PLUGINS_`-prefixed env var overrides, legacy alias (`PLUGIN_CONFIG_FILE`), module singleton stability |\r\n| `tests/unit/.../framework/test_plugin_models.py` | Updated `from_env()` tests to use `PLUGINS_`-prefixed env vars via `PluginsSettings` |\r\n| `tests/unit/.../framework/test_plugin_models_coverage.py` | Updated `from_env()` tests for `PluginsSettings` migration |\r\n| `tests/unit/.../grpc/test_grpc_models.py` | Updated gRPC `from_env()` tests for `PluginsSettings` migration |\r\n| `tests/unit/.../services/test_tool_service_coverage.py` | Updated plugin-enabled tests to monkeypatch `PluginsSettings` singleton |\r\n| `tests/unit/.../services/test_resource_service_plugins.py` | Updated plugin-enabled tests to monkeypatch `PluginsSettings` singleton |\r\n| `tests/unit/.../integration/test_cross_hook_context_sharing.py` | Minor import adjustment |\r\n| `tests/unit/.../integration/test_resource_plugin_integration.py` | Minor import adjustment |\r\n| `tests/unit/.../middleware/test_http_auth_integration.py` | Minor import adjustment |\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3850488714",
+      "author": "jonpspri",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-24T20:59:05+00:00",
+      "body": "Reviewed the full changeset. The decoupling of plugin framework settings from the gateway config is well-structured:\n\n- `PluginsSettings` with pydantic-settings and `PLUGINS_` prefix is clean and type-safe\n- `LazySettingsWrapper` proxy avoids circular imports via deferred import — confirmed no circular import risk\n- `from_env()` migrations are consistent across all 7 model classes\n- Backwards compatibility for `PLUGIN_CONFIG_FILE` via `AliasChoices` is properly handled\n- Helm `coalesce` fallback chain (new → legacy → default) is correct\n- Test coverage is thorough with 23 new settings tests\n\nOne fix was applied in 81c5984cb: `get_plugin_manager()` was silently dropping the `observability` parameter after the migration, and `test_observability.py` was patching the removed gateway settings fields. Both are now corrected.\n\nMinor notes for future consideration (non-blocking):\n- `ENABLE_METRICS` in `mcp/server/runtime.py` still reads `os.getenv` directly — could be folded into `PluginsSettings` for consistency\n- `plugin_timeout` field is defined in `PluginsSettings` but not wired into `PluginManager`\n- `settings` vs `get_settings()` usage is mixed across modules — consider standardizing"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "30a5b4ab252fc7a63a83b43406ae571cf2856a17",
+      "message": "refactor(plugins): decouple plugin framework from gateway settings\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-11T06:22:43+00:00"
+    },
+    {
+      "sha": "713ebccc5cc05381edc0cca513db790e78db012e",
+      "message": "chore: fix lint issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-11T07:04:59+00:00"
+    },
+    {
+      "sha": "3fe62c07d0b97b806c8c9a921c6db8bdb7eb208c",
+      "message": "fix: variable expansion in clean target\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-11T19:26:21+00:00"
+    },
+    {
+      "sha": "a24fb6c2c4eed2992eb2cf79f049fc696bb280d8",
+      "message": "feat: additional cleanups and documentation\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-11T21:14:29+00:00"
+    },
+    {
+      "sha": "85f64aba2743fd8ea9fd7da5f872d87010b7b492",
+      "message": "fix: mypy warning\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-12T13:27:36+00:00"
+    },
+    {
+      "sha": "36d1025c0f66d56618adf1c80991f21142bb2c50",
+      "message": "fix: mypy warnings\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-12T14:05:18+00:00"
+    },
+    {
+      "sha": "9523ac0898e4f657df437cb2047d3cef953cb0b2",
+      "message": "fix: plugin settings env override\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-12T17:22:50+00:00"
+    },
+    {
+      "sha": "47d5e55d3b0efaf0de2a0841c21d935969201654",
+      "message": "fix: minor issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-14T03:49:20+00:00"
+    },
+    {
+      "sha": "549a373804f70ee1cbd065981f0f6b70b96eca53",
+      "message": "tests: update conftest\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-14T13:35:45+00:00"
+    },
+    {
+      "sha": "d89110f06c801625ff4ab06fd0fac9c10cbe6618",
+      "message": "fix: from_env should read from environment\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-14T14:14:29+00:00"
+    },
+    {
+      "sha": "45232068c48f5185c27b5232bdea3793a1104c5e",
+      "message": "feat: expose cache_clear through settings\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-15T01:12:25+00:00"
+    },
+    {
+      "sha": "673d91647514e99e14345389b65a64c31db89c99",
+      "message": "feat: use cached settings in from_env adapters\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-15T03:04:55+00:00"
+    },
+    {
+      "sha": "174d43b2a3061f61921089355f5615de20241a6a",
+      "message": "chore: fix lint issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-15T03:17:33+00:00"
+    },
+    {
+      "sha": "43674d56fcfe270132c4d4edecddd0c53d0459b3",
+      "message": "fix: preserve Helm backward compat and harden plugin settings\n\n- Comment out PLUGINS_CONFIG_FILE default in values.yaml so legacy\n  PLUGIN_CONFIG_FILE overrides are not shadowed by coalesce/AliasChoices\n- Return PluginsSettings from config.py plugins property (not the\n  LazySettingsWrapper proxy) to match the type annotation\n- Use SecretStr for keyfile_password fields and .get_secret_value() in\n  from_env adapters\n- Switch runtime servers from PluginsSettings() to get_settings() for\n  cached singleton access\n- Simplify get_settings to no-arg lru_cache(maxsize=1)\n- Remove LazySettingsWrapper.enabled os.getenv bypass\n- Fix AliasChoices priority to prefer PLUGINS_ prefixed names\n- Add env_file and extra=ignore to model_config\n- Simplify test_tool_service_coverage to rely on autouse cache_clear\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-19T12:55:58+00:00"
+    },
+    {
+      "sha": "81c5984cbe87c745d0f270763491db61d40612df",
+      "message": "fix: pass observability provider to PluginManager and update test\n\nThe get_plugin_manager() function accepted an observability parameter but\nsilently discarded it after the settings migration. Also updates the\nobservability test to patch the new framework settings instead of the\nremoved gateway settings fields.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-24T20:58:31+00:00"
+    }
+  ],
+  "files_changed": 54,
+  "additions": 854,
+  "deletions": 349,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:41.694026",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:41.695131",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3141,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3141.json"
+  }
+}

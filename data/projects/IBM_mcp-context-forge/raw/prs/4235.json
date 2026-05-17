@@ -1,0 +1,103 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4235,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4235"
+  },
+  "metadata": {
+    "title": "fix(ui): Normalize team_id whitespace checks across all edit functions and server-side visibility guard",
+    "state": "closed",
+    "created_at": "2026-04-16T06:24:27+00:00",
+    "updated_at": "2026-05-06T16:20:19+00:00",
+    "closed_at": "2026-05-06T16:20:17+00:00",
+    "merged_at": "2026-05-06T16:20:17+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "ui",
+      "ica"
+    ],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey",
+      "vishu-bh"
+    ]
+  },
+  "description": "## :pushpin: Summary\r\n\r\nThis PR contains two fixes:\r\n\r\n### 1. Whitespace `team_id` visibility coercion\r\n\r\nAll 6 edit functions in the Admin UI (`editTool`, `editGateway`, `editA2AAgent`, `editResource`, `editPrompt`, `editServer`) were checking raw `teamId` truthiness to decide whether to coerce a `public` visibility record to `team`. A whitespace-only URL parameter (`?team_id=%20`) is truthy in JS, causing silent coercion while `isTeamScopedView()` — already trim-aware — correctly returned `false`. The Python server-side guard had the same gap. This fix makes all checks consistent.\r\n\r\n### 2. Dead code removal in `servers.js`\r\n\r\n`serverDesc.textContent` was assigned via `decodeHtml()` and then immediately overwritten with the raw value on the next line, making the `decodeHtml` call unreachable and causing HTML entities in server descriptions to render incorrectly.\r\n\r\n## :link: Related Issue\r\nCloses: #3338\r\n\r\n## :repeat: Reproduction Steps\r\n\r\n1. Set `ALLOW_PUBLIC_VISIBILITY=false`.\r\n2. Navigate to the admin UI with `?team_id=%20` in the URL.\r\n3. Open the edit modal for any tool, gateway, A2A agent, resource, prompt, or server that has `public` visibility.\r\n4. Observe: the public radio button appears enabled (because `isTeamScopedView()` returns `false`), but the visibility is silently coerced to `team` on submit.\r\n\r\n## 🐞  Root Cause\r\n\r\nThe `effectiveVisibility` ternary in each of the 6 edit functions used the raw URL-derived `teamId`/`_teamId` variable directly:\r\n\r\n```js\r\n// Before — raw truthiness, no trim\r\nteamId ? \"team\" : visibility\r\n```\r\n\r\n`\" \"` (whitespace) is truthy, so it triggered coercion. Meanwhile `isTeamScopedView()` in `teams.js` correctly trims before checking, returning `false` for whitespace-only values. The two code paths were inconsistent.\r\n\r\nOn the Python side, `_check_public_visibility_allowed` in `admin.py` had the same raw-truthiness check (`and team_id`).\r\n\r\n## :bulb: Fix Description\r\n\r\n### Fix 1 — Whitespace `team_id` coercion\r\n\r\n- **JS (6 files):** Added `isTeamScopedView` to the import from `./teams.js` in each affected module and replaced the raw `teamId` / `_teamId` condition in the `effectiveVisibility` ternary with `isTeamScopedView()`. For `editResource`, `editPrompt`, and `editServer`, the now-redundant local `_teamId` variable was also removed.\r\n- **Python (`admin.py`):** Changed `and team_id` → `and team_id and team_id.strip()` in `_check_public_visibility_allowed` so both layers treat whitespace-only values as absent.\r\n\r\n### Fix 2 — Dead code removal (`servers.js`)\r\n\r\n- Removed the redundant `serverDesc.textContent = server.description` line that immediately overwrote the `decodeHtml()` result, so HTML entities in server descriptions are now decoded correctly.\r\n- **Tests:** Fixed the existing visibility-coercion test in `prompts.test.js` to include `search` in the mocked `window.location` (required since `isTeamScopedView` reads `location.search`, not `href`). Added a whitespace-only `team_id` test asserting no coercion occurs. Updated the `teams.js` mock in `resources.test.js` to export `isTeamScopedView` (previously missing, would throw at runtime in tests). Added 3 direct tests of `_check_public_visibility_allowed` in `test_admin.py` covering spaces-only, tab, and a real `team_id` to verify the `team_id.strip()` branch.\r\n\r\n## :test_tube: Verification\r\n\r\n| Check | Command | Status |\r\n|---|---|---|\r\n| Lint suite | `make lint` | |\r\n| Unit tests | `make test` | |\r\n| Coverage ≥ 90 % | `make coverage` | |\r\n| Manual regression no longer fails | Visit `?team_id=%20`, open any edit modal with a public entity — coercion no longer occurs | |\r\n\r\n## :triangular_ruler: MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## :white_check_mark: Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4229472995",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-05T15:29:11+00:00",
+      "body": "Thanks for tackling this and for making the UI-side checks use the shared `isTeamScopedView()` helper. That’s a good direction and makes the edit-modal behavior much more consistent.\n\nI think there’s one blocking runtime path still worth tightening before merge: whitespace-only `team_id` is now ignored by `_check_public_visibility_allowed()`, but the raw value can still be submitted and passed into `TeamManagementService.verify_team_for_user()`. Since `\" \"` is truthy there, it is treated as an explicit team id and can return `[]` / fail validation instead of being handled as “no team”.\n\nA practical approach would be to normalize `team_id` once before both the visibility guard and team verification, for example converting whitespace-only values to `None`, and ideally use the same trimmed logic in the edit form hidden-field / submit handling paths. That would make `?team_id=%20` consistently behave as absent end to end, not just during the public visibility guard."
+    },
+    {
+      "id": "4234398929",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-06T08:19:12+00:00",
+      "body": "Thanks @shoummu1  for addressing the review comment.\nSix admin edit flows now use isTeamScopedView() for visibility coercion, and server-side form handling normalizes whitespace-only team_id values to None before both the public visibility guard and team verification.\n\nLGTM 🚀 "
+    },
+    {
+      "id": "4236501369",
+      "author": "brian-hussey",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-06T13:35:55+00:00",
+      "body": "Approved based on previous reviews. Rebasing and merging.\n@shoummu1 Thank you for your contribution."
+    },
+    {
+      "id": "4237822827",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-06T16:20:09+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e97b53ca678f8eb546808b2b01cc5b06666f3fbc",
+      "message": "fix(ui): normalize team_id whitespace checks in visibility coercion\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-04-15T05:53:42+00:00"
+    },
+    {
+      "sha": "ec57dcaf8e415421b8f761934efb6dfd8a1a99dd",
+      "message": "remove dead code overwriting decodeHtml result in servers.js\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-04-16T07:52:21+00:00"
+    },
+    {
+      "sha": "f58000d06915a08e5285c54d9ae863186bbdc49c",
+      "message": "fix(admin): normalize team_id to None end-to-end in all form handlers\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-05-06T05:38:37+00:00"
+    },
+    {
+      "sha": "0b14bb7c72b04485768703f283e7c5fbaa046c9a",
+      "message": "chore: update .secrets.baseline line numbers after admin.py changes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-05-06T06:47:19+00:00"
+    },
+    {
+      "sha": "4597ecc3ae540c1f9c25655d7f131ebf1abeb3f2",
+      "message": "Update loaded module following cpex extraction\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-05-06T15:47:51+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 204,
+  "deletions": 71,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:13.716785",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:13.717476",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4235,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4235.json"
+  }
+}

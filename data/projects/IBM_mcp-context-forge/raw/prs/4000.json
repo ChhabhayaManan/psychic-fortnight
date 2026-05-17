@@ -1,0 +1,57 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4000,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4000"
+  },
+  "metadata": {
+    "title": "fix: use absolute OAuth authorize URL and allow non-admin users to authorize",
+    "state": "closed",
+    "created_at": "2026-04-02T10:51:47+00:00",
+    "updated_at": "2026-04-27T08:56:44+00:00",
+    "closed_at": "2026-04-27T08:55:21+00:00",
+    "merged_at": null,
+    "author": "ecthelion77",
+    "labels": [
+      "bug",
+      "SHOULD"
+    ],
+    "milestone": null,
+    "assignees": [
+      "gcgoncalves"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\n\n## 📌 Summary\n\nTwo related OAuth UX fixes for multi-user deployments:\n\n1. **Relative authorize URL in error messages**: When a tool invocation fails due to a missing OAuth token, the `ToolInvocationError` message contains `/oauth/authorize/{id}` — a relative path that AI agents (VS Code Copilot, etc.) cannot use. Fixed to build an absolute URL using `settings.app_domain` + `settings.app_root_path`.\n\n2. **Authorize button hidden for non-admin users**: In `gateways_partial.html`, the \"Authorize\" button is gated behind `can_modify` (admin/owner). Since OAuth authorization is a per-user action (each user needs their own token), any authenticated user with gateway access should be able to authorize. \"Fetch/Refresh Tools\" remains admin-only.\n\nFixes #3998\n\n## 🔁 Reproduction Steps\n\n**Bug 1:**\n1. Configure a gateway with OAuth enabled\n2. As a non-admin user, call a tool on that gateway via MCP client\n3. Error: `\"Visit /oauth/authorize/xxx to complete OAuth flow\"` — relative path\n\n**Bug 2:**\n1. As a non-admin team member, open Admin UI gateways list\n2. OAuth gateway the user has access to is visible\n3. No \"Authorize\" button — only admins see it\n\n## 🐞 Root Cause\n\n1. `tool_service.py`: Uses hardcoded relative path `/oauth/authorize/{id}` in two `ToolInvocationError` messages (line ~3162 and ~4165)\n2. `gateways_partial.html`: `{% if gateway.authType == 'oauth' and can_modify %}` groups the Authorize button with admin-only actions\n\n## 💡 Fix Description\n\n1. **`tool_service.py`**: Build `authorize_url` from `settings.app_domain` + `settings.app_root_path` + `/oauth/authorize/{id}`. Applied in both `invoke_tool` and `stream_invoke_tool` code paths.\n2. **`gateways_partial.html`**: Change condition to `{% if gateway.authType == 'oauth' %}` (no `can_modify`) for the Authorize button. The `{% if can_modify %}` block now starts after the Authorize button, before Fetch/Refresh Tools.\n\n## 🧪 Verification\n\n| Check | Command | Status |\n| --- | --- | --- |\n| Lint suite | `make lint` | ⚠️ Not run (no local dev env) |\n| Unit tests | `make test` | ⚠️ Not run (no local dev env) |\n| Coverage ≥ 80 % | `make coverage` | ⚠️ Not run (no local dev env) |\n| Manual regression | Tested in production Kubernetes (3+ weeks) — VS Code Copilot receives clickable absolute URLs, non-admin team members can authorize gateways | ✅ |\n\n## 📐 MCP Compliance\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted\n- [x] No secrets/credentials committed\n- [x] DCO Signed-off-by included",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4098884867",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-13T13:07:29+00:00",
+      "body": "Tool test response for an authorised user:\n\n<img width=\"609\" height=\"301\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/3cb478aa-57fd-4941-ac54-8f038bae3a5d\" />\n\nTool test response for a non-authorised user:\n\n<img width=\"612\" height=\"305\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/f210bbb3-9a21-48b4-ae00-82b62651bf52\" />"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "1b7cefc6acce9423cd03e6e292281a639ce234e8",
+      "message": "fix: use absolute OAuth authorize URL and allow non-admin users to authorize\n\nTwo related fixes for OAuth UX in multi-user deployments:\n\n1. tool_service.py: Build absolute authorize URL using\n   settings.app_domain + settings.app_root_path instead of a\n   relative path. AI agents (VS Code Copilot, etc.) receive\n   clickable URLs in ToolInvocationError messages. Applied in\n   both invoke_tool and stream_invoke_tool code paths.\n\n2. gateways_partial.html: Decouple the OAuth Authorize button\n   from the can_modify permission check. OAuth authorization is\n   a per-user action (each user gets their own token), so any\n   authenticated user with gateway access should be able to\n   authorize. Fetch/Refresh Tools remains gated behind can_modify.\n\nFixes #3998\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-02T10:51:17+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 6,
+  "deletions": 4,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:07:07.763718",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:07.764214",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4000,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4000.json"
+  }
+}

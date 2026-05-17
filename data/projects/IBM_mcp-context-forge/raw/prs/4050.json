@@ -1,0 +1,176 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4050,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4050"
+  },
+  "metadata": {
+    "title": "fix: observability data incorrectly rolled back with failed transactions",
+    "state": "closed",
+    "created_at": "2026-04-06T11:19:46+00:00",
+    "updated_at": "2026-04-08T17:50:14+00:00",
+    "closed_at": "2026-04-08T17:50:12+00:00",
+    "merged_at": "2026-04-08T17:50:12+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "bug",
+      "enhancement",
+      "release-fix",
+      "ready"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai",
+      "brian-hussey"
+    ]
+  },
+  "description": "## Summary\n\n**Bug Fix:** Observability data was incorrectly being rolled back when the main request transaction failed, making it impossible to trace the cause of failures. This PR fixes the issue by implementing a separate session pattern where observability write operations create and manage their own independent database sessions.\n\nPreviously, observability operations shared the request's database session, which meant observability data would be rolled back along with failed requests - defeating the entire purpose of observability. Now, observability writes commit immediately on a best-effort basis, independent of the main transaction, providing the visibility into failures that observability systems are meant to provide.\n\n**Context:** This work supports the future 4-database architecture (#1952) by establishing independent session handling for observability operations. By decoupling observability writes from the main transaction, we create a clean boundary that will enable routing these writes to a dedicated `OBSERVABILITY_DATABASE_URL` without requiring further session refactoring.\n\n## 🏷️ Type of Change\n- [x] Bug fix\n- [x] Feature / Enhancement\n- [ ] Documentation\n- [ ] Refactor\n- [ ] Chore (deps, CI, tooling)\n\n## Breaking Changes\n\n⚠️ **API Changes** - Observability write methods no longer accept `db` parameter:\n```python\n# OLD API (before this PR)\nservice.start_trace(db, \"trace_name\", ...)\nservice.end_span(db, span_id, status=\"ok\")\n\n# NEW API (after this PR)\nservice.start_trace(\"trace_name\", ...)\nservice.end_span(span_id, status=\"ok\")\n```\n\n⚠️ **Middleware behavior** - `ObservabilityMiddleware` no longer creates `request.state.db`\n- If you have custom code that relied on `request.state.db` being set by ObservabilityMiddleware, it will need to be updated\n- Other middleware (like auth middleware) may still set `request.state.db` - this change only affects ObservabilityMiddleware\n\n⚠️ **Transaction atomicity** - Observability data is **no longer rolled back** with main request transactions (this fixes the bug)\n- **Before (buggy):** Failed request → all observability data rolled back → no trace of failure ❌\n- **After (fixed):** Failed request → observability data persists → can see what happened before failure ✅\n- This is the **bug fix** - observability should provide visibility into failures, not lose data\n\n⚠️ **Context manager signatures** - `trace_span()`, `trace_tool_invocation()`, and `trace_a2a_request()` no longer require `db` parameter\n```python\n# OLD API\nwith service.trace_span(db, trace_id, \"span_name\") as span_id:\n    ...\n\n# NEW API\nwith service.trace_span(trace_id, \"span_name\") as span_id:\n    ...\n```\n\n### Migration Guide\n\n**Internal codebase:** All internal callers have been updated in this PR. No action needed.\n\n**External consumers:** If you have external code calling observability methods directly:\n1. Remove the `db` parameter from all write method calls\n2. If relying on `request.state.db` from ObservabilityMiddleware, use `get_db()` dependency injection instead\n3. Observability data now persists independently of main transaction success/failure (as it should)\n\n**Query methods unchanged:** Methods like `get_trace()`, `get_traces()`, `query_traces()` still accept `db: Session` for RBAC/token scoping.\n\n## Changes\n\n### Core Implementation\n- **Observability write methods** now create their own sessions using `SessionLocal()`:\n  - `start_trace()`, `end_trace()`\n  - `start_span()`, `end_span()`\n  - `add_event()`, `record_metric()`, `record_token_usage()`, `delete_old_traces()`\n- **Context managers** create and manage a single session for the full lifecycle:\n  - `trace_span()`, `trace_tool_invocation()`, `trace_a2a_request()`\n- **Query methods** still accept `db: Session` parameter for RBAC/token scoping\n- **ObservabilityMiddleware** no longer creates or manages `request.state.db`\n\n### Updated Callers\n- `mcpgateway/services/resource_service.py` - Removed `db` parameters from observability calls\n- `mcpgateway/services/prompt_service.py` - Removed `db` parameters from observability calls\n- `mcpgateway/services/tool_service.py` - Removed `db` parameters from observability calls\n- `mcpgateway/instrumentation/sqlalchemy.py` - Updated to use new API\n\n### Bug Fixes\n- **Primary bug:** Observability data no longer rolled back with failed transactions\n- Fixed `add_event()` and `record_metric()` where `db.refresh()` was incorrectly called after commit failure\n\n### Type Safety Improvements\n- Added proper return type annotations to context managers:\n  - `trace_span() -> Generator[str, None, None]`\n  - `trace_tool_invocation() -> Generator[Tuple[Optional[str], Dict[str, Any]], None, None]`\n  - `trace_a2a_request() -> Generator[Tuple[Optional[str], Dict[str, Any]], None, None]`\n\n### Documentation\n- Added \"Observability Transaction Behavior\" section to `AGENTS.md`\n- Updated module docstrings explaining the separate session pattern\n\n### Testing\n- Added 11 new tests verifying separate session behavior and exception handling coverage\n- Updated 62 existing tests to use new API\n- All 96 observability tests passing\n- Full test suite: 16,673 tests passing\n\n## Benefits\n\n✅ **Bug fixed:** Observability data now persists independently - can trace failures properly  \n✅ **Visibility into partial failures** - Can see what succeeded before a request failed  \n✅ **Reduced transaction contention** - Observability writes don't interfere with business logic  \n✅ **Follows established pattern** - Matches SQL instrumentation approach in `instrumentation/sqlalchemy.py`  \n✅ **Improved type safety** - Context managers now have explicit return type annotations  \n✅ **Enables future database separation** - Clean foundation for routing observability writes to dedicated database (#1952)\n\n## Trade-offs\n\nℹ️ **Not atomic** - Observability data commits separately from main transaction (necessary for the fix)  \nℹ️ **Eventual consistency** - Traces may show \"in progress\" states for failed requests  \nℹ️ **Best-effort recording** - If observability session fails, main request continues unaffected\n\n## Testing\n\n```bash\n# Run observability tests\npytest tests/unit/mcpgateway/middleware/test_observability_middleware*.py tests/unit/mcpgateway/services/test_observability_service.py -v\n\n# Run full test suite\nmake test\n```\n\n**Results:**\n- ✅ 96 observability tests passing\n- ✅ 16,673 total tests passing\n- ✅ Pylint 10.00/10 rating maintained\n- ✅ All pre-commit hooks passing\n\n## Commits\n\n1. **feat: implement separate observability session pattern (best-effort)** - Core implementation fixing the rollback bug\n2. **fix: add type annotations to observability context managers** - Added proper Generator type hints for type safety\n3. **test: Add coverage tests for observability session close exception handling** - Achieved 100% coverage of exception handling paths\n\n## Files Changed\n\n- `.secrets.baseline` - Updated line numbers\n- `AGENTS.md` - Added observability transaction behavior documentation\n- `mcpgateway/instrumentation/sqlalchemy.py` - Updated to new API (38 lines)\n- `mcpgateway/middleware/observability_middleware.py` - Removed session management (124 lines)\n- `mcpgateway/services/observability_service.py` - Core implementation + type annotations (768 lines)\n- `mcpgateway/services/prompt_service.py` - Updated callers (6 lines)\n- `mcpgateway/services/resource_service.py` - Updated callers (36 lines)\n- `mcpgateway/services/tool_service.py` - Updated callers (75 lines)\n- Test files - Updated and added tests (347 + 307 + 300 + 207 lines)\n\n**Total:** 11 files changed, 1,292 insertions(+), 995 deletions(-)\n\nCloses #3883\n",
+  "comments": [
+    {
+      "id": "3044551543",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-07T11:02:15+00:00",
+      "body": "The class-level docstring still shows the old API with db as the first argument. Update the examples to match the new API (no db parameter)."
+    },
+    {
+      "id": "3044638901",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-07T11:21:11+00:00",
+      "body": "`owned` is always true. guard is dead code."
+    },
+    {
+      "id": "3051987361",
+      "author": "MohanLaksh",
+      "created_at": "2026-04-08T14:22:14+00:00",
+      "body": "  **Validation:** ✅ **VALID - Design Choice**\r\n\r\n  **Analysis:**\r\n  - The reviewer is technically correct - `owned` is always `True` in current implementation\r\n  - However, maintainer @crivetimihai noted: \"slightly over-engineered but leaves room for future optimization\"\r\n  - Pattern allows future optimization where callers could optionally reuse sessions\r\n  - Matches established pattern from `auth_middleware._get_or_create_session()`\r\n\r\n  **Action Taken:** ✅ **Documented Design Choice**\r\n  - Added explanatory Note to `_get_or_create_observability_session()` docstring\r\n  - Documents that tuple return enables future session reuse optimization\r\n  - Guards remain for forward compatibility\r\n\r\n  **Commit:** a8cbba6ce (lines 208-211 in observability_service.py)\r\n\r\n  **Response:**\r\n  ```markdown\r\n  Acknowledged as intentional design choice. The `owned` flag is always True currently, but the tuple\r\n  return pattern enables future optimization where callers could optionally pass a session for reuse.\r\n  This matches the established pattern in `auth_middleware._get_or_create_session()` and was approved\r\n  by the maintainer as \"leaving room for future optimization.\" Added explanatory note to docstring\r\n  documenting this design decision.\r\n\r\n  ---\r\n"
+    },
+    {
+      "id": "3051996690",
+      "author": "MohanLaksh",
+      "created_at": "2026-04-08T14:23:34+00:00",
+      "body": "  Validation: ✅ VALID - Documentation Bug\r\n\r\n  Analysis:\r\n  - Class docstring at line 224 showed: service.start_trace(db, \"POST /tools/invoke\")\r\n  - Implementation signature is: start_trace(name, http_method=...)\r\n  - This would confuse new developers who copy-paste examples\r\n\r\n  Action Taken: ✅ Fixed in Commit bd1528ea8\r\n  - Updated all class-level docstring examples\r\n  - Removed db parameter from all examples\r\n  - Added clarification about write vs query methods\r\n  - Added example showing query method with db parameter for contrast\r\n\r\n  Commit: bd1528ea8 (lines 217-238 in observability_service.py)\r\n\r\n  Before:\r\n  >>> trace_id = service.start_trace(db, \"POST /tools/invoke\")\r\n  >>> span_id = service.start_span(db, trace_id, \"tool_execution\")\r\n\r\n  After:\r\n  >>> trace_id = service.start_trace(\r\n  ...     \"POST /tools/invoke\",\r\n  ...     http_method=\"POST\",\r\n  ...     http_url=\"https://api.example.com/tools/invoke\"\r\n  ... )\r\n  >>> span_id = service.start_span(trace_id, \"tool_execution\")\r\n  >>> # Query methods accept db parameter for RBAC scoping\r\n  >>> traces = service.get_traces(db, limit=10)\r\n\r\n  Response:\r\n  Fixed. Updated class-level docstring to show correct API without db parameter for write methods.\r\n  Added example demonstrating the distinction between write methods (no db parameter) and query\r\n  methods (accept db for RBAC scoping).\r\n"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4067586497",
+      "author": "madhu-mohan-jaishankar",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-07T11:21:41+00:00",
+      "body": ""
+    },
+    {
+      "id": "4067712827",
+      "author": "madhu-mohan-jaishankar",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-07T11:28:34+00:00",
+      "body": "Approving with minor comments.\n\n1. `_get_or_create_observability_session()` always returns `owned `as true. Every `if owned: `guard in `finally `blocks is a dead code.\n2. The class-level docstring in `ObservabilityService `still shows the old API with db as the first argument. Update the examples to match the new API."
+    },
+    {
+      "id": "4075822031",
+      "author": "MohanLaksh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-08T14:22:14+00:00",
+      "body": ""
+    },
+    {
+      "id": "4075831713",
+      "author": "MohanLaksh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-08T14:23:34+00:00",
+      "body": ""
+    },
+    {
+      "id": "4076310658",
+      "author": "madhu-mohan-jaishankar",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-08T15:32:32+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "4076325218",
+      "author": "msureshkumar88",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-08T15:34:44+00:00",
+      "body": "## ✅ Complete PR #4050 Verification and Analysis\r\n\r\nI've created a comprehensive analysis of PR #4050 with automated verification confirming it successfully solves issue #3883.\r\n\r\n### Automated Test Results: **ALL 7 TESTS PASSED** ✅\r\n\r\nThe automated script verified:\r\n1. ✅ DB parameter removed from all observability methods\r\n2. ✅ Independent session helper exists with correct signature\r\n3. ✅ Sessions created safely inside try blocks (resource leak fixed)\r\n4. ✅ Proper session cleanup with null checks in finally blocks\r\n5. ✅ _safe_commit() now uses independent sessions\r\n6. ✅ Context managers use independent sessions\r\n7. ✅ Documentation explains separate session pattern\r\n\r\n### Review Feedback Status\r\n\r\n**4/10 Critical Issues RESOLVED**:\r\n- ✅ Resource leak fixed\r\n- ✅ Sensitive data redacted\r\n- ✅ Header injection prevented\r\n- ✅ Atomicity improved\r\n\r\n**6 Remaining Items → MARKED AS FUTURE WORK**:\r\n\r\n#### High Priority (Recommended for Next Sprint)\r\n1. **Connection Pool Sizing Documentation** - Document 4-6x connection increase; provide pool_size recommendations (Low effort)\r\n2. **Breaking API Change Documentation** - Add CHANGELOG entry, migration guide for removed `db` parameter (Low effort)\r\n3. **Convert to Async Operations** - Fix sync DB ops blocking async event loop; use `asyncio.to_thread()` (Medium effort)\r\n\r\n#### Medium Priority (Future Enhancements)\r\n4. **Circuit Breaker** - Add circuit breaker for connection pool exhaustion, graceful degradation (Medium effort)\r\n5. **Optimistic Locking** - Prevent lost updates in concurrent trace/span operations with version column (Medium effort)\r\n\r\n#### Low Priority (Nice to Have)\r\n6. **Extract Common Logic** - Reduce ~200 lines of duplicated code in context managers (Medium effort)\r\n\r\n\r\n\r\n### Conclusion\r\n\r\n**PR #4050 is READY TO MERGE** ✅\r\n\r\n- Successfully implements separate observability session pattern\r\n- Solves issue #3883 (orphaned observability records)\r\n- All critical safety/security issues resolved\r\n- Remaining items documented as future enhancements (not blockers)\r\n- Automated tests confirm implementation correctness\r\n\r\n**Recommendation**: Merge this PR and create follow-up issues for high-priority items # 1-3."
+    },
+    {
+      "id": "4076332656",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-08T15:35:58+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "4076810679",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-08T16:57:02+00:00",
+      "body": "Prior approvals from @msureshkumar88 and @madhu-mohan-jaishankar .\nI'm rebasing for merging now."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "15613a851470016414812b2e5d547f4245127901",
+      "message": "feat: implement separate observability session pattern (best-effort)\n\nObservability write operations now use independent database sessions that\ncommit immediately on a best-effort basis, separate from main request\ntransactions. This ensures observability data persists even when the main\nrequest fails, providing visibility into partial failures.\n\nImplementation details:\n- Observability write methods (start_trace, end_trace, start_span, end_span,\n  add_event, record_metric, record_token_usage, delete_old_traces) now create\n  their own independent sessions using SessionLocal() instead of accepting a\n  db parameter from the caller\n- Context managers (trace_span, trace_tool_invocation, trace_a2a_request)\n  create and manage a single session for the full span lifecycle\n- Query methods still accept db: Session parameter for RBAC/token scoping\n- ObservabilityMiddleware no longer creates or manages request.state.db\n- Each observability operation creates its own short-lived session that\n  commits immediately in a try/except/finally block\n- Updated all callers across resource_service, prompt_service, tool_service,\n  and instrumentation/sqlalchemy to use new API (removed db parameters)\n- Added comprehensive test coverage verifying separate session behavior\n- Fixed pre-existing bugs in add_event() and record_metric() where db.refresh()\n  was called after commit failure\n\nBenefits:\n- Observability data persists independently of main request transaction success\n- Provides visibility into partial failures and error states\n- Follows pattern established in instrumentation/sqlalchemy.py (lines 58-87)\n- Reduces transaction contention between observability and business logic\n\nTrade-offs:\n- NOT atomic with main request transaction (intentional design choice)\n- Traces may show \"in progress\" or partial states for failed requests\n- Provides eventual consistency rather than strict consistency\n\nDocumentation:\n- Added \"Observability Transaction Behavior\" section to AGENTS.md explaining\n  the separate session pattern, implementation details, and security notes\n- Updated module docstrings with session management details\n\nTests: 96 observability tests passing, full suite 16,673 tests passing\nPylint: 10.00/10 rating maintained\n\nCloses #3883\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-06T11:14:44+00:00"
+    },
+    {
+      "sha": "f6c1ff4c9321c77486902b48405cb653579d57e1",
+      "message": "fix: add type annotations to observability context managers\n\nAdd proper return type annotations to context manager methods:\n- trace_span() -> Generator[str, None, None]\n- trace_tool_invocation() -> Generator[Tuple[Optional[str], Dict[str, Any]], None, None]\n- trace_a2a_request() -> Generator[Tuple[Optional[str], Dict[str, Any]], None, None]\n\nThese annotations improve type safety and make the return values explicit.\nThe trace_span context manager yields just the span_id string, while\ntrace_tool_invocation and trace_a2a_request yield a tuple of (span_id, result_dict)\nfor capturing operation results.\n\nTests: 96 observability tests passing\nPylint: 10.00/10 rating maintained\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-06T11:42:04+00:00"
+    },
+    {
+      "sha": "141643abe33ec4c3695aeade9e7b6b5c03a85c49",
+      "message": "test: Add coverage tests for observability session close exception handling\n\nAdd 11 new test functions to achieve 100% coverage of exception handling\npaths in observability_service.py. These tests verify that all write\nmethods and context managers handle session close failures gracefully:\n\n- test_start_trace_session_close_failure\n- test_end_trace_session_close_failure\n- test_start_span_session_close_failure\n- test_start_span_with_commit_true\n- test_end_span_session_close_failure\n- test_add_event_session_close_failure\n- test_record_metric_session_close_failure\n- test_delete_old_traces_session_close_failure\n- test_trace_span_context_manager_session_close_failure\n- test_trace_tool_invocation_context_manager_session_close_failure\n- test_trace_a2a_request_context_manager_session_close_failure\n\nEach test mocks the session close() method to raise an exception and\nverifies that the operation completes successfully despite the close\nfailure. This covers the previously uncovered lines in finally blocks\nwhere session close exceptions are caught and logged.\n\nResolves CI/CD coverage requirement for observability_service.py.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-06T12:15:07+00:00"
+    },
+    {
+      "sha": "87b2d2e4b9b0b18b7d5411578e4fee7193847d7e",
+      "message": "fix: complete separate session migration for delete_old_traces and record_transport_activity\n\n- Fix runtime TypeError in cleanup_old_traces router: delete_old_traces()\n  no longer accepts db parameter (missed call site from #3883)\n- Remove unused db parameter from record_transport_activity() for API\n  consistency with other write methods\n- Update docstring and doctest for delete_old_traces call in router\n- Update test calls to match new record_transport_activity signature\n- Add 3 tests for 100% differential coverage: error-path exception\n  handlers in trace_tool_invocation, trace_a2a_request, and session\n  close failure in record_token_usage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-06T19:06:03+00:00"
+    },
+    {
+      "sha": "9f19a36426482c1f02cc43552d6cf3d01db0c2b4",
+      "message": "fix: address review feedback for separate observability session pattern\n\nThis commit addresses valid concerns raised in PR review:\n\n1. Fix class docstring showing old API (madhu-mohan-jaishankar)\n   - Updated ObservabilityService class docstring to show correct API\n   - Removed db parameter from examples (old: start_trace(db, name))\n   - Added clarification about write vs query methods\n   - Examples now demonstrate correct usage with proper parameters\n\n2. Fix context manager atomicity (msureshkumar88 issue #5)\n   - Added optional obs_db parameter to add_event() method\n   - Context managers now pass their session to add_event() in error paths\n   - Ensures atomic commit of span updates and error events together\n   - Prevents orphaned events when span update fails\n   - Updated all three context managers:\n     * trace_span() at line 644\n     * trace_tool_invocation() at line 757\n     * trace_a2a_request() at line 1112\n\n3. Document connection pool sizing (msureshkumar88 issue #7)\n   - Added Connection Pool Sizing section to AGENTS.md\n   - Explains 4-6 sessions per traced request pattern\n   - Documents default pool (200+10 = 210 connections)\n   - Supports ~35 concurrent traced requests by default\n   - Guidance for high-traffic deployments (>50 req/sec)\n   - Note about SQLite 50-connection cap\n\nImplementation details:\n- add_event() now accepts optional obs_db: Optional[Session] = None\n- When obs_db is provided, uses caller's session (owned = False)\n- When obs_db is None, creates independent session (owned = True)\n- Only closes session if owned is True\n- All existing tests pass (87 observability service tests, 23 middleware tests)\n\nTests: All 87 observability service tests passing\n       All 23 observability middleware tests passing\n       100% differential coverage maintained\n\nAddresses review feedback from:\n- @madhu-mohan-jaishankar (approved with comments)\n- @msureshkumar88 (issues #5 and #7 from detailed review)\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-08T09:19:52+00:00"
+    },
+    {
+      "sha": "d1ff83b9537996cfdabb7481b6406d6ecdbe6450",
+      "message": "fix: address remaining review concerns with safety improvements\n\nThis commit addresses all remaining valid reviewer concerns:\n\n1. Document dead code guard design choice (madhu-mohan-jaishankar issue #1)\n   - Added Note section to _get_or_create_observability_session() docstring\n   - Explains tuple return pattern enables future session reuse optimization\n   - Guards remain for forward compatibility (maintainer approved pattern)\n\n2. Move session creation inside try blocks (msureshkumar88 issue #1)\n   - Initialize obs_db = None and owned = False before try blocks\n   - Create session inside try to prevent theoretical resource leak\n   - Update finally blocks to check `if owned and obs_db is not None:`\n   - Applied to all 8 write methods:\n     * start_trace() (line 317)\n     * end_trace() (line 385)\n     * trace_span() context manager (line 619)\n     * trace_tool_invocation() context manager (line 719)\n     * add_event() (line 836)\n     * record_token_usage() (line 926)\n     * trace_a2a_request() context manager (line 1087)\n     * record_metric() (line 1306)\n     * delete_old_traces() (line 1718)\n\n3. Add header sanitization (msureshkumar88 issue #10)\n   - Added sanitize_header_for_storage() helper function\n   - Removes control characters (prevents log injection)\n   - Truncates to max_length (prevents DoS via large headers)\n   - Applied to user_agent (max 500 chars) and http_url (max 2000 chars)\n   - Defense-in-depth security improvement\n\nImplementation details:\n- sanitize_header_for_storage() removes non-printable chars except space/tab\n- Returns \"unknown\" for None/empty values\n- All 87 observability service tests passing\n- All 23 observability middleware tests passing\n\nDeferred to future PR (with justification):\n- Code duplication refactoring (issue #9): Too complex and risky for this PR.\n  The three context managers share patterns but have significant domain-specific\n  differences (attributes, yield signatures, sanitization). Refactoring would\n  require extensive testing and carries risk of subtle bugs. Current code is\n  correct and well-tested. Recommend separate focused PR for refactoring.\n\nTests: All 110 observability tests passing (87 service + 23 middleware)\n       100% differential coverage maintained\n\nAddresses remaining review feedback from:\n- @madhu-mohan-jaishankar (issue #1 - dead code guards)\n- @msureshkumar88 (issues #1, #10 - resource leak, header sanitization)\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-08T09:32:54+00:00"
+    },
+    {
+      "sha": "be6dded4144e871a8c10b7d5ce93f64d3cc6a9a5",
+      "message": "fix: correct doctest examples in sanitize_header_for_storage\n\nThe function removes control characters completely (doesn't replace with spaces)\nand truncates without adding ellipsis. Updated doctest examples to match\nactual behavior:\n- Control chars removed: 'Evil\\x00\\nInjection' -> 'EvilInjection'\n- Truncation verified by length check instead of expecting '...'\n- Added test for None input returning 'unknown'\n\nAll doctests now passing.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-08T14:04:22+00:00"
+    },
+    {
+      "sha": "30f4a518240750769cdf89e4c2f9cb29644dcc02",
+      "message": "Update secrets following rebase\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-04-08T16:55:28+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 1458,
+  "deletions": 1001,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:21.370227",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:21.370796",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4050,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4050.json"
+  }
+}

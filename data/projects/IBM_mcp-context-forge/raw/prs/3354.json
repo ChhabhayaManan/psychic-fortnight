@@ -1,0 +1,111 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3354,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3354"
+  },
+  "metadata": {
+    "title": "fix: hardening and behavior consistency across auth, import/export, and transport paths",
+    "state": "closed",
+    "created_at": "2026-03-01T18:21:32+00:00",
+    "updated_at": "2026-03-02T02:57:14+00:00",
+    "closed_at": "2026-03-02T02:57:12+00:00",
+    "merged_at": "2026-03-02T02:57:12+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "security",
+      "revisit",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\nBroad hardening pass across auth, import/export scoping, transport safety defaults, subprocess input validation, and provenance consistency.\n\n## Included hardening updates\n- A-13: plugin auth hook now reconciles user/admin identity against DB records.\n- A-14: debug logging hardening removes credential-bearing fields.\n- A-15: OAuth token storage model hardening tightened.\n- A-16: tool-read responses harden auth masking behavior.\n- C-42: plugin pre-request handling hardens auth-sensitive header precedence.\n- C-43: IP token scoping hardening uses direct client address handling.\n- C-44: login-attempt accounting hardening keeps lockout counters consistent.\n- C-45: import re-key hardening avoids global secret mutation.\n- C-46: full export hardening enforces scoped visibility filtering.\n- C-47: forwarded-internal header trust hardening is restricted to loopback.\n- C-48: plugin execution hardening enforces denylist + sandboxed template handling.\n- C-49: secret comparison hardening uses `get_secret_value()` consistently.\n- C-50: JSON-RPC error hardening uses stable response IDs.\n- C-51: deploy command hardening validates and safely quotes plugin names.\n- C-52: translate restart hardening adds restart rate-limiting.\n- C-74: update-path hardening ignores client-supplied ownership fields.\n- C-75: admin schema path reviewed and aligned with hardened behavior.\n- C-87: LLM chat stdio transport hardening is feature-flagged off by default.\n- C-88: builder subprocess hardening validates make/git argument handling.\n- C-89: plugin permission-grant path hardening defaults to audit-only behavior.\n- C-104: import ownership-assignment hardening scopes to active import provenance/time window.\n- C-105: selective export hardening enforces scoped visibility filtering.\n- S-04: gRPC target hardening applies SSRF guardrails.\n- S-05: TLS path hardening validates relative-path constraints.\n- S-07: provider `api_base` hardening applies SSRF validation.\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "f1ca1d2d0ff24619f5dfea687d1323e7e6acb60a",
+      "message": "fix: auth, RBAC, and input validation hardening (Round 2)\n\n- Strip auth-sensitive headers from plugin pre-request hook output (C-42)\n- Use direct client IP instead of spoofable X-Forwarded-For for token scoping (C-43)\n- Apply lockout enforcement consistently for all accounts including admins (C-44)\n- Pass encryption secret as parameter to avoid global state mutation during re-keying (C-45)\n- Add team-scoped visibility filtering to export service (C-46)\n- Only trust x-forwarded-internally header from loopback addresses (C-47)\n- Validate plugin kind against module allowlist and use SandboxedEnvironment (C-48)\n- Use get_secret_value() for SecretStr comparison in security status (C-49)\n- Use correct response_id instead of builtin id in JSON-RPC error responses (C-50)\n- Validate and quote plugin names in Dagger deploy commands (C-51)\n- Rate-limit subprocess restarts in translate bridge (C-52)\n- Validate gRPC target addresses against SSRF-unsafe destinations (S-04)\n- Validate TLS cert/key paths against directory traversal (S-05)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-01T02:33:26+00:00"
+    },
+    {
+      "sha": "1cba1034acb3cbaace7f2c282dc133eb269adc35",
+      "message": "fix: gRPC target and path validation hardening, test alignment\n\n- gRPC target validation now consults platform SSRF settings\n  (ssrf_allow_localhost, ssrf_allow_private_networks, ssrf_allowed_networks,\n  ssrf_blocked_networks, ssrf_blocked_hosts) for consistent behavior\n- TLS path validation uses Path.is_relative_to() for correct prefix matching\n- Plugin hook auth header stripping refined to only block overrides of\n  existing inbound headers, preserving legitimate header transforms\n- Protected admin lockout bypass preserved as feature-flagged behavior;\n  failed attempt tracking now applies to all accounts for audit visibility\n- Import resilience for Gunicorn --preload circular import during startup\n- Test assertions aligned with hardened behavior\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-01T09:59:06+00:00"
+    },
+    {
+      "sha": "00cf1e9edf2ecb6886117df694edeee04b639f94",
+      "message": "fix: auth and provider hardening for identity and URL validation\n\n- harden plugin auth identity resolution with DB-backed admin derivation (A-13)\n- reduce sensitive auth debug metadata in tool schema assembly (A-14)\n- add ORM-level encrypted token handling for oauth token columns (A-15)\n- enforce ownership consistency by ignoring payload owner_email in vulnerable update paths (C-74)\n- validate llm provider api_base on create/update/health-check paths using existing SSRF controls (S-07)\n- update unit tests for hardened behavior and regression coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-01T12:56:48+00:00"
+    },
+    {
+      "sha": "2950864e21c0134da20496e996abd4626749174f",
+      "message": "fix: round 3 hardening follow-ups\n\n- fail closed on OAuth token ORM encryption write errors\n\n- normalize provider api_base validation to typed errors and 422 mapping\n\n- add regression tests for encryption failure, provider validation, and inactive plugin-auth users\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-01T14:56:48+00:00"
+    },
+    {
+      "sha": "ff83e83ed242ce083cf9f28960e16d661a52a561",
+      "message": "fix: round 4 hardening for transport, builder inputs, and RBAC plugin policy\n\n- C-87: harden MCP chat stdio transport with explicit feature-flag gating (default disabled)\n\n- C-88: harden python deploy input handling with stricter plugin/repo/ref validation and safer make/git argument handling\n\n- C-89: harden plugin permission hook behavior with audit logging and opt-in RBAC override control\n\n- update unit coverage for transport gating, builder validation, and RBAC plugin decision paths\n\n- include related test stabilization updates in playwright page object\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-01T16:04:16+00:00"
+    },
+    {
+      "sha": "8f20bd571d3b8b9c46568362fe4736b99c694bd7",
+      "message": "chore: harden RBAC provenance and builder validation (C-88, C-89)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-01T16:46:21+00:00"
+    },
+    {
+      "sha": "aaf772a42ab19d5b9559ba3da9eac31eb1cb18e9",
+      "message": "chore: harden plugin decision provenance attribution\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-01T16:55:09+00:00"
+    },
+    {
+      "sha": "bd31a562d7bb9082eff18c76d51d5bff98ecf99b",
+      "message": "fix: import/export hardening and scoped access consistency\n\nAddresses C-104 and C-105 with behavior hardening.\n\n- Scope post-import team assignment to the active import provenance window\n\n- Apply scoped visibility filtering to selective export by selected entities\n\n- Add regression coverage for import/export scoped behavior and endpoint wiring\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-01T18:09:01+00:00"
+    },
+    {
+      "sha": "1de90b9b15c2d741cff1a2d734685020fb90eb7f",
+      "message": "tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-01T19:17:11+00:00"
+    },
+    {
+      "sha": "421bf63fec68d73cbdbaa4eb2740e745fa4d49c4",
+      "message": "Test coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-01T19:54:18+00:00"
+    },
+    {
+      "sha": "ab6e1ddc6164273c29b8da475b5c3c086ed12a9b",
+      "message": "Test coverage improvements including iframe testing, test fixes and helm chart fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T00:14:42+00:00"
+    }
+  ],
+  "files_changed": 68,
+  "additions": 3502,
+  "deletions": 346,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:05.829959",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:05.831192",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3354,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3354.json"
+  }
+}

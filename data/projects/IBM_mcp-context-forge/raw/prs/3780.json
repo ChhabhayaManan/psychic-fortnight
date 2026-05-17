@@ -1,0 +1,84 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3780,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3780"
+  },
+  "metadata": {
+    "title": "fix: preserve server team_id during admin UI edits",
+    "state": "closed",
+    "created_at": "2026-03-21T05:51:16+00:00",
+    "updated_at": "2026-03-24T01:40:59+00:00",
+    "closed_at": "2026-03-23T10:49:32+00:00",
+    "merged_at": "2026-03-23T10:49:32+00:00",
+    "author": "kimsehwan96",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses: #3779\r\n\r\n---\r\n\r\n## 📝 Summary\r\nWhen editing a virtual server via the admin UI, the server's `team_id` was silently overwritten on every save — even when the user did not intend to change the team.\r\n                                                                                                                                                            \r\n  **Root cause:** In `admin_edit_server()`, when no `team_id` is present in the form (e.g., editing from the \"All Teams\" view), `verify_team_for_user()` falls back to the current user's **personal team**, which is then unconditionally written to the server record.\r\n                                                                                                                                                            \r\n  **Fix:** Before calling `verify_team_for_user()`, the edit endpoint now looks up the existing server's `team_id` from the database and uses it as the default when the form does not include one. This preserves the original team assignment while still allowing explicit team changes via the API.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   pass     |\r\n| Unit tests                | `make test`     |    pass    |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\nRecommended future work\r\n- A2A Agent edit has the same pattern (`a2a_service.py` uses generic `setattr` loop)\r\n- Explicit \"transfer team\" UI/API for intentional team reassignment\r\n- Tool, Gateway, Prompt edit endpoints call `verify_team_for_user()` but their service layers don't persist the result (accidentally safe)\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3990278364",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T09:06:07+00:00",
+      "body": "LGTM — fix is correct, complete, and well-tested across all entity types."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a9e024eb466b818dc1350e0fa1271284446f275b",
+      "message": "fix: preserve server team_id during admin UI edits\n\nWhen editing a virtual server via the admin UI without an explicit\nteam_id in the form, verify_team_for_user() fell back to the current\nuser's personal team, silently reassigning the server on every edit.\n\nNow the edit endpoint looks up the existing server's team_id and\npreserves it when no team_id is provided in the form.\n\nCloses: #3779\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-03-21T05:47:56+00:00"
+    },
+    {
+      "sha": "6520fa4dde79263cc962141260cf1ce64a8dbd3a",
+      "message": "fix: preserve entity team_id during admin UI edits for all entity types\n\nExtend the server team_id preservation fix to gateway, resource, prompt,\nand A2A agent edit endpoints. All five endpoints now look up the existing\nentity's team_id when no explicit team_id is provided in the form, instead\nof silently falling back to the user's personal team.\n\nAlso fixes:\n- resource edit was missing team_id and owner_email entirely\n- prompt edit had a debug log typo (\"befor\")\n\nAdds comprehensive tests for all five entity types covering the team_id\npreservation path and the explicit team_id override path.\n\nCloses: #3779\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T05:21:53+00:00"
+    },
+    {
+      "sha": "49e1a196d6197d6bb1ca62d25de27ffee6b2b3f4",
+      "message": "fix: add service-layer team_id persistence and validation for all entity types\n\nThe admin-side team_id preservation (previous commit) was only effective for\nserver and A2A agent edits because only those service-layer update methods\nactually persisted team_id to the ORM row. Gateway, resource, and prompt\nservices accepted team_id in their update DTOs but silently ignored it.\n\nThis commit:\n- Adds team_id persistence to gateway_service.update_gateway()\n- Adds team_id persistence to resource_service.update_resource()\n- Adds team_id persistence to prompt_service.update_prompt()\n- Adds team reassignment validation to a2a_service.update_agent()\n  (previously persisted via generic setattr without ownership checks)\n- Each service now validates team existence and caller ownership before\n  allowing team reassignment, matching server_service's pattern\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T08:26:42+00:00"
+    },
+    {
+      "sha": "ef726e50966a47cb96ee97be8030b1f83bab5709",
+      "message": "fix: validate visibility->\"team\" transitions in all entity services\n\nThe server service validates the effective team_id when visibility\nchanges to \"team\" (even when team_id is not explicitly provided in\nthe update), ensuring you cannot set visibility to \"team\" with an\ninvalid or missing team. The gateway, resource, prompt, and A2A\nservices were missing this validation.\n\nNow all four services validate the target team_id (either from the\nupdate DTO or from the existing entity) when visibility transitions\nto \"team\", matching server_service's stricter pattern.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T08:47:35+00:00"
+    },
+    {
+      "sha": "532385302c9cf198fd3ff833da562bb3d2d52d5b",
+      "message": "test: add deny-path service tests for team_id validation\n\nAdd targeted deny-path tests for all four entity services verifying:\n- Reassigning to a non-existent team is rejected\n- Setting visibility to \"team\" without any team_id is rejected\n\nThese tests validate the service-layer validation logic, not just\nadmin-route DTO construction.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T08:59:41+00:00"
+    },
+    {
+      "sha": "212fd4b409d8798707d0d57da89726d9ccfa626a",
+      "message": "test: achieve 100% differential coverage for team_id validation\n\nAdd tests for uncovered branches in team validation functions:\n- Non-owner membership rejection (all 4 services)\n- No-user-email early return path with team_id persistence\n  (gateway, resource, prompt, A2A)\n\nDifferential coverage: 114 lines, 0 missing, 100%.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T10:33:16+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 759,
+  "deletions": 7,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:59.419205",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:59.421213",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3780,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3780.json"
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4204,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4204"
+  },
+  "metadata": {
+    "title": "Fixed bug in validation of tool error responses",
+    "state": "closed",
+    "created_at": "2026-04-14T16:18:00+00:00",
+    "updated_at": "2026-04-14T23:39:18+00:00",
+    "closed_at": "2026-04-14T23:39:16+00:00",
+    "merged_at": "2026-04-14T23:39:16+00:00",
+    "author": "ja8zyjits",
+    "labels": [
+      "bug",
+      "mcp-protocol",
+      "wxo",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nThis PR fixes a regression where ContextForge Gateway incorrectly enforces `outputSchema` validation on MCP tool error responses (`isError: true`), breaking MCP specification compliance and preventing standard error handling.\r\n\r\n**What was broken:** The gateway validated structured output against `outputSchema` even when tools returned error responses with `isError: true`, causing validation failures and obscuring the actual error messages from tools.\r\n\r\n**Why it matters:** This regression broke previously functional MCP integrations and forced developers to implement non-standard workarounds that violate the MCP specification.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n\r\n**Minimal reproduction:**\r\n\r\n1. Create an MCP tool that raises `ToolError` (or use test endpoint: https://mcptest.1yhjfkkdsl9j.us-south.codeengine.appdomain.cloud/mcp)\r\n\r\n```python\r\nfrom fastmcp import FastMCP\r\nfrom fastmcp.exceptions import ToolError\r\nfrom pydantic import BaseModel, Field\r\nfrom uuid import UUID, uuid4\r\n\r\nmcp = FastMCP(\"Test MCP\")\r\n    \r\nclass RecognitionResult(BaseModel):\r\n    recognitionId: UUID\r\n    message: str\r\n\r\n@mcp.tool(description=\"Submits a recognition for a recipient.\")\r\ndef submit_recognition(points: int = Field(description=\"The number of points to award\")) -> RecognitionResult:\r\n    if points > 200:\r\n        raise ToolError(f\"You cannot send more than 200 points (Requested: {points})\")\r\n    \r\n    return RecognitionResult(\r\n        recognitionId=uuid4(),\r\n        message=\"Recognition submitted successfully with \" + str(points) + \" points\"\r\n    )\r\n\r\nif __name__ == \"__main__\":\r\n    mcp.run(transport=\"streamable-http\", host=\"0.0.0.0\", port=8000)\r\n```\r\n\r\n2. Invoke the tool via ContextForge Gateway with `points > 200`\r\n3. **Before fix:** Observe \"Output validation error: outputSchema defined but no structured output returned\"\r\n4. **After fix:** Error message properly surfaces: \"You cannot send more than 200 points (Requested: 2023)\"\r\n\r\n## 🐞 Root Cause\r\n\r\n**Location:** `mcpgateway/services/tool_service.py`, method `_extract_and_validate_structured_content` (lines 1228-1375)\r\n\r\n**Problem:** The validation method did not check if `tool_result.is_error` or `tool_result.isError` was `True` before enforcing output schema validation.\r\n\r\n**MCP Specification:** According to the [MCP Error Handling Specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#error-handling), error responses with `isError: true` should contain:\r\n- `content` array with text messages\r\n- **NO requirement for `structuredContent`**\r\n\r\nThe gateway was unconditionally validating all responses, including errors, causing:\r\n1. Validation failures for standards-compliant error responses\r\n2. Original error messages being overwritten with validation errors\r\n3. Breaking compatibility with MCP-compliant tools\r\n\r\n## 💡 Fix Description\r\n\r\n**Solution:** Skip output schema validation for error responses per MCP specification.\r\n\r\n**Implementation:**\r\n\r\n1. **Added early return check** in `_extract_and_validate_structured_content`:\r\n   ```python\r\n   # CRITICAL: Skip validation for error responses per MCP spec\r\n   # Error responses with isError=true do not require structured content\r\n   # Reference: https://modelcontextprotocol.io/specification/2025-11-25/server/tools#error-handling\r\n   is_error = getattr(tool_result, \"is_error\", False) or getattr(tool_result, \"isError\", False)\r\n   if is_error:\r\n       logger.debug(f\"Skipping output schema validation for error response from tool {getattr(tool, 'name', '<unknown>')}\")\r\n       return True\r\n   ```\r\n\r\n2. **Updated docstring** to document MCP error handling behavior\r\n\r\n3. **Added comprehensive unit tests** covering:\r\n   - Error responses with `is_error=True` skip validation\r\n   - Error responses with `isError=True` (alias) skip validation\r\n   - Error content is preserved (not overwritten)\r\n   - Successful responses still validate normally\r\n   - Validation failures for successful responses still work correctly\r\n\r\n**Key design points:**\r\n- Early return pattern for performance (no unnecessary validation)\r\n- Checks both `is_error` and `isError` for compatibility\r\n- Preserves original error messages\r\n- No impact on successful response validation\r\n- Aligns with MCP specification\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          | ✅ Pass |\r\n| Unit tests                            | `make test`          | ✅ Pass (678 tests) |\r\n| Coverage ≥ 80 %                       | `make coverage`      | ✅ Pass |\r\n| Manual regression no longer fails     | Tested with reproduction case | ✅ Pass |\r\n\r\n**Test results:**\r\n- All 678 existing tests pass\r\n- 5 new tests added for error response handling\r\n- No regressions in tool invocation or validation logic\r\n\r\n**Manual verification:**\r\n- Error responses with `isError: true` now pass through without validation\r\n- Original error messages are preserved and surfaced to users\r\n- Successful responses continue to validate against `outputSchema`\r\n- Validation errors for successful responses still work correctly\r\n\r\n## 📐 MCP Compliance\r\n\r\n- [x] Matches current MCP spec (error handling section)\r\n- [x] No breaking change to MCP clients\r\n- [x] Restores compatibility with MCP-compliant tools\r\n- [x] Removes need for non-standard workarounds\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] Comprehensive unit tests added\r\n- [x] All existing tests pass\r\n- [x] Documentation updated (docstring)\r\n- [x] MCP specification compliance verified\r\n- [x] Backward compatibility maintained (bug fix only)\r\n\r\n## 📊 Impact\r\n\r\n**Severity:** High - Regression breaking previously functional integrations\r\n\r\n**Benefits:**\r\n- ✅ Restores MCP specification compliance\r\n- ✅ Enables standard `ToolError` exception handling\r\n- ✅ Eliminates need for non-standard workarounds\r\n- ✅ Improves error message visibility for users\r\n- ✅ Maintains backward compatibility (bug fix only)\r\n\r\n**Related Issues:** Closes #4202\r\n",
+  "comments": [
+    {
+      "id": "3081062007",
+      "author": "dawid-nowak",
+      "created_at": "2026-04-14T16:46:00+00:00",
+      "body": "I don't think we should skip the validation.\n1. If the tools is MCP compliant  and error response matches the schema then the validation should pass.\n2. If the tools is NOT MCP compliant  and error response does not match the the schema then we should return a correct error indicating that the tools is misbehaving.\n"
+    },
+    {
+      "id": "3081098791",
+      "author": "ja8zyjits",
+      "created_at": "2026-04-14T16:53:04+00:00",
+      "body": "Hi @dawid-nowak ,\r\nThanks for the input. Here we will try to follow the spec and make it complaint. We can have a followup to dig deeper into this and come up with a more granular control over things.\r\n"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4107694488",
+      "author": "dawid-nowak",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-14T16:46:18+00:00",
+      "body": "I don't think we should skip the validation.\n1. If the tools is MCP compliant  and error response matches the schema then the validation should pass.\n2. If the tools is NOT MCP compliant  and error response does not match the the schema then we should return a correct error indicating that the tools is misbehaving.\n"
+    },
+    {
+      "id": "4107734432",
+      "author": "ja8zyjits",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-14T16:53:04+00:00",
+      "body": ""
+    },
+    {
+      "id": "4108305233",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-14T18:37:35+00:00",
+      "body": "Thanks for the PR @ja8zyjits . \nPlease implement following changes.\n## Security findings \n\nThe fix itself does not introduce security concerns. `is_error=True` in the REST API path is set by gateway code, not passed through from upstream clients, so there is no trust boundary violation.\n\n| # | File | Line | Severity | CWE | Description |\n|---|------|------|----------|-----|-------------|\n| 1 | `request_logging_middleware.py:303` | 303 | Medium | CWE-532 | `logger.exception()` in the Rust masking fast-path fallback may emit unmasked raw payload bytes via the exception traceback, leaking sensitive data into logs before masking completes |\n| 2 | `tool_service.py:1301` | 1301 | Low | CWE-117 | Tool name interpolated unsanitized in f-string debug log; a tool name containing CRLF or ANSI escape codes could confuse structured log parsers |\n\n**Finding 1 detail:** The change in `request_logging_middleware.py` replaces `pass` with `logger.exception(...)` inside the Rust-masking fast-path `try/except`. If the Rust library raises with payload fragments in its error message, those fragments reach logs before Python-level masking has run. Recommend replacing with:\n```python\nlogger.warning(\"Rust payload masking failed; falling back to Python masking\", exc_info=False)\n```\n\n**Finding 2 detail:** The f-string pattern (`logger.debug(f\"...{tool.name}...\")`) conflicts with the project's pylint `W1203` convention. Use:\n```python\nlogger.debug(\"Skipping output schema validation for error response from tool %s\", getattr(tool, \"name\", \"<unknown>\"))\n```\n\n---\n\n## Redundant Code\n\n| # | File | Line(s) | Type | Description | Suggestion |\n|---|------|---------|------|-------------|------------|\n| 1 | `test_tool_service_coverage.py:3529` | 3529–3548 | Dead code / duplicate class | `class TestRegisterToolBranches` is defined twice in the file. The new definition at line 3529 (added by the PR) contains an incomplete `test_team_name_conflict` — a method body that sets up a `MagicMock` tool but has zero assertions and zero service calls. The original `TestRegisterToolBranches` at line 3654 (with the real test body) is shadowed by Python's class re-definition semantics. | Remove the duplicate class definition at lines 3529–3548. Move any intended new tests into the existing `TestRegisterToolBranches` at line 3654. |\n| 2 | `test_tool_service_coverage.py:3531` | 3531–3548 | Vacuous test | `test_team_name_conflict` in the new class body has no assertions. It will always \"pass\" and tests nothing. | Either add assertions (and a service call to trigger the conflict) or remove the method. |"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7d9a2c9e82d52903c8c45173c82fcf8780ac69d4",
+      "message": "Fixed issue in validation of tool error responses. Henceforth isError=True will be respected and wont be cross validated against outputSchema\ncloses #4202\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-14T16:03:35+00:00"
+    },
+    {
+      "sha": "f904f474e92892e17428ee20385d35182f22faec",
+      "message": "Fixed security issues in the logging and redundant test cases\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-14T21:54:32+00:00"
+    },
+    {
+      "sha": "dd8e7b9f41bae13855883f04895f4f67c4fa356f",
+      "message": "fix(tool-service): fully close #4202 across ingress, egress, coercion, and metrics\n\nSeal the remaining #4202 gaps surfaced by multiple review rounds on top of\nthe earlier 7d9a2c9/f904f47 fixes. The original fix made the ingress\nvalidator skip ``isError=true`` responses; this change extends the\ninvariant end-to-end so error payloads survive verbatim and success\nmetrics reflect the real tool state across every non-A2A path.\n\nProduction changes:\n\n* ``_coerce_to_tool_result`` (replaces ``_normalize_tool_result_payload``)\n  becomes the canonical coercion for heterogeneous upstream responses\n  (``ToolResult``, MCP SDK ``CallToolResult``, REST JSON dicts, scalars).\n  A two-layer ``_looks_like_mcp_envelope`` heuristic — (1) no top-level\n  keys outside ``_MCP_ENVELOPE_KEYS``, (2) at least one positive MCP\n  marker — stops REST payloads whose business schema happens to use\n  ``content``/``isError``/``structuredContent`` from being silently\n  reinterpreted and losing sibling fields.\n* Direct-proxy MCP path now routes through the helper so the egress\n  sees snake-case ``is_error`` rather than a raw MCP SDK\n  ``CallToolResult`` with camelCase ``isError``; previously the egress\n  ``is_error`` check missed the camelCase attribute and the MCP server\n  SDK's server-side validator re-clobbered error payloads with \"Output\n  validation error: outputSchema defined but no structured output\n  returned\".\n* REST branch success metric now reads ``success = not\n  tool_result.is_error`` after the optional validator call. The old\n  ``success = bool(valid)`` clobbered upstream ``is_error=True``\n  responses back to ``success=True``, silently inflating tool success\n  rates in observability.\n* Egress ``call_tool`` (both local and pooled/worker-forwarded\n  branches) returns a fully-formed ``types.CallToolResult`` only for\n  ``isError=True`` responses, exploiting the SDK's ``isinstance(results,\n  types.CallToolResult)`` short-circuit; success paths keep the\n  list/tuple shape so the SDK still enforces ``outputSchema``. A new\n  ``_truthy_is_error`` helper centralises the MagicMock-aware identity\n  check.\n* Fallback log severities upgraded from DEBUG to WARNING for\n  user-visible payload reshapes in ``_coerce_to_tool_result``; outer\n  defensive ``except Exception`` in the ingress validator now logs\n  with ``exc_info=True`` and the sanitized tool name; a ``<unknown>``\n  sentinel replaces the silently-empty fallback for ``tool.name is\n  None`` on partially-hydrated rows.\n\nFixture changes:\n\n* ``mcp-servers/rust/fast-test-server`` adds ``convert_time``,\n  ``schema_success`` and ``schema_error`` tools with declared output\n  schemas, enabling real end-to-end regression guards via\n  ``make test-mcp-cli``.\n\nTest changes:\n\n* Unit coverage for every validator branch plus metric bookkeeping:\n  ``TestExtractAndValidateErrorResponses`` (10+ #4202 scenarios),\n  ``TestCoerceToToolResult`` (11 tests including an MCP SDK\n  ``CallToolResult`` round-trip, four Codex-follow-up field-drop\n  rejection tests, a ``_meta`` round-trip guard, and validation-error\n  fallback), REST and MCP-non-direct-proxy metric regression guards\n  (both empirically verified to fail against the respective buggy\n  code), and egress guards for the local, pooled and direct-proxy\n  branches. A2A coverage gap is pinned as a ``@pytest.mark.skip``\n  with reason referencing #4210.\n* Two new e2e tests in ``tests/e2e/test_mcp_cli_protocol.py``\n  drive the full MCP-federation stack against the Rust fixtures\n  with a ``_require_declared_output_schema`` preflight that fails\n  fast when the upstream image is stale.\n\nDocumentation:\n\n* New ``docs/docs/architecture/tool-invocation-and-validation.md``\n  catalogues the three validation layers (MCP client SDK, gateway\n  ``_extract_and_validate_structured_content``, MCP server SDK),\n  per-path outcome table, known gaps (#4207 / #4208 / #4210), and\n  an \"adding a new backend\" checklist.\n\nFollow-up issues filed: #4207 (non-MCP e2e coverage), #4208 (success\npath with declared schema but empty output — spec tightening),\n#4210 (Option B unification refactor), #4211 (A2A + plugin-hook\nsilent-success traps).\n\nCloses #4202\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-14T23:03:01+00:00"
+    },
+    {
+      "sha": "8788c106db68f5fa414cf8b75ffad4f550acb056",
+      "message": "style(tool-service): fix pylint implicit-str-concat in _coerce_to_tool_result log\n\nBlack had collapsed the dict-envelope validation-failure warning into two\nadjacent string literals on one line, which pylint flags as\n``W1404 implicit-str-concat``. Merge the halves into a single literal.\nNo behavioural change.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-14T23:09:20+00:00"
+    },
+    {
+      "sha": "24712901bc6d97d34a1a0cb05973cca25760ae0c",
+      "message": "test(tool-service): cover _looks_like_mcp_envelope layer-2 branches and BaseModel fallback\n\nFive new tests in ``TestCoerceToToolResult`` close the coverage gaps\nflagged by the tool_service.py coverage report (86.2% → higher on the\nhelper):\n\n* ``test_accepts_dict_with_structured_content_marker_only`` — exercises\n  the ``structuredContent`` positive-marker branch of\n  ``_looks_like_mcp_envelope`` (was uncovered).\n* ``test_accepts_dict_with_snake_case_structured_content_marker`` — the\n  snake-case sibling; forwarded-worker responses use this form.\n* ``test_accepts_dict_with_only_typed_content_items`` — the weakest\n  positive marker (content items carrying a string ``type`` field);\n  without this a future tightening could drop the branch silently.\n* ``test_rejects_dict_with_only_meta_marker`` — the final ``return\n  False`` branch when all keys are envelope-shaped but no positive\n  marker fires. ``_meta`` alone is not sufficient.\n* ``test_basemodel_with_content_that_fails_validation_falls_back`` —\n  pins the ``except ValidationError`` branch inside\n  ``_coerce_to_tool_result``'s BaseModel dispatch; asserts WARNING-level\n  log with ``exc_info=True``.\n\nWhile writing the BaseModel fallback test it surfaced a real bug: a\nPydantic ``BaseModel`` that failed ``ToolResult.model_validate`` and\nfell through to the opaque-JSON fallback caused ``orjson.dumps`` to\nraise ``TypeError`` — breaking the helper's \"always returns a valid\nToolResult\" invariant. Fixed by dumping BaseModel payloads via\n``model_dump(mode=\"json\", by_alias=True)`` before serialising, and\nadding a last-resort ``TypeError`` catch that falls back to\n``str(payload)`` with a WARNING log. ``test_non_json_serialisable_payload_falls_back_to_str``\npins the new branch.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-14T23:22:15+00:00"
+    },
+    {
+      "sha": "699361bb64c313d579264b8a44d571ca0cd08678",
+      "message": "fix(tool-service): move BaseModel model_dump into opaque-JSON fallback try/except\n\nCodex stop-review caught that the BaseModel defensive-path fix was\nincomplete: ``payload.model_dump(mode=\"json\", by_alias=True)`` lived\n*outside* the ``try/except`` block that guarded ``orjson.dumps``, so a\nBaseModel whose ``model_dump`` itself raised (custom field serialiser\nthrowing, ``PydanticSerializationError`` — a ``ValueError`` subclass —\nor fields holding non-representable objects) would escape the helper\nand break the \"always returns a valid ``ToolResult``\" invariant.\n\nFix: move the ``model_dump`` call inside the guard, broaden the catch\nto ``Exception``, and add a nested ``str()`` / ``repr()`` last-resort\nso even a payload whose ``__str__`` raises still yields a valid\n``TextContent``.\n\nRegression guard: ``test_basemodel_whose_model_dump_raises_falls_back_to_str``\nuses a ``BaseModel`` subclass whose ``model_dump`` raises ``ValueError``\nunconditionally. Empirically verified to fail against the pre-fix code\n(``ValueError`` propagated uncaught) and pass against the new shape.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-14T23:26:02+00:00"
+    },
+    {
+      "sha": "95ece4f3fb63d63410726b3e21382b732edbf0f9",
+      "message": "fix(tool-service): harden _coerce_to_tool_result last-resort fallback against broken str/repr\n\nCodex stop-review found that the prior fix still had escape hatches:\n``type(payload).__name__``, ``str(payload)`` and ``repr(payload)`` all\nlive inside the last-resort fallback but none were individually\nguarded, so a payload whose ``__str__`` and ``__repr__`` both raise\n(or whose ``type().__name__`` lookup fails) could still escape the\nhelper and break the \"never raises\" invariant.\n\nExtract two module-level helpers with staged defensive fallbacks:\n\n* ``_safe_type_name(obj)`` — returns ``type(obj).__name__`` or\n  ``\"<untypeable>\"`` sentinel, never raises.\n* ``_safe_text_repr(obj, fallback_type)`` — tries ``str`` → ``repr`` →\n  ``f\"<{fallback_type} object (unrepresentable)>\"``. Guarantees a\n  ``str`` return on every branch; each coercion attempt is\n  try/except-guarded, and the final tier is a pre-computed literal\n  so even a metaclass whose ``__name__`` property raises cannot\n  propagate.\n\n``_coerce_to_tool_result``'s opaque-JSON fallback now computes\n``payload_type`` via ``_safe_type_name`` once up front and passes it\nboth to the DEBUG/WARNING log sites and to ``_safe_text_repr``.\n\nRegression guard: ``test_payload_with_broken_str_and_repr_still_produces_toolresult``\nexercises an ``AdversarialPayload`` whose ``__str__`` and ``__repr__``\nboth raise ``RuntimeError``. Against the pre-fix code either the\n``str(payload)`` call or the fall-through ``repr(payload)`` would\npropagate; against the new shape the helper emits the third-tier\nsentinel text and a WARNING log. Empirically validated via an\nin-line stress test of ``_safe_type_name`` and ``_safe_text_repr``\nagainst a metaclass with a ``__name__`` property that raises.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-14T23:29:41+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 2737,
+  "deletions": 122,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:07.162381",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:07.163825",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4204,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4204.json"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4212,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4212"
+  },
+  "metadata": {
+    "title": "fix(ui): fix login in Vite dev mode",
+    "state": "closed",
+    "created_at": "2026-04-15T00:00:29+00:00",
+    "updated_at": "2026-04-15T12:48:38+00:00",
+    "closed_at": "2026-04-15T12:48:37+00:00",
+    "merged_at": null,
+    "author": "a-effort",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Three bugs prevented login from working when running the React app via `npm run dev`:\r\n\r\n1. No dev proxy: relative `/auth/*` and `/api/*` fetch calls resolved to the Vite port (5173) instead of the FastAPI backend on 4444. Added `server.proxy` to forward these paths.\r\n\r\n2. Wrong base in dev: Vite base was `/static/app/` in all modes. The custom router pushes paths like `/app/login`, which Vite rejected as outside the base. Changed base to `/` for dev, keeping `/static/app/` only for production builds.\r\n\r\n3. Unconditional 401 redirect: any 401 — including from the login endpoint itself — triggered `window.location.replace(\"/app/login\")`, so wrong-password attempts reloaded the page instead of showing \"Invalid credentials.\"\r\n\r\n   Fix: add `skipRedirectOn401` to `RequestOptions`. When true, a 401 throws ApiError without redirecting, leaving the caller in control. This is intentionally separate from `unauthenticated` so the two concerns stay independently composable as the app grows (token refresh, SSO callback, password reset all need skipRedirectOn401 without necessarily being unauthenticated, or vice versa).\r\n\r\n   The login call now passes both flags explicitly.\r\n\r\n<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n---\r\n\r\n## 📝 Use cases and behavior\r\n\r\nNormal authenticated request (unauthenticated: false, skipRedirectOn401: false)\r\n\r\nToken is added to the header. On 401, the token is cleared and the user is redirected to login. This is the session-expiry path, the right behavior for the majority of calls.\r\n\r\n  ---\r\nLogin (unauthenticated: true, skipRedirectOn401: true)\r\n\r\nNo token in header (none exists yet). On 401, no redirect: the Login component catches the ApiError and shows `Invalid credentials`. note: this is the case I ran across.\r\n\r\nEdge case: the backend returns 401 for reasons other than wrong password: account locked, account inactive, IP blocked, brute-force throttle. All of these currently surface to the user as `Invalid credentials` which is intentionally vague for security reasons. The Login component would need separate handling (checking err.body) to show more specific messages if the backend sends them.\r\n\r\n  ---\r\n  Token refresh (unauthenticated: false, skipRedirectOn401: true)\r\n\r\nThe expired access token is still sent in the header (the refresh endpoint may need it to identify the session). On 401, no redirect: the caller handles it, likely by clearing the session and navigating to login programmatically with a `session expired` message rather than a silent redirect. This gives the app control over the UX (e.g. showing a modal rather than losing in-progress form state).\r\n\r\nEdge case: if the refresh token is also expired or revoked, the 401 should be treated as a hard logout. The caller must handle this explicitly: skipRedirectOn401 means it won't happen automatically.\r\n\r\n  ---\r\nSSO/OIDC callback (unauthenticated: true, skipRedirectOn401: true)\r\n\r\nThe browser returns from the IdP with an auth code. The app exchanges it without a Bearer token. On 401, the exchange failed: bad code, clock skew, nonce mismatch. No redirect is correct here; redirecting to login mid-SSO flow would create a loop. The caller handles the error and shows a meaningful message or restarts the flow.\r\n\r\n  ---\r\nPassword reset submission (unauthenticated: true, skipRedirectOn401: true)\r\n\r\nThe reset token in the request body is the credential. On 401, the token is expired or invalid. No redirect: the user should see an error on the reset page, not be sent to login (they're already trying to recover access).\r\n\r\nEdge case: the reset endpoint might return 401 vs 400 vs 410 (Gone) for different failure modes: expired token vs malformed token vs already-used token. skipRedirectOn401 handles the redirect suppression; distinguishing these requires checking err.status and err.body in the caller.\r\n\r\n  ---\r\nPublic endpoint that returns 401 (unauthenticated: true, skipRedirectOn401: false)\r\n\r\nExample: public tool listing on a ContextForge instance that has been reconfigured to require auth. The app has no token, makes an unauthenticated request, gets 401. With skipRedirectOn401: false, the user is redirected to login (correct behavior). This is why the two flags need to be independent: unauthenticated doesn't imply skipRedirectOn401.\r\n\r\nEdge case: if the user is mid-flow (e.g. filling out a form on a page that also fetches a public resource), the redirect interrupts them. This is a general SPA problem, not specific to this design.\r\n\r\n  ---\r\nMisuse: skipRedirectOn401 (true on a normal authenticated call)\r\n  \r\nIf a developer sets this on a regular API call and the session expires, the user gets an error message instead of being redirected to login. The app may end up in an inconsistent authenticated-looking state. The JSDoc on the option is the primary guard against this.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\nlogic changes in `client.ts` and `AuthContext.tsx` are worth covering when a test framework gets set up:               \r\n                                                                                      \r\n  client.ts — skipRedirectOn401                                                       \r\n  - 401 with skipRedirectOn401: false (default): clears token, calls                  \r\n  window.location.replace, throws ApiError(401)\r\n  - 401 with skipRedirectOn401: true: does NOT redirect, does NOT clear token, throws\r\n  ApiError(401)\r\n  - 401 with unauthenticated: true, skipRedirectOn401: true (login case): same as\r\n  above — no redirect, no token clear\r\n\r\n  AuthContext.tsx\r\n  - Failed login (backend 401): ApiError(401) propagates to the caller, no redirect\r\n  occurs\r\n  - Successful login: token stored, user state set\r\n\r\n  These are the highest-value cases to test when Vitest or Jest gets added. \r\n\r\n---\r\n🤖 AI assisted \r\n🧑🏻‍💻 human edited / reviewed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4111945640",
+      "author": "gcgoncalves",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-15T08:25:07+00:00",
+      "body": "This config is not needed, the client should never be started as a separate entity.\n\nUsers should run `make serve` or `dev` or `compose-up` or similar, and access the app through the same port as the HTMX app (`/admin`), without running an extra service. For example: `localhost:8000/app` or `localhost:8080/app`."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8d1e5c73142e0907d6bc10ae02581f9cbcc1fca0",
+      "message": "fix(ui): fix login in Vite dev mode\n\nThree bugs prevented login from working when running the React app via\n`npm run dev`:\n\n1. No dev proxy: relative `/auth/*` and `/api/*` fetch calls resolved\n   to the Vite port (5173) instead of the FastAPI backend on 4444.\n   Added `server.proxy` to forward these paths.\n\n2. Wrong base in dev: Vite base was `/static/app/` in all modes. The\n   custom router pushes paths like `/app/login`, which Vite rejected as\n   outside the base. Changed base to `/` for dev, keeping `/static/app/`\n   only for production builds.\n\n3. Unconditional 401 redirect: any 401 — including from the login\n   endpoint itself — triggered `window.location.replace(\"/app/login\")`,\n   so wrong-password attempts reloaded the page instead of showing\n   \"Invalid credentials.\"\n\n   Fix: add `skipRedirectOn401` to `RequestOptions`. When true, a 401\n   throws ApiError without redirecting, leaving the caller in control.\n   This is intentionally separate from `unauthenticated` so the two\n   concerns stay independently composable as the app grows (token\n   refresh, SSO callback, password reset all need skipRedirectOn401\n   without necessarily being unauthenticated, or vice versa).\n\n   The login call now passes both flags explicitly.\n\nSigned-off-by: Anna Effort <anna.effort@datastax.com>",
+      "author": "Anna Effort",
+      "date": "2026-04-14T23:58:31+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 30,
+  "deletions": 11,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:06:07.109284",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:07.110554",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4212,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4212.json"
+  }
+}

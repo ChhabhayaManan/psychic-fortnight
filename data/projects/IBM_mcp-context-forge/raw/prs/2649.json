@@ -1,0 +1,61 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2649,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2649"
+  },
+  "metadata": {
+    "title": "Handle empty auth headers in tool conversion to avoid StopIteration",
+    "state": "closed",
+    "created_at": "2026-02-02T12:56:57+00:00",
+    "updated_at": "2026-02-07T11:15:46+00:00",
+    "closed_at": "2026-02-07T11:15:45+00:00",
+    "merged_at": "2026-02-07T11:15:45+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #1430 \r\n\r\n## 📌 Summary\r\n\r\nThis PR fixes a `StopIteration` crash in the `ToolService.convert_tool_to_read` method that occurs when listing tools that have `auth_type=\"authheaders\"` but an empty or null authentication value in the database.\r\n\r\nThe crash happens because the code assumes that if `auth_type` is \"authheaders\", the `decoded_auth_value` dictionary will contain at least one key. When `decoded_auth_value` is empty (returned by decode_auth(None), calling `next(iter(decoded_auth_value))` raises `StopIteration`, causing a 500 Internal Server Error during `list_tools` operations.\r\n\r\nThis fix makes the service robust against such malformed or incomplete data states by explicitly checking if `decoded_auth_value` is truthy before attempting to access its keys.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Create a tool with `auth_type=\"authheaders\"`.\r\n2. Manually modify the database (or use a script) to set its `auth_value` to `NULL` or an encrypted value that decrypts to `{}`.\r\n3. Call `list_tools`.\r\n4. Observe the `StopIteration` error in the logs.\r\n\r\nA reproduction script `tests/reproduce_stop_iteration.py` was created to simulate this exact state.\r\n\r\n## 🐞 Root Cause\r\n\r\nThe issue was located in `mcpgateway/services/tool_service.py` within the `convert_tool_to_read` method.\r\n\r\nThe `decode_auth` utility function returns an empty dictionary `{}` when the input is `None` (which is the case for tools with null `auth_value`. The code block for `authheaders` handling blindly attempted to get the first key from this dictionary:\r\n\r\n```python\r\nelif tool.auth_type == \"authheaders\":\r\n    # Get first key\r\n    first_key = next(iter(decoded_auth_value))  # <--- CRASH HERE if dict is empty\r\n```\r\n\r\n## 💡 Fix Description\r\n\r\nThe fix involves adding a check to verify that `decoded_auth_value` is not empty before accessing it.\r\n\r\n```python\r\nelif tool.auth_type == \"authheaders\":\r\n    # Get first key\r\n    if decoded_auth_value:  # <--- Safety check added\r\n        first_key = next(iter(decoded_auth_value))\r\n        tool_dict[\"auth\"] = { ... }\r\n    else:\r\n        tool_dict[\"auth\"] = None\r\n```\r\n\r\nIf the auth value is empty, we effectively treat it as having no authentication configured (`tool_dict[\"auth\"] = None`), which prevents the crash and allows the tool to be listed, albeit without auth headers (which is correct since none exist).\r\n\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3766885711",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-07T11:04:45+00:00",
+      "body": ""
+    },
+    {
+      "id": "3766888090",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-07T11:09:32+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c80314eab31c54e0bb729bd991618167918a5e2e",
+      "message": "fix: handle empty auth headers in tool conversion to avoid StopIteration\n\nAdd guard check for empty decoded_auth_value before accessing dict keys\nin convert_tool_to_read for authheaders auth type. When auth_value\ndecrypts to an empty dict, set auth to None instead of crashing.\n\nCloses #1430\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-02T12:35:39+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 32,
+  "deletions": 7,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:53.670269",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:53.672008",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2649,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2649.json"
+  }
+}

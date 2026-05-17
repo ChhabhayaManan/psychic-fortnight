@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1658,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1658"
+  },
+  "metadata": {
+    "title": "Optimize logs",
+    "state": "closed",
+    "created_at": "2025-12-18T23:38:47+00:00",
+    "updated_at": "2025-12-18T23:49:35+00:00",
+    "closed_at": "2025-12-18T23:49:34+00:00",
+    "merged_at": "2025-12-18T23:49:34+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Optimizes logging performance across the codebase by caching static values at module load, adding early log level filtering, and eliminating repeated dictionary allocations in hot paths.\r\n\r\nCloses #1657 \r\n\r\n### Changes\r\n\r\n**`mcpgateway/services/structured_logger.py`**\r\n- Cache `hostname` and `pid` at module load instead of calling `socket.gethostname()` and `os.getpid()` on every log entry\r\n- Move OpenTelemetry import to module level with availability flag to avoid import overhead per log\r\n- Add `_should_log()` helper for early termination before expensive enrichment/DB operations\r\n\r\n**`mcpgateway/services/logging_service.py`**\r\n- Cache `hostname` and `pid` at module load\r\n- Move three level-mapping dictionaries to module-level constants:\r\n  - `_PYTHON_TO_MCP_LEVEL_MAP` (used in `StorageHandler.emit()`)\r\n  - `_MCP_TO_PYTHON_METHOD_MAP` (used in `notify()`)\r\n  - `_MCP_LEVEL_VALUES` (used in `_should_log()`)\r\n- Properly set root logger level from `settings.log_level`\r\n\r\n**`mcpgateway/middleware/request_logging_middleware.py`**\r\n- Add `log_request_start` parameter (default: `False`) to optionally skip \"request started\" logs\r\n- When disabled, reduces middleware logging overhead by ~50% (1 log vs 2 per request)\r\n\r\n### Performance Impact\r\n\r\n| Optimization | Benefit |\r\n|-------------|---------|\r\n| Cached hostname/PID | Eliminates 2 system calls per log entry |\r\n| Module-level OTEL import | Eliminates import check per log entry |\r\n| Early log level filtering | Skips enrichment/DB writes for filtered logs |\r\n| Cached level mapping dicts | Eliminates 3 dict allocations per log entry |\r\n| Optional request start log | Halves middleware logging overhead |\r\n\r\n**Estimated improvement at 1000 logs/sec:**\r\n- ~10-20 MB/day less GC pressure from eliminated object allocations\r\n- Reduced p99 latency from fewer system calls in hot paths\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "7cac46c1f7b4f5dba5046264d9a0d08be59636ff",
+      "message": "Logging improvements\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-18T22:57:34+00:00"
+    },
+    {
+      "sha": "ebf653107016f6111e59332b244ea05ccd865252",
+      "message": "Logging improvements\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-18T23:06:02+00:00"
+    },
+    {
+      "sha": "e6369a9b3b077f9c8a3668da2c48e1a193e08137",
+      "message": "Logging improvements\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-18T23:15:08+00:00"
+    },
+    {
+      "sha": "c9ae72410d5f67100451b2474d434cce5b77aaca",
+      "message": "Logging improvements\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-18T23:37:14+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 260,
+  "deletions": 73,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:45.787344",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:45.789147",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1658,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1658.json"
+  }
+}

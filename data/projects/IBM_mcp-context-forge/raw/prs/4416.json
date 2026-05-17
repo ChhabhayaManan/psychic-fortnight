@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4416,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4416"
+  },
+  "metadata": {
+    "title": "fix(oauth): Allow Vault plugin to inject auth for OAuth authorization_code gateways",
+    "state": "closed",
+    "created_at": "2026-04-23T15:18:36+00:00",
+    "updated_at": "2026-04-26T15:17:20+00:00",
+    "closed_at": "2026-04-26T15:17:18+00:00",
+    "merged_at": "2026-04-26T15:17:18+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "ica",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Problem\n\nThe Vault plugin's `X-Vault-Tokens` header mechanism fails for gateways configured with `grant_type: authorization_code`. When no stored OAuth token exists in the database, the code raises a `ToolInvocationError` **before** plugin hooks execute, preventing the Vault plugin from injecting authentication via the `X-Vault-Tokens` header.\n\n### Why This Matters\n\nThe Vault plugin is designed to inject authentication tokens from external vault systems (stored in client-provided `X-Vault-Tokens` headers). This allows clients to provide authentication dynamically without requiring tokens to be stored in ContextForge's database. However, the current OAuth authorization_code flow assumes tokens MUST come from the database and blocks execution early.\n\n### Current Behavior\n\n1. OAuth authorization_code check happens at lines 3816-3819 (Rust fallback path) and 4907-4911 (Python MCP path)\n2. If `get_user_token()` returns `None`, exception is raised immediately: `\"Please authorize {gateway_name} first...\"`\n3. Plugin `tool_pre_invoke` hooks run **later** at lines 3862-3882 (Rust path) and 4691-4708 (Python path)\n4. Vault plugin never gets a chance to inject auth from `X-Vault-Tokens` header\n\n### Expected Behavior\n\nWhen no stored OAuth token exists, don't raise exception immediately. Allow plugins to run and potentially provide auth via headers. Only fail if plugins also don't provide auth (fail-closed at upstream).\n\n## Solution\n\nRemove the blocking exception when no database token is found. Instead, initialize empty headers and continue execution, allowing plugin hooks to inject authentication. If neither database token nor plugin provides auth, the upstream MCP server returns a 401 authentication error (proper fail-closed behavior).\n\n### Approach\n\nThe fix changes the exception-raising behavior to a pass-through approach:\n\n**Before:**\n```python\nif access_token:\n    headers = {\"Authorization\": f\"Bearer {access_token}\"}\nelse:\n    raise ToolInvocationError(f\"Please authorize {gateway_name} first...\")\n```\n\n**After:**\n```python\nif access_token:\n    headers = {\"Authorization\": f\"Bearer {access_token}\"}\nelse:\n    # If no token, continue with empty headers - plugins may provide auth via X-Vault-Tokens.\n    # If plugins don't provide auth, upstream MCP server returns 401 (fail-closed).\n    headers = {}\n```\n\nThis pattern maintains security while enabling plugin-based authentication injection.\n\n## Changes Made\n\n### Code Changes (mcpgateway/services/tool_service.py)\n\n1. **Rust fallback path (line 3819)**: Removed `raise ToolInvocationError`, added `else: headers = {}` with explanatory comment\n2. **Python MCP path (lines 4910-4911)**: Same change for Python code path\n\n### Test Updates\n\n1. **test_tool_service.py:9443** - `test_prepare_rust_mcp_tool_execution_oauth_authorization_code_requires_prior_authorization`\n   - **Old**: Expected `ToolInvocationError` to be raised\n   - **New**: Verifies no exception raised, plan is eligible, plugins can execute\n\n2. **test_tool_service_coverage.py:8543** - `test_mcp_gateway_oauth_authorization_code_missing_token_raises`\n   - **Old**: Expected immediate `ToolInvocationError`\n   - **New**: Expects upstream 401 when no auth provided (fail-closed)\n\n## Security Analysis\n\n### No Security Regression\n\n✅ **Fail-closed behavior maintained**: If neither database token nor plugin provides auth, the upstream MCP server will return a 401 authentication error. This is proper fail-closed security - the system denies access by default.\n\n✅ **Database token precedence preserved**: When a database token exists, it's used (line 3817/4908). The change only affects the case where `get_user_token()` returns `None`.\n\n✅ **Plugin execution order unchanged**: Plugins run after OAuth setup (lines 3862-3882 / 4691-4708), before upstream request. No changes to plugin hook timing.\n\n✅ **Existing auth flows unchanged**:\n- Users with stored OAuth tokens → still works (token set at line 3817/4908)\n- Client credentials flow → unchanged (lines 3823-3829 / 4915-4922)\n- Other auth types (`basic`, `bearer`, `authheaders`) → already allow empty headers\n\n### Why This Is Safe\n\n1. **Not a bypass**: We're not removing authentication - just moving the enforcement point from ContextForge to the upstream server\n2. **Better error messages**: Users get specific 401 errors from the upstream server instead of generic \"Please authorize\" messages\n3. **Matches existing patterns**: Other auth types already use this fail-closed-at-upstream pattern\n4. **Enables legitimate use case**: Vault plugin can now inject credentials dynamically without database storage\n\n## Test Results\n\n### Full Test Suite\n- **Total tests**: 18,501 passed\n- **Runtime**: ~8 minutes\n- **Coverage**: All test files passed\n\n### Updated Tests\n✅ `test_prepare_rust_mcp_tool_execution_oauth_authorization_code_requires_prior_authorization` - Verifies plugins can execute when no DB token exists  \n✅ `test_mcp_gateway_oauth_authorization_code_missing_token_raises` - Verifies upstream handles auth failure with 401\n\n### Code Quality\n- **pylint**: 10.00/10\n- **ruff**: All checks passed\n- **bandit**: 0 security issues\n- **interrogate**: Docstring coverage passed\n- **pre-commit**: All hooks passed\n\n## Verification Plan\n\n1. ✅ Fix existing tests that verify the old (blocking) behavior\n2. ✅ Verify no exception raised when no DB token exists\n3. ✅ Verify plugins can inject auth via X-Vault-Tokens header\n4. ✅ Verify upstream returns 401 when no auth provided (fail-closed)\n5. ✅ Verify DB token still takes precedence when present\n\n## Fixes\n\nCloses #4397",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "88ad7e949cc4343666c2aea61fade6ad1a60808b",
+      "message": "fix(oauth): allow Vault plugin to inject auth for authorization_code gateways\n\nWhen OAuth authorization_code gateways have no stored token in the database,\nthe code previously raised an exception before plugin hooks could execute.\nThis blocked the Vault plugin from injecting authentication via X-Vault-Tokens\nheaders.\n\nChanges:\n- Remove exception when no stored OAuth token found (lines 3819, 4911)\n- Initialize empty headers dict to allow plugin auth injection\n- Update test to verify plugins can execute without DB token\n- Maintain fail-closed security: upstream returns 401 if no auth provided\n\nThe Vault plugin can now inject OAuth tokens dynamically for authorization_code\ngateways, enabling external vault integration without requiring tokens to be\nstored in ContextForge's database.\n\nFixes #4397\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-23T14:45:46+00:00"
+    },
+    {
+      "sha": "996d7ae7ac5bbf669897cb060dc300b0ad76dbbb",
+      "message": "test: update test_mcp_gateway_oauth_authorization_code_missing_token_raises\n\nUpdate test in test_tool_service_coverage.py to reflect new behavior where\nplugins can inject auth when no DB token exists. The test now verifies that\nexecution continues (no immediate exception) and upstream handles auth failure.\n\nRelated to #4397\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-23T14:51:16+00:00"
+    },
+    {
+      "sha": "666f09889be5dc273d108d7ef2289dc19b628c4e",
+      "message": "fix(oauth): defer auth gate to post-plugin and strip vault tokens\n\nAddress review of vault-plugin-oauth-authorization-code:\n\n- Defer authorization_code auth requirement until after tool_pre_invoke\n  hooks run; raise the actionable /oauth/authorize/{id} error locally if\n  no plugin or other source injected an Authorization header. Restores\n  actionable UX while still letting Vault-style plugins inject auth.\n- Strip X-Vault-Tokens (case-insensitive) from outbound headers in both\n  Rust fallback and Python MCP paths. Defense in depth against header\n  leakage when Vault plugin is disabled (default), errors out, or the\n  header is mistakenly added to passthrough_allowed.\n- Log INFO when entering the no-DB-token fallback branch (gateway, user,\n  no token values) so SecOps can detect this codepath being exercised.\n- Add deny-path test: no DB token + no plugin -> raises actionable error.\n- Add positive-path test: no DB token + plugin injects Authorization\n  -> request reaches upstream with the plugin's token.\n- Add defense-in-depth test: X-Vault-Tokens stripped (any case) from\n  outbound headers regardless of plugin state.\n\nPer AGENTS.md, security-sensitive changes must include deny-path\nregression tests.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T13:45:27+00:00"
+    },
+    {
+      "sha": "be57e2122c6342a0c239156232d649fd10065a38",
+      "message": "style(oauth): collapse audit log strings to silence W1404\n\nPylint W1404 (implicit-str-concat) tripped after black joined the\nmulti-line audit log strings introduced in 666f09889. Single literals\nfit within line length and keep pylint clean at 10.00/10.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T14:30:41+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 334,
+  "deletions": 9,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:02.565592",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:02.566704",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4416,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4416.json"
+  }
+}

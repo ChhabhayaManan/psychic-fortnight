@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4535,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4535"
+  },
+  "metadata": {
+    "title": "fix(auth): owner cannot access their own private resources with a scoped token",
+    "state": "open",
+    "created_at": "2026-04-30T06:13:21+00:00",
+    "updated_at": "2026-05-04T05:36:37+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nOwners of private resources (tools, prompts, resources, A2A agents, virtual servers, gateways) were receiving a 404 when accessing their own resources using a scoped token (`token_teams=[]`). The owner check was inadvertently blocked before it could run, because the `is_public_only_token` early-return gate came first in all `_check_*_access` methods. This PR fixes the ordering across all seven affected services so that an owner is always granted access to their own private resource regardless of token scope.\r\n\r\n## 🔗 Related Issue\r\n\r\nCloses: #4473\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Create a tool (or prompt, resource, virtual server, gateway, or A2A agent) and set its visibility to `private`.\r\n2. Generate a scoped JWT for the owner with an explicit `teams` claim set to `[]`.\r\n3. `GET /tools/{id}` (or equivalent) with that token → **404 Not Found**.\r\n4. After this fix, the same request returns **200 OK**.\r\n\r\n## 🐞 Root Cause\r\n\r\nIn all seven `_check_*_access` helper functions the code evaluated:\r\n\r\n```python\r\nis_public_only_token = token_teams is not None and len(token_teams) == 0\r\nif is_public_only_token:\r\n    return False          # ← owner also hits this early return\r\n# … owner check follows, never reached\r\n```\r\n\r\nBecause `token_teams=[]` is the \"public-only\" scope, the gate fired before the `owner_email == user_email` check, denying the owner access to their own private resource.\r\n\r\nAffected services: `tool_service`, `prompt_service`, `resource_service`, `a2a_service`, `server_service`, `gateway_service`, `a2a_server_service`.\r\n\r\n## 💡 Fix Description\r\n\r\nIn each of the seven functions, the owner equality check is moved **above** the `is_public_only_token` gate:\r\n\r\n```python\r\n# owner check first — token scope does not restrict ownership\r\nif visibility == \"private\" and owner_email and owner_email == user_email:\r\n    return True\r\n\r\nis_public_only_token = token_teams is not None and len(token_teams) == 0\r\nif is_public_only_token:\r\n    return False\r\n```\r\n\r\n**Design invariants preserved:**\r\n- `(None, None)` anonymous admin bypass fires before this block and is unchanged.\r\n- Non-owner callers with `token_teams=[]` still get `False` — the owner check requires `owner_email == user_email`.\r\n- **Listing paths** (`_visible_agent_ids`, `base_service._apply_access_control`) deliberately keep owner rows suppressed for public-only tokens — this is a documented policy and is **not** changed here. Only point-lookup (`_check_*_access`) is affected.\r\n\r\nTests updated/added:\r\n- Existing `owner + token_teams=[]` assertions flipped from `False` → `True` for all seven functions.\r\n- New symmetry tests assert that **non-owners** with `token_teams=[]` are still denied.\r\n- New `TestA2AServerAccessCheck` class for the previously untested `a2a_server_service._check_server_access`.\r\n- Stale comment in `_visible_agent_ids` updated to document the intentional divergence from `_check_agent_access`.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                             | Command                          | Status |\r\n|-----------------------------------|----------------------------------|--------|\r\n| Lint suite                        | `make lint`                      |     Pass   |\r\n| Unit tests                        | `make test`                      |    Pass    |\r\n| Coverage ≥ 90 %                   | `make coverage`                  |    Pass    |\r\n| Manual regression no longer fails | steps above (scoped token + GET) |   Pass     |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n\r\n- [x] No breaking change to MCP clients — access control is server-side only\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "dba268aea677e0132d0e962748fec73ced366c8b",
+      "message": "fix(auth): move owner check before public-only token gate in all _check_*_access methods\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-04-28T13:49:57+00:00"
+    },
+    {
+      "sha": "36104dc8ea1813a3aa7bb240514b2601a73ca3f1",
+      "message": "test(auth): fix stale owner+public-only-token assertions in test_a2a_server_service, test_tool_service, and test_tool_service_coverage\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-04-30T10:18:03+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 184,
+  "deletions": 64,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T17:17:11.452304",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:11.453426",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4535,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4535.json"
+  }
+}

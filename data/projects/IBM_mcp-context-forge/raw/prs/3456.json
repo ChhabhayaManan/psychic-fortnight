@@ -1,0 +1,64 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3456,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3456"
+  },
+  "metadata": {
+    "title": "fix: restore OAuth settings in server edit form",
+    "state": "closed",
+    "created_at": "2026-03-04T05:35:42+00:00",
+    "updated_at": "2026-03-04T13:33:19+00:00",
+    "closed_at": "2026-03-04T13:33:17+00:00",
+    "merged_at": "2026-03-04T13:33:17+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "ica",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Description\r\n\r\nFixes the server edit form not restoring OAuth 2.0 settings when reopening a server for editing.\r\n\r\n## Problem\r\n\r\nWhen editing a Virtual Server with OAuth 2.0 enabled in the admin UI:\r\n1. OAuth settings are correctly saved to the database\r\n2. `GET /admin/servers/{id}` returns the data correctly\r\n3. However, the edit form shows the OAuth checkbox unchecked and Authorization Server URL empty\r\n\r\n## Root Cause\r\n\r\nThe backend API returns camelCase property names (`oauthEnabled`, `oauthConfig`) due to Pydantic's `alias_generator=to_camel_case` in `BaseModelWithConfigDict`, but the frontend JavaScript was reading snake_case properties (`oauth_enabled`, `oauth_config`), which are `undefined` in the response.\r\n\r\n## Solution\r\n\r\nUpdated `mcpgateway/static/admin.js` to use camelCase property names that match the API response format:\r\n- `server.oauth_enabled` → `server.oauthEnabled`\r\n- `server.oauth_config` → `server.oauthConfig`\r\n\r\n## Changes\r\n- Modified 6 property references in the server edit form population logic\r\n- No API or database schema changes required\r\n- Maintains consistency with MCP specification's camelCase convention\r\n\r\n\r\nCloses #3405\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3889411200",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-04T13:23:12+00:00",
+      "body": "LGTM — correct fix, clean implementation.\n\n**Review findings:**\n\n- **Root cause confirmed:** `ServerRead` schema uses `alias_generator=to_camel_case` and `admin_get_server()` returns `model_dump(by_alias=True)`, so the API response uses camelCase. The frontend was reading snake_case properties (`oauth_enabled`, `oauth_config`) which are `undefined` in the response.\n- **Fix is correct:** All 13 property references updated from snake_case to camelCase.\n- **Nested fields are correct:** `oauthConfig` is `Dict[str, Any]` — Pydantic's alias generator doesn't transform dict keys, so inner fields (`authorization_servers`, `token_endpoint`, `scopes_supported`) correctly remain snake_case.\n- **Consistency verified:** Matches the pattern used by other fields in `editServer` (`associatedTools`, `associatedResources`, `createdAt`) and other entity types (A2A agents, gateways).\n- **No security or performance concerns.**\n\n**Test coverage added:** 4 JS unit tests covering OAuth checkbox + config population, disabled state, `authorization_server` string fallback, and a regression guard ensuring snake_case properties are not read."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "48b5f350ffe45313775e794b88d5a47ae3b453b6",
+      "message": "fix: restore OAuth settings in server edit form\n\nUpdate admin.js to use camelCase property names (oauthEnabled, oauthConfig)\ninstead of snake_case (oauth_enabled, oauth_config) to match the API response\nformat from ServerRead schema which uses Pydantic's alias_generator.\n\nThis fixes the issue where OAuth checkbox and Authorization Server URL\nwere not populated when editing a server with OAuth enabled.\n\nCloses #3405\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-03-04T05:30:34+00:00"
+    },
+    {
+      "sha": "2c3fe66d235ccb5c2315b28d0cfdc00f1f6f630a",
+      "message": "test: add JS unit tests for OAuth edit form camelCase fix (#3405)\n\nCover editServer OAuth settings restoration with 4 test cases:\n- OAuth enabled with full config populates checkbox, section, and fields\n- OAuth disabled hides section and clears fields\n- authorization_server string fallback (vs authorization_servers array)\n- Regression guard: snake_case properties are NOT read from API response\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-04T13:20:57+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 260,
+  "deletions": 13,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:22.717385",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:22.719106",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3456,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3456.json"
+  }
+}

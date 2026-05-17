@@ -1,0 +1,105 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2071,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2071"
+  },
+  "metadata": {
+    "title": "Event-Driven Gateway Refresh for Pooled Sessions with Notifications",
+    "state": "closed",
+    "created_at": "2026-01-13T13:26:56+00:00",
+    "updated_at": "2026-01-19T12:41:38+00:00",
+    "closed_at": "2026-01-19T12:41:37+00:00",
+    "merged_at": "2026-01-19T12:41:37+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "enhancement",
+      "wxo"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# ✨ Feature / Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\n\r\nCloses #1984 \r\n\r\n(Phase 2 of https://github.com/IBM/mcp-context-forge/issues/1984#issuecomment-3734591382)\r\n\r\n---\r\n\r\n## 🚀 Summary (1-2 sentences)\r\n\r\n- Implemented an event-driven refresh mechanism for MCP gateways using the notifications send by the server to the client in mcp eg. `notifications/tools/list_changed` NOTE: notifications only work with long lived sessions, i.e with session pooling in gateway.\r\n- Introduced a NotificationService that handles server notifications for pooled sessions, debounces rapid updates, and automatically triggers a gateway schema refresh (tools, resources, prompts) when changes are detected.\r\n\r\n**NOTE:** _this same notifications service can be used for other notifications as well like **progress**, **cancellations**, etc. \r\n(gateway <->mcp server)_\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n- [ ] CHANGELOG updated (if user-facing)\r\n\r\n---\r\n\r\n## 📓 Notes:\r\n\r\nArchitecture:\r\n\r\nThe implementation introduces a new NotificationService that acts as a bridge between the low-level MCPSessionPool and the high-level GatewayService.\r\n\r\n1. Notification Handling: MCPSessionPool now configures ClientSession instances with a message handler that routes list_changed notifications to the NotificationService.\r\n2. Debouncing: The service implements a configurable debounce mechanism (default 5s) to prevent \"refresh storms\" from chatty servers.\r\n3. Context Propagation: Fixed a critical issue where gateway_id was not being propagated to pooled sessions, ensuring notifications can be correctly attributed to the source gateway. \r\n4. Automatic Refresh: The NotificationService holds a reference to GatewayService to trigger the existing _refresh_gateway_tools_resources_prompts logic efficiently.\r\n\r\nFlow Diagram:\r\n\r\n```mermaid\r\nsequenceDiagram\r\n    participant MCP as MCP Server\r\n    participant Pool as MCPSessionPool\r\n    participant NS as NotificationService\r\n    participant GS as GatewayService\r\n    participant DB as Database\r\n\r\n    Note over MCP, Pool: Session established with gateway_id context\r\n    MCP->>Pool: notifications/tools/list_changed\r\n    Pool->>NS: message_handler(notification)\r\n    NS->>NS: Debounce (5s)\r\n    NS->>GS: _refresh_gateway_tools_resources_prompts\r\n    GS->>MCP: Call tool/list, resource/list, prompt/list\r\n    MCP-->>GS: Return updated schemas\r\n    GS->>DB: Sync changes (add/update/remove)\r\n    Note right of GS: Updates reflected in database\r\n```\r\n\r\nKey Changes\r\n\r\n1. New Service:  `mcpgateway/services/notification_service.py`\r\n2. Session Pool: Updated `mcpgateway/services/mcp_session_pool.py` to auto-initialize notification handling and pass gateway_id.\r\n3. Gateway Service: Updated `mcpgateway/services/gateway_service.py` to register capabilities (tools.listChanged support) and ensure health checks use gateway_id.\r\n4. Tool/Resource Services: Updated tool_service.py and resource_service.py to pass gateway_id during session acquisition.\r\n5. Main: Updated main.py to wire up the NotificationService startup.\r\n\r\nVerification\r\n\r\n- Added comprehensive unit tests for NotificationService.\r\n- Verified end-to-end flow with a local MCP server triggering catalog updates.\r\n\r\n---\r\n\r\n\r\n## 🛠️ Testing:\r\n\r\n1. Enable Session pooling in the gateway\r\n```\r\nMCP_SESSION_POOL_ENABLED=true\r\n```\r\n\r\n2. Run this MCP server, and add it in the context forge gateway\r\nThe server has two tools, simple `hello` tool and `add_dynamic_tool` tool that takes a tool name as input and when the tool is called with an input, it creates another tool with the name you passed as input and sends a `notifications/tools/list_changed` notification to the gateway.\r\n\r\n```python\r\nfrom fastmcp import FastMCP, Context\r\n\r\n# Initialize with dependencies\r\nmcp = FastMCP(name=\"dynamic-tools-mcp\")\r\n\r\n# -------------------------------------------------\r\n# Initial tool\r\n# -------------------------------------------------\r\n@mcp.tool()\r\ndef hello(name: str) -> str:\r\n    \"\"\"Say hello.\"\"\"\r\n    return f\"Hello {name}\"\r\n\r\n# -------------------------------------------------\r\n# AdminMCP tool to add tools dynamically\r\n# -------------------------------------------------\r\n@mcp.tool()\r\nasync def add_dynamic_tool(tool_name: str, ctx: Context) -> str:\r\n    \"\"\"\r\n    Adds a new tool at runtime and notifies clients.\r\n    \"\"\"\r\n    # Define the new tool logic\r\n    def dynamic_tool(text: str) -> str:\r\n        return f\"[{tool_name}] {text}\"\r\n    \r\n    # Set the function name/metadata explicitly so FastMCP picks it up\r\n    dynamic_tool.__name__ = tool_name\r\n    dynamic_tool.__doc__ = f\"Dynamically added tool '{tool_name}'\"\r\n\r\n    # Register the tool\r\n    mcp.tool(name=tool_name)(dynamic_tool)\r\n\r\n    # This sends the 'notifications/tools/list_changed' event\r\n    await ctx.send_tool_list_changed()\r\n    await ctx.info(f\"Notification sent for new tool: {tool_name}\")\r\n\r\n    return f\"Tool '{tool_name}' added successfully.\"\r\n\r\n# -------------------------------------------------\r\n# Run MCP server\r\n# -------------------------------------------------\r\nif __name__ == \"__main__\":\r\n    mcp.run(transport=\"http\", host=\"127.0.0.1\", port=8001)\r\n```\r\n\r\n3. Once the server is added in the gateway, go to tools tabs, find add_dynamic_tool, click test tool.\r\n\r\n4. Give input as `my_new_tool` and click Run Tool. Once executed the mcp server will automatically create a new tool inside the server and then will send a `notifications/tools/list_changed` notification to the gateway. The Gateway will read the notification, check for correct notification and will take the appropriate action and refresh/sync the server.\r\n\r\n5. Reload the tools tab, check that the new tool: `my_new_tool` will be automatically show up in the tools list.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3677716893",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-19T11:50:45+00:00",
+      "body": "Approved - merging. Please test and open new issue / PR if needed."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "edaa6ea92ead63c15cc9b1c3001d31571d7845c1",
+      "message": "centralized notification service integration with session pooling\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-13T11:23:40+00:00"
+    },
+    {
+      "sha": "7e4b424852b26ff9a72cb5f07706af00a51295e3",
+      "message": "update doctests\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-13T11:46:47+00:00"
+    },
+    {
+      "sha": "325b843d9339edcd7a424116db67afdbaf575e08",
+      "message": "notification service test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-13T11:53:59+00:00"
+    },
+    {
+      "sha": "24906bcab09218c375b8e6447dca202207a350b3",
+      "message": "linting fixes\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-13T12:18:43+00:00"
+    },
+    {
+      "sha": "0349f2af390c923b8dc3954555137ea7215b27d5",
+      "message": "e2e test cases updation\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-13T12:33:06+00:00"
+    },
+    {
+      "sha": "daaa8cdc6a50f6ca8da8f58dffc7050ef37c612c",
+      "message": "adr for notification service\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-13T13:52:04+00:00"
+    },
+    {
+      "sha": "3434a33d93caabb08c8c067a10fd56a927fbef72",
+      "message": "fix: improve type annotations in notification_service.py\n\n- Add MessageHandlerCallback type alias for proper callable typing\n- Fix asyncio.Task type parameter (Task[None])\n- Add typed factory function for Set[NotificationType] default\n- Add explicit type annotations to capability dict processing\n- Add pyright ignore for intentional protected member access\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T09:39:18+00:00"
+    },
+    {
+      "sha": "445c345ea82b252ae10d5b023bc4335af92f421c",
+      "message": "fix: address review feedback for notification service\n\nSecurity & Correctness Fixes:\n- Add per-gateway lock acquisition before calling _refresh_gateway_tools_resources_prompts\n  to prevent race conditions with manual/auto refresh operations\n- Implement flag merging during debounce window - subsequent notifications\n  now merge their include_resources/include_prompts flags instead of being dropped\n- Add tracking of pending refresh flags to support flag merging\n\nDocumentation:\n- Update ADR-034 status from \"Planned\" to \"Accepted\"\n- Document known limitation: session pool keys by URL/identity, not gateway_id,\n  so multiple gateways sharing the same URL may have notification attribution issues\n- Add limitation note to notification_service.py module docstring\n\nTest Updates:\n- Fix mock configuration for _get_refresh_lock (synchronous, returns asyncio.Lock)\n- Add test for lock-held skip behavior\n- Update e2e tests with proper lock mocking\n\nCloses review feedback from PR #2071\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T10:02:27+00:00"
+    },
+    {
+      "sha": "660240a5beee1946a8c21cff1cfeb4fdd1bc86a7",
+      "message": "fix: add gateway_id to session pool key for correct notification attribution\n\nPreviously, session pool keys were (user_identity, url, identity_hash, transport_type).\nIf multiple gateways shared the same URL/auth, notifications would be attributed to\nwhichever gateway first created the session, causing the wrong gateway to be refreshed.\n\nChanges:\n- Add gateway_id as 5th element of PoolKey tuple\n- Add gateway_id field to PooledSession dataclass\n- Update _make_pool_key to include gateway_id parameter\n- Update acquire/release to use gateway_id in pool key reconstruction\n- Update _create_session to store gateway_id on PooledSession\n- Update get_metrics to unpack 5-element pool key\n- Add \"Gateway Isolation\" section to MCPSessionPool docstring\n- Update ADR to note slightly reduced session reuse as trade-off\n- Remove \"Known Limitations\" section since issue is now fixed\n- Update all tests to use 5-element pool keys\n\nThe trade-off is slightly reduced session reuse when multiple gateways have\ndifferent gateway_ids but share the same URL/auth. This is acceptable because\ncorrectness of notification attribution is more important than session reuse\nefficiency for this edge case.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-19T11:35:40+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 1764,
+  "deletions": 28,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:30.992361",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:30.993232",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2071,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2071.json"
+  }
+}

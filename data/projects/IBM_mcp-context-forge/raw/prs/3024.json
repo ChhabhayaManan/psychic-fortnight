@@ -1,0 +1,103 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3024,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3024"
+  },
+  "metadata": {
+    "title": "Fix injection of server_id in internally-forwarded streamable HTTP requests",
+    "state": "closed",
+    "created_at": "2026-02-18T07:20:10+00:00",
+    "updated_at": "2026-02-20T11:17:09+00:00",
+    "closed_at": "2026-02-20T11:13:46+00:00",
+    "merged_at": "2026-02-20T11:13:46+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3018\r\n\r\n## 📌 Summary\r\nWhen a Streamable HTTP POST request is forwarded between workers via the internal affinity mechanism (x-forwarded-internally=true), the server_id from the URL path (/servers/{id}/mcp) was not injected into the JSON-RPC params before posting to /rpc. This caused /rpc routing to fall into the unscoped list_tools path instead of the server-scoped list_server_tools path, breaking multi-tenant isolation in multi-worker deployments.\r\n\r\nWhy this matters: In production deployments with multiple workers and session affinity enabled, clients would receive tools from ALL servers instead of just the requested server, violating tenant isolation.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\nPrerequisites:\r\n\r\n- Multi-worker deployment with MCPGATEWAY_SESSION_AFFINITY_ENABLED=true\r\n- At least 2 registered MCP servers with different tools\r\n\r\nSteps:\r\n\r\n1. Establish a stateful MCP session on Worker A via /servers/{server_id}/mcp/\r\n2. Send a tools/list request that gets routed to Worker B (cross-worker forward)\r\n3. Worker B forwards the request internally with x-forwarded-internally: true\r\n4. The forwarded request posts to /rpc without params.server_id\r\n5. /rpc routes to unscoped handler → returns tools from all servers instead of just {server_id}\r\n\r\nExpected: Only tools from the requested server\r\nActual: Tools from all servers (multi-tenant isolation broken)\r\n\r\n## 🐞 Root Cause\r\n\r\nThe internally-forwarded branch (lines 1850-1873) was missing the server_id injection logic that was added to the local-owner branch in PR #2974.\r\nLocation: mcpgateway/transports/streamablehttp_transport.py:1850-1873\r\nThe match variable (containing the extracted server_id from the URL path) was available but not used in this branch.\r\n\r\n## 💡 Fix Description\r\nAdded the same server_id injection logic to the internally-forwarded branch that already existed in the local-owner branch.\r\n\r\nKey changes:\r\n\r\nInject server_id from URL path (lines 1861-1868):\r\n\r\n```python\r\n# Inject server_id from URL path into params for /rpc routing\r\nif match:\r\n    server_id = match.group(\"server_id\")\r\n    if \"params\" not in json_body:\r\n        json_body[\"params\"] = {}\r\n    if server_id:\r\n        json_body[\"params\"][\"server_id\"] = server_id\r\n        # Re-serialize body with injected server_id\r\n        body = orjson.dumps(json_body)\r\n        logger.debug(\r\n            f\"[HTTP_AFFINITY_FORWARDED] Injected server_id {server_id} into /rpc params\"\r\n        )\r\n\r\n```\r\n\r\nAdded comprehensive test coverage in test_streamablehttp_transport.py:\r\n\r\ntest_forwarded_post_injects_server_id_from_url - Verifies the fix\r\ntest_forwarded_post_no_server_id_in_url_no_injection - Edge case without server_id\r\ntest_forwarded_post_notification_no_server_id_injection - Notification handling\r\ntest_local_affinity_post_injects_server_id_regression - Regression test\r\n\r\nDesign points:\r\n\r\nMirrors the existing pattern in the local-owner branch (lines 2003-2010) for consistency\r\nUses the existing match variable captured at line 1776\r\nPlaced after notification handling (line 1859) and before httpx client call (line 1869)\r\nAdded debug logging for observability\r\nAll 251 transport tests pass with no regressions\r\nImpact: Restores proper server-scoped routing and multi-tenant isolation in multi-worker deployments.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3825327616",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-19T11:48:29+00:00",
+      "body": "Clean fix. The server_id injection from the URL path into JSON-RPC params is correctly guarded (`if match` and `if server_id`), and creates the `params` dict when missing. Comprehensive test coverage: injection with missing params, no-injection for non-server URLs, no-injection for notifications (202), and regression test for the local-owner path."
+    },
+    {
+      "id": "3831529250",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-20T11:17:09+00:00",
+      "body": "Re-reviewed after the latest commits. The hardening looks good:\n\n- `isinstance(json_body.get(\"params\"), dict)` correctly handles `null`, `[]`, and missing params — all coerced to a fresh dict before injection. Better than the previous `\"params\" not in json_body` check.\n- The fix is now applied to **both** injection paths (forwarded branch + local-owner branch) — good consistency.\n- 7 new tests with solid coverage: missing params, existing params, non-dict params (null/list), no-match URL, notification, and regression for local-owner path.\n\nLGTM."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d7f6421088e8738d07107943038e7e0dc596d617",
+      "message": "inject server_id for internally forwarded request\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-18T06:37:32+00:00"
+    },
+    {
+      "sha": "face19902829e2bf4aecdd0b4f2ef057e415ff42",
+      "message": "added test cases for server_id injection\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-18T06:38:50+00:00"
+    },
+    {
+      "sha": "f78bcd98a7e592a009ae101f749f2b4052fe7543",
+      "message": "lint\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-18T07:02:39+00:00"
+    },
+    {
+      "sha": "1a69404cadfbd7276f24cebf0cbdee1b9cc7fc08",
+      "message": "lint\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-18T07:27:05+00:00"
+    },
+    {
+      "sha": "e14091d5d6948177943b9a24c9e98aeeb147a1cf",
+      "message": "increase cov\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-18T07:54:17+00:00"
+    },
+    {
+      "sha": "b08e471c5d0423cebfca455912af3e203874d3a0",
+      "message": "fix(test): add missing test for server_id injection with existing params\n\nAdd test_forwarded_post_injects_server_id_with_existing_params to verify\nthat server_id is properly merged into an existing params dict without\noverwriting other keys. Fix misleading docstring on related test.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-20T00:46:00+00:00"
+    },
+    {
+      "sha": "e580420e4e92dee3a54d9f194a42c4ba895d8912",
+      "message": "refactor: remove redundant server_id guard for consistency with local-owner branch\n\nThe regex [a-fA-F0-9\\-]+ guarantees server_id is always non-empty when\nmatch is truthy, making the `if server_id:` guard dead code. Removing it\naligns the internally-forwarded branch with the structurally identical\nlocal-owner branch and eliminates a misleading code path where params\ndict creation would not be serialized back into body.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-20T08:12:25+00:00"
+    },
+    {
+      "sha": "24d0db67f0a5e2bd360bcc455533d3fe8d6a2a8d",
+      "message": "fix: guard server_id injection against non-dict params (null, list)\n\nReplace `if \"params\" not in json_body` with `if not isinstance(... dict)`\nin both the internally-forwarded and local-owner injection branches.\n\nWhen params is null or a list (valid JSON-RPC but unusual for MCP), the\nkey-existence check passes but dict subscript assignment throws TypeError,\ncausing the request to silently fall through to the SDK path instead of\nrouting to /rpc — defeating the server-scoped routing fix.\n\nAdd parametrized tests for both branches covering params:null and\nparams:[] to prevent regression.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-20T10:28:04+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 416,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:14:17.654193",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:14:17.655782",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3024,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3024.json"
+  }
+}

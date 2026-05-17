@@ -1,0 +1,91 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2974,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2974"
+  },
+  "metadata": {
+    "title": " Fix stateful session context propagation and affinity forwarding for appropriate list tools response",
+    "state": "closed",
+    "created_at": "2026-02-16T13:39:03+00:00",
+    "updated_at": "2026-02-17T21:00:52+00:00",
+    "closed_at": "2026-02-17T21:00:43+00:00",
+    "merged_at": "2026-02-17T21:00:43+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "bug",
+      "revisit"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2973\r\n\r\n## 📌 Summary\r\n\r\nFixed a bug where server_id and other request context (headers, user auth) were lost when using stateful sessions and server_id was lost when using session_affinity. It ensures that:\r\n\r\nLong-lived session tasks can dynamically recover context from the active request.\r\nInternal session affinity forwarding for POST requests correctly preserves the server_id.\r\n\r\n## 🔁 Reproduction Steps\r\n1. Configure MCPGATEWAY_USE_STATEFUL_SESSIONS=true and MCPGATEWAY_SESSION_AFFINITY_ENABLED=true.\r\n2. Connect to `/servers/server-id/mcp` and list the tools\r\nBefore fix: Returns tools for \"default_server_id\" (empty/all).\r\nAfter fix: Returns tools strictly for `<id>`.\r\n\r\n## 🐞 Root Cause\r\nTwo separate issues contributed to this bug:\r\n\r\n1. ContextVar Loss: in stateful sessions, the run_server task is long-lived and spawned separately. The contextvars (server_id_var) set during the initial connection or previous requests do not propagate to this isolated task context, causing handlers to see the default value.\r\n\r\n2. Forwarding Data Loss: When session affinity is enabled, stateful POST requests are forwarded internally to the /rpc endpoint in main.py. The original streamablehttp_transport extracted server_id from the URL, but \r\nmain.py's /rpc endpoint expects it in the JSON body (params). The forwarding logic was not injecting the server_id from the URL into the JSON body, so main.py received server_id=None.\r\n\r\n## 💡 Fix Description\r\n\r\n1. Dynamic Context Recovery: Introduced `_get_request_context_or_default` helper in streamablehttp_transport.py. This function first checks contextvars (fast path). If missing (stateful case), it inspects mcp_app.request_context to retrieve the underlying starlette.requests.Request object and extracts server_id, headers, and re-verifies user auth via \r\nverify_credentials.\r\n\r\n2. Affinity Forwarding Injection: Updated handle_streamable_http to extract the server_id from the URL regex and inject it into the params of the JSON-RPC body before forwarding the request to /rpc. This ensures correct routing in main.py.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed- [ ] ",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "18b1c29b7400b4da3799052d4383e3c12fd97f5d",
+      "message": "maintain server_id context with session affinity\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-16T13:31:36+00:00"
+    },
+    {
+      "sha": "aca3ed0389e1241784df3f04ce98a4a40dfbea52",
+      "message": "test cases for new improvements\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-16T14:17:21+00:00"
+    },
+    {
+      "sha": "847c81efb66f0ff6a721b2a8c36eb01ff8cdf485",
+      "message": "linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-16T15:01:14+00:00"
+    },
+    {
+      "sha": "92f3ad280f795303ad389be381c8f4bf9604535c",
+      "message": "fix: address review findings for stateful session context propagation\n\n- Remove debug log statement that leaked auth headers and user context\n  at INFO level (security: token/PII exposure in production logs)\n- Apply _get_request_context_or_default() to call_tool, read_resource,\n  and list_resource_templates for consistent context recovery in\n  stateful sessions (previously only list_* handlers were updated)\n- Fix server_id injection to create params dict when absent, ensuring\n  JSON-RPC requests without params still get proper server scoping\n- Remove orphaned blank line in list_resources left from prior edit\n- Clean up test imports: remove duplicate pytest, unused asyncio/types/\n  transport imports, fix isort ordering\n- Fix test property cleanup in test_list_resources_direct_proxy_meta_\n  lookup_error to properly save/restore original descriptor\n- Run black + isort on all changed files\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-17T18:21:30+00:00"
+    },
+    {
+      "sha": "157204ab40bcca1d2ede1748868d2f29809c870d",
+      "message": "test: add missing coverage for context propagation and affinity injection\n\nCover all branches in _get_request_context_or_default():\n- Fast path when ContextVars are already populated\n- Anonymous user string-to-dict conversion\n- URL without /servers/{id}/mcp pattern (no server_id match)\n- LookupError fallback (no active request context)\n- Generic Exception fallback with error logging\n- Cookie JWT token forwarding to require_auth_override\n\nCover server_id injection edge cases:\n- JSON-RPC body without params key (params dict created)\n- URL without server pattern (no injection occurs)\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-17T18:34:34+00:00"
+    },
+    {
+      "sha": "6e7351c7f2e5acc3775cc90aa98c5a74d6bbb82f",
+      "message": "fix: normalize raw JWT payload in stateful session context recovery\n\n_get_request_context_or_default() was returning raw JWT payloads from\nrequire_auth_override() without normalizing to the canonical user\ncontext shape {email, teams, is_admin, is_authenticated} that MCP\nhandlers expect. This caused handlers to look up missing keys (email,\nteams) from the raw JWT which uses different field names (sub,\ntoken_use, nested user.is_admin).\n\nChanges:\n- Add _normalize_jwt_payload() that mirrors streamable_http_auth\n  normalization: extracts email from sub/email, resolves teams via\n  normalize_token_teams (API) or _resolve_teams_from_db_sync (session),\n  and detects nested user.is_admin\n- call_tool now extracts app_user_email from the already-recovered\n  user_context instead of reading from stale ContextVar via\n  get_user_email_from_context()\n- Update test mocks to use realistic JWT payloads instead of\n  pre-normalized dicts\n- Add 6 dedicated tests for _normalize_jwt_payload covering API token,\n  session token (admin/non-admin), nested is_admin, email fallback,\n  and no-email edge case\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-17T19:25:02+00:00"
+    },
+    {
+      "sha": "4ff34d70191daf28cad57aadddb47ab4ce5e8103",
+      "message": "test: add regression test for call_tool recovered email propagation\n\nVerify call_tool passes app_user_email from the recovered fallback\ncontext (via _get_request_context_or_default) rather than reading\nfrom the stale user_context_var ContextVar. This prevents regression\nof the stateful session identity propagation fix.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-17T19:39:16+00:00"
+    },
+    {
+      "sha": "20f16286d56e7b73c81d634cd48d4f36f926e7f8",
+      "message": "fix: add missing docstring params for _normalize_jwt_payload (flake8 DAR)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-17T19:57:48+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 1194,
+  "deletions": 112,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:47.906464",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:47.911912",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2974,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2974.json"
+  }
+}

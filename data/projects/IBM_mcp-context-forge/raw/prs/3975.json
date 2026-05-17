@@ -1,0 +1,68 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3975,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3975"
+  },
+  "metadata": {
+    "title": "feat(api): add leader instance identification with operational metadata in /health endpoint",
+    "state": "open",
+    "created_at": "2026-04-01T14:14:16+00:00",
+    "updated_at": "2026-04-09T22:15:54+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "enhancement",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3838\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR implements leader instance identification and operational metadata mapping for MCP Gateway clusters, enabling operators and monitoring tools to easily identify which specific physical instance currently holds the cluster leadership.\r\n\r\n**Problem**: Previously, the system used random UUIDs in Redis for leader election without mapping to any identifiable process information. In production environments with multiple instances, it was impossible to know which instance was the leader without destructive testing or temporary code patching.\r\n\r\n**Solution**: \r\n- Store structured JSON metadata (port, PID, hostname, instance_id) in Redis instead of plain UUID\r\n- Add `is_leader` boolean field to `/health` endpoint for automated monitoring\r\n- Make `/health` endpoint async to properly check Redis leadership status\r\n- Maintain backward compatibility with legacy UUID-only format\r\n\r\n**Impact**: SREs can now identify the leader with a single Redis command or health check, and monitoring tools (Prometheus/Grafana) can track leadership changes automatically.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    Pass ✅    |\r\n| Unit tests                | `make test`     |    Pass ✅    |\r\n| Coverage ≥ 80%            | `make coverage` |    Pass ✅    |\r\n\r\n**Functional Testing**:\r\n- ✅ Tested with 3 instances (ports 8001, 8002, 8003)\r\n- ✅ Verified `/health` endpoint returns correct `is_leader` status\r\n- ✅ Verified Redis stores JSON metadata with all operational fields\r\n- ✅ Tested failover: killed leader, confirmed new leader election within 15s\r\n- ✅ Verified backward compatibility with legacy UUID format\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Implementation Details\r\n\r\n**Files Modified**:\r\n1. `mcpgateway/services/gateway_service.py` - Core implementation\r\n   - Initialize `_instance_metadata` with port, PID, hostname, instance_id\r\n   - Store JSON metadata in Redis during leader election\r\n   - Parse JSON with backward compatibility for legacy UUID format\r\n   - Async `is_leader()` method for checking leadership status\r\n\r\n2. `mcpgateway/main.py` - Health endpoint enhancement\r\n   - Made `/health` endpoint async\r\n   - Added `is_leader` boolean field to response\r\n\r\n3. `tests/unit/mcpgateway/services/test_gateway_service_redis_leadership.py` - Test updates\r\n   - Updated to expect JSON metadata format\r\n   - Verified all metadata fields are present\r\n\r\n4. `tests/unit/mcpgateway/test_main.py` & `tests/unit/mcpgateway/test_main_extended.py`\r\n   - Updated health check tests to async\r\n   - Added assertions for `is_leader` field\r\n\r\n### Example Usage\r\n\r\n**Check leader via health endpoint**:\r\n```\r\ncurl http://localhost:8001/health\r\n# Returns: {\"status\":\"healthy\",\"is_leader\":true,...}\r\n\r\ncurl http://localhost:8002/health\r\n# Returns: {\"status\":\"healthy\",\"is_leader\":false,...}\r\n```\r\n\r\n**Check leader via Redis:**\r\n```\r\nredis-cli GET gateway_service_leader\r\n# Returns:\r\n{\r\n  \"instance_id\": \"86688ed8-2948-418f-a9f6-e18761115260\",\r\n  \"port\": 8001,\r\n  \"pid\": 18444,\r\n  \"hostname\": \"192.168.1.4\"\r\n}\r\n```\r\n\r\n### Design Decisions\r\n\r\nAsync-only approach: Removed sync `is_leader()` method to avoid event loop conflicts in FastAPI context\r\nJSON metadata format: Provides structured data for better observability and debugging\r\nBackward compatibility: Gracefully handles both JSON and legacy UUID formats during transition\r\nFail-safe defaults: Returns sensible defaults when Redis is unavailable to avoid blocking operations\r\n\r\n### Tests Added (9 total)\r\n\r\n**`tests/unit/mcpgateway/test_main.py`**\r\n1. `test_health_check_leader_exception` - Health check handles `is_leader()` exception, returns `is_leader: false`\r\n\r\n**`tests/unit/mcpgateway/services/test_gateway_service_redis_leadership.py`**\r\n\r\nTestGatewayServiceInitialization (3 tests):\r\n2. `test_init_with_invalid_port` - Invalid port string defaults to 0\r\n3. `test_init_with_none_port` - None port defaults to 0\r\n4. `test_init_with_valid_port` - Valid port string converts to int\r\n\r\nTestIsLeaderMethod (5 tests):\r\n5. `test_is_leader_with_json_metadata` - Parses JSON metadata from Redis\r\n6. `test_is_leader_with_legacy_uuid` - Handles legacy UUID-only format\r\n7. `test_is_leader_returns_false_when_not_leader` - Returns False for non-leader\r\n8. `test_is_leader_returns_false_when_no_leader` - Returns False when Redis has no leader\r\n9. `test_is_leader_returns_false_when_redis_unavailable` - Returns False when Redis unavailable (bug fix)\r\n\r\n**Result**: 15,833 tests passing, all coverage gaps addressed\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "ff2c838b86e9951c9b56a9e9ce4e2902d1ef94d2",
+      "message": "feat: add leader instance identification with operational metadata\n\n- Add instance metadata (port, PID, hostname) to Redis leader election\n- Expose is_leader boolean field in /health endpoint for cluster monitoring\n- Store JSON metadata in Redis instead of plain UUID for operational visibility\n- Add startup logging of instance metadata\n- Make /health endpoint async to support Redis leader status checks\n- Update tests to async for health check endpoints\n- Maintain backward compatibility with legacy UUID-only format\n\nCloses #3838\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-01T13:28:51+00:00"
+    },
+    {
+      "sha": "8793e8a39d0815aa17c41cf373fefc6c140bc3f6",
+      "message": "merge: sync with main branch",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-01T13:31:46+00:00"
+    },
+    {
+      "sha": "0557e3b4f9eb426fd711cb97f36b9a29d9a5adfc",
+      "message": "feat: add leader instance identification with operational metadata\n\n- Store instance metadata (port, PID, hostname, instance_id) in Redis as JSON\n- Add is_leader boolean field to /health endpoint for monitoring\n- Make /health endpoint async to properly check Redis leadership status\n- Update tests to verify JSON metadata format and async health checks\n- Maintain backward compatibility with legacy UUID-only format\n- Remove unused is_leader_sync() method to avoid event loop conflicts\n\nCloses #3838\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-01T14:07:24+00:00"
+    },
+    {
+      "sha": "d38d030ceb1b728641bab03a37003e63906fcf8a",
+      "message": "test: improve coverage for leader identification feature\n\n- Add test for health check exception handling when is_leader() fails\n- Add tests for GatewayService initialization with invalid/None port values\n- Add comprehensive tests for is_leader() method covering JSON metadata, legacy UUID, and edge cases\n- Fix is_leader() to return False when Redis is unavailable (was incorrectly returning True)\n- All tests passing: 15,833 passed (9 new tests added)\n\nAddresses coverage gaps identified in diff-cover report for lines:\n- mcpgateway/main.py: 10346, 10348 (exception handling)\n- mcpgateway/services/gateway_service.py: 478-479 (port conversion), 4133-4152 (is_leader logic)\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-01T14:39:19+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 7536,
+  "deletions": 7293,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:59.286734",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:59.287231",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3975,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3975.json"
+  }
+}

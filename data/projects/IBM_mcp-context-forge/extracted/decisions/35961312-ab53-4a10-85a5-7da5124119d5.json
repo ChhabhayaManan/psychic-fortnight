@@ -1,0 +1,42 @@
+{
+  "id": "35961312-ab53-4a10-85a5-7da5124119d5",
+  "title": "fix(mcp): resolve MCP session pool memory leak, dead-worker locks and polling inefficiency",
+  "summary": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #4002\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR resolves four bugs in the MCP session pool (`mcpgateway/services/mcp_session_pool.py`) that affect scalability, robustness and resource management in multi-worker deployments:\r\n- Memory Leak (HIGH): `_mcp_session_mapping` dictionary grew indefinitely, never evicting stale entries\r\n- Dead-Worker Lock (HIGH): Orphaned Redis ownership keys caused 5-minute request failures when workers crashed\r\n- Dead Code (LOW): Unused `_pending_responses` attribute cluttered the codebase\r\n- Busy-Wait Polling (MEDIUM): 100ms polling loops scaled CPU cost linearly with concurrent forwarded requests\r\n\r\n### Changes Made\r\n\r\n**Bug 1 - Memory Leak Fix:**\r\n- Added cleanup of `_mcp_session_mapping` in `_maybe_evict_idle_pool_keys()` when pool keys are evicted\r\n- Clear mapping in `close_all()` and `drain_all()` lifecycle methods\r\n\r\n**Bug 2 - Dead-Worker Detection:**\r\n- Implemented Redis-based heartbeat mechanism (30s TTL, refreshed every 10s)\r\n- Added` _worker_heartbeat_key()`, `_start_heartbeat()`, `_is_worker_alive()` methods\r\n- Modified `acquire()` to detect dead workers and atomically reclaim ownership\r\n- Updated `forward_request_to_owner()` to check worker liveness before forwarding\r\n\r\n**Bug 3 - Dead Code Removal:**\r\n- Removed unused `_pending_responses` attribute\r\n\r\n**Bug 4 - Polling Optimization:**\r\n- Replaced `get_message(timeout=0.1)` polling loop with `pubsub.listen()` async iterator\r\n- Eliminates per-request wake-ups, reducing CPU overhead in high-concurrency scenarios\r\n\r\n**Tests Added:**\r\n- `test_worker_heartbeat_key_format` - verifies heartbeat key format includes worker ID\r\n- `test_is_worker_alive_returns_true_when_heartbeat_exists` - tests liveness detection for active workers\r\n- `test_is_worker_alive_returns_false_when_heartbeat_missing` - tests dead worker detection\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    Pass ✅    |\r\n| Unit tests                | `make test`     |    Pass ✅    |\r\n| Coverage ≥ 80%            | `make coverage` |    Pass ✅    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Design Decisions\r\n\r\n**Heartbeat Implementation:**\r\n- Chose 30s TTL with 10s refresh interval to balance liveness detection speed vs Redis load\r\n- Heartbeat runs as background task only when session affinity is enabled\r\n- Graceful shutdown cancels heartbeat task and waits for completion\r\n\r\n**Ownership Reclaim Strategy:**\r\n- Atomic delete + re-register pattern prevents race conditions\r\n- Falls back to local session creation if reclaim fails\r\n- Maintains backward compatibility with non-affinity deployments\r\n\r\n**Polling Replacement:**\r\n- `pubsub.listen()` is the recommended async pattern for Redis pub/sub\r\n- Eliminates CPU waste from timed polling in idle periods\r\n- Maintains same timeout behavior via `asyncio.timeout()` wrapper\r\n\r\n### Impact\r\n\r\nThese fixes address production reliability issues in session-affinity-enabled deployments:\r\n- Prevents memory exhaustion in long-running workers\r\n- Reduces request failure window from 5 minutes to <30 seconds on worker crashes\r\n- Improves CPU efficiency under high concurrent forwarding load",
+  "reasoning": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #4002\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR resolves four bugs in the MCP session pool (`mcpgateway/services/mcp_session_pool.py`) that affect scalability, robustness and resource management in multi-worker deployments:\r\n- Memory Leak (HIGH): `_mcp_session_mapping` dictionary grew indefinitely, never evicting stale entries\r\n- Dead-Worker Lock (HIGH): Orphaned Redis ownership keys caused 5-minute request failures when workers crashed\r\n- Dead Code (LOW): Unused `_pending_responses` attribute cluttered the codebase\r\n- Busy-Wait Polling (MEDIUM): 100ms polling loops scaled CPU cost linearly with concurrent forwarded requests\r\n\r\n### Changes",
+  "confidence": 0.6000000000000001,
+  "related_services": [
+    "dead-worker",
+    "multi-worker"
+  ],
+  "contributors": [
+    "bogdanmariusc10",
+    "crivetimihai"
+  ],
+  "tags": [
+    "MUST",
+    "api",
+    "resilience",
+    "release-fix",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "b378764d-7cb3-4944-ad40-7c60972f8d99",
+      "source_type": "pr",
+      "source_id": "4029",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/4029",
+      "contributor": "bogdanmariusc10",
+      "timestamp": "2026-04-03T12:31:25Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4029.json"
+    }
+  ],
+  "timestamp": "2026-04-03T12:31:25Z",
+  "created_at": "2026-05-17T17:24:57.207761",
+  "updated_at": "2026-05-17T17:24:57.207763",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:24:57.208085",
+    "artifact_type": "decisions",
+    "artifact_id": "35961312-ab53-4a10-85a5-7da5124119d5"
+  }
+}

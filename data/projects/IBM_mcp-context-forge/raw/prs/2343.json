@@ -1,0 +1,57 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2343,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2343"
+  },
+  "metadata": {
+    "title": "perf: Precompile regex patterns across plugins",
+    "state": "closed",
+    "created_at": "2026-01-23T06:23:02+00:00",
+    "updated_at": "2026-01-24T19:57:43+00:00",
+    "closed_at": "2026-01-24T19:57:41+00:00",
+    "merged_at": "2026-01-24T19:57:41+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "performance",
+      "plugins"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## :rocket: Performance Improvement PR\r\n\r\n## Summary\r\n\r\nThis PR precompiles all regex patterns at module or configuration initialization time across 14 plugins, eliminating per-request compilation overhead.\r\n\r\n## :link: Related Issue\r\n**Closes #1834**\r\n\r\n## Changes\r\n\r\nRefactored 14 plugins to precompile all regex patterns:\r\n\r\n### Core Plugins\r\n- **regex_filter** (`search_replace.py`) - Precompile search patterns in `__init__`\r\n- **sql_sanitizer** (`sql_sanitizer.py`) - Module-level pattern compilation + config validator\r\n- **html_to_markdown** (`html_to_markdown.py`) - 15+ module-level precompiled patterns\r\n- **markdown_cleaner** (`markdown_cleaner.py`) - 5 module-level precompiled patterns\r\n- **json_repair** (`json_repair.py`) - Module-level pattern compilation\r\n\r\n### Security & Validation Plugins\r\n\r\n- **argument_normalizer** (`argument_normalizer.py`) - Module-level + Pydantic validator compilation\r\n- **code_safety_linter** (`code_safety_linter.py`) - Default + custom pattern precompilation\r\n- **secrets_detection** (`secrets_detection.py`) - Module-level PATTERNS dict\r\n- **content_moderation** (`content_moderation.py`) - Module-level + category pattern compilation\r\n- **harmful_content_detector** (`harmful_content_detector.py`) - Module-level pattern compilation\r\n\r\n### Integration Plugins\r\n- **virus_total_checker** (`virus_total_checker.py`) - URL + allow/deny pattern compilation via validators\r\n- **timezone_translator** (`timezone_translator.py`) - Module-level ISO timestamp pattern\r\n- **safe_html_sanitizer** (`safe_html_sanitizer.py`) - Multiple module-level precompiled patterns\r\n- **robots_license_guard** (`robots_license_guard.py`) - Module-level META_PATTERN\r\n\r\n## Implementation Patterns\r\n\r\nTwo primary patterns were used:\r\n\r\n### 1. Module-level compilation\r\nPatterns compiled at import time:\r\n```python\r\n_PATTERN_RE = re.compile(r\"regex_pattern\", flags=re.IGNORECASE)\r\n```\r\n\r\n### 2. Config-time compilation\r\nPatterns compiled via Pydantic validators:\r\n```python\r\n@field_validator('patterns', mode='before')\r\n@classmethod\r\ndef compile_patterns(cls, v: Any) -> List[Pattern[str]]:\r\n    return [re.compile(p) if isinstance(p, str) else p for p in v]\r\n```\r\n\r\n## Performance Impact\r\n\r\nBenchmark results (1000 iterations each):\r\n- **Average improvement**: 2.60% faster (1.05x speedup)\r\n- **Best performers**:\r\n  - Robots License Guard: 29.68% faster (1.42x)\r\n  - HTML to Markdown: 12.46% faster (1.14x)\r\n  - Regex Filter: 12.61% faster (1.14x)\r\n  - SQL Sanitizer: 7.01% faster (1.08x)\r\n\r\n## Verification\r\n\r\n✅ All acceptance criteria met:\r\n- No per-request `re.compile()` calls in any plugin\r\n- Same matching behavior and output preserved\r\n- All regex operations use precompiled `Pattern` objects\r\n\r\n✅ Code review completed:\r\n- Zero inline `re.sub()`, `re.search()`, `re.match()`, or `re.findall()` with string patterns\r\n- All patterns stored as `Pattern[str]` or `re.Pattern` objects\r\n- Proper use of `.sub()`, `.search()`, `.finditer()` on precompiled patterns\r\n\r\n✅ Testing:\r\n\r\nExisting plugin test suites validate:\r\n- Functionality remains identical\r\n- All pattern matching behavior preserved\r\n- No regressions introduced",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3702545172",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-24T19:48:12+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "49d75e98fed8faa1e65d6401fd048668ad4faedd",
+      "message": "perf: precompile regex patterns across plugins\n\nPrecompile all regex patterns at module or configuration initialization\ntime across 14 plugins, eliminating per-request compilation overhead.\n\nCloses #1834\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Shoumi M",
+      "date": "2026-01-24T19:38:54+00:00"
+    }
+  ],
+  "files_changed": 14,
+  "additions": 360,
+  "deletions": 126,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:15.676979",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:15.678995",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2343,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2343.json"
+  }
+}

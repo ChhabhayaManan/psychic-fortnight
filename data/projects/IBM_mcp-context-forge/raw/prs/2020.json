@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2020,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2020"
+  },
+  "metadata": {
+    "title": "Fixes #2018 - REST `/tools` list endpoint returns stale visibility data after tool update in multi-worker deployments",
+    "state": "closed",
+    "created_at": "2026-01-10T12:11:59+00:00",
+    "updated_at": "2026-01-10T12:41:39+00:00",
+    "closed_at": "2026-01-10T12:41:37+00:00",
+    "merged_at": "2026-01-10T12:41:37+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Closes #2018 - follow-up from #1915\r\n\r\n### Root Cause\r\n\r\nCache invalidation code existed and published messages to Redis pubsub channel `mcpgw:cache:invalidate`, but **no subscriber existed** to listen for these messages. In multi-worker deployments (e.g., 3 gunicorn workers behind nginx), when Worker A updated a tool's visibility and invalidated its local cache, Workers B and C continued serving stale cached data.\r\n\r\n### Solution\r\n\r\nAdded `CacheInvalidationSubscriber` class that:\r\n- Subscribes to Redis pubsub channel `mcpgw:cache:invalidate` on application startup\r\n- Listens for invalidation messages in a background asyncio task\r\n- Clears local in-memory caches when messages are received\r\n- Handles graceful shutdown and Redis unavailability\r\n\r\n### Message Formats Supported\r\n\r\n| Message | Action |\r\n|---------|--------|\r\n| `registry:tools` | Clear all tools from RegistryCache |\r\n| `registry:prompts` | Clear all prompts from RegistryCache |\r\n| `registry:resources` | Clear all resources from RegistryCache |\r\n| `registry:agents` | Clear all agents from RegistryCache |\r\n| `tool_lookup:{name}` | Clear specific tool from ToolLookupCache |\r\n| `tool_lookup:gateway:{id}` | Clear all tools for gateway from ToolLookupCache |\r\n| `admin:{prefix}` | Clear admin stats with prefix from AdminStatsCache |\r\n\r\n## Changes\r\n\r\n- **mcpgateway/cache/registry_cache.py**: Added `CacheInvalidationSubscriber` class (~220 lines)\r\n- **mcpgateway/main.py**: Start/stop subscriber in application lifespan\r\n- **tests/unit/mcpgateway/cache/test_cache_invalidation_subscriber.py**: Added 14 regression tests\r\n- **scripts/test_mcp_token_scoping.py**: Manual MCP client test for token scoping verification\r\n\r\n## Testing\r\n\r\n### Automated Tests (14 tests)\r\n```bash\r\npytest tests/unit/mcpgateway/cache/test_cache_invalidation_subscriber.py -v\r\n```\r\n\r\nTests cover:\r\n- Registry cache invalidation (tools, prompts, resources)\r\n- Tool lookup cache invalidation (by name, by gateway)\r\n- Admin stats cache invalidation\r\n- Graceful Redis unavailability handling\r\n- Concurrent invalidation message processing\r\n- **Main regression test**: Tool visibility update clears caches across workers\r\n\r\n### Manual Verification\r\n```bash\r\npython scripts/test_mcp_token_scoping.py\r\n```\r\n\r\nResults (all passing):\r\n| Test | Expected | Actual |\r\n|------|----------|--------|\r\n| Admin no teams key | 5 tools | 5 tools |\r\n| Admin teams:null | 5 tools | 5 tools |\r\n| Admin teams:[] | 4 tools | 4 tools |\r\n| Admin + correct team | 5 tools | 5 tools |\r\n| Admin + wrong team | Rejected | Rejected |\r\n| Non-admin no teams | 4 tools | 4 tools |\r\n| Non-admin + team | 5 tools | 5 tools |\r\n| Non-admin teams:[] | 4 tools | 4 tools |\r\n\r\n## Deployment Notes\r\n\r\n- Requires Redis for cross-worker cache synchronization\r\n- Subscriber starts automatically on application boot\r\n- Gracefully handles Redis unavailability (logs warning, continues without cross-worker sync)\r\n- No configuration changes required\r\n\r\n## Checklist\r\n\r\n- [x] Linting passes (`make flake8 pylint bandit`)\r\n- [x] Type checking passes (`make mypy pyright`)\r\n- [x] Unit tests pass (14 new tests)\r\n- [x] Manual MCP client tests pass (8/8 RPC + 4/4 transport)\r\n- [x] No breaking changes to existing APIs\r\n\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "e089cad6c97b2f75c5a9fda77618ab2b55789fdb",
+      "message": "Cache fix for token scoping\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-10T11:49:49+00:00"
+    },
+    {
+      "sha": "1731a323265a13af5d4abc0c871c929014497119",
+      "message": "test: add regression tests for cross-worker cache invalidation\n\nAdd unit tests for CacheInvalidationSubscriber to prevent regression of\nthe stale visibility data bug (#2018).\n\nTests verify:\n- Registry cache invalidation for tools/prompts/resources\n- Tool lookup cache invalidation by name and gateway\n- Admin stats cache invalidation\n- Graceful handling of Redis unavailability\n- Concurrent invalidation message processing\n- Main regression scenario: tool visibility update clears caches\n\nAlso updates .flake8 to ignore DAR docstring warnings for test file.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-10T12:06:43+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 920,
+  "deletions": 26,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:12.990399",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:12.993307",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2020,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2020.json"
+  }
+}

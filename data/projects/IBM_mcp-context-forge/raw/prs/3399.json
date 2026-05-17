@@ -1,0 +1,96 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3399,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3399"
+  },
+  "metadata": {
+    "title": "fix(security): enforce team membership validation in admin UI",
+    "state": "closed",
+    "created_at": "2026-03-02T15:40:17+00:00",
+    "updated_at": "2026-03-09T01:51:26+00:00",
+    "closed_at": "2026-03-06T18:14:56+00:00",
+    "merged_at": "2026-03-06T18:14:56+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "security",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nFixes https://github.ibm.com/contextforge-org/mcp-context-forge/issues/44\r\n\r\n---\r\n\r\n## 📌 Summary\r\nFixes a team scoping validation issue in the admin UI where an invalid `team_id` query parameter could result in broader visibility than intended. The endpoint now correctly enforces team membership checks and rejects unauthorized team contexts.\r\n\r\n## 🐞 Root Cause\r\nThe `admin_ui` endpoint in `mcpgateway/admin.py` had a permissive fallback path during team validation that silently relaxed scoping constraints instead of enforcing them.\r\n\r\n## 💡 Fix Description\r\n- Replaced the permissive fallback with strict 403 rejection when team membership validation fails.\r\n- The fix is scoped to the two validation branches inside the `admin_ui` function; the default no-team-id path remains unchanged.\r\n- Added three unit tests covering the invalid, unavailable, and null team_id cases.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    pass    |\r\n| Unit tests                            | `make test`          |    pass    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] No breaking change to MCP clients\r\n- [x] Admin UI only; no protocol-level changes\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] Deny-path regression tests included\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3901888462",
+      "author": "MohanLaksh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T07:15:29+00:00",
+      "body": "# PR Review: Team Scoping Validation Fix (PR #3399)\r\n\r\n## Executive Summary\r\n\r\n**Verdict: ✅ APPROVED**\r\n\r\n\r\n### Architecture Compliance\r\n\r\n**Two-Layer Security Model:**\r\n```\r\nLayer 1 (Token Scoping) → Layer 2 (RBAC) → Operation\r\n     ↓                          ↓\r\nnormalize_token_teams()    require_permission()\r\n     ↓                          ↓\r\n  [PASS]                     [PASS]  → admin_ui() validates team_id\r\n```\r\n\r\n**This fix operates at the application layer (after both security layers):**\r\n- Token scoping already filtered what user CAN SEE\r\n- RBAC already checked if user CAN ACCESS admin dashboard\r\n- **This fix ensures user can't REQUEST a team context they don't belong to**\r\n\r\n**Correct placement in security stack:**\r\n- ✅ After authentication ([`get_current_user_with_permissions`](mcpgateway/admin.py:3112))\r\n- ✅ After RBAC check ([`@require_permission(\"admin.dashboard\")`](mcpgateway/admin.py:3106))\r\n- ✅ Before data fetching (lines 3227+)\r\n\r\n---\r\n\r\n\r\n\r\n## 🚨 Potential Issues & Mitigations\r\n\r\n### Issue 1: Breaking Change for Existing Clients\r\n**Risk**: Low  \r\n**Impact**: Clients relying on fallback behavior will now get 403  \r\n**Mitigation**: This is the **intended behavior** - the fallback was a bug. Clients should not be requesting team contexts they don't belong to.\r\n\r\n### Issue 2: User Experience\r\n**Risk**: Low  \r\n**Impact**: Users might see 403 instead of empty results  \r\n**Mitigation**: Error messages are clear (\"Not a member of the requested team\"). This is better UX than silently showing different data.\r\n\r\n### Issue 3: Service Availability\r\n**Risk**: Low  \r\n**Impact**: If team service fails, users can't access admin UI with team filter  \r\n**Mitigation**: Users can still access without `team_id` parameter. This is correct fail-closed behavior.\r\n\r\n---\r\n\r\n## 🎓 Recommendations\r\n\r\n### For Merge\r\n✅ **APPROVE** - This PR should be merged as-is.\r\n\r\n**Rationale:**\r\n1. Fixes the issue\r\n2. Implementation is correct and minimal\r\n3. Test coverage is comprehensive\r\n4. Aligns with project security principles\r\n5. No breaking changes to legitimate use cases\r\n\r\n**Test Running Results:**\r\n```\r\ntests/unit/mcpgateway/test_admin_module.py::test_admin_ui_rejects_invalid_team_id PASSED\r\ntests/unit/mcpgateway/test_admin_module.py::test_admin_ui_rejects_team_id_when_teams_unavailable PASSED\r\ntests/unit/mcpgateway/test_admin_module.py::test_admin_ui_no_team_id_returns_public_items PASSED\r\n```\r\n\r\n---\r\n\r\n## 🏆 Final Verdict\r\n\r\n**APPROVED ✅**\r\n\r\n**Recommendation**: Merge immediately"
+    },
+    {
+      "id": "3904442502",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-06T15:36:16+00:00",
+      "body": "Approved. Security fix is correct — 403 rejection for unauthorized team_id with proper admin bypass (is_admin + token_teams=None). All branches tested."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "31ac667ca84f3c67ad1d1a24b94fdeced16d3c94",
+      "message": "fix(security): reject invalid team_id with 403 instead of falling back to public visibility\n\nWhen a team_id query param does not match the user's teams, the admin UI\nsilently dropped the team filter and returned public entities. Now returns\n403 Forbidden for both invalid team_id and failed team lookup cases.\nAdds regression tests for invalid, unavailable, and null team_id paths.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-02T15:17:58+00:00"
+    },
+    {
+      "sha": "02f9518225a75a95f6533a8062232377f07803ab",
+      "message": "pytest and pylint fixes\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-03T05:30:06+00:00"
+    },
+    {
+      "sha": "412e04775d9fecd57123bb796bc9cc2053668492",
+      "message": "fix(security): add admin bypass to team_id validation and fix test name\n\nPlatform admins should be able to view any team's resources in the admin\nUI, consistent with the codebase-wide admin bypass pattern (token scoping,\nRBAC middleware, permission service all skip team checks for admins).\n\n- Add is_admin check before team membership validation so platform admins\n  can select any team_id without being a member\n- Rename test_admin_ui_team_loading_failure_ignores_team_id to\n  test_admin_ui_team_loading_failure_rejects_team_id (matches new 403 behavior)\n- Add test_admin_ui_admin_bypasses_team_membership_check for coverage of\n  the admin bypass path\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T14:21:48+00:00"
+    },
+    {
+      "sha": "b46aabb3c1d183e6a3a4d86ce7e4cdb445a14152",
+      "message": "fix(security): update comment to reflect admin bypass behavior\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T14:57:37+00:00"
+    },
+    {
+      "sha": "ec6c062a98928f6a9b02715d50b118a20a385ad8",
+      "message": "fix(security): add HTTPException to admin_ui docstring Raises section\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T15:07:23+00:00"
+    },
+    {
+      "sha": "1e5a2f2ac82b51707d393a1cfa51ee7380c3bbe1",
+      "message": "fix(security): tighten admin bypass to require unrestricted token_teams\n\nThe admin bypass must check both is_admin AND token_teams is None,\nconsistent with the codebase convention (admin.py:13253, base_service.py,\ntoken scoping middleware). A team-scoped admin token (is_admin=True,\ntoken_teams=[\"team-1\"]) must still pass membership validation.\n\n- Check _token_teams is None alongside _is_admin for the bypass\n- Update comment to document the token_teams requirement\n- Add test for team-scoped admin rejection (token_teams=[\"team-1\"])\n- Update admin bypass test to set token_teams=None explicitly\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T15:24:23+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 205,
+  "deletions": 29,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:16.019009",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:16.020212",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3399,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3399.json"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3625,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3625"
+  },
+  "metadata": {
+    "title": "fix: improve A2A agent test error handling and status codes (#3611)",
+    "state": "closed",
+    "created_at": "2026-03-11T15:42:59+00:00",
+    "updated_at": "2026-03-12T00:40:20+00:00",
+    "closed_at": "2026-03-12T00:40:18+00:00",
+    "merged_at": "2026-03-12T00:40:18+00:00",
+    "author": "msureshkumar88",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3611\r\n\r\n---\r\n\r\n## 📝 Summary\r\nFixed A2A Agent test endpoint to return appropriate HTTP status codes instead of generic 500 errors for all failures. The endpoint now properly distinguishes between different failure types (agent not found, disabled, unreachable, validation errors) making debugging significantly easier for administrators.\r\n\r\n**Before**: All failures returned HTTP 500 with no error type classification\r\n**After**: Returns appropriate status codes (404, 502, 400, 500) with `error_type` field for programmatic handling\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Implementation Details\r\n\r\n### Changes Made\r\n\r\n#### 1. Updated Exception Handling (`mcpgateway/admin.py`)\r\nReplaced generic exception handler in `admin_test_a2a_agent()` with specific handlers:\r\n\r\n```python\r\n# Before (lines 15076-15078)\r\nexcept Exception as e:\r\n    LOGGER.error(f\"Error testing A2A agent {agent_id}: {e}\")\r\n    return ORJSONResponse(\r\n        content={\"success\": False, \"error\": str(e), \"agent_id\": agent_id}, \r\n        status_code=500\r\n    )\r\n\r\n# After (lines 15076-15101)\r\nexcept A2AAgentNotFoundError as e:\r\n    return ORJSONResponse(..., status_code=404)  # Agent not found or access denied\r\nexcept A2AAgentError as e:\r\n    return ORJSONResponse(..., status_code=502)  # Agent disabled/unreachable\r\nexcept ValidationError as e:\r\n    return ORJSONResponse(..., status_code=400)  # Invalid parameters\r\nexcept Exception as e:\r\n    return ORJSONResponse(..., status_code=500)  # Unexpected errors only\r\n```\r\n\r\n#### 2. HTTP Status Code Mapping\r\n\r\n| Status Code | Exception Type | Use Case |\r\n|-------------|----------------|----------|\r\n| **404** | `A2AAgentNotFoundError` | Agent doesn't exist in DB or user lacks access |\r\n| **502** | `A2AAgentError` | Agent disabled, endpoint unreachable, or HTTP errors |\r\n| **400** | `ValidationError` | Invalid test parameters |\r\n| **500** | `Exception` | Unexpected system errors only |\r\n\r\n#### 3. Added `error_type` Field\r\nAll error responses now include `error_type` for programmatic handling:\r\n- `\"not_found\"` - Agent not found or access denied\r\n- `\"agent_error\"` - Agent-related failures\r\n- `\"validation_error\"` - Invalid request parameters  \r\n- `\"internal_error\"` - Unexpected system errors\r\n\r\n#### 4. Comprehensive Test Coverage (`tests/unit/mcpgateway/test_admin.py`)\r\nAdded 7 new test cases (lines 4728-4856):\r\n- ✅ Updated existing test to verify `error_type` field\r\n- ✅ Test 404 for agent not found\r\n- ✅ Test 404 for access denied (security: prevents info disclosure)\r\n- ✅ Test 502 for disabled agent\r\n- ✅ Test 502 for HTTP errors from agent endpoint\r\n- ✅ Test 400 for validation errors\r\n- ✅ Test 502 for connection failures\r\n\r\n#### 5. Enhanced Documentation\r\nUpdated function docstring with:\r\n- Clear HTTP status code mapping\r\n- Detailed response format documentation\r\n- Security notes about error sanitization\r\n- Explanation of 404 vs 403 for access control\r\n\r\n### Security Considerations\r\n\r\n✅ **Error messages remain sanitized** - Verified that `sanitize_exception_message()` in `a2a_service.py` prevents credential leakage\r\n\r\n✅ **Access control preserved** - Returns 404 (not 403) for access denied to avoid leaking agent existence (security best practice)\r\n\r\n✅ **No breaking changes** - Existing response fields preserved, `error_type` is additive only\r\n\r\n### Exception Handling Order Rationale\r\n\r\nThe order `A2AAgentNotFoundError` → `A2AAgentError` → `ValidationError` → `Exception` is intentional:\r\n\r\n1. **Python requires it** - `A2AAgentNotFoundError` inherits from `A2AAgentError`, so subclass must be caught first\r\n2. **Security** - 404 for both \"not found\" and \"access denied\" prevents information disclosure\r\n3. **HTTP semantics** - 404 for missing resources, 502 for upstream failures\r\n4. **Execution flow** - Database lookup (404) happens before HTTP invocation (502)\r\n\r\n### Impact Assessment\r\n\r\n- **Files Modified**: 2\r\n  - `mcpgateway/admin.py` - Exception handling (~25 lines)\r\n  - `tests/unit/mcpgateway/test_admin.py` - Test coverage (~128 lines)\r\n- **Risk Level**: Low (isolated change, comprehensive tests)\r\n- **Backward Compatibility**: ✅ Maintained (additive changes only)\r\n- **Performance Impact**: None\r\n\r\n### Benefits\r\n\r\n1. **Better Debugging** - Administrators can distinguish between failure types\r\n2. **Proper HTTP Semantics** - Correct status codes improve API usability\r\n3. **Improved UX** - Frontend can provide specific error messages\r\n4. **Security Maintained** - No credential leakage, proper access control\r\n5. **Production Ready** - Clean code, comprehensive tests, well-documented\r\n\r\n---\r\n\r\n## 📸 Example Response Changes\r\n\r\n### Before (All failures returned 500)\r\n```json\r\n{\r\n  \"success\": false,\r\n  \"error\": \"A2A Agent not found with name: test-agent\",\r\n  \"agent_id\": \"agent-123\"\r\n}\r\n```\r\n**Status**: 500 Internal Server Error ❌\r\n\r\n### After (Appropriate status codes)\r\n```json\r\n{\r\n  \"success\": false,\r\n  \"error\": \"A2A Agent not found with name: test-agent\",\r\n  \"error_type\": \"not_found\",\r\n  \"agent_id\": \"agent-123\"\r\n}\r\n```\r\n**Status**: 404 Not Found ✅\r\n\r\n---\r\n\r\n## 🧪 Testing Instructions\r\n\r\nRun the new tests:\r\n```bash\r\ncd mcp-context-forge\r\nmake test\r\n\r\n# Or run specific test class:\r\nsource ~/.venv/mcpgateway/bin/activate\r\npytest tests/unit/mcpgateway/test_admin.py::TestA2AAgentEndpoints -v\r\n```\r\n\r\nManual testing via admin UI:\r\n1. Navigate to `/admin/#a2a-agents`\r\n2. Register a test A2A agent\r\n3. Click \"Test\" button\r\n4. Observe proper status codes in browser DevTools Network tab",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3933262137",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T00:39:39+00:00",
+      "body": "Reviewed and tested end-to-end. Changes look good.\n\n**Original PR**: Proper HTTP status codes for A2A agent test failures (404/502/500 instead of generic 500 for all).\n\n**Review fixes applied:**\n1. Changed `ValidationError` status code from 400 → 422 to match codebase convention (every other `ValidationError` handler in admin.py uses 422)\n2. Fixed frontend `handleA2ATestSubmit` to parse JSON body for non-2xx responses — the existing error display code was dead for error responses because `!response.ok` threw before reaching it\n\n**Verified via:**\n- All 1032 admin unit tests pass\n- Playwright E2E: unreachable endpoint → \"Failed to invoke A2A agent: All connection attempts failed\"\n- Playwright E2E: disabled agent → \"A2A Agent 'test-error-handling-agent' is disabled\"\n- API: non-existent agent → 404 with `error_type: \"not_found\"`\n- API: unreachable endpoint → 502 with `error_type: \"agent_error\"`\n- API: disabled agent → 502 with `error_type: \"agent_error\"`"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0dc32cbbb19698441a84caee9521dce522358ebb",
+      "message": "fix: improve A2A agent test error handling and status codes (#3611)\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-11T15:33:59+00:00"
+    },
+    {
+      "sha": "cd90c5fceaf215ad59db519020c247ed72978d7f",
+      "message": "fix: use 422 for ValidationError to match codebase convention\n\nEvery other ValidationError handler in admin.py returns 422\n(Unprocessable Entity), not 400 (Bad Request). Align the A2A\nagent test endpoint with the established pattern.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T00:02:42+00:00"
+    },
+    {
+      "sha": "f2c67b7042e3fdc70be2538d973afe5a80873de2",
+      "message": "fix(ui): display structured error messages for A2A agent test failures\n\nThe frontend handler threw on non-2xx responses with a generic\n\"HTTP 404: Not Found\" message, discarding the structured JSON error\nbody from the backend. The result-display code (checking result.success\nand result.error) was dead for error responses despite being designed\nto handle them.\n\nParse the JSON body for all responses and let the existing display\nlogic show the detailed error message in the styled error box.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T00:20:01+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 173,
+  "deletions": 7,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:09.629820",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:09.631933",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3625,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3625.json"
+  }
+}

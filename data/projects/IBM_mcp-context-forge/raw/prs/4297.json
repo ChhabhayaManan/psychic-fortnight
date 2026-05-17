@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4297,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4297"
+  },
+  "metadata": {
+    "title": "build(container): consolidate on Containerfile.lite; deprecate others",
+    "state": "closed",
+    "created_at": "2026-04-18T16:01:44+00:00",
+    "updated_at": "2026-04-18T16:13:50+00:00",
+    "closed_at": "2026-04-18T16:13:49+00:00",
+    "merged_at": "2026-04-18T16:13:49+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nCloses #2613.\n\nRemoves the top-level `Containerfile` and `Containerfile.scratch` in favour of `Containerfile.lite` as the sole canonical gateway image, then applies a layer-consolidation and cache-ordering pass to `Containerfile.lite` and every per-component Containerfile in the tree.\n\n### Why\n\n- `Containerfile` duplicated the `.lite` build with weaker layer caching (a `COPY . /app` before the venv install invalidated dependencies on any code change) and shipped build tooling in the runtime image.\n- `Containerfile.scratch` had no frontend-builder stage (admin UI JS bundle absent in the image), failed under QEMU (amd64-only), and had no consumer in CI, docs, or the Makefile.\n- `Containerfile.lite` had a latent EACCES bug under the UBI nodejs-24 base (default UID 1001 can't write to root-owned `/app`) and used `npm install --frozen-lockfile`, a yarn/pnpm flag npm silently ignores.\n\n### Changes\n\n**Consolidation and caching (Containerfile.lite + 15 per-component Containerfiles):**\n- Merged adjacent `RUN` steps (microdnf + ln + useradd; profile.d setup + chmod; Rust MCP + A2A `cargo build`; etc.) to reduce layer churn.\n- Reordered `COPY` blocks from stable to volatile so frontend / Rust-binary / app-code changes no longer invalidate the heavy venv-install layer.\n- `COPY --chown=1001:0` in the UBI nodejs frontend-builder stage — fixes EACCES on `package-lock.json` under the non-root default user.\n- `COPY --chmod=0755` on run scripts to drop follow-up `chmod` layers.\n- `npm install --frozen-lockfile` → `npm ci`.\n- Silenced two pre-existing hadolint DL3013/DL3041 findings with targeted ignores consistent with the file-header policy.\n\n**Deprecation touchpoints updated:**\n- Makefile: `podman`, `podman-dev`, `podman-prod`, `docker`, `docker-dev`, `docker-prod`, `docker-prod-rust*`, `docker-prod-profiling`, `container-build-rust-lite` all now default to `Containerfile.lite` via `CONTAINER_FILE ?= ...` and respect user overrides (prior design had explicit overrides that blocked `make docker CONTAINER_FILE=foo`). Removed the `containerfile-update` target. Fixed a latent `$(CONTAINERFILE)` → `$(CONTAINER_FILE)` typo in the snyk-iac block.\n- Deployment / config: `fly.toml`, commented `docker-compose*.yml` migration examples, `.github/workflows/docker-scan.yml` (matrix + path triggers), `.travis.yml`, `.pre-commit-config.yaml`, `.bumpversion.cfg`, `MANIFEST.in`, `.snyk`.\n- Docs: `packaging.md`, `release-management.md` (removed the \"keep Containerfile and Containerfile.lite in sync\" warning, updated the FROM-tag table), `compose.md`, `openshift.md`, `container.md`, `fly-io.md` (rewrote an outdated psycopg install note — the `[postgres]` extra already bundles `psycopg[c,binary]>=3.3.3`), `argocd-helm-deployment-ibm-cloud-iks.md`, `MULTIPLATFORM.md`, `roadmap.md` (marked #2613 ✅).\n- Test: `tests/unit/test_docker_scan_workflow.py` updated to match the trimmed workflow matrix.\n\n### Verification\n\n- `hadolint Containerfile.lite` exit 0.\n- `make -n docker` → `-f Containerfile.lite`; `make -n docker CONTAINER_FILE=Foobarfile` → `-f Foobarfile` (override regression fixed).\n- `pytest tests/unit/test_docker_scan_workflow.py` — 4/4 pass.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "0f4a84216bebc88a1e8168f3437602b7b3088c68",
+      "message": "build(container): consolidate on Containerfile.lite; deprecate others\n\nCloses #2613.\n\nThe top-level `Containerfile` duplicated the .lite build with weaker layer\ncaching and shipped build tooling in the runtime image. `Containerfile.scratch`\nhad no frontend-builder stage (admin UI bundle absent), failed under QEMU\n(amd64-only), and had no consumer in CI, docs, or the Makefile. Both are\nremoved; `Containerfile.lite` is now the only canonical gateway image.\n\nApply the same layer-consolidation and caching pass across `Containerfile.lite`\nand the per-component Containerfiles:\n\n- Merge adjacent RUN steps (microdnf + ln + useradd; profile.d setup + chmod;\n  Rust MCP + A2A cargo builds; ...) to reduce layer churn.\n- Reorder COPYs from stable to volatile so frontend/Rust-binary changes no\n  longer invalidate the heavy venv-install layer.\n- Use COPY --chown=1001:0 in the UBI nodejs frontend-builder stage — fixes\n  EACCES on package-lock.json under the non-root UBI default user — and\n  COPY --chmod=0755 on run scripts to drop follow-up chmod layers.\n- Replace \\`npm install --frozen-lockfile\\` (a yarn/pnpm flag npm silently\n  ignores) with \\`npm ci\\`.\n- Silence pre-existing hadolint DL3013/DL3041 findings with targeted ignore\n  comments consistent with the file-header policy.\n\nUpdate every touchpoint of the deprecated images: Makefile podman/docker[-dev]\ntargets, fly.toml, docker-compose commented migration examples, the\ndocker-scan workflow matrix and trigger paths, .travis.yml,\n.pre-commit-config.yaml, .bumpversion.cfg, MANIFEST.in, and user-facing docs\n(packaging, release-management, compose, openshift, container, fly-io, argocd\ntutorial, MULTIPLATFORM, roadmap). Update the docker-scan unit test to match\nthe trimmed workflow. Incidentally fix the stale \\$(CONTAINERFILE) typo in\nthe snyk-iac Makefile target.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-18T14:22:04+00:00"
+    }
+  ],
+  "files_changed": 40,
+  "additions": 265,
+  "deletions": 753,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:30.964602",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:30.965285",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4297,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4297.json"
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3767,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3767"
+  },
+  "metadata": {
+    "title": "feat(api): add dynamic server catalog with rule-based matching",
+    "state": "open",
+    "created_at": "2026-03-20T14:57:16+00:00",
+    "updated_at": "2026-03-31T15:47:10+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "AbdulR11",
+    "labels": [
+      "enhancement",
+      "COULD",
+      "api"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #123\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR adds the **Dynamic Server Catalog** API, allowing users to define and retrieve virtual MCP servers dynamically using rule-based matching (tags, regex, metadata) and optional LLM selection. The new `/dynamic` endpoints let operators build flexible server groupings without fixed entity IDs.\r\n\r\n### Problem Statement\r\nStatic server definitions require explicit tool/resource/prompt IDs, which:\r\n- **Limit flexibility** for real-world groupings\r\n- **Force manual maintenance** as catalogs evolve\r\n- **Prevent rule-driven discovery** by tags, names, or metadata\r\n- **Block AI-driven selection** where heuristics fall short\r\n\r\n### Solution\r\n- **Dynamic Server API** under `/dynamic` for creating and managing virtual servers\r\n- **Rule evaluation engine** supporting rules, regex, and tags\r\n- **Optional LLM-based selection** for semantic matching when enabled\r\n- **Catalog endpoints** to preview matched tools/resources/prompts\r\n- **Database support** for dynamic servers and rules\r\n\r\n### Key Components\r\n- **Router Endpoints**: `/dynamic/*` CRUD + catalog preview endpoints\r\n- **Service Layer**: Rule evaluation and catalog matching logic\r\n- **Schemas**: Dynamic server and rule request/response models\r\n- **Database**: `DynamicServer` and `DynamicRule` models + migration\r\n- **Tests**: Router, service, and database coverage\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n\r\n\r\n### Test Coverage\r\n- ✅ Dynamic server CRUD endpoints\r\n- ✅ Rule validation and evaluation paths\r\n- ✅ Catalog evaluation for tools/resources/prompts\r\n- ✅ Service-layer matching logic\r\n- ✅ Database model/migration coverage\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Files Changed \r\n\r\n#### Core Implementation\r\n- `mcpgateway/routers/dynamic_router.py` - Dynamic server CRUD and catalog endpoints\r\n- `mcpgateway/main.py` - Router registration\r\n- `mcpgateway/services/dynamic_server_service.py` - Rule evaluation + catalog matching\r\n- `mcpgateway/db.py` - DynamicServer and DynamicRule models\r\n- `mcpgateway/alembic/versions/d4e5f6a7b8c9_add_dynamic_servers_and_rules.py` - Migration\r\n\r\n#### Tests \r\n- `tests/unit/mcpgateway/routers/test_dynamic_router.py` - Router endpoints coverage\r\n- `tests/unit/mcpgateway/services/test_dynamic_server_service.py` - Service logic coverage\r\n- `tests/unit/mcpgateway/test_db.py` - DB model coverage\r\n\r\n\r\n### Usage Example\r\n\r\n**Create a Dynamic Server:**\r\n```bash\r\nPOST /dynamic\r\n{\r\n\t\"name\": \"finance-tools\",\r\n\t\"rules\": [\r\n\t\t{\"rule_type\": \"tag\", \"entity_type\": \"tool\", \"value\": \"finance\"},\r\n\t\t{\"rule_type\": \"regex\", \"entity_type\": \"tool\", \"value\": \"^risk_.*\"}\r\n\t]\r\n}\r\n```\r\n\r\n**Preview matching tools:**\r\n```bash\r\nGET /dynamic/{id}/tools\r\n```\r\n\r\n### Benefits\r\n\r\n**For AI Agents:**\r\n- Smaller, targeted catalogs without manual curation\r\n- Optional LLM routing for semantic matching\r\n- Faster, more relevant tool exposure\r\n\r\n**For Platform Operators:**\r\n- Rule-driven control of dynamic catalogs\r\n- Reduced maintenance as catalogs evolve\r\n- Works with tags, regex, metadata, or LLM selection\r\n\r\n### Migration & Compatibility\r\n- ✅ **Backward compatible**: existing static servers unchanged\r\n- ✅ **Additive changes**: new `/dynamic` endpoints only\r\n- ✅ **Opt-in feature**: dynamic servers are created explicitly\r\n\r\n### Configuration\r\n```bash\r\n# Enable AI-driven selection when needed\r\nMCPGATEWAY_DYNAMIC_LLM_ENABLED=true\r\n```\r\n\r\n",
+  "comments": [
+    {
+      "id": "2966333512",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:27+00:00",
+      "body": "`mcpgateway.schemas` does not currently define `DynamicCatalogResponse`, `DynamicRuleCreate/Read`, or `DynamicServerCreate/Read/Update` (repo search finds these names only in the new dynamic router/service). This import will raise at runtime and prevent the app/tests from starting. Please add the missing Pydantic models to `mcpgateway/schemas.py` (or import from the correct module) before merging."
+    },
+    {
+      "id": "2966333569",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:28+00:00",
+      "body": "This endpoint immediately raises HTTP 501, so the `try:` block below is unreachable and the catalog evaluation is never executed. If catalog evaluation is intended to be available in this PR, remove the 501 and call `DynamicServerService.evaluate_catalog()`; otherwise delete the dead code below to avoid confusion.\n```suggestion\n\n```"
+    },
+    {
+      "id": "2966333610",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:28+00:00",
+      "body": "This endpoint immediately raises HTTP 501, so the `try:` block below is unreachable and preview evaluation is never executed. If preview is intended to be available in this PR, remove the 501 and call `DynamicServerService.preview_catalog()`; otherwise delete the dead code below to avoid confusion."
+    },
+    {
+      "id": "2966333629",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:28+00:00",
+      "body": "`update_dynamic_server()` allows renaming without checking `(team_id, owner_email, name)` uniqueness. Because there is a DB unique constraint, this will raise an `IntegrityError` on commit and the router will currently convert it to a 500. Consider pre-checking for name conflicts (like create does) and/or catching `IntegrityError` to return a 400/409 with a clear message."
+    },
+    {
+      "id": "2966333656",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:28+00:00",
+      "body": "The `metrics_hourly` relationship was removed from `Tool`, but multiple services still use it for eager loading (e.g. `ToolService.list_server_tools(...).options(selectinload(DbTool.metrics_hourly))`). This will raise `AttributeError` at runtime. Either restore the `metrics_hourly` relationship (viewonly is fine), or update all call sites to stop referencing it.\n```suggestion\n\n    # View-only relationship with hourly-aggregated ToolMetric records.\n    # This is kept to support existing eager-loading usage such as\n    # selectinload(DbTool.metrics_hourly) in services.\n    metrics_hourly: Mapped[List[\"ToolMetricHourly\"]] = relationship(\"ToolMetricHourly\", viewonly=True)\n```"
+    },
+    {
+      "id": "2966333678",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:29+00:00",
+      "body": "The unique constraint for `EmailApiToken` was changed to `(user_email, name)` and no longer includes `team_id`. Several code paths still assume per-team uniqueness (e.g. `token_catalog_service` checks `(user_email, name, team_id)`), so this will incorrectly reject creating tokens with the same name in different teams (and also changes behavior for `team_id IS NULL`). Please restore the composite uniqueness that includes `team_id` (and any needed partial unique index for the NULL team case), and add a migration to update the DB constraint accordingly."
+    },
+    {
+      "id": "2966333699",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:29+00:00",
+      "body": "This endpoint immediately raises HTTP 501, so the `try:` block below is unreachable and the catalog evaluation is never executed. If catalog evaluation is intended to be available in this PR, remove the 501 and call `DynamicServerService.evaluate_catalog()`; otherwise delete the dead code below to avoid confusion.\n```suggestion\n    raise HTTPException(\n        status_code=status.HTTP_501_NOT_IMPLEMENTED,\n        detail=\"Catalog resources preview is not implemented\",\n    )\n```"
+    },
+    {
+      "id": "2966333732",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:29+00:00",
+      "body": "These imports are unused in the test file (`_create_engine`, `_sa_text`, `_IntegrityError`, `_Session`) and will be flagged by the repo’s linting (flake8/pycodestyle) if enabled for tests. Please remove them or use them in the tests that require them.\n```suggestion\nfrom sqlalchemy.exc import SQLAlchemyError\n```"
+    },
+    {
+      "id": "2966333759",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:30+00:00",
+      "body": "The module docstring says the catalog endpoints are stubbed with HTTP 501 until the rule evaluation engine is merged, but this PR already adds `DynamicServerService.evaluate_catalog()` / `preview_catalog()` and the catalog handlers below include (unreachable) implementations. Either wire the endpoints to the service and remove the stub note, or remove the dead code/service methods so the router and PR description are consistent."
+    },
+    {
+      "id": "2966333776",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:30+00:00",
+      "body": "This endpoint immediately raises HTTP 501, so the `try:` block below is unreachable and the catalog evaluation is never executed. If catalog evaluation is intended to be available in this PR, remove the 501 and call `DynamicServerService.evaluate_catalog()`; otherwise delete the dead code below to avoid confusion."
+    },
+    {
+      "id": "2966333800",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:30+00:00",
+      "body": "`Permissions.get_all_permissions()` now only returns permission strings containing a dot. This drops colon-delimited permissions like `logs:read` and `admin.sso_providers:read`, which are actively required by routers (e.g. `routers/log_search.py`, `routers/sso.py`) and are validated via `RoleService` using `get_all_permissions()`. Please include `:` permissions again (or remove/rename those permission strings everywhere) so role validation and the “available permissions” endpoint remain consistent with runtime authorization checks."
+    },
+    {
+      "id": "2966333834",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:30+00:00",
+      "body": "This migration only creates `dynamic_servers` / `dynamic_rules`, but the PR also changes other ORM schema in `mcpgateway/db.py` (e.g., OAuth token columns/encryption, `EmailApiToken` unique constraint, metrics relationships/fields, new analytics tables). Those changes need their own Alembic migrations (or should be reverted from this PR) to avoid runtime mismatches between ORM and the actual DB schema."
+    },
+    {
+      "id": "2966333862",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:30+00:00",
+      "body": "`create_dynamic_server()` hard-codes `team_id=None` and also enforces uniqueness only for `team_id IS NULL`. This makes it impossible to create team-scoped dynamic servers that will ever match the team filters in `list_dynamic_servers()` (which checks `team_id.in_(token_teams)` when visibility is team). Please set `team_id` based on the request/user context when `visibility` is team-scoped (and include `team_id` in the uniqueness check), or remove team visibility support from the listing logic."
+    },
+    {
+      "id": "2966333888",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:31+00:00",
+      "body": "Swallowing all exceptions from `session.flush()` can mask the real failure cause and leave the session in a bad state; callers will likely see a later commit/rollback error without the original context. If the goal is resilience, consider logging the exception and re-raising (or rolling back) so the failure is explicit, or restrict the `except` to known transient connection errors.\n```suggestion\n    except SQLAlchemyError as exc:\n        logger = logging.getLogger(__name__)\n        logger.exception(\"Session flush failed in before_commit_handler; rolling back.\")\n        try:\n            session.rollback()\n        except SQLAlchemyError:\n            # If rollback itself fails, log and re-raise the original error.\n            logger.exception(\"Rollback failed after flush error in before_commit_handler.\")\n        raise\n```"
+    },
+    {
+      "id": "2966333914",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:31+00:00",
+      "body": "`Tool.metrics_summary` now aggregates only `ToolMetric` (raw) rows and ignores hourly rollup tables (`ToolMetricsHourly`, etc.). This breaks historical metrics once raw metrics are rolled up/cleaned (see `metrics_rollup_service` / `metrics_cleanup_service`) and contradicts existing service comments that expect raw+hourly coverage. Please either reintroduce combined raw+hourly aggregation, or ensure raw metrics are never deleted/rolled up when these summaries are used."
+    },
+    {
+      "id": "2966333934",
+      "author": "Copilot",
+      "created_at": "2026-03-20T15:10:31+00:00",
+      "body": "`OAuthToken.access_token` and `refresh_token` are now stored as plaintext `Text`. This is a security regression for credentials at rest; previously the codebase used an ORM boundary type to encrypt/decrypt tokens. Please restore encryption-at-rest for OAuth tokens (or implement an equivalent application-layer encryption) and add/keep tests to ensure encryption/decryption behavior."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3982176990",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-20T15:10:31+00:00",
+      "body": "## Pull request overview\n\nAdds a new “Dynamic Server Catalog” feature intended to let operators define virtual servers via rule-based matching (tags/regex/LLM) and expose them via new `/dynamic` API endpoints, backed by new DB tables and unit tests.\n\n**Changes:**\n- Introduces `DynamicServerService` with CRUD operations and an async rule-evaluation engine (tag/regex/LLM).\n- Adds a `dynamic_router` with CRUD + rule endpoints and placeholder catalog endpoints.\n- Adds an Alembic migration for `dynamic_servers` / `dynamic_rules` and updates/extends DB-related unit tests.\n\n### Reviewed changes\n\nCopilot reviewed 7 out of 8 changed files in this pull request and generated 16 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `mcpgateway/routers/dynamic_router.py` | New REST router for dynamic servers (CRUD/rules + catalog endpoints currently stubbed). |\r\n| `mcpgateway/services/dynamic_server_service.py` | New service layer for persistence + rule evaluation + catalog/preview evaluation. |\r\n| `mcpgateway/db.py` | Adds DynamicServer/DynamicRule models and includes multiple other DB/RBAC/metrics/auth changes. |\r\n| `mcpgateway/alembic/versions/d4e5f6a7b8c9_add_dynamic_servers_and_rules.py` | Creates `dynamic_servers` and `dynamic_rules` tables. |\r\n| `tests/unit/mcpgateway/routers/test_dynamic_router.py` | New unit tests for router endpoints (currently asserting 501 for catalog endpoints). |\r\n| `tests/unit/mcpgateway/services/test_dynamic_server_service.py` | New unit tests for DynamicServerService CRUD and rule evaluation. |\r\n| `tests/unit/mcpgateway/test_db.py` | Updates DB tests to reflect new metrics summary behavior and removes encryption-related tests. |\n</details>\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (1)</summary>\n\n**mcpgateway/db.py:5116**\n* `OAuthState` no longer defines `app_user_email`, but `OAuthManager`’s database cache path only persists that field when `hasattr(OAuthState, 'app_user_email')` is true. With the field removed, DB-backed OAuth state storage will drop the user context and can break token association during the callback flow. Please re-add the column to the ORM model (and ensure the migration state matches), or adjust `OAuthManager` to persist user context reliably without relying on `hasattr`.\n```\nclass OAuthState(Base):\n    \"\"\"ORM model for OAuth authorization states with TTL for CSRF protection.\"\"\"\n\n    __tablename__ = \"oauth_states\"\n\n    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: uuid.uuid4().hex)\n    gateway_id: Mapped[str] = mapped_column(String(36), ForeignKey(\"gateways.id\", ondelete=\"CASCADE\"), nullable=False)\n    state: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)  # The state parameter\n    code_verifier: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)  # PKCE code verifier (RFC 7636)\n    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)\n    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)\n    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)\n\n```\n</details>\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0cb613df9f272ef6b6aa3e6a926c7dfcfe822570",
+      "message": "feat: add dynamic server catalog\n\nSigned-off-by: AbdulR11 <147985851+AbdulR11@users.noreply.github.com>",
+      "author": "AbdulR11",
+      "date": "2026-03-20T14:51:01+00:00"
+    },
+    {
+      "sha": "bb0900edd8ce8a2d05fc352b9a7c7e1c3d0eb02b",
+      "message": "Update dynamic server catalog after feedback\n\nSigned-off-by: AbdulR11 <147985851+AbdulR11@users.noreply.github.com>",
+      "author": "AbdulR11",
+      "date": "2026-03-21T18:00:04+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 5375,
+  "deletions": 4904,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:04.736183",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:04.737357",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3767,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3767.json"
+  }
+}

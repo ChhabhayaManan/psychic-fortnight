@@ -1,0 +1,38 @@
+{
+  "id": "06814d1c-7352-440c-ac1a-c26fd991b4d6",
+  "title": "fix(resources): Implement resource URI deduplication and graceful ambiguity handling for federated resources",
+  "summary": "## 🔗 Related Issue\r\nCloses #4418\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes the federated resource URI ambiguity issue where multiple upstream MCP servers exposing the same resource URI (e.g., `timezone://info`) caused failures on the generic `/mcp/` endpoint.\r\n\r\n**Problem**: When `fast_time_server` (Go) and `fast_test_server` (Rust) both register `timezone://info`, the generic `/mcp/` endpoint would:\r\n- Return duplicate URIs in `resources/list`\r\n- Fail with `ResourceError: Resource URI 'timezone://info' is ambiguous` on `resources/read`\r\n\r\n**Solution**: Implements the recommended combination approach from the bug report:\r\n\r\n1. **Short-term fixes**:\r\n   - **Deduplication**: `list_resources()` now deduplicates resources by URI when `gateway_id` is not specified, returning only the first occurrence (by `created_at DESC`)\r\n   - **Graceful handling**: `read_resource()` picks the first match instead of raising an error when `MultipleResultsFound` occurs on the generic `/mcp/` endpoint\r\n\r\n2. **Long-term fix**:\r\n   - **Transparency**: Added `gateway_name` field to `ResourceRead` schema so clients can see which gateway each resource originates from\r\n\r\n**Impact**: The default docker-compose stack now works correctly via the generic `/mcp/` endpoint when multiple servers expose the same resource URI.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Implementation Details\r\n\r\n**Files Modified**:\r\n1. `mcpgateway/services/resource_service.py`:\r\n   - Lines 1295-1313: URI deduplication logic in `list_resources()`\r\n   - Lines 2415-2421: Graceful `MultipleResultsFound` handling in `read_resource()` for active resources\r\n   - Lines 2493-2498: Similar handling for inactive resource checks\r\n   - Lines 428-437: Gateway name population in `convert_resource_to_read()`\r\n\r\n2. `mcpgateway/schemas.py`:\r\n   - Line 2044: Added `gateway_name` field to `ResourceRead` schema\r\n\r\n3. Test updates:\r\n   - `tests/e2e/test_mcp_protocol_e2e.py`: Updated `test_resources_read_roundtrip` and added `test_resources_list_deduplicates_uris`\r\n   - `tests/unit/mcpgateway/services/test_resource_service.py`: Updated `test_read_resource_generic_uri_lookup_reports_ambiguity`\r\n\r\n### Design Decisions\r\n\r\n- **Deduplication strategy**: Returns first occurrence by `created_at DESC` to ensure deterministic behavior\r\n- **Backward compatibility**: Server-scoped endpoints (`/servers/{id}/mcp`) maintain strict ambiguity checks\r\n- **Transparency**: The `gateway_name` field allows clients to understand resource origin without breaking existing integrations\r\n- **Logging**: Added warning logs when ambiguous URIs are encountered to aid debugging\r\n\r\n### Behavior Changes\r\n\r\n**Before**:\r\n```\r\nGET /mcp/resources/list → [{\"uri\": \"timezone://info\"}, {\"uri\": \"timezone://info\"}]\r\nGET /mcp/resources/read?uri=timezone://info → 500 ResourceError\r\n```\r\n\r\n**After**:\r\n```\r\nGET /mcp/resources/list → [{\"uri\": \"timezone://info\", \"gateway_name\": \"fast_time\"}]\r\nGET /mcp/resources/read?uri=timezone://info → 200 OK (returns first match with warning log)\r\n```",
+  "reasoning": "## 🔗 Related Issue\r\nCloses #4418\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes the federated resource URI ambiguity issue where multiple upstream MCP servers exposing the same resource URI (e.g., `timezone://info`) caused failures on the generic `/mcp/` endpoint.\r\n\r\n**Problem**: When `fast_time_server` (Go) and `fast_test_server` (Rust) both register `timezone://info`, the generic `/mcp/` endpoint would:\r\n- Return duplicate URIs in `resources/list`\r\n- Fail with `ResourceError: Resource URI 'timezone://info' is ambiguous` on `resources/read`\r\n\r\n**Solution**: Implements the recommended combination approach from the bug report:\r\n\r\n1. **Short-term fixes**:\r\n   - **Deduplication**: `list_resources()` now deduplicates resources by URI when `gateway_id` is not specified, returning only the first occurrence (by `created_at DESC`)\r\n   - **Graceful handling**: `read_resource()` picks the first match instead of raising an error when `MultipleResultsFound` occurs on the generic `/mcp/` endpoint\r\n\r\n2. **",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "bogdanmariusc10"
+  ],
+  "tags": [
+    "mcp-protocol",
+    "api",
+    "bug",
+    "docker",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "1782712a-80c8-4150-b1da-53fdd9ffb801",
+      "source_type": "pr",
+      "source_id": "4517",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/4517",
+      "contributor": "bogdanmariusc10",
+      "timestamp": "2026-04-29T11:09:54Z",
+      "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4517.json"
+    }
+  ],
+  "timestamp": "2026-04-29T11:09:54Z",
+  "created_at": "2026-05-17T17:23:20.809050",
+  "updated_at": "2026-05-17T17:23:20.809053",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:20.809572",
+    "artifact_type": "decisions",
+    "artifact_id": "06814d1c-7352-440c-ac1a-c26fd991b4d6"
+  }
+}

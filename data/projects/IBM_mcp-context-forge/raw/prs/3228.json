@@ -1,0 +1,196 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3228,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3228"
+  },
+  "metadata": {
+    "title": "fix(oauth): harden legacy state handling and document token audience gap ",
+    "state": "closed",
+    "created_at": "2026-02-24T16:32:30+00:00",
+    "updated_at": "2026-03-20T17:04:34+00:00",
+    "closed_at": "2026-03-20T17:04:32+00:00",
+    "merged_at": "2026-03-20T17:04:32+00:00",
+    "author": "Lang-Akshay",
+    "labels": [
+      "bug",
+      "security",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "Closes #3068 (partial — Finding B remediated, Finding A documented only)\r\n\r\n## Summary\r\n\r\nHardens how legacy OAuth state is decoded and how user identity is bound to\r\nstored tokens, addressing **Finding B** (CWE-287 / CWE-345) from the OAuth / OBO\r\nsecurity review in #3068. Also documents the current token-forwarding behavior\r\ndescribed in **Finding A** (no local `aud`/`scope` pre-validation) without\r\nchanging runtime behavior.\r\n\r\n## Changes\r\n\r\n### OAuth state & identity binding (`oauth_manager.py`)\r\n\r\n| Area | Before | After |\r\n|------|--------|-------|\r\n| Legacy state decoding | `_extract_legacy_state_payload` returned the full unsigned payload, including `app_user_email` | Returns **only** `gateway_id`; identity fields are stripped (CWE-345) |\r\n| Missing email handling | Error was raised late, inside the `store_tokens` block | Error is raised **early** with a clear log line before any token exchange when `token_storage` is configured (CWE-287) |\r\n| No-storage path | Would also fail on missing email | Succeeds without `app_user_email` when `token_storage is None` — no cross-user binding risk exists |\r\n\r\n### Router & UI\r\n\r\n- **`oauth_router.py`**: JS callback snippet now escapes `gateway_id` with\r\n  `quote=True` when interpolating into the fetch URL.\r\n- **`admin.js`**: Fixes snake_case field access (`oauth_enabled`, `oauth_config`)\r\n  to match the actual API response schema; removes stale JS test file that\r\n  tested the old camelCase paths.\r\n\r\n### Documentation (Finding A)\r\n\r\n- **`oauth-design.md`**: Clarifies that tokens are forwarded as-is in the\r\n  `Authorization: Bearer` header and the MCP server is responsible for\r\n  validating `aud`/`scope`/`iss`. Adds an explicit\r\n  *\"Known Gap: No local audience/scope pre-validation\"* admonition for\r\n  future hardening.\r\n\r\n### Tests (deny-path regressions)\r\n\r\n- **`test_oauth_manager_pkce.py`** — new `TestCWE287DenyPathRegressions` class:\r\n  - Ambient `request.state` identity (object `.email`, dict `[\"email\"]`,\r\n    `_jwt_verified_payload`) is **never** used as `app_user_email`.\r\n  - `OAuthError(\"User context required …\")` is raised and `store_tokens` is\r\n    **never** called when email is missing and `token_storage` is configured.\r\n  - Flow **succeeds** when `token_storage is None` and email is missing.\r\n  - Legacy state with a mismatched `gateway_id` raises\r\n    `OAuthError(\"State parameter gateway mismatch\")`.\r\n\r\n## What is NOT addressed\r\n\r\n- **Finding A** (local audience/scope validation before forwarding tokens) is\r\n  documented but deferred to a follow-up.\r\n",
+  "comments": [
+    {
+      "id": "2891635513",
+      "author": "brian-hussey",
+      "created_at": "2026-03-05T18:55:10+00:00",
+      "body": "Is there an issue raised for this that we can point at?"
+    },
+    {
+      "id": "2891653680",
+      "author": "brian-hussey",
+      "created_at": "2026-03-05T18:59:48+00:00",
+      "body": "This is a copy of the `if not app_user_email:` 6 lines above, and having removed the `app_user_email = legacy_state_payload.get(\"app_user_email\")` there is nothing to change the state of `app_user_email`.\n\nPlease rearrange this so that the logic is all under the one if statement, or true it up if something else is needed."
+    },
+    {
+      "id": "2891698348",
+      "author": "brian-hussey",
+      "created_at": "2026-03-05T19:07:57+00:00",
+      "body": "These all look like exact duplicates of the `test_ambient_user_object_with_email_attribute_not_used` above."
+    },
+    {
+      "id": "2891701552",
+      "author": "brian-hussey",
+      "created_at": "2026-03-05T19:08:31+00:00",
+      "body": "This looks like duplicate logic as well but the docstring is different."
+    },
+    {
+      "id": "2906773860",
+      "author": "Lang-Akshay",
+      "created_at": "2026-03-09T17:05:32+00:00",
+      "body": "Thanks @brian-hussey, have raised \r\n- Issue  #3563\r\n\r\n"
+    },
+    {
+      "id": "2930336477",
+      "author": "brian-hussey",
+      "created_at": "2026-03-13T10:27:57+00:00",
+      "body": "This has been taken care of, resolving"
+    },
+    {
+      "id": "2930352218",
+      "author": "brian-hussey",
+      "created_at": "2026-03-13T10:31:18+00:00",
+      "body": "```suggestion\n            logger.warning(\"User context (app_user_email) missing from OAuth state; no token_storage configured — proceeding without binding. gateway_id=%s\", gateway_id)\n```\nTo fix the lint failure"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3898902359",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-05T19:12:11+00:00",
+      "body": "Hey @Lang-Akshay, 1 documentation change if we have an issue to point at for documented future work. One logical change, and then it looks like some of the tests are straight up duplicates."
+    },
+    {
+      "id": "3916907558",
+      "author": "Lang-Akshay",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-09T17:05:32+00:00",
+      "body": ""
+    },
+    {
+      "id": "3943027103",
+      "author": "brian-hussey",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-13T10:27:57+00:00",
+      "body": ""
+    },
+    {
+      "id": "3943045318",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-13T10:31:45+00:00",
+      "body": "This one change to fix linting issue and then I think we're good to merge."
+    },
+    {
+      "id": "3982788014",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-20T16:54:36+00:00",
+      "body": "Rebased, reviewed, and added two fixup commits. Security fixes are correct (CWE-287/CWE-345), 100% differential test coverage, all 310 tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "00692338f37674830754d2e7c764b0ae9d85eed1",
+      "message": "fix: enhance OAuth flow to extract user email from request context for legacy fallback\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-24T16:32:04+00:00"
+    },
+    {
+      "sha": "4a1c84b0592d12001782dce93eef55b8122163d8",
+      "message": "refactor(oauth): remove request context fallback for app_user_email to prevent CWE-287 vulnerabilities\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-25T15:54:50+00:00"
+    },
+    {
+      "sha": "a5635c1ec21f3c324ad974d1449595926f9507d0",
+      "message": "fix(oauth): ensure user context is required for token storage to prevent CWE-287 vulnerabilities\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-25T16:40:25+00:00"
+    },
+    {
+      "sha": "dfb504c06b76c9e8e9f69b63a43c465d295f3a38",
+      "message": "fix(oauth): ensure legacy state payloads do not expose identity claims and update tests for compliance\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-26T15:17:30+00:00"
+    },
+    {
+      "sha": "6138b7916a12d3e54b9dbf76aa7a35585a0980ed",
+      "message": "fixup: flake8\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-26T16:09:47+00:00"
+    },
+    {
+      "sha": "2b4354d29b09ee3d755a4acc0eaf05858e043c02",
+      "message": "fix(oauth): enforce hard errors for missing email in state to prevent CWE-287 vulnerabilities\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-27T12:33:01+00:00"
+    },
+    {
+      "sha": "1a8515f1750dcfd4e8d520ccbcca69c217c7c54e",
+      "message": "test(oauth): add regression tests for legacy state gateway ID mismatch handling\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-03-04T13:51:04+00:00"
+    },
+    {
+      "sha": "cfe6a03cfee979a2961e14c84c42bde2bc2284e9",
+      "message": "fix(oauth): enforce hard errors for missing email in state and update tests for ambient context scenarios\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-03-10T16:09:07+00:00"
+    },
+    {
+      "sha": "80be30076b34f987594dd4f9c913cf60f9963e42",
+      "message": "fix(oauth): enhance logging for missing user context in OAuth state and handle token storage absence\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-03-10T18:11:30+00:00"
+    },
+    {
+      "sha": "0c15a8f18782c4c7f672b257e9e851de4b4a5430",
+      "message": "Update mcpgateway/services/oauth_manager.py\n\nCo-authored-by: Brian Hussey <brian.hussey@ie.ibm.com>\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-03-13T13:01:07+00:00"
+    },
+    {
+      "sha": "f53c53ab109aa4a2213deb5493d7e51c9b083a4a",
+      "message": "fix: remove stray blank lines from oauth_manager and oauth-design doc\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T15:27:05+00:00"
+    },
+    {
+      "sha": "816fe4a13f50a1626011f498a11c2f16bf046305",
+      "message": "fix(oauth): correct misleading comment on legacy state handling\n\nThe comment said \"backward compatibility for in-flight legacy states\"\nbut the /oauth/callback router rejects pure legacy states before\nreaching complete_authorization_code_flow (allow_legacy_fallback=False).\nUpdated to accurately describe the block as defence-in-depth for\nserver-stored states that lack app_user_email.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T16:52:37+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 296,
+  "deletions": 12,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:20.198588",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:20.201522",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3228,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3228.json"
+  }
+}

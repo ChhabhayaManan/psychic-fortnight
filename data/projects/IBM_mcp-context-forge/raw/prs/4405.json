@@ -1,0 +1,61 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4405,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4405"
+  },
+  "metadata": {
+    "title": "fix(rbac): enforce team-membership check on plugin binding DELETE endpoints",
+    "state": "closed",
+    "created_at": "2026-04-23T06:57:10+00:00",
+    "updated_at": "2026-05-09T21:20:15+00:00",
+    "closed_at": "2026-05-09T21:20:12+00:00",
+    "merged_at": "2026-05-09T21:20:12+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "security",
+      "plugins",
+      "ica"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\n`DELETE /v1/tools/plugin_bindings/{id}` and `DELETE /v1/tools/plugin_bindings?binding_reference_id=...` relied solely on the `tools.manage_plugins` RBAC permission and did not verify that the caller's team membership overlapped with the binding's `team_id`. A non-admin holding `tools.manage_plugins` on any team could delete a binding belonging to a different team by guessing or observing its UUID or external reference ID. The paired upsert endpoint already enforced this check; the delete endpoints did not.\r\n\r\n## 🔗 Related Issue\r\n\r\nCloses: #4311\r\n\r\n## 🔁 Reproduction Steps\r\n\r\nSee [#4311](https://github.com/IBM/mcp-context-forge/issues/4311).\r\n\r\n1. Authenticate as a non-admin user who holds `tools.manage_plugins` on **team-A**.\r\n2. Obtain the UUID (or `binding_reference_id`) of a binding that belongs to **team-B**.\r\n3. `DELETE /v1/tools/plugin_bindings/<team-B-binding-uuid>` → binding is deleted despite the caller having no membership in team-B.\r\n\r\n## 🐞 Root Cause\r\n\r\nThe router handlers (`delete_tool_plugin_binding`, `delete_tool_plugin_bindings_by_reference`) forwarded the delete straight to the service layer without extracting the caller's team membership or passing it down. The service methods contained no team filter — they matched only on `id` / `binding_reference_id`, making any binding reachable to anyone with the permission.\r\n\r\nAffected code:\r\n- `mcpgateway/routers/tool_plugin_bindings.py` lines 189–286\r\n- `mcpgateway/services/tool_plugin_binding_service.py` `delete_binding` / `delete_bindings_by_reference`\r\n\r\n## 💡 Fix Description\r\n\r\nTwo orthogonal layers of defence, mirroring the existing upsert pattern:\r\n\r\n1. **Router-side guard** — each delete handler now extracts `is_admin` and `teams` from `current_user_ctx` and computes `allowed_teams = None` (admin bypass) or `set(user_teams)` (non-admin). This is passed to the service.\r\n\r\n2. **Service-side scoping**:\r\n   - `delete_binding` — checks `binding.team_id not in allowed_teams` before deleting; raises `ToolPluginBindingForbiddenError` (mapped to HTTP 403 by the router).\r\n   - `delete_bindings_by_reference` — applies `team_id.in_(allowed_teams)` as a SQL filter so foreign-team rows are never fetched or deleted (silent skip, consistent with bulk-operation semantics).\r\n\r\nA new `ToolPluginBindingForbiddenError` exception class carries the denial through the service→router boundary cleanly.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                             | Command                                                                                                   | Status |\r\n|-----------------------------------|-----------------------------------------------------------------------------------------------------------|--------|\r\n| Lint suite                        | `make lint`                                                                                               |        |\r\n| Unit tests                        | `make test`                                                                                               |        |\r\n| Coverage ≥ 90 %                   | `make coverage`                                                                                           |        |\r\n| Plugin-binding tests (76 pass)    | `.venv/bin/pytest tests/unit/mcpgateway/routers/test_tool_plugin_bindings.py tests/unit/mcpgateway/services/test_tool_plugin_binding_service.py -v` | ✅ 76/76 passed |\r\n| Non-admin foreign team → 403      | `test_delete_non_admin_foreign_team_raises_403`                                                           | ✅     |\r\n| Non-admin bulk scoped to own team | `test_delete_by_reference_non_admin_scoped_to_own_teams`                                                  | ✅     |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "1ee6cecf661a14fd5c2782d3252dfb29dd8d01ec",
+      "message": "fix(rbac): enforce team-membership check on plugin binding DELETE endpoints\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-04-21T07:02:37+00:00"
+    },
+    {
+      "sha": "867c588ee05ebb219d1d56f52e1376030bcea55c",
+      "message": "test(rbac): add deny-path regression tests for plugin binding DELETE endpoints\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-04-23T06:06:03+00:00"
+    },
+    {
+      "sha": "a84137bdd429f730e04c71a436669a4224a24da7",
+      "message": "fix(rbac): use token_teams and respect token scoping on plugin binding delete\n\nCorrects the auth context key from 'teams' to 'token_teams' and restricts\n\nthe admin bypass to only unrestricted tokens (token_teams is None).\n\n- Extract _allowed_teams_from_ctx() helper to deduplicate team resolution\n\n- Tighten type hints: Optional[set] -> Optional[set[str]]\n\n- Add narrowed-admin deny-path tests for both by-id and by-reference delete\n\n- Add empty allowed_teams service-level test\n\n- Fix service docstring wording\n\n- Clean up unused test imports\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T20:29:50+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 309,
+  "deletions": 14,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:58.751606",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:58.752368",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4405,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4405.json"
+  }
+}

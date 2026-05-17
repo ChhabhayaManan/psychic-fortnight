@@ -1,0 +1,61 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4383,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4383"
+  },
+  "metadata": {
+    "title": "security(mcp_runtime): backend URL validation for SSRF protection",
+    "state": "closed",
+    "created_at": "2026-04-22T05:29:16+00:00",
+    "updated_at": "2026-04-24T15:20:23+00:00",
+    "closed_at": "2026-04-24T15:20:21+00:00",
+    "merged_at": "2026-04-24T15:20:21+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "security",
+      "ica",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nImplements allowlist-based URL validation for all outgoing Rust→Python backend HTTP requests to prevent SSRF attacks via misconfigured environment variables.\n\n## Problem\n\nThe Rust MCP runtime makes outgoing HTTP requests to Python backend services using URLs derived from environment variables. Without validation, misconfigured environment variables could point to:\n- Cloud metadata endpoints (e.g., 169.254.169.254)\n- Internal network services\n- Other unintended destinations\n\nThis creates an SSRF (Server-Side Request Forgery) vulnerability via environment variable misconfiguration.\n\n## Solution\n\n### Design Approach\n\n**Allowlist-based validation with CIDR blocking:**\n1. Parse URL to extract host\n2. Check if host is in allowlist → allow\n3. If host is IP address, check against blocked CIDR ranges → deny if matched\n4. If host is domain not in allowlist → deny (fail-closed)\n\n**No DNS resolution:**\n- Simplified implementation avoids DNS complexity\n- No async DNS lookups or caching\n- Assumes operator-controlled infrastructure\n\n**Threat model:**\n- ✅ Defends against: Misconfigured environment variables\n- ❌ Does NOT defend against: DNS poisoning (assumes operator-controlled infrastructure)\n\n### Implementation Details\n\n**New module:** `crates/mcp_runtime/src/backend_url_validator.rs`\n- `BackendUrlValidator` struct with allowlist + CIDR blocking\n- Uses `ipnetwork = \"0.21\"` crate for CIDR range checking\n- 9 comprehensive unit tests\n\n**Refactored for DRY:**\n- `AppState::validate_backend_url()` - Shared validation helper\n- `validation_error_response()` - Shared error response builder\n- Eliminates code duplication across 19 validation call sites\n\n**Complete coverage - all 19 backend request functions:**\n1. ✅ `authenticate_public_request_if_needed`\n2. ✅ `send_to_backend_url`\n3. ✅ `send_transport_to_backend`\n4. ✅ `send_session_delete_to_backend`\n5. ✅ `send_tools_list_to_backend`\n6. ✅ `send_resources_list_to_backend`\n7. ✅ `send_resources_read_to_backend`\n8. ✅ `send_resources_subscribe_to_backend`\n9. ✅ `send_resources_unsubscribe_to_backend`\n10. ✅ `send_resource_templates_list_to_backend`\n11. ✅ `send_roots_list_to_backend`\n12. ✅ `send_completion_complete_to_backend`\n13. ✅ `send_sampling_create_message_to_backend`\n14. ✅ `send_logging_set_level_to_backend`\n15. ✅ `send_prompts_list_to_backend`\n16. ✅ `send_prompts_get_to_backend`\n17. ✅ `resolve_tools_call_plan_via_backend`\n18. ✅ `send_tools_call_to_backend`\n19. ✅ `send_tools_call_metric_to_backend`\n\n## Configuration\n\n**Environment variables:**\n```bash\nBACKEND_VALIDATION_ENABLED=true                     # Enable validation (default: true)\nBACKEND_ALLOWED_HOSTS=\"localhost,127.0.0.1,0.0.0.0\" # Approved backend hosts (default)\nBACKEND_BLOCKED_NETWORKS=\"169.254.169.254/32\"       # CIDR ranges to block (default)\nBACKEND_MAX_URL_LENGTH=2048                          # Maximum URL length (default: 2048)\n```\n\n**Production example:**\n```bash\nBACKEND_ALLOWED_HOSTS=\"backend.internal,10.0.1.50\" \\\nBACKEND_BLOCKED_NETWORKS=\"169.254.169.254/32,10.0.0.0/8\" \\\ncargo run\n```\n\n**Development (local only):**\n```bash\nBACKEND_ALLOWED_HOSTS=\"localhost,127.0.0.1\" cargo run\n```\n\n**Disable validation (NOT recommended):**\n```bash\nBACKEND_VALIDATION_ENABLED=false cargo run\n```\n\n## Testing\n\n**Unit tests:**\n- 9 validator tests in `backend_url_validator.rs`\n- Cover: allowlist approval/rejection, IP allowlist, CIDR blocking, length limits, validation disabled, invalid URLs, invalid CIDR\n\n**Integration tests:**\n- All 56 existing integration tests pass\n- Tests validate the complete request flow including URL validation\n\n**Verification:**\n```bash\ncd crates/mcp_runtime\ncargo test --release          # 56 integration + 9 validator tests = 65 total\ncargo fmt --check             # Clean\ncargo clippy --all-features -- -D warnings  # Clean\n```\n\n## Security Model\n\n**Fail-closed by default:**\n- Validation enabled by default (`BACKEND_VALIDATION_ENABLED=true`)\n- Domain not in allowlist = reject\n- Validation errors return BAD_GATEWAY (502) with safe error messages\n\n**Protection:**\n- ✅ Blocks cloud metadata endpoints (169.254.169.254/32 by default)\n- ✅ URL length limit prevents overflow attacks\n- ✅ CIDR range validation for IP-based blocking\n- ✅ No sensitive information leaked in error responses\n\n**Scope:**\n- Validates OUTGOING Rust→Python backend requests\n- Does NOT validate incoming client requests\n\n## Files Changed\n\n**New files:**\n- `crates/mcp_runtime/src/backend_url_validator.rs` - Validator implementation + tests\n\n**Modified files:**\n- `Cargo.lock` - Added ipnetwork dependency\n- `crates/mcp_runtime/Cargo.toml` - Added ipnetwork = \"0.21\"\n- `crates/mcp_runtime/README.md` - Added Backend URL Validation section\n- `crates/mcp_runtime/src/config.rs` - Added 4 validation config fields\n- `crates/mcp_runtime/src/lib.rs` - Added validator, AppState field, helpers, 19 call sites\n- `crates/mcp_runtime/tests/runtime.rs` - Updated test config\n- `supply-chain/audits.toml` - Added cargo-vet exemption for ipnetwork\n\n**Stats:** 8 files changed, 536 insertions(+), 18 deletions(-)\n\n## Documentation\n\n**README section added:**\n- Purpose and scope\n- Threat model\n- Environment variables\n- Configuration examples\n- Production/development/disabled modes\n\nSee `crates/mcp_runtime/README.md` lines 116-148.\n\n## Dependencies\n\n**New dependency:**\n- `ipnetwork = \"0.21\"` - CIDR network parsing for IP address validation\n- cargo-vet exemption added in `supply-chain/audits.toml`\n- Reviewed for safe IP/CIDR parsing with no unsafe code or network I/O\n\n## Breaking Changes\n\nNone. This is a backward-compatible security enhancement:\n- Validation enabled by default with safe default configuration\n- Default allowlist permits localhost/127.0.0.1/0.0.0.0\n- Can be disabled via `BACKEND_VALIDATION_ENABLED=false` if needed",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "c28ebcdb1ce0c7e10c45563ed1e0c85ddc75076e",
+      "message": "security(mcp_runtime): add backend URL validation for SSRF protection\n\nImplements allowlist-based URL validation for all outgoing Rust→Python\nbackend HTTP requests to prevent SSRF attacks via misconfigured\nenvironment variables.\n\nKey features:\n- Validates all 19 backend request functions before making HTTP calls\n- Allowlist approach: only approved hosts allowed (fail-closed security)\n- CIDR network blocking for IP addresses (blocks 169.254.169.254 by default)\n- No DNS resolution (avoids DNS poisoning complexity)\n- URL length limit (2048 bytes) prevents overflow attacks\n- Validation enabled by default (BACKEND_VALIDATION_ENABLED=true)\n\nImplementation:\n- New BackendUrlValidator with ipnetwork 0.21 for CIDR parsing\n- Reads all config from RuntimeConfig (no ad-hoc env var reads)\n- Refactored shared validation helper to eliminate code duplication\n- Returns BAD_GATEWAY (502) on validation failure\n\nCoverage:\n- All 19 backend request paths validate URLs\n- 9 validator unit tests + 56 integration tests pass\n- cargo fmt and clippy clean\n\nAddresses review feedback:\n- Fixed send_transport_to_backend() and send_session_delete_to_backend()\n- Fixed UrlValidator::from_config() to use RuntimeConfig exclusively\n- Simplified design: eliminated DNS resolution complexity\n- Documented correct test commands in README\n\nConfiguration:\nBACKEND_VALIDATION_ENABLED=true                     # default\nBACKEND_ALLOWED_HOSTS=\"localhost,127.0.0.1,0.0.0.0\" # default\nBACKEND_BLOCKED_NETWORKS=\"169.254.169.254/32\"       # default\nBACKEND_MAX_URL_LENGTH=2048                          # default\n\nThreat model: Defends against misconfigured environment variables\npointing to cloud metadata endpoints or blocked internal networks.\nDoes NOT defend against DNS poisoning (assumes operator-controlled\ninfrastructure).\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-22T05:26:24+00:00"
+    },
+    {
+      "sha": "c8e695c28e1abb6ae4d65bf55e0d267535ccc9a6",
+      "message": "fix(cargo-vet): correct ipnetwork version to 0.21.1\n\ncargo-vet was failing because the audit was for version 0.21.0 but\nCargo.lock resolved to 0.21.1. Updated audit version to match.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-22T06:06:26+00:00"
+    },
+    {
+      "sha": "da177e24dc8b5d3f7ec70c76057277abea2aab3e",
+      "message": "security(mcp_runtime): harden SSRF validator (IPv6, redirects, authz paths)\n\nAddress review feedback on backend URL validation:\n\n- Fix IPv6 CIDR blocklist bypass. url::Url::host_str() returns IPv6 hosts\n  with surrounding brackets (per RFC 3986), which caused IpAddr::from_str\n  to fail and skip the CIDR check entirely. parse_host_as_ip() now strips\n  brackets before parsing and maps ::ffff:<IPv4> back to IPv4, so\n  http://[::ffff:169.254.169.254]/ is caught by the default\n  169.254.169.254/32 rule.\n\n- Cover the 6 authz paths that previously bypassed validation. All\n  direct_* entry points route through authorize_server_method_via_backend;\n  adding state.validate_backend_url() at the top of that helper covers\n  backend_tools_list_authz_url, backend_resources_list_authz_url,\n  backend_resources_read_authz_url, backend_resource_templates_list_authz_url,\n  backend_prompts_list_authz_url, and backend_prompts_get_authz_url in\n  one place.\n\n- Disable HTTP redirects on the shared reqwest client via\n  redirect::Policy::none() (and reqwest_rmcp::redirect::Policy::none() on\n  the feature-gated rmcp_client). The validator only inspects the initial\n  URL; without this the default 10-redirect policy would let an allowlisted\n  host 302-redirect to a blocked endpoint.\n\n- Rename env vars BACKEND_* -> MCP_RUST_BACKEND_* to match the crate's\n  existing naming convention and avoid global env-namespace pollution.\n\n- Validate MCP_RUST_BACKEND_RPC_URL once at AppState::new() so operator\n  misconfigurations fail fast at startup instead of on first request.\n\n- Update default allowlist: remove nonsensical 0.0.0.0 connect address,\n  add [::1] (pre-bracketed to match url::Url::host_str output) for\n  dual-stack loopback deployments. Default blocklist now includes\n  fd00::1/128 (IPv6 cloud metadata) to mirror Python SSRF defaults.\n\n- Rewrite threat-model wording in the module docstring and README to\n  frame DNS rebinding and redirect-bypass as explicit 'out of scope'\n  non-guarantees rather than as safe assumptions.\n\n- Add 3 IPv6 regression tests:\n  * ipv6_loopback_blocklist_hits_through_brackets\n  * ipv4_mapped_ipv6_caught_by_ipv4_cidr_block\n  * ipv6_in_allowlist_approved_via_brackets\n\nVerification:\n  cargo fmt --check: clean\n  cargo clippy --all-features --all-targets -- -D warnings: clean\n  cargo test --all-features: 159 tests pass (100 lib + 57 integration + 2 CLI)\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T10:37:30+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 631,
+  "deletions": 20,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:52.498003",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:52.498639",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4383,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4383.json"
+  }
+}

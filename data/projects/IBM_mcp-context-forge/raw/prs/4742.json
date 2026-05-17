@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4742,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4742"
+  },
+  "metadata": {
+    "title": "fix: correct middleware execution order for password change enforcement",
+    "state": "closed",
+    "created_at": "2026-05-13T12:18:29+00:00",
+    "updated_at": "2026-05-13T12:20:58+00:00",
+    "closed_at": "2026-05-13T12:20:56+00:00",
+    "merged_at": "2026-05-13T12:20:56+00:00",
+    "author": "vishu-bh",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nThis PR hardens the login process by correcting the middleware execution order for password change enforcement.\n\nFixes #4736\n\n## Problem\n\nThe password change enforcement middleware was executing before the authentication context middleware due to Starlette/FastAPI's reverse middleware execution order. This caused  to be unavailable when the enforcement middleware tried to access it.\n\n## Solution\n\nSwapped the middleware registration order in  so that:\n1. AuthContextMiddleware is added second (runs first)\n2. PasswordChangeEnforcementMiddleware is added first (runs second)\n\nThis ensures  is populated before password enforcement checks occur.\n\n## Changes\n\n- **mcpgateway/main.py** (lines 3091-3134): Swapped middleware registration order with detailed comments explaining reverse execution\n- **tests/unit/mcpgateway/middleware/test_password_change_enforcement_security.py**: Added 18 comprehensive edge case tests\n\n## Test Coverage\n\n✅ **30/30 tests passing** (18 new + 12 existing)\n\nNew security edge case tests cover:\n- All HTTP methods enforcement (GET, POST, PUT, DELETE)\n- Missing/None attribute handling\n- Path traversal prevention\n- Case sensitivity verification\n- Trailing slash handling\n- Redirect loop prevention\n- Auth method variations (jwt, session, api_token, bearer, None)\n- Boolean value variations for password_change_required\n- State manipulation prevention\n- Concurrent request isolation\n- Proper HTTP 303 redirect status\n- Immutable exempt paths (frozenset)\n- Feature flag integrity\n\n## Verification\n\n```bash\npytest tests/unit/mcpgateway/middleware/test_password_change_enforcement*.py -v\n# Result: 30 passed in 0.67s\n```\n\n## Impact\n\n- Hardens the login process by ensuring proper middleware execution order\n- Prevents AttributeError when accessing user context\n- Comprehensive test coverage prevents regression\n- No breaking changes to existing functionality",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4281479113",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-13T12:20:49+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "bee7f9d4ff99cb239c34a42343782e5b36b12680",
+      "message": "fix: correct middleware execution order for password change enforcement\n\nFixes #4736\n\nThis change hardens the login process by ensuring the password change\nenforcement middleware executes after authentication context is established.\n\nChanges:\n- Swapped middleware registration order in main.py (lines 3091-3134)\n- PasswordChangeEnforcementMiddleware now added first (runs second)\n- AuthContextMiddleware now added second (runs first)\n- Added comprehensive security edge case tests (18 new tests)\n- All 30 tests passing (18 new + 12 existing)\n\nThe middleware execution order is critical because Starlette/FastAPI\nprocesses middleware in reverse order of addition. This ensures\nrequest.state.user is populated before password enforcement checks.\n\nTest coverage includes:\n- All HTTP methods enforcement\n- Missing/None attribute handling\n- Path traversal prevention\n- Auth method variations\n- State isolation between requests\n- Feature flag integrity\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-05-13T12:17:52+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 1192,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:38.268433",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:38.269241",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4742,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4742.json"
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3514,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3514"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Include public MCP objects in team-scoped server associations",
+    "state": "closed",
+    "created_at": "2026-03-06T09:39:02+00:00",
+    "updated_at": "2026-03-12T15:42:53+00:00",
+    "closed_at": "2026-03-12T15:42:50+00:00",
+    "merged_at": "2026-03-12T15:42:50+00:00",
+    "author": "gcgoncalves",
+    "labels": [
+      "bug",
+      "ui",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nWhen editing a team server, include selected objects from public MCP servers on saving.\r\n\r\n\r\nhttps://github.com/user-attachments/assets/1ba50b94-f50a-4cf1-8d9a-7f83846782a1\r\n\r\nCloses #3446 \r\n\r\n## 🔁 Reproduction Steps\r\n_Link the issue and minimal steps to reproduce the bug._\r\n\r\n## 🐞 Root Cause\r\nThere was a filter for team items on the saving and fetching logic.\r\n\r\n## 💡 Fix Description\r\nEnabled both the team and public ones on the saving and fetching conditions.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3904926759",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-06T17:05:50+00:00",
+      "body": "### Code Review for PR 3486\n\nThe review found solid work on the core change, but several gaps that should be addressed before merging:\n\n---\n#### Strengths\n\n- All targeted instances in rbac.py, streamablehttp_transport.py, and main.py updated consistently\n- Server-side logging retains full permission detail in rbac.py and transport layer\n- Tests updated in lock-step and verify new generic messages end-to-end\n- Two-layer security model (token scoping + RBAC) structurally unchanged\n\n---\n#### Critical Issues (Must Fix)\n\n1. admin.py:10493 still exposes permission name in 403\nraise HTTPException(status_code=403, detail=\"Insufficient permissions. Required: admin.user_management\"). Leaks admin.user_management — exactly what this PR aims to eliminate.\n\n2. main.py:6088,6091,6293 — three JSON-RPC errors expose operational detail\n- Lines 6088/6091: \"Session ownership unavailable\" / \"Session ownership mismatch\" — allows probing of session state\n- Line 6293: \"Insufficient permissions for resource subscription\" — exposes operation type\n- Lines 6088/6091 also include session_id in the error data dict, confirming session existence\n\n3. main.py:6796 — WebSocket relay RBAC gate uses inconsistent message raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=\"Insufficient permissions\"). Should be \"Access denied\" for consistency.\n\n---\n#### Important Issues (Should Fix)\n\n4. No shared constant — \"Access denied\" is hardcoded as a raw literal in 15+ locations. A _ACCESS_DENIED_MSG constant in rbac.py would prevent future drift.\n\n5. rbac.py:1066 — PermissionChecker.require_permission logs nothing before raising — silent denials, no server-side audit trail. Violates requirement to preserve logging for debugging.\n\n6. token_scoping.py:1268 — \"Insufficient permissions for this operation\" not normalized.\n\n7. routers/teams.py and routers/reverse_proxy.py — six \"Insufficient permissions\" responses not covered by this PR.\n\n8. No deny-path test for SessionManagerWrapper RBAC gate (streamablehttp_transport.py:2348-2358) — required by CLAUDE.md security invariants.\n\n---\n#### Assessment\n\nReady to merge: No — fix Critical issues first\n\nThe core implementation is mechanically clean but the sweep is incomplete. Three actively leaking 403 responses remain (admin.py:10493, main.py:6088,6091,6293), and the SessionManagerWrapper path lacks the deny-path regression test required by CLAUDE.md security invariants. Fix these, then the PR is in good shape.\n\n---\n\n**Update (971590de1):** All critical and important issues above have been addressed:\n- `admin.py`: permission name removed from 403 response\n- `main.py`: session ownership detail and `session_id` removed from JSON-RPC errors; resource subscription detail removed; WebSocket relay gate normalized\n- `rbac.py`: server-side warning log added to `require_permission`\n- `token_scoping.py`: normalized to \"Access denied\"\n- `routers/teams.py` + `routers/reverse_proxy.py`: all 8 instances normalized\n- All affected tests updated\n\nThe shared constant (issue #4) and `SessionManagerWrapper` deny-path test (issue #8) remain outstanding but are non-blocking for merge.\n\n**Updated assessment: Ready to merge.**"
+    },
+    {
+      "id": "3937692297",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T15:40:10+00:00",
+      "body": "Approved. Code is correct, well-tested, and manually verified with Playwright. Added differential test coverage."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "810e53e05468c59b370bb9ec798f08b452d65291",
+      "message": "3446 - Enable public MCP objects on team Servers\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-03-06T09:19:55+00:00"
+    },
+    {
+      "sha": "3b3e699ea571bd345e252aad54359bb4b38b682b",
+      "message": "test: add differential coverage for public visibility in team-scoped /ids endpoints\n\nAdd direct unit tests for _merge_select_all_ids helper covering all\nbranches (flag not set, valid merge, int normalization, JSON decode\nerror, missing key, empty checked list). Add regression tests for\nprompts and resources /ids endpoints to match the existing tool test,\nensuring standalone visibility='public' condition is present in\nteam-scoped queries. Closes #3446.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T15:17:00+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 242,
+  "deletions": 80,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:45.355297",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:45.357938",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3514,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3514.json"
+  }
+}

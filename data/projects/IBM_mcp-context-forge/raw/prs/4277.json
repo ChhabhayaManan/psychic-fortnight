@@ -1,0 +1,53 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4277,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4277"
+  },
+  "metadata": {
+    "title": "fix(sso): generic OIDC providers can now promote users to platform_admin",
+    "state": "open",
+    "created_at": "2026-04-17T12:22:13+00:00",
+    "updated_at": "2026-05-05T08:41:27+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "marekdano",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "marekdano",
+      "brian-hussey"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n---\r\n\r\nCloses #4232\r\n\r\n## 📌 Summary\r\nGeneric OIDC providers (Authentik, Auth0, and any provider configured via SSO_GENERIC_*) could not promote users to platform_admin via SSO group mapping. Keycloak and Entra worked because they had dedicated bootstrap and admin-check wiring; the generic path was missing equivalent support in three places along the same login flow.\r\n\r\n## What was broken\r\n\r\n  **Gap 1 — bootstrap never wrote `provider_metadata`**\r\n  `sso_bootstrap.py` built the generic provider config dict but left `provider_metadata` empty (`{}`). Downstream, `_map_groups_to_roles()` reads `provider_metadata` for `groups_claim`, `role_mappings`, and `default_role` and\r\n  exits early with \"No role mappings configured\" when it is absent. Keycloak and Entra both populate these fields; the generic path did not.\r\n\r\n  **Gap 2 — `_should_user_be_admin` had no generic provider path**\r\n  The method checked GitHub orgs, Google domains, and Entra admin groups explicitly but had no path for generic providers. It always returned `False` for Authentik regardless of what groups the IdP emitted, so `is_admin` was never set to `True` at login.\r\n\r\n  **Gap 3 — `is_admin` and RBAC role were not in sync**\r\n  Even after fixing the first two gaps, users who had already logged in before the fix was deployed could have`is_admin=False` in the DB while holding a `platform_admin` RBAC role. The JWT is built from `is_admin`, so the admin UI remained inaccessible until the flag was corrected.\r\n\r\n  ## Changes\r\n\r\n  ### `mcpgateway/config.py`\r\n  Four new environment variables for generic OIDC group/role wiring, matching\r\n  the pattern Keycloak and Entra already follow:\r\n\r\n  | Variable | Default | Purpose |\r\n  |---|---|---|\r\n  | `SSO_GENERIC_GROUPS_CLAIM` | `groups` | JWT claim that contains the user's group list |\r\n  | `SSO_GENERIC_ADMIN_GROUPS` | `[]` | Groups that directly grant `is_admin=True` |\r\n  | `SSO_GENERIC_ROLE_MAPPINGS` | `{}` | JSON map of IdP group → ContextForge role name |\r\n  | `SSO_GENERIC_DEFAULT_ROLE` | `None` | Role assigned when no group mapping matches |\r\n\r\n  ### `mcpgateway/utils/sso_bootstrap.py` (gap 1)\r\n  The generic OIDC provider block now populates `provider_metadata` with\r\n  `groups_claim`, `role_mappings`, and `default_role` from the new settings,\r\n  so `_map_groups_to_roles()` no longer exits early.\r\n\r\n  ### `mcpgateway/services/sso_service.py` (gaps 2 & 3)\r\n\r\n  `_should_user_be_admin()` gains two new checks after the existing provider-specific blocks:\r\n\r\n  1. **`SSO_GENERIC_ADMIN_GROUPS` check** — scoped to `provider.id == sso_generic_provider_id` only, so the list does not bleed into Keycloak, ADFS, or any other named provider sharing the same process.\r\n\r\n  2. **`role_mappings → platform_admin` check** — provider-agnostic: any provider whose `provider_metadata.role_mappings` maps one of the user's groups to `platform_admin` returns `True`. Group names are compared case-insensitively on both sides, consistent with the existing `sso_entra_admin_groups` behaviour. This also benefits Keycloak deployments that use `role_mappings` without a separate `sso_keycloak_admin_groups` setting.\r\n\r\nA belt-and-suspenders block after `_sync_user_roles()` in the existing-user login path promotes `is_admin` if `_map_groups_to_roles()` assigned `platform_admin` but `is_admin` is still `False` (covers users who logged in before the fix was deployed). Promoted users receive `admin_origin=\"sso\"`, placing them under the same bidirectional sync contract as Entra and GitHub SSO admins — removal from the IdP group revokes `is_admin` on the next login. Manual grants (`admin_origin=None / \"manual\" / \"api\"`) are unaffected.\r\n\r\n  ### `.env.example`\r\n  New variables documented with Authentik example values.\r\n\r\n  ## Env var quickstart for Authentik\r\n\r\n  ```env\r\n  SSO_GENERIC_GROUPS_CLAIM=groups\r\n  SSO_GENERIC_ROLE_MAPPINGS={\"cf-platform-admin\":\"platform_admin\",\"cf-dev\":\"developer\"}\r\n  SSO_GENERIC_DEFAULT_ROLE=platform_viewer\r\n  # optional: shortcut that also sets is_admin without needing a role_mappings entry\r\n  SSO_GENERIC_ADMIN_GROUPS=[\"cf-platform-admin\"]\r\n\r\n  Notes for reviewers\r\n\r\n  - The `role_mappings → platform_admin check` in `_should_user_be_admin` is intentionally provider-agnostic. This is a behavioural extension for Keycloak and Entra: if a group is mapped to `platform_admin` in their `role_mappings, is_admin` is now set to True at login without needing the provider-specific *_admin_groups setting. This is correct and consistent, but worth noting as a scope change.\r\n  \r\n  - `TestEntraIDAdminRoleRetention (e2e)` had a docstring that said \"SSO never downgrades\" without the qualifier \"manual grants only\". The corrected docstring documents both sides of the admin-origin contract to avoid confusion with `test_is_admin_revoked_when_sso_admin_removed_from_group`.\r\n\r\n  - The SQL workaround from the issue report (UPDATE `sso_providers SET provider_metadata = ...`) is no longer needed after this fix. Users who applied it and set admin_origin='manual' will not be affected by the belt-and-suspenders promotion.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "0c838210985cbab488cfc6edbdf9fac212ca553e",
+      "message": "fix(sso): generic OIDC providers can now promote users to platform_admin\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-17T12:14:45+00:00"
+    },
+    {
+      "sha": "41831273c44dde2822888bceb9d08f4a0978202a",
+      "message": "fix: lint issues\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-17T12:55:34+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 545,
+  "deletions": 22,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:25.837558",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:25.838332",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4277,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4277.json"
+  }
+}

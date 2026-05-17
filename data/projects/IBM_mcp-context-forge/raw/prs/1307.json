@@ -1,0 +1,59 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1307,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1307"
+  },
+  "metadata": {
+    "title": "feat: add optional persistence support for PostgreSQL and Redis",
+    "state": "closed",
+    "created_at": "2025-10-20T17:48:06+00:00",
+    "updated_at": "2025-10-21T15:50:46+00:00",
+    "closed_at": "2025-10-21T15:50:46+00:00",
+    "merged_at": "2025-10-21T15:50:46+00:00",
+    "author": "SharkyND",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "feat: add optional persistence support for PostgreSQL and Redis in mcp-stack Helm chart\r\n\r\n- Add conditional PV/PVC templates for PostgreSQL and Redis with proper Helm templating\r\n- Enhance PostgreSQL deployment with conditional persistence (PVC or emptyDir fallback) \r\n- Add Redis persistence configuration with AOF and RDB settings via ConfigMap\r\n- Standardize resource naming using Helm template helpers for consistency\r\n- Add backup annotations support for both PostgreSQL and Redis persistence\r\n- Set default reclaim policy to 'Retain' to prevent accidental data loss\r\n- Enable Redis custom configuration mounting when persistence is enabled\r\n\r\nTemplates added:\r\n- charts/mcp-stack/templates/redis-pv.yaml\r\n- charts/mcp-stack/templates/redis-pvc.yaml  \r\n- charts/mcp-stack/templates/configmap-redis.yaml\r\n\r\nTemplates enhanced:\r\n- Improve PostgreSQL PV/PVC naming and labeling consistency\r\n- Add conditional volume mounting logic for both PostgreSQL and Redis\r\n- Add persistence configuration sections in values.yaml\r\n\r\nNote: Persistence is disabled by default for Redis (caching use case) and can be enabled via values.yaml\r\n\r\nDiscussed here: https://github.com/IBM/mcp-context-forge/issues/1308\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3358174829",
+      "author": "crivetimihai",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2025-10-20T23:00:50+00:00",
+      "body": "Thank you, good PR! There's a few issues that should be addressed first before merging:\r\n\r\n## Main Issues\r\n\r\n**PV naming collision in multi-namespace deployments**\r\nPVs are cluster-scoped, so `{{ include \"mcp-stack.fullname\" . }}-postgres-pv` will collide if deployed to multiple namespaces. Include namespace in the name: `{{ include \"mcp-stack.fullname\" . }}-{{ .Release.Namespace }}-postgres-pv`\r\n_Affects: `postgres-pv.yaml:5`, `redis-pv.yaml:5`_\r\n\r\n**Missing PV/PVC binding selectors**\r\nNo guarantee the PVC will bind to the correct PV. Add `claimRef` to PV and `selector` to PVC:\r\n```yaml\r\n# PV spec:\r\nclaimRef:\r\n  name: {{ include \"mcp-stack.fullname\" . }}-postgres-pvc\r\n  namespace: {{ .Release.Namespace }}\r\n\r\n# PVC spec:\r\nselector:\r\n  matchLabels:\r\n    app: {{ include \"mcp-stack.fullname\" . }}-postgres\r\n```\r\n_Affects: All PV/PVC templates_\r\n\r\n**hostPath collision**\r\nPostgreSQL uses `/mnt/data`, Redis uses `/mnt/data/redis`. Use separate top-level paths: `/mnt/data/postgres` and `/mnt/data/redis`\r\n_Affects: `postgres-pv.yaml:17`, `redis-pv.yaml:17`_\r\n\r\n**PostgreSQL access mode**\r\nUsing `ReadWriteMany` but it's a single Deployment. Change to `ReadWriteOnce` (easier to provision, cheaper on cloud providers)\r\n_Location: `values.yaml:561`_\r\n\r\n**StorageClass inconsistency**\r\nPostgreSQL defaults to `storageClassName: manual`, Redis to `\"\"`. Pick one approach for consistency.\r\n_Locations: `values.yaml:560`, `values.yaml:652`_\r\n\r\n**Redis command override**\r\n`command: [\"redis-server\"]` with separate `args` might not work with entrypoint scripts. Consider combining: `command: [\"redis-server\", \"/usr/local/etc/redis/redis.conf\"]`\r\n_Location: `deployment-redis.yaml:41-42`_\r\n\r\n## Minor Items\r\n\r\n- Missing newlines at EOF in `configmap-redis.yaml:32`, `redis-pv.yaml:18`, `redis-pvc.yaml:20`\r\n- Comment indentation for annotation examples in `values.yaml:565-566`, `values.yaml:657-658`\r\n- Reclaim policy comment should mention manual PV cleanup needed after uninstall (`values.yaml:563`, `values.yaml:655`)\r\n- hostPath only works for single-node clusters; most production deployments use dynamic provisioning\r\n- Missing README/docs update for the new persistence features\r\n"
+    },
+    {
+      "id": "3361492796",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-10-21T15:50:37+00:00",
+      "body": "Looks good, thank you!"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "cbb663837a69334cb39883699fd771bdbd87db8b",
+      "message": "feat: add optional persistence support for PostgreSQL and Redis\n\nAdd conditional PV/PVC templates with proper Helm templating, backup annotations,\nand fallback to emptyDir when persistence is disabled. Standardize resource naming\nand add Redis configuration mounting for persistence scenarios.\n\nSigned-off-by: SharkyND <shahrukh.naveed@live.com>",
+      "author": "SharkyND",
+      "date": "2025-10-21T01:00:39+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 142,
+  "deletions": 9,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:21:58.688078",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:21:58.688595",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1307,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1307.json"
+  }
+}

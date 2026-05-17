@@ -1,0 +1,64 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2123,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2123"
+  },
+  "metadata": {
+    "title": "Prevent HTTP connection exhaustion and expose pool metrics",
+    "state": "closed",
+    "created_at": "2026-01-16T10:41:33+00:00",
+    "updated_at": "2026-01-16T21:08:55+00:00",
+    "closed_at": "2026-01-16T21:08:53+00:00",
+    "merged_at": "2026-01-16T21:08:53+00:00",
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## :rocket: Performance Improvement PR\r\n\r\n## :pushpin: Summary\r\n- Prevents creating new per-request `httpx.AsyncClient` instances which can exhaust system sockets under load.\r\n- Uses the existing `SharedHttpClient` (no new factory added); replaces per-request `httpx.AsyncClient` usages in `translate.py`; stores configured `httpx.Limits` and exposes pool-limit metrics to Prometheus.\r\n- Fixes unreliable pool-inspection code and Prometheus registration issues that caused test/runtime failures.\r\n\r\n## :link: Related Issue\r\nCloses: #1676\r\n\r\n## :chart_with_upwards_trend: Root Cause\r\n- Callers created a new `httpx.AsyncClient(...)` per request which can open many sockets and exhaust resources under concurrency.\r\n- Code attempted to inspect httpx internal transport/pool objects (e.g., using `len()`), which is fragile and incompatible across httpx versions.\r\n- Prometheus metric registration used `Gauge.set_function()` in a way that caused registry errors during tests.\r\n- `AsyncClient` limits were not recorded centrally, making it impossible to reliably expose pool-limit metrics.\r\n\r\n## ✅ What Was Already in the Codebase\r\n1. `SharedHttpClient` service (`mcpgateway/services/http_client_service.py`)\r\n   - Singleton intended to provide a single shared HTTP client for the app\r\n   - Configured to manage connections (defaults via settings)\r\n   - Reuses connections instead of creating new ones\r\n\r\n2. Configuration (`mcpgateway/config.py` and `.env.example`)\r\n   - `HTTPX_MAX_CONNECTIONS=200`\r\n   - `HTTPX_MAX_KEEPALIVE_CONNECTIONS=100`\r\n   - `HTTPX_KEEPALIVE_EXPIRY=30.0`\r\n\r\n3. Lifespan Management (`mcpgateway/main.py`)\r\n   - Startup: initializes shared client\r\n   - Shutdown: closes shared client cleanly\r\n\r\n4. Most consumers already used the shared client:\r\n   - `llm_admin_router.py` ✅\r\n   - `llm_provider_service.py` ✅\r\n   - `sso_service.py` ✅\r\n   - `tool_service.py` ✅\r\n   - `keycloak_discovery.py` ✅\r\n   - `catalog_service.py` ✅\r\n   - `a2a_service.py` ✅\r\n   - `gateway_service.py` ✅\r\n\r\n## :wrench: Files Modified\r\n- Files modified:\r\n  - `mcpgateway/services/http_client_service.py` — central shared client enhancements, store `httpx.Limits`, provide `get_pool_stats()` and lifecycle cleanup\r\n  - `mcpgateway/services/metrics.py` — added Prometheus gauges for pool limits and replaced fragile `set_function()` usage with an explicit `update_http_pool_metrics()` call\r\n  - `mcpgateway/main.py` — ensure metrics update runs after shared client init\r\n  - `mcpgateway/translate.py` — replaced per-request `AsyncClient(...)` usage with `get_isolated_http_client()` (only file requiring this change)\r\n  - `mcpgateway/cli_export_import.py` — replaced per-request client creation with isolated client helper where applicable\r\n\r\n- Key behavior changes:\r\n  - Use a shared, lazily-initialized `AsyncClient` (`SharedHttpClient`) for the app\r\n  - Use the existing `get_isolated_http_client()` contextmanager for short-lived isolated clients when needed\r\n  - Store configured `httpx.Limits` on the shared client and expose metrics from those stored values\r\n  - Avoid inspecting internal transport pool objects\r\n  - Update Prometheus metrics after shared-client initialization to avoid test-time registry errors\r\n  - Expose two new Prometheus gauges:\r\n    - `http_pool_max_connections` — configured max connections\r\n    - `http_pool_max_keepalive_connections` — configured max keepalive connections\r\n  - Metrics are updated at startup after the shared client is initialized to ensure values are present in `/metrics/prometheus`\r\n\r\n## :test_tube: Verification\r\n| Test | Command | Status |\r\n|------|---------|--------|\r\n| Translate unit tests | `pytest tests/unit/mcpgateway/test_translate.py -v` | ✅ 83 passed |\r\n| Metrics tests (post-fix) | `pytest tests/unit/mcpgateway/test_metrics.py -v` | ✅ 4 passed |\r\n| CLI/coverage boost tests | `pytest tests/unit/mcpgateway/test_simple_coverage_boost.py -v` | ✅ 7 passed |\r\n| Consumer tests (patching `get_http_client`) | targeted `pytest` run | ✅ 73 passed, 1 failed (unrelated) |",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "0453db46f7fbfdc48ede9db5a4c64273ad13ccd4",
+      "message": "use shared httpx client and expose pool metrics\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-14T06:50:41+00:00"
+    },
+    {
+      "sha": "88953c6bdbbeef4118ded6ef692d75054376742c",
+      "message": "expose pool limits & metrics\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-14T10:49:08+00:00"
+    },
+    {
+      "sha": "303bef91f43858bdc9a92128ffa4ab1c83a1dac8",
+      "message": "fix bandit issue\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-01-16T11:48:45+00:00"
+    },
+    {
+      "sha": "642e98bee1080b654cae5411d68924172b601862",
+      "message": "fix: preserve original timeout behavior and correct docstring in get_pool_stats\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-16T20:28:57+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 107,
+  "deletions": 13,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:43.077372",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:43.079014",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2123,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2123.json"
+  }
+}

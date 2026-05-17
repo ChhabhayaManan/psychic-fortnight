@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4432,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4432"
+  },
+  "metadata": {
+    "title": "Improved Resource Limits and Process Management for docker based deployments",
+    "state": "closed",
+    "created_at": "2026-04-24T11:42:57+00:00",
+    "updated_at": "2026-04-24T17:20:28+00:00",
+    "closed_at": "2026-04-24T17:20:25+00:00",
+    "merged_at": "2026-04-24T17:20:25+00:00",
+    "author": "ja8zyjits",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nBefore opening this PR please:\r\n\r\n1. `make lint`            - passes `ruff`, `mypy`, `pylint`\r\n2. `make test`            - all unit + integration tests green\r\n3. `make coverage`        - ≥ 80 %\r\n4. `make docker docker-run-ssl` or `make podman podman-run-ssl`\r\n5. Update relevant documentation.\r\n6. Tested with sqlite and postgres + redis.\r\n7. Manual regression no longer fails. Ensure the UI and /version work correctly.\r\n\r\n---\r\n\r\n## 📌 Summary\r\n\r\nThis PR adds missing process and file descriptor limits (`ulimits`) to Docker Compose configurations to ensure stable operation and prevent resource exhaustion. Several compose files lacked these critical operational safeguards, which could lead to container instability under load.\r\n\r\n**Closes #4431**\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Deploy using affected compose files (debug, performance, verbose-logging, embedded, lite, SSO, Langfuse, Phoenix variants)\r\n2. Run workload that spawns multiple processes or opens many file descriptors\r\n3. Observe potential container instability or \"Cannot fork\" / \"Too many open files\" errors\r\n4. Compare with production `docker-compose.yml` which already has proper limits\r\n\r\n## 🐞 Root Cause\r\n\r\nThe following compose files were missing `ulimits` configuration:\r\n- `docker-compose-debug.yml`\r\n- `docker-compose-performance.yml`\r\n- `docker-compose-verbose-logging.yml`\r\n- `docker-compose-embedded.yml`\r\n- `docker-compose.override.lite.yml`\r\n- `docker-compose.sso.yml`\r\n- `docker-compose.with-langfuse.yml`\r\n- `docker-compose.with-phoenix.yml`\r\n\r\nThe production `docker-compose.yml` already included proper limits:\r\n```yaml\r\nulimits:\r\n  nofile:\r\n    soft: 65535\r\n    hard: 65535\r\n  nproc:\r\n    soft: 5000\r\n    hard: 5000\r\n```\r\n\r\nThis inconsistency meant deployments using variant compose files lacked resource protection, creating operational risk.\r\n\r\n## 💡 Fix Description\r\n\r\nApplied consistent `ulimits` configuration across all Docker Compose files:\r\n\r\n**Process Limits (`nproc`):**\r\n- Soft limit: 5000 processes\r\n- Hard limit: 5000 processes\r\n\r\n**File Descriptor Limits (`nofile`):**\r\n- Soft limit: 65535 file descriptors\r\n- Hard limit: 65535 file descriptors\r\n\r\nThese values align with the existing production configuration and operational best practices documented in `docs/docs/security/resource-limits.md`.\r\n\r\n**Files Modified:**\r\n- `docker-compose-debug.yml`\r\n- `docker-compose-performance.yml`\r\n- `docker-compose-verbose-logging.yml`\r\n- `docker-compose-embedded.yml`\r\n- `docker-compose.override.lite.yml`\r\n- `docker-compose.sso.yml`\r\n- `docker-compose.with-langfuse.yml`\r\n- `docker-compose.with-phoenix.yml`\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          | ✅     |\r\n| Unit tests                            | `make test`          | ✅     |\r\n| Coverage ≥ 80 %                       | `make coverage`      | ✅     |\r\n| Manual regression no longer fails     | Verified ulimits in containers | ✅     |\r\n\r\n**Manual Verification:**\r\n```bash\r\n# Start each compose variant\r\ndocker compose -f docker-compose-debug.yml up -d\r\ndocker exec mcp-context-forge-gateway-1 ulimit -a\r\n\r\n# Verify output shows:\r\n# max user processes              (-u) 5000\r\n# open files                      (-n) 65535\r\n```\r\n\r\nTested across all modified compose files to confirm limits are properly applied.\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] No MCP protocol changes\r\n- [x] Infrastructure-only change\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] Documentation updated (`docs/docs/security/resource-limits.md` already covers this)\r\n- [x] Consistent configuration across all compose variants\r\n- [x] Tested with Docker and Podman\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4170545563",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-24T12:50:59+00:00",
+      "body": "Clean fix. 🐳 "
+    },
+    {
+      "id": "4172128560",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-24T16:52:21+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "47917092d62afbc20e505d69bbde212ef6ee09cb",
+      "message": "Improved Resource Limits and Process Management for docker based deployments\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-24T08:24:11+00:00"
+    },
+    {
+      "sha": "d9ccba9f1192f8a552136c37d2c6565e8645453d",
+      "message": "improved the documentation\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-24T11:48:08+00:00"
+    },
+    {
+      "sha": "d7d4b0a53a17ac20d39c66422f406f1b67a97da3",
+      "message": "fixed sectrets detection\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-24T11:55:46+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 461,
+  "deletions": 54,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:08.116588",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:08.117063",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4432,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4432.json"
+  }
+}

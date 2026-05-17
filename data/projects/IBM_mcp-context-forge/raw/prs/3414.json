@@ -1,0 +1,138 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3414,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3414"
+  },
+  "metadata": {
+    "title": "fix(security): enforce management-plane isolation for API tokens, fix team scoping, and fix blocked usage logging",
+    "state": "closed",
+    "created_at": "2026-03-03T07:16:31+00:00",
+    "updated_at": "2026-03-06T10:44:57+00:00",
+    "closed_at": "2026-03-06T10:44:55+00:00",
+    "merged_at": "2026-03-06T10:44:55+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "security",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# Bug-fix PR\r\n## Summary\r\n\r\nFixes three security bugs in the API token lifecycle: token management endpoints could be accessed using API tokens (privilege escalation), team membership was not auto-inherited when creating tokens (broken scoping), and blocked/revoked token usage was never logged (invisible audit trail).\r\n\r\n---\r\n\r\n## Related Issue\r\nCloses: #3291 \r\n\r\n---\r\n\r\n## Root Cause\r\n\r\n### Bug 1 — Token Chaining (Privilege Escalation)\r\n`_require_authenticated_session()` only blocked anonymous (unauthenticated) requests. It did not check `auth_method`, so an API token bearer could call `POST /tokens`, `GET /tokens`, `DELETE /tokens/{id}`, etc. — allowing an API token to create or revoke other tokens.\r\n\r\n### Bug 2 — Broken Team Inheritance\r\n`create_token()` attempted to auto-populate `team_id` from the caller's team membership using `current_user.get(\"teams\")`. However, `get_current_user_with_permissions()` (in `rbac.py`) injects teams into the user dict under the key `token_teams` — not `teams`. The lookup always returned `None`, so non-admin users who omitted `team_id` always created globally-scoped tokens regardless of their team membership.\r\n\r\n### Bug 3a — `blocked` Flag Always False\r\n`token_usage_middleware.py` hardcoded `blocked=False` when logging authenticated API token requests, regardless of the actual HTTP response status code.\r\n\r\n### Bug 3b — Revoked/Expired Token Attempts Not Logged\r\nWhen a revoked or expired API token was rejected (HTTP 401/403), the middleware exited early because `request.state.auth_method` is never set for failed auth. These attempts were silently dropped with no audit trail.\r\n\r\n---\r\n\r\n## Fix Description\r\n\r\n### `mcpgateway/routers/tokens.py`\r\n\r\n**Bug 1:** Added an explicit `auth_method == \"api_token\"` check inside `_require_authenticated_session()`, which is called at the top of all 11 token management endpoints:\r\n\r\n```python\r\nif auth_method == \"api_token\":\r\n    raise HTTPException(\r\n        status_code=status.HTTP_403_FORBIDDEN,\r\n        detail=(\r\n            \"Token management requires an interactive session (JWT from web login or SSO). \"\r\n            \"API tokens cannot create, list, or revoke other tokens.\"\r\n        ),\r\n    )\r\n```\r\n\r\n**Bug 2:** Replaced the broken `.get(\"teams\")` lookup with `.get(\"token_teams\")` and introduced an `effective_team_id` variable with fallback logic for single-team non-admin users. Admin tokens remain globally scoped (`team_id=null`).\r\n\r\n### `mcpgateway/middleware/token_usage_middleware.py`\r\n\r\n**Bug 3a:** Replaced `blocked=False` hardcode with `blocked = status_code >= 400`.\r\n\r\n**Bug 3b:** Added a new `elif status_code in (401, 403)` branch that uses `jwt.decode(..., options={\"verify_signature\": False})` to identify whether the rejected bearer token was an API token, then logs it with `blocked=True` and the appropriate `block_reason` (`\"revoked_or_expired\"` for 401, `\"http_403\"` for 403).\r\n\r\n---\r\n\r\n## Verification\r\n\r\n| Bug | Test Method | Expected | Result |\r\n|---|---|---|---|\r\n| 1 — Token Chaining | `curl -H \"Authorization: Bearer <api_token>\" POST /tokens` | HTTP 403 | ✅ |\r\n| 2 — Team Inheritance | Create token as non-admin without `team_id`; check response | `team_id` auto-set to user's team | ✅ |\r\n| 3a — blocked flag | Create token, use it to make a bad request; check `GET /tokens/{id}/stats` | `blocked_requests > 0` | ✅ |\r\n| 3b — Revoked logging | Revoke token, attempt 3 calls with revoked token; check stats | `total_requests >= 3`, `blocked_requests >= 3` | ✅ |\r\n\r\nUnit tests: `pytest tests/unit/mcpgateway/routers/test_tokens.py tests/unit/mcpgateway/middleware/test_token_usage_middleware.py` → **100% pass**\r\n\r\nFull suite: `pytest tests/unit/` → **694 passed, 15 skipped**, 1 pre-existing unrelated failure in `test_email_auth_service_admin_role_sync` (unrelated to changed files).\r\n\r\n---\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n\r\n---",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3899232475",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-05T19:46:12+00:00",
+      "body": "## Review Summary\n\nRebased onto `main` (clean, no conflicts), reviewed all changes, verified all three bugs, and added differential test coverage.\n\n### Bug Verification\n\nAll three bugs confirmed against `main`:\n\n1. **Token Chaining (Privilege Escalation)** — `_require_authenticated_session()` only blocked `None` and `\"anonymous\"`, allowing API tokens to manage other tokens. Fix correctly adds `api_token` denial.\n2. **Team Auto-Inheritance** — `main` had no team auto-inheritance; tokens created without `team_id` got public-only scope silently. Fix adds auto-inheritance using `token_teams` (correct key per `rbac.py`), only for single-team non-admin users.\n3. **Blocked Usage Logging** — `main` hardcoded `blocked=False` and exited early for revoked tokens. Fix correctly derives blocked status from HTTP status code and adds a 401/403 handler for revoked/expired token logging.\n\n### Security\n\n- `jwt.decode(verify_signature=False)` usage is appropriate — identification-only, no auth decisions, wrapped in try/except.\n- `_require_authenticated_session` changes are strictly more restrictive (safe direction).\n- Auth method values (`api_token`, `jwt`, `anonymous`) consistent with `auth.py` and `rbac.py`.\n- No new attack surfaces.\n\n### Test Coverage\n\n- `token_usage_middleware.py`: **100%** coverage (added 3 edge-case tests for 401/403 paths)\n- `tokens.py`: **98%** (4 uncovered lines are pre-existing, not from this PR)\n- Added missing `list_team_tokens` API-token-blocked test\n- **86 tests pass** for changed files; **13,390 unit tests pass** full suite\n\n### Commits Added During Review\n\n- `test(security): add differential coverage for 401/403 middleware paths and list_team_tokens` — 4 new tests\n- `style: apply linter formatting to tokens.py` — linter auto-format"
+    },
+    {
+      "id": "3899233639",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-05T19:46:28+00:00",
+      "body": "## Review Summary\n\nRebased onto main (clean, no conflicts), reviewed all changes, verified all three bugs, and added differential test coverage.\n\n### Bug Verification\n\nAll three bugs confirmed against main:\n\n1. **Token Chaining (Privilege Escalation)** — _require_authenticated_session() only blocked None and anonymous, allowing API tokens to manage other tokens. Fix correctly adds api_token denial.\n2. **Team Auto-Inheritance** — main had no team auto-inheritance; tokens created without team_id got public-only scope silently. Fix adds auto-inheritance using token_teams (correct key per rbac.py), only for single-team non-admin users.\n3. **Blocked Usage Logging** — main hardcoded blocked=False and exited early for revoked tokens. Fix correctly derives blocked status from HTTP status code and adds a 401/403 handler for revoked/expired token logging.\n\n### Security\n\n- jwt.decode(verify_signature=False) usage is appropriate — identification-only, no auth decisions, wrapped in try/except.\n- _require_authenticated_session changes are strictly more restrictive (safe direction).\n- Auth method values (api_token, jwt, anonymous) consistent with auth.py and rbac.py.\n- No new attack surfaces.\n\n### Test Coverage\n\n- token_usage_middleware.py: **100%** coverage (added 3 edge-case tests for 401/403 paths)\n- tokens.py: **98%** (4 uncovered lines are pre-existing, not from this PR)\n- Added missing list_team_tokens API-token-blocked test\n- **86 tests pass** for changed files; **13,390 unit tests pass** full suite\n\n### Commits Added During Review\n\n- test(security): add differential coverage for 401/403 middleware paths and list_team_tokens — 4 new tests\n- style: apply linter formatting to tokens.py — linter auto-format"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2feb7e92cd0948b80c86861c1c2511ff397ff629",
+      "message": "fix: block API tokens from token management, fix team_id inheritance, and fix blocked/revoked usage logging\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-03T07:05:10+00:00"
+    },
+    {
+      "sha": "69f3a9533e0158cfe1fcfc884943584248c63714",
+      "message": "update test coverage\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-03T08:27:01+00:00"
+    },
+    {
+      "sha": "84e065a8f474b7c40b43a5e8c1c6f8ef54c5f178",
+      "message": "test(security): add differential coverage for 401/403 middleware paths and list_team_tokens\n\nAdd 4 tests covering uncovered edge-case paths in the token usage\nmiddleware's 401/403 handler (no Bearer header, non-API-token JWT,\nmalformed token) and the missing list_team_tokens API-token-blocked\ntest, achieving 100% differential coverage on new code.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T19:35:24+00:00"
+    },
+    {
+      "sha": "748fbac8ec8559b3e98ede02e390c06b46827f17",
+      "message": "style: apply linter formatting to tokens.py\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T19:45:38+00:00"
+    },
+    {
+      "sha": "cf1a93d2d312dcff76a540415c492821c430c240",
+      "message": "fix(security): enforce token revocation by propagating 401 from auth middleware\n\nThree root causes allowed revoked API tokens to bypass rejection:\n\n1. AuthContextMiddleware caught ALL exceptions from get_current_user()\n   (including HTTPException 401 for revoked tokens) and silently\n   continued as anonymous, letting the request reach public endpoints.\n   Fix: Re-raise 401/403 HTTPExceptions as hard deny responses instead\n   of swallowing them.\n\n2. The fallback revocation check in auth.py silently swallowed\n   _check_token_revoked_sync errors (e.g. missing table, DB unreachable)\n   and allowed the token through. Fix: Fail-secure — reject the token\n   when the revocation check itself fails.\n\n3. Cache invalidation on revoke used asyncio.create_task (fire-and-forget),\n   creating a race window where the next request could arrive before the\n   invalidation task ran. Fix: Await invalidate_revocation() directly in\n   both revoke_token() and admin_revoke_token().\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T20:33:22+00:00"
+    },
+    {
+      "sha": "8becc2701ce7807f1d8736cbc09a6f21d26df9c3",
+      "message": "fix(security): cross-worker revocation via Redis revoke key check\n\nIn a multi-worker deployment (gunicorn behind nginx), revoking a token\nonly updated the local worker's _revoked_jtis set.  Other workers\nserved stale L1 cache entries with is_token_revoked=False until the\n30-second TTL expired.\n\nFix: In get_auth_context(), check the Redis revocation marker key\n(mcpgw:auth:revoke:{jti}) BEFORE the L1 in-memory cache.  When found,\npromote the JTI to the local _revoked_jtis set and evict stale L1\nentries, so subsequent requests on this worker skip the Redis call.\nOne Redis EXISTS per request with a JTI — sub-millisecond overhead.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T21:46:44+00:00"
+    },
+    {
+      "sha": "497e74c72f6eca4e54d30d3253465a6edc9d51a5",
+      "message": "fix(security): validate JTI before logging, preserve browser redirect, scope blocked to 4xx\n\nAddress three review findings from Codex:\n\n1. Forged JWT audit-log poisoning: the 401/403 rejected-token logging\n   path decoded unverified JWTs and wrote jti/sub claims directly to\n   token_usage_logs. An attacker could craft a JWT with fake identity\n   claims to pollute audit data. Fix: verify the JTI exists in the\n   email_api_tokens table before logging.\n\n2. Browser redirect broken: the hard-deny JSONResponse for 401/403 in\n   AuthContextMiddleware also applied to browser/HTMX requests with\n   stale cookies, returning raw JSON instead of letting the RBAC layer\n   redirect to /admin/login. Fix: detect browser requests (Accept:\n   text/html or HX-Request) and let them pass through without user\n   context.\n\n3. 5xx folded into blocked metrics: status_code >= 400 included\n   backend errors (5xx) in the blocked count, skewing security denial\n   analytics. Fix: scope to 400 <= status_code < 500.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T22:14:50+00:00"
+    },
+    {
+      "sha": "f74bf5968fa167da6f126c65e1dcdbc7c8822831",
+      "message": "style: fix import ordering in token_usage_middleware\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T22:16:17+00:00"
+    },
+    {
+      "sha": "c8225ebf64276b95a07e15825845a34e6b411f93",
+      "message": "test(security): achieve 100% diff coverage for auth middleware, cache, and usage logging\n\nAdd 11 tests covering all uncovered lines from diff-cover:\n\n- auth_middleware.py: HTTPException 401/403 hard deny for API requests,\n  browser/HTMX passthrough for redirect, failure logging with DB errors,\n  DB close errors, and non-401/403 HTTPException anonymous fallthrough\n- auth_cache.py: Redis revocation marker detection with L1 eviction and\n  local set promotion, Redis error fallthrough to L1/L2\n- token_usage_middleware.py: forged JWT with unknown JTI skipped,\n  DB error during JTI verification skipped\n\nCoverage: auth_middleware.py 100%, auth_cache.py 100%,\ntoken_usage_middleware.py 100%\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-05T22:41:57+00:00"
+    },
+    {
+      "sha": "596b09429e7465a3a0a214b2bd552f7dce57d6cf",
+      "message": "fix(security): use DB-stored email for usage logs, align browser detection, add security headers\n\nAddress three findings from final review:\n\n1. Forged user attribution: the rejected-token logging path used the\n   unverified JWT sub/email claim for usage logs. An attacker knowing\n   a valid JTI could forge a JWT with an arbitrary email to poison\n   another user's blocked-request stats. Fix: query EmailApiToken for\n   both id and user_email by JTI, use the DB-stored owner email.\n\n2. Referer-based browser detection gap: AuthContextMiddleware only\n   checked Accept and HX-Request headers for browser detection, but\n   rbac.py also treats Referer containing /admin as browser traffic.\n   Admin UI fetch requests with Accept: */* and an /admin Referer got\n   a JSON 401 instead of passing through for redirect. Fix: include\n   /admin Referer check to match RBAC behavior.\n\n3. Missing security headers on JSON 401/403: responses returned\n   directly from AuthContextMiddleware bypassed SecurityHeadersMiddleware.\n   Fix: add X-Content-Type-Options: nosniff and Referrer-Policy headers\n   to the JSONResponse.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T06:53:11+00:00"
+    },
+    {
+      "sha": "4a74b098a8c3bbeb2ec1f77df33371d1bd01ec5f",
+      "message": "fix(auth): only hard-deny revocation/disabled 401s, not all auth failures\n\nThe auth middleware was hard-denying ALL 401/403 HTTPExceptions, which\nbroke registration scripts and other callers using minimal JWT claims\n(no user/teams/token_use). These previously fell through to route-level\nauth handlers.\n\nNarrow the hard-deny to only security-critical rejections: \"Token has\nbeen revoked\", \"Account disabled\", and \"Token validation failed\". All\nother 401/403s continue as anonymous for route-level handling.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T08:43:30+00:00"
+    },
+    {
+      "sha": "73ae4239244b1e2dd1ccb8bfac3399d044e10376",
+      "message": "embeeded auth\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T09:27:33+00:00"
+    },
+    {
+      "sha": "2bfb77ae9fdb424750c671d0e3bb24a51c58e3d6",
+      "message": "pylint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T09:55:27+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 1056,
+  "deletions": 201,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:11.081662",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:11.082504",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3414,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3414.json"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4644,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4644"
+  },
+  "metadata": {
+    "title": "[BUG]: OTEL_EXPORTER_OTLP_INSECURE configuration setting is defined but not used",
+    "state": "open",
+    "created_at": "2026-05-07T11:05:52+00:00",
+    "updated_at": "2026-05-11T05:32:01+00:00",
+    "closed_at": null,
+    "author": "vishu-bh",
+    "labels": [
+      "bug",
+      "triage"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Description\n\nThe `OTEL_EXPORTER_OTLP_INSECURE` configuration setting is defined in `mcpgateway/config.py` and documented in multiple places, but it is **not actually used** by the OTLP exporter initialization code in `mcpgateway/observability.py`.\n\n## Current Behavior\n\n- Setting is defined: `mcpgateway/config.py` line 2064\n- Setting is documented: `docs/docs/manage/observability/opentelemetry.md` line 292\n- Setting is **NOT passed** to OTLP exporter: `mcpgateway/observability.py` lines 926-945\n\nThe code comment explicitly states:\n> \"Note: some versions of OTLP exporters may not accept 'insecure' kwarg; avoid passing it. Use endpoint scheme or env to control TLS externally.\"\n\n## Expected Behavior\n\nEither:\n1. The `insecure` parameter should be passed to the OTLP exporter constructors, OR\n2. The configuration setting should be removed/deprecated and documentation updated to clarify that SSL verification is controlled via Python environment variables (`REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`)\n\n## Impact\n\nUsers attempting to disable SSL verification for OTLP exports to servers with self-signed certificates (e.g., Langfuse on OpenShift) find that setting `OTEL_EXPORTER_OTLP_INSECURE=true` has no effect, leading to SSL certificate verification errors.\n\n## Workaround\n\nUse Python's standard SSL environment variables instead:\n```yaml\nenv:\n- name: REQUESTS_CA_BUNDLE\n  value: /path/to/ca-bundle.crt\n```\n\n## Proposed Fix\n\n**Option 1: Implement the setting**\n```python\nif protocol == \"grpc\" and OTLP_SPAN_EXPORTER:\n    exporter = cast(Any, OTLP_SPAN_EXPORTER)(\n        endpoint=endpoint, \n        headers=header_dict or None,\n        insecure=cfg.otel_exporter_otlp_insecure\n    )\nelif HTTP_EXPORTER:\n    exporter = cast(Any, HTTP_EXPORTER)(\n        endpoint=http_ep, \n        headers=header_dict or None,\n        insecure=cfg.otel_exporter_otlp_insecure\n    )\n```\n\n**Option 2: Remove/deprecate**\n- Remove `otel_exporter_otlp_insecure` from `config.py`\n- Update documentation to clarify SSL verification is controlled via `REQUESTS_CA_BUNDLE`/`SSL_CERT_FILE`\n\n## References\n\n- User report: Customer attempting to export to Langfuse on OCP with self-signed certs\n- Code locations:\n  - Config: `mcpgateway/config.py:2064`\n  - Implementation: `mcpgateway/observability.py:926-945`\n  - Docs: `docs/docs/manage/observability/opentelemetry.md:292`",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:47.845311",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:47.846096",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4644,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4644.json"
+  }
+}

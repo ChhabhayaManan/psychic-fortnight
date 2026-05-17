@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4738,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4738"
+  },
+  "metadata": {
+    "title": "fix: upgrade path from 0.9.0 - unnamed FK handling, temp table cleanup",
+    "state": "closed",
+    "created_at": "2026-05-13T10:08:49+00:00",
+    "updated_at": "2026-05-13T10:23:04+00:00",
+    "closed_at": "2026-05-13T10:23:02+00:00",
+    "merged_at": "2026-05-13T10:23:02+00:00",
+    "author": "madhu-mohan-jaishankar",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 📝 Summary\r\n\r\nFixes three bugs that prevented clean upgrades from 0.9.0 to 1.0.1.\r\n\r\n**1. `r2b3c4d5e6f7` — temp table race condition (SQLite)**\r\nWhen multiple Gunicorn workers start simultaneously, the first worker to run the\r\n`add_prompt_namespacing_fields` migration creates `_alembic_tmp_prompts` via\r\n`batch_alter_table`. If that worker is killed mid-migration, the temp table is left\r\nbehind. Every subsequent worker then fails with:\r\n```\r\nsqlalchemy.exc.OperationalError: table _alembic_tmp_prompts already exists\r\n```\r\nFix: add `DROP TABLE IF EXISTS _alembic_tmp_prompts` at the start of `upgrade()` —\r\na no-op on a clean database, a safe cleanup on a dirty one.\r\n\r\n**2. `9fb98535724d` — unnamed FK constraints (SQLite upgrade from 0.9.0)**\r\nIn 0.9.0 databases, all foreign key constraints are unnamed (e.g.\r\n`FOREIGN KEY(tool_id) REFERENCES tools (id)`). The `add_ondelete_cascade` migration\r\ncalls `inspector.get_foreign_keys()` which returns `{'name': None, ...}` for these.\r\nThe original code/previous fix either crashed or silently skipped adding\r\n`ON DELETE CASCADE`, leaving upgraded databases without the required cascade behavior.\r\nFix: detect unnamed FKs, reflect the full table into a `sa.Table` object, strip the\r\nunnamed FK constraints via `_strip_all_unnamed_fks()`, then pass `copy_from=` to\r\n`batch_alter_table()` so SQLite recreates the table correctly with a new named\r\n`ON DELETE CASCADE` FK.\r\n\r\n**3. `scripts/ci/run_upgrade_validation.sh` — psycopg driver mismatch**\r\nThe validation script was hardcoding `postgresql+psycopg://` (psycopg3) for both\r\nthe base and target containers. The 0.9.0 image ships only `psycopg2_binary`, so\r\nstarting the base container immediately crashed with:\r\n```\r\nModuleNotFoundError: No module named 'psycopg'\r\n```\r\nFix: at startup, probe the base image with `docker run ... python3 -c \"import psycopg\"`.\r\nIf it fails, use `postgresql+psycopg2://` for the base container; the target container\r\nalways uses `postgresql+psycopg://` (psycopg3).\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n| Upgrade validation (all 6 scenarios) | `make upgrade-validate UPGRADE_BASE_IMAGE=ghcr.io/ibm/mcp-context-forge:0.9.0 UPGRADE_TARGET_IMAGE=mcpgateway/mcpgateway:latest` | ✅ PASS |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\nAll 6 upgrade validation scenarios pass (SQLite fresh, SQLite upgrade, PostgreSQL fresh,\r\nPostgreSQL upgrade, SQLite round-trip, PostgreSQL round-trip) against a real 0.9.0 base\r\nimage (`ghcr.io/ibm/mcp-context-forge:0.9.0`).\r\n```",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4280586850",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-13T10:22:54+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2b70023ec8d303c6e6698119d8c0878c864aaeb4",
+      "message": "fix: upgrade path from 0.9.0 - unnamed FK handling, temp table cleanup, psycopg driver detection\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-05-13T10:04:13+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 89,
+  "deletions": 31,
+  "merged": true,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:35.073308",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:35.073734",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4738,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4738.json"
+  }
+}

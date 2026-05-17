@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2645,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2645"
+  },
+  "metadata": {
+    "title": "MCP Spec Compliant Strict JSON Schema Validation (Draft 2020-12) for Registration",
+    "state": "closed",
+    "created_at": "2026-02-02T07:09:41+00:00",
+    "updated_at": "2026-02-07T17:52:52+00:00",
+    "closed_at": "2026-02-07T17:52:50+00:00",
+    "merged_at": "2026-02-07T17:52:50+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2348 \r\n\r\n## 📌 Summary\r\nFixed an issue where invalid JSON schemas for tools and prompts were being silently persisted with only a warning log, leading to potential runtime errors in downstream components.\r\n\r\n**Key Changes:**\r\n\r\n1.  **Strict Validation**: processing is now halted when an invalid schema is detected. This prevents broken data(json) from entering the database.\r\n2.  **MCP Spec Compliance**: The default JSON Schema version for payloads missing the `$schema` field is now explicitly set to **Draft 2020-12**, as mandated by the [MCP Schema Specification](https://modelcontextprotocol.io/specification/draft/schema).\r\n3.  **Configuration**: A new setting `JSON_SCHEMA_VALIDATION_STRICT` has been added (defaults to `True`) to control this behavior, with valid documentation.\r\n\r\n## 🔁 Reproduction Steps\r\n1.  Attempt to register a tool or prompt with a syntactically invalid JSON schema (e.g., `{\"type\": \"object\", \"properties\": {\"p\": {\"type\": \"UNKNOWN_TYPE\"}}}`).\r\n2.  **Before**: Request succeeds (200 OK), and a warning is logged.\r\n3.  **After**: Request fails (400 Bad Request) with a clear error message: `Invalid tool input schema: ...`.\r\n\r\n## 🐞 Root Cause\r\n1.  **Swallowed Exceptions**: The `validate_tool_schema` and `validate_prompt_schema` database listeners caught `jsonschema.exceptions.SchemaError` but effectively ignored it by only logging a warning and allowing the transaction to commit.\r\n2.  **Ambiguous Default**: The validator selection logic did not explicitly enforce the MCP-required default (Draft 2020-12) for schemaless inputs, leading to potential inconsistencies.\r\n\r\n## 💡 Fix Description\r\n*   **Config**: Introduced `json_schema_validation_strict` in Settings to allow opting out of strict mode (for legacy compatibility).\r\n*   **Logic**: Updated `mcpgateway/db.py` to:\r\n    *   Check `settings.json_schema_validation_strict`. If `True`, `SchemaError` is caught and re-raised as `ValueError`, aborting the DB transaction.\r\n    *   Explicitly instantiate `jsonschema.Draft202012Validator` if `$schema` is missing.\r\n*   **Tests**: Added reproduction tests verifying both strict and lenient behaviors, and confirming the default validator version.\r\n\r\n\r\n> **Note on Configuration**: `JSON_SCHEMA_VALIDATION_STRICT` is distinct from the existing `VALIDATION_STRICT` setting.\r\n> *   `VALIDATION_STRICT`: Controls general API input validation (middleware level) for request bodies/parameters.\r\n> *   `JSON_SCHEMA_VALIDATION_STRICT`: Specifically controls whether **invalid JSON Schemas** (defined inside Tool/Prompt inputs) cause a hard failure/exception during registration or are just logged as warnings.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3767493387",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-07T17:51:50+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "802307c610e00c61c33349e6db96e1441fa6ae0a",
+      "message": "feat: add strict JSON Schema validation (Draft 2020-12) for tool and prompt registration\n\nCloses #2348\n\nAdd JSON_SCHEMA_VALIDATION_STRICT config option (default: true) to reject invalid\nJSON schemas during tool/prompt registration. When enabled, invalid schemas cause\na 400 error instead of being silently persisted with a warning log.\n\nDefault to Draft 2020-12 validator when $schema field is missing, per MCP spec.\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-07T17:14:13+00:00"
+    },
+    {
+      "sha": "f1d6ee1fa42fc0815ff5fc23f272cf3239bcf3ca",
+      "message": "fix: remove unrelated changes, fix typo, add missing test coverage\n\n- Remove unrelated VALIDATION_STRICT=true additions from docker-compose files\n- Remove unrelated comment on existing validation_strict field in config.py\n- Fix typo in configuration.md (\"may valid schemas may\" -> \"may\")\n- Restore trailing newline in config.schema.json files\n- Add tests for non-strict mode (json_schema_validation_strict=False)\n- Add test for Draft 2020-12 default validator selection\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-07T17:14:25+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 132,
+  "deletions": 11,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:51.155212",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:51.157688",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2645,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2645.json"
+  }
+}

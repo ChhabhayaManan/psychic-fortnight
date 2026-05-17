@@ -1,0 +1,160 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2042,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2042"
+  },
+  "metadata": {
+    "title": "Full mcp server list/spec refresh (polling + API)",
+    "state": "closed",
+    "created_at": "2026-01-12T06:56:56+00:00",
+    "updated_at": "2026-01-12T22:19:19+00:00",
+    "closed_at": "2026-01-12T22:19:17+00:00",
+    "merged_at": "2026-01-12T22:19:17+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# ✨ Feature / Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\nPhase 1 of #1984  (https://github.com/IBM/mcp-context-forge/issues/1984#issuecomment-3734591382)\r\n\r\n---\r\n\r\n## 🚀 Summary (1-2 sentences)\r\nAdded configurable per-gateway polling intervals for tools, resources, and prompts, allowing detailed control over refresh frequency with a global fallback. Also added a new POST /gateways/{id}/tools/refresh API endpoint to manually trigger synchronization and receive granular change counts. Complete tools/spec updation (all relevant fields now updated if changed)\r\n\r\n---\r\n\r\n## 🛠️ Testing\r\n\r\n### 1. Manual Refresh API\r\nUse the new endpoint to trigger an immediate sync. \r\nUpdate a tool description in your MCP server, call the API, and verify tools_updated: 1.\r\nAdd a new tool in your MCP server, call the API and verfiy tools_added: 1\r\n\r\nNOTE: Orchestrate Usecase: For servers with one time authentication enabled, the refresh api supports passthrough headers for authentication and then performs the server sync.\r\n\r\n```bash\r\n\r\nexport CONTEXT_FORGE_TOKEN=\"your_token_here\"\r\n\r\n# Refresh tools\r\ncurl -X POST \"http://localhost:4444/gateways/{gateway_id}/tools/refresh\" \\\r\n  -H \"Authorization: Bearer ${CONTEXT_FORGE_TOKEN}\"\r\n\r\n# Refresh tools, prompts and resources\r\ncurl -X POST \"http://localhost:4444/gateways/{gateway_id}/tools/refresh?include_resources=true&include_prompts=true\" \\\r\n  -H \"Authorization: Bearer ${CONTEXT_FORGE_TOKEN}\"\r\n```\r\n\r\nVerify:\r\nResponse should look like:\r\n```json\r\n{\r\n  \"gatewayId\": \"bc62c2318f2a4954afd6ae6f726560d2\",\r\n  \"success\": true,\r\n  \"error\": null,\r\n  \"toolsAdded\": 2,\r\n  \"toolsUpdated\": 0,\r\n  \"toolsRemoved\": 1,\r\n  \"resourcesAdded\": 0,\r\n  \"resourcesUpdated\": 0,\r\n  \"resourcesRemoved\": 0,\r\n  \"promptsAdded\": 0,\r\n  \"promptsUpdated\": 0,\r\n  \"promptsRemoved\": 0,\r\n  \"validationErrors\": [],\r\n  \"durationMs\": 75.19576100003178,\r\n  \"refreshedAt\": \"2026-01-12T06:50:36.320920Z\"\r\n}\r\n```\r\n\r\n---\r\n\r\n### 2. Per-Gateway Polling (Auto-Refresh):\r\n\r\nConfiguration in the .env:\r\n```\r\nAUTO_REFRESH_SERVERS=true\r\nGATEWAY_AUTO_REFRESH_INTERVAL=15\r\n```\r\n\r\nGATEWAY_AUTO_REFRESH_INTERVAL is the global default, if you want to configure per gateway interval, while creating/updating a gateway, use `refresh_interval_seconds` to configure gateway specific interval for refresh.\r\n\r\n1. Add a mcpserver in the gateway.\r\n2. Modify the MCP server after some time (add a tool/remove a tool/update description or input_schema or any tool configuration)\r\n3. Wait for the set refresh interval, notice that the mcp server is polled, and automatically refreshed with the changes done in the mcp server.\r\n\r\n\r\n---\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n- [ ] CHANGELOG updated (if user-facing)\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\nKey Changes:\r\n\r\n**1. Manual Refresh API (POST /gateways/{id}/tools/refresh):**\r\n\r\n- Triggers immediate re-discovery of tools, resources, and prompts.\r\n- Passthrough Headers: Forwards allowed headers (e.g., Auth, Custom IDs) from the API request to the upstream MCP server.\r\n- Error Handling: Returns detailed success/failure status and validation errors in the response (200 OK with success: false payload).\r\n- Concurrency: Uses per-gateway locking to prevent race conditions.\r\n\r\n**2. Per-Gateway Polling:**\r\n\r\n- Added refresh_interval_seconds to Gateway model (DB + Pydantic).\r\n- Gateways can now have individual refresh schedules (overriding the global default).\r\n- Added last_refresh_at timestamp tracking.\r\n\r\n**3. Reliability & Monitoring:**\r\n\r\n- Refactored _refresh_gateway_tools_resources_prompts to accurately track changes (added/removed/updated).\r\n- Fixed bug where update counts were not correctly calculated.\r\n- Added database migration (Alembic) for new fields.\r\n- Fixed bug where update counts were not correctly calculated.\r\n- Added database migration (Alembic) for new fields.\r\n\r\n**4. Tool Spec Synchronization:** \r\n\r\n- Deeply syncs tool definitions (not just list membership). Updates description, request_type, headers, input_schema, output_schema, jsonpath_filter, and auth/visibility metadata. \r\n- Stale tools are automatically removed.\r\n\r\n\r\n```mermaid\r\nflowchart TD\r\n    A[Health Check Loop] --> B{Gateway Healthy?}\r\n    B -- No --> C[Mark Unreachable]\r\n    C --> D[Skip Refresh]\r\n    B -- Yes --> E{Was Unreachable?}\r\n    E -- Yes --> F[Force Refresh - Recovery]\r\n    E -- No --> G{Interval Elapsed?}\r\n    G -- Yes --> H[Refresh Tools/Resources]\r\n    G -- No --> I[Skip]\r\n    F --> H\r\n    H --> J[Atomic DB Commit]\r\n    J --> K[Invalidate Caches]\r\n```",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3652960094",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-12T22:17:48+00:00",
+      "body": "Rebased"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6c9c5b33279436209db6d669e7298d52fe54cdd2",
+      "message": "gateway refresh enhancements\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-09T18:56:29+00:00"
+    },
+    {
+      "sha": "1ed3cba855a8d00b253dc623f6bcc1d950c0a24c",
+      "message": "fix manual refresh\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-09T19:18:52+00:00"
+    },
+    {
+      "sha": "d735cd7eaa3945898ed833af8b6d1cb49e43a660",
+      "message": "included output_schema updation\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-09T19:23:57+00:00"
+    },
+    {
+      "sha": "838093f59370cc66fa6cb12898bded31696f2b22",
+      "message": "support passthrough headers for manual gateway refresh\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-10T11:18:04+00:00"
+    },
+    {
+      "sha": "bb017a68d43c8cb83636a99f3f449d69cc1ccba1",
+      "message": "optimize gateway refresh\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-10T12:12:00+00:00"
+    },
+    {
+      "sha": "58f1da3e129f0c7b6909a8f25fce90a1acd1e5d5",
+      "message": "updated refresh interval\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-10T12:12:22+00:00"
+    },
+    {
+      "sha": "6245364e5ffc34f09ca29017919cdd61d1a876e1",
+      "message": "fixed last_refresh issue\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-10T13:17:06+00:00"
+    },
+    {
+      "sha": "98471394f3acb4474ada1a0c949d7400ef6d2085",
+      "message": "per gateway refresh interval fix\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-10T13:33:54+00:00"
+    },
+    {
+      "sha": "bfee69e56d5d403697ac00fb44cbc33ec52c4db5",
+      "message": "added testcases for gateway refresh\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-10T13:53:59+00:00"
+    },
+    {
+      "sha": "1081b08fb6c2db9f20cade7c81654a1d6e0a6049",
+      "message": "more health check related test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-10T14:02:27+00:00"
+    },
+    {
+      "sha": "0eaae1d9b608bb4b899bf1571952c8c0d6043a06",
+      "message": "linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-10T14:14:11+00:00"
+    },
+    {
+      "sha": "0afe810aff29824a7441976a377a5d5a92f41352",
+      "message": "linting fixes\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-10T14:32:56+00:00"
+    },
+    {
+      "sha": "1b1ea52f03f84a64fd53c201efdf8b64763f8f7f",
+      "message": "update testcase with new result\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-12T07:19:01+00:00"
+    },
+    {
+      "sha": "5194b39756dcabb569000f78888f3ee1ddd3054f",
+      "message": "fix doctest with correct result\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-12T07:33:40+00:00"
+    },
+    {
+      "sha": "e053474c0fdd9e893e5d889b1a2352e5f5d48174",
+      "message": "fix: split long doctest line for flake8 compliance\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-12T19:51:31+00:00"
+    },
+    {
+      "sha": "c02af50a410237a1e582f6df359ee4aa1f98d9a9",
+      "message": "Rebase\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-12T20:46:27+00:00"
+    },
+    {
+      "sha": "2386357bc391bdbedb8eb10534b7d7f1a48e5f6a",
+      "message": "fix: address review findings for gateway refresh\n\n- Guard resource/prompt deletions with include_resources/include_prompts flags\n  to prevent accidental deletion when only tools are refreshed (High severity)\n- Remove redundant last_refresh_at update in refresh_gateway_manually that\n  ran even on failure - timestamp is now only updated on success inside\n  _refresh_gateway_tools_resources_prompts (Medium severity)\n- Change refresh_interval_seconds validation from ge=1 to ge=60 to match\n  the documented minimum and prevent refresh storms (Low severity)\n- Update test to reflect the changed behavior\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-12T20:54:51+00:00"
+    },
+    {
+      "sha": "a968b1a31bdcb0193eb643050ff0baca3a22bbcb",
+      "message": "fix: _validate_tools now returns validation errors tuple\n\nChanged _validate_tools to return (valid_tools, validation_errors) tuple\ninstead of just valid_tools. This exposes validation errors to callers,\npreparing for future propagation to the GatewayRefreshResponse.\n\nNote: Full propagation of validation_errors to the API response would\nrequire changing signatures of connect_to_sse_server,\nconnect_to_streamablehttp_server, and _initialize_gateway - deferred\nto a follow-up PR to keep this change focused.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-12T21:30:29+00:00"
+    },
+    {
+      "sha": "20f7759f1b96d6cbae7b5ad25274c7dbf0ac6dc8",
+      "message": "fix: enforce ge=60 for gateway_auto_refresh_interval in config\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-12T21:35:24+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 1131,
+  "deletions": 213,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:19.636252",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:19.637637",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2042,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2042.json"
+  }
+}

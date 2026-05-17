@@ -1,0 +1,58 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4062,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4062"
+  },
+  "metadata": {
+    "title": "feat: implement hierarchical plugin condition evaluation",
+    "state": "closed",
+    "created_at": "2026-04-07T10:23:24+00:00",
+    "updated_at": "2026-04-07T16:04:09+00:00",
+    "closed_at": "2026-04-07T16:04:07+00:00",
+    "merged_at": "2026-04-07T16:04:07+00:00",
+    "author": "ja8zyjits",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# ✨ Feature / Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\nCloses #3930\r\n\r\n---\r\n\r\n## 🚀 Summary\r\nImplements hierarchical plugin condition evaluation with hybrid AND/OR logic, replacing the previous OR-only evaluation. Within each condition object, all fields must match (AND logic), while multiple condition objects use OR logic, enabling precise control over plugin execution contexts.\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n- [x] CHANGELOG updated (if user-facing)\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Breaking Change\r\n\r\n**⚠️ This is a breaking change.** The plugin condition evaluation logic has been fundamentally changed from OR-based to hybrid AND/OR-based evaluation.\r\n\r\n**Impact:**\r\n- Existing plugin configurations with multiple conditions will execute differently\r\n- Same YAML configuration produces different runtime behavior\r\n- Requires configuration review and testing before upgrade\r\n\r\n**Migration Required:**\r\n- Review all plugin configurations with multiple conditions\r\n- Restructure conditions to use hybrid AND/OR semantics\r\n- Test thoroughly in non-production environments\r\n\r\n### Architecture Changes\r\n\r\n**New Evaluation Logic:**\r\n```\r\nWithin condition object: ALL fields must match (AND)\r\nAcross condition objects: ANY object can match (OR)\r\n```\r\n\r\nThis enables expressions like:\r\n```yaml\r\n# (tenant=healthcare AND tool=patient_reader) OR (server=prod AND user=admin_*)\r\nconditions:\r\n  - tenant_ids: [\"healthcare\"]\r\n    tools: [\"patient_reader\"]\r\n  - server_ids: [\"prod\"]\r\n    user_patterns: [\"admin_.*\"]\r\n```\r\n\r\n**Evaluation Flow:**\r\n\r\n```mermaid\r\nflowchart TD\r\n    A[Plugin Conditions List] --> B[Condition Object 1]\r\n    A --> C[Condition Object 2]\r\n    \r\n    B --> B1{All Fields Match?}\r\n    B1 -->|Yes| E[Execute Plugin]\r\n    B1 -->|No| F[Try Next Object]\r\n    \r\n    C --> C1{All Fields Match?}\r\n    C1 -->|Yes| E\r\n    C1 -->|No| G[Skip Plugin]\r\n    \r\n    F --> C\r\n    \r\n    style E fill:#90EE90\r\n    style G fill:#FFB6C1\r\n    style A fill:#E0F2F7,stroke:#4CAF50,stroke-width:3px\r\n```\r\n\r\n### Changes Made\r\n\r\n1. **Core Logic** (`mcpgateway/plugins/framework/utils.py`):\r\n   - Replaced `payload_matches()` with hybrid AND/OR evaluation\r\n   - Added fail-fast short-circuit optimization\r\n   - Enhanced debug logging for condition evaluation\r\n\r\n2. **Tests** (`tests/unit/mcpgateway/plugins/framework/`):\r\n   - Comprehensive test coverage for AND logic within condition objects\r\n   - Tests for OR logic across multiple condition objects\r\n   - Edge cases: empty conditions, single fields, complex scenarios\r\n   - New test file: `test_utils_and_logic.py`\r\n\r\n3. **Documentation** (`docs/docs/architecture/plugins.md`):\r\n   - Updated condition evaluation section\r\n   - Added configuration examples\r\n   - Documented evaluation order and short-circuit behavior\r\n   - Migration guide with common patterns\r\n\r\n4. **CHANGELOG** (`CHANGELOG.md`):\r\n   - Breaking change notice\r\n   - Feature description\r\n   - Migration guidance reference\r\n\r\n### Security Benefits\r\n\r\n- **Defense-in-depth**: AND logic enables multi-factor plugin execution control\r\n- **Reduced attack surface**: Eliminates accidental policy bypass via OR logic\r\n- **Clearer intent**: Conditions explicitly state all requirements\r\n- **Enhanced audit trail**: Debug logging shows exact evaluation path\r\n\r\n### Performance\r\n\r\n- **Fail-fast optimization**: Short-circuits on first non-matching field\r\n- **Expected improvement**: Faster evaluation for non-matching conditions\r\n- **No memory impact**: Same data structures\r\n- **Minimal logging overhead**: Debug logging only when enabled\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4069245794",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-07T15:19:12+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8fe96854baa7b3d000c060bb237f6545a28e2f00",
+      "message": "feat: implement hierarchical plugin condition evaluation\n\n- Add support for AND/OR/NOT logical operators in plugin conditions\n- Implement nested condition evaluation with proper precedence\n- Add comprehensive test coverage for condition logic\n- Update documentation with examples and migration guide\n\nBREAKING CHANGE: Plugin condition syntax now supports hierarchical\nevaluation. Simple string conditions are still supported but complex\nconditions require new AND/OR/NOT structure.\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-07T10:09:52+00:00"
+    },
+    {
+      "sha": "4bd81b10502f22960b7f8d46b58a66239a745f86",
+      "message": "Ran Precommit and other refacotring\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-04-07T10:53:41+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 805,
+  "deletions": 43,
+  "merged": true,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:07:24.466650",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:24.467322",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4062,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4062.json"
+  }
+}

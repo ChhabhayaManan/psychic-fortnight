@@ -1,0 +1,42 @@
+{
+  "id": "db1a2a95-3534-4f19-a836-aecb49a76a40",
+  "title": "fix(ui): hide deactivated entities in admin UI catalog and API",
+  "summary": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3425\r\n\r\n---\r\n\r\n## 📝 Summary\r\n_What does this PR do and why?_\r\n\r\n\r\n✅ Fix Complete: Deactivated Entities No Longer Visible in Admin UI and API\r\n\r\n## Problem Resolved\r\nFixed the issue where deactivated prompts, tools, and resources were incorrectly displayed in the Admin UI catalog (`admin/#catalog`) and API responses.\r\n\r\n## Changes Implemented\r\n\r\n### 1. **Admin UI Endpoint Fix** - `mcp-context-forge/mcpgateway/admin.py`\r\n\r\n#### Added Import (Line 56):\r\n```python\r\nfrom sqlalchemy.orm import joinedload, selectinload, Session, with_loader_criteria\r\n```\r\n\r\n#### Fixed Query in `admin_servers_partial_html()` (Lines 2268-2280):\r\n```python\r\n# Build base query with eager loading to avoid N+1 queries\r\n# Filter out deactivated tools, resources, prompts, and agents at query level\r\nquery = select(DbServer).options(\r\n    selectinload(DbServer.tools),\r\n    with_loader_criteria(DbTool, DbTool.enabled.is_(True)),\r\n    selectinload(DbServer.resources),\r\n    with_loader_criteria(DbResource, DbResource.enabled.is_(True)),\r\n    selectinload(DbServer.prompts),\r\n    with_loader_criteria(DbPrompt, DbPrompt.enabled.is_(True)),\r\n    selectinload(DbServer.a2a_agents),\r\n    with_loader_criteria(DbA2AAgent, DbA2AAgent.enabled.is_(True)),\r\n    joinedload(DbServer.email_team),\r\n)\r\n```\r\n\r\n### 2. **API Endpoint Fix** - `mcp-context-forge/mcpgateway/services/server_service.py`\r\nPreviously fixed in the same session - the `get_server()` method now uses the same filtering pattern (lines 1019-1033).\r\n\r\n### 3. **Test Coverage Added**\r\n\r\n#### Test for Service Layer:\r\n- **File**: `mcp-context-forge/tests/unit/mcpgateway/services/test_server_service.py`\r\n- **Test**: `test_get_server_filters_deactivated_entities()`\r\n- **Status**: ✅ Passing (3/3 tests)\r\n\r\n#### Test for Admin UI:\r\n- **File**: `mcp-context-forge/tests/unit/mcpgateway/test_admin.py` (Line 8218)\r\n- **Test**: `test_admin_servers_partial_html_filters_deactivated_entities()`\r\n- **Purpose**: Verifies that the admin UI endpoint correctly filters deactivated entities\r\n\r\n## Technical Implementation\r\n\r\n**Method**: SQLAlchemy's `with_loader_criteria()`\r\n- Filters eagerly loaded relationships at the database query level\r\n- More efficient than post-query filtering (no N+1 queries)\r\n- Ensures consistent behavior across all endpoints\r\n\r\n**Entities Filtered**:\r\n- ✅ Tools (`DbTool.enabled.is_(True)`)\r\n- ✅ Resources (`DbResource.enabled.is_(True)`)\r\n- ✅ Prompts (`DbPrompt.enabled.is_(True)`)\r\n- ✅ A2A Agents (`DbA2AAgent.enabled.is_(True)`)\r\n\r\n## Impact & Results\r\n\r\n### Before Fix ❌\r\n- Admin UI at `admin/#catalog` showed incorrect counts including deactivated entities\r\n- Virtual MCP Servers displayed deactivated tools/resources/prompts in their counts\r\n- API endpoint `/servers/{server_id}` returned deactivated entities\r\n- Security risk: deactivated entities were exposed\r\n\r\n### After Fix ✅\r\n- Admin UI catalog table shows correct counts (only active entities)\r\n- Virtual MCP Servers only display active tools/resources/prompts\r\n- API responses exclude deactivated entities\r\n- Filtering happens at database query level (efficient)\r\n- Security improved: deactivated entities properly hidden\r\n\r\n## Files Modified\r\n\r\n1. **`mcp-context-forge/mcpgateway/admin.py`**\r\n   - Added `with_loader_criteria` import\r\n   - Fixed query in `admin_servers_partial_html()` endpoint\r\n\r\n2. **`mcp-context-forge/mcpgateway/services/server_service.py`**\r\n   - Previously fixed `get_server()` method (same session)\r\n\r\n3. **`mcp-context-forge/tests/unit/mcpgateway/services/test_server_service.py`**\r\n   - Added test for service layer filtering\r\n\r\n4. **`mcp-context-forge/tests/unit/mcpgateway/test_admin.py`**\r\n   - Added test for admin UI endpoint filtering\r\n\r\n## Testing\r\n\r\n- ✅ Service layer tests: 3/3 passing\r\n- ✅ Admin UI test added with comprehensive coverage\r\n- ✅ Follows existing test patterns in the codebase\r\n\r\n\r\n\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [X] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    PASS    |\r\n| Unit tests                | `make test`     |   PASS     |\r\n| Coverage ≥ 80%            | `make coverage` |    99%    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [X] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._",
+  "reasoning": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3425\r\n\r\n---\r\n\r\n## 📝 Summary\r\n_What does this PR do and why?_\r\n\r\n\r\n✅ Fix Complete: Deactivated Entities No Longer Visible in Admin UI and API\r\n\r\n## Problem Resolved\r\nFixed the issue where deactivated prompts, tools, and resources were incorrectly displayed in the Admin UI catalog (`admin/#catalog`) and API responses.\r\n\r\n## Changes Implemented\r\n\r\n### 1. **Admin UI Endpoint Fix** - `mcp-context-forge/mcpgateway/admin.py`\r\n\r\n#### Added Import (Line 56):\r\n```python\r\nfrom sqlalchemy.orm import joinedload, selectinload, Session, with_loader_criteria\r\n```\r\n\r\n#### Fixed Query in `admin_servers_partial_html()` (Lines 2268-2280):\r\n```python\r",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "msureshkumar88",
+    "vishu-bh",
+    "crivetimihai",
+    "marekdano",
+    "jonpspri"
+  ],
+  "tags": [
+    "bug",
+    "SHOULD",
+    "ui",
+    "database",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "664934ad-6c47-4bfc-bb76-7d64ffe386ea",
+      "source_type": "pr",
+      "source_id": "3462",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/3462",
+      "contributor": "msureshkumar88",
+      "timestamp": "2026-03-04T11:37:12Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3462.json"
+    }
+  ],
+  "timestamp": "2026-03-04T11:37:12Z",
+  "created_at": "2026-05-17T17:23:14.257967",
+  "updated_at": "2026-05-17T17:23:14.257969",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:14.258429",
+    "artifact_type": "decisions",
+    "artifact_id": "db1a2a95-3534-4f19-a836-aecb49a76a40"
+  }
+}

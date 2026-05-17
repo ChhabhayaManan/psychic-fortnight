@@ -1,0 +1,227 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3900,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3900"
+  },
+  "metadata": {
+    "title": "feat: integrate Langfuse LLM observability via OTEL",
+    "state": "closed",
+    "created_at": "2026-03-28T00:19:26+00:00",
+    "updated_at": "2026-04-01T10:25:56+00:00",
+    "closed_at": "2026-04-01T10:25:54+00:00",
+    "merged_at": "2026-04-01T10:25:53+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "wxo",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Add Langfuse as an LLM observability backend, receiving traces via standard OTLP/HTTP\n- New `docker-compose.with-langfuse.yml` overlay with 6 services (web, worker, PostgreSQL, ClickHouse, MinIO, Redis)\n- Makefile targets: `make langfuse-up`, `langfuse-down`, `langfuse-status`, `langfuse-logs`, `langfuse-clean`, `langfuse-monitoring-up`\n- Full documentation at `docs/docs/manage/observability/langfuse.md`\n- `.env.example` section with all Langfuse configuration variables\n\n## Design Decisions\n\n- **Follows Phoenix overlay pattern** (`docker-compose.with-phoenix.yml` precedent)\n- **Separate infrastructure** — Langfuse uses its own PostgreSQL, Redis, ClickHouse, MinIO to avoid coupling\n- **OTLP/HTTP** — Langfuse does not support gRPC; gateway override sets `OTEL_EXPORTER_OTLP_PROTOCOL=http`\n- **Hyphenated service names** — AWS S3 SDK rejects underscore hostnames (`langfuse-minio` not `langfuse_minio`)\n- **No host port bindings** for infrastructure — only Langfuse UI exposed on port 3100 (avoids conflicts with Grafana on 3000)\n- **Auto-provisioned** org, project, and API keys via `LANGFUSE_INIT_*` env vars — works out of the box\n\n## Test plan\n\n- [x] `docker compose config --quiet` validates with Langfuse overlay\n- [x] `docker compose config --quiet --profile monitoring` validates combined stack\n- [x] All 6 Langfuse services start healthy (`make langfuse-status`)\n- [x] Gateway OTEL exporter initializes and connects to Langfuse\n- [x] Tool invocations generate traces visible in Langfuse API (`/api/public/traces`)\n- [x] 13+ traces verified flowing from tool calls and health checks into Langfuse v3.162.0\n- [x] `make test-mcp-cli` — 17/23 passed (5 failures pre-existing, unrelated to Langfuse)\n- [x] No S3 upload errors after hostname fix\n- [x] `make langfuse-up/down/status/logs/clean` targets all work",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4031409704",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-30T15:24:17+00:00",
+      "body": "Thanks for the extra validation details. I still see a few code-level issues that look unresolved on the current branch:\r\n\r\n`tools_rust/mcp_runtime/src/observability.rs:419-448`  \r\nThe new Rust observability bootstrap appears to assume OTLP is always the exporter. `build_tracer_provider()` always goes through `build_otlp_exporter()`, and `ObservabilityConfig::from_env()` only reads OTLP/Langfuse settings. That means a Rust-side deployment configured with `OTEL_TRACES_EXPORTER=jaeger`, `zipkin`, or `console` would now fail at startup with an OTLP configuration error, even though those exporter modes are still supported on the Python side. I don’t see anything in the follow-up notes that addresses this compatibility regression.\r\n\r\n`docker-compose.with-langfuse.yml:311-320`  \r\nI also don’t understand how the Redis healthcheck is meant to work as written. The container is started with `--requirepass`, but the probe is still plain `redis-cli ping` with no authentication. If `redis-cli` enforces auth here the way I’d expect, `langfuse-cache` should stay unhealthy and the dependent Langfuse services would be gated on that. Since you mentioned the stack came up locally, there may be some image/CLI behavior I’m missing, but the compose file still looks inconsistent and I think the probe should authenticate explicitly.\r\n\r\n`Makefile:1227-1238`  \r\nThe host-port preflight in `CHECK_PORT_SPECS` still doesn’t look idempotent for the Langfuse targets. It checks running services with `$(COMPOSE_CMD_MONITOR) ps`, but `make langfuse-up` / `make langfuse-monitoring-up` start the stack through `$(LANGFUSE_COMPOSE)`. So if the Langfuse stack is already running and already owns ports like `3100` / `3130`, a second invocation can still fail with a false “port already in use” error instead of recognizing those containers as part of the same project and reusing them.\r\n\r\n`tools_rust/mcp_runtime/src/observability.rs:491-499`  \r\n`normalize_http_otlp_endpoint()` also still looks brittle for explicit OTLP/HTTP endpoint overrides on `:4317` when a path is already present. For example, `http://collector:4317/v1/traces` is returned unchanged, so the HTTP exporter still points at the gRPC port, and other `:4317` URLs with custom paths can be rewritten into malformed paths after normalization. I didn’t see this addressed in the follow-up Rust/Langfuse notes either.\r\n\r\nSo I agree the OTLP/Langfuse hot path is in much better shape than it was earlier in the thread, but these four issues still look open from the current diff.\r\n"
+    },
+    {
+      "id": "4036445902",
+      "author": "lucarlig",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-31T10:45:42+00:00",
+      "body": "LGTM.\r\n\r\nLet’s open a follow-up issue for [the review comments](https://github.com/IBM/mcp-context-forge/pull/3900#pullrequestreview-4031409704) and explore whether:\r\n- [`axum-otel-metrics`](https://docs.rs/axum-otel-metrics/latest/axum_otel_metrics/) (metrics)\r\n- [`axum-tracing-opentelemetry`](https://crates.io/crates/axum-tracing-opentelemetry) (spans)\r\n\r\ncan help here."
+    },
+    {
+      "id": "4040133164",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-31T20:57:12+00:00",
+      "body": "LGTM 🚀 \n\nFound a minor issue, where output is not captured in trace. It is not a blocker can be covered in a seperate issue.\n\nI can help there once merged will create a issue and raise PR for it."
+    },
+    {
+      "id": "4043065549",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-01T10:00:35+00:00",
+      "body": "Thanks for the update. I found one remaining issue:\n\n- The Rust runtime can fail startup even when observability is disabled, because Langfuse configuration is validated before the `OTEL_ENABLE_OBSERVABILITY` gate is checked.\n"
+    },
+    {
+      "id": "4043151040",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-01T10:17:19+00:00",
+      "body": "LGTM\n\ntested the changes locally, able to see the trace in langfuse as expected."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a2a598cad0e23c846714af17d03fec5930b7fda9",
+      "message": "feat: integrate Langfuse LLM observability via OTEL\n\nAdd Langfuse as an observability backend for ContextForge, receiving\ntraces via standard OTLP/HTTP. Follows the existing Phoenix overlay\npattern with a dedicated docker-compose overlay file.\n\nNew files:\n- docker-compose.with-langfuse.yml: Complete overlay with 6 services\n  (langfuse-web, langfuse-worker, langfuse-db, langfuse-clickhouse,\n  langfuse-minio, langfuse-cache) using separate infrastructure to\n  avoid coupling with ContextForge databases\n- docs/docs/manage/observability/langfuse.md: Full integration guide\n\nModified files:\n- Makefile: 7 new targets (langfuse-up/down/status/logs/clean,\n  langfuse-monitoring-up/down)\n- .env.example: Langfuse configuration section with all tunable vars\n- docker-compose.yml: Document Langfuse overlay in profiles header\n- docs/docs/manage/observability/.pages: Add to docs navigation\n- docs/docs/manage/observability/observability.md: Add as recommended\n  backend option\n\nKey design decisions:\n- OTLP/HTTP protocol (Langfuse does not support gRPC)\n- Hyphenated service names (AWS S3 SDK rejects underscore hostnames)\n- No host port bindings for infrastructure (only UI on port 3100)\n- Auto-provisioned org/project/keys via LANGFUSE_INIT_* env vars\n- Health check uses $(hostname) (Next.js binds to container hostname)\n\nTested with 13+ traces flowing from tool invocations and gateway\nhealth checks into Langfuse v3.162.0.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-28T00:19:06+00:00"
+    },
+    {
+      "sha": "888fc9e6ca6b35d912c4dc012ec91f021cc31519",
+      "message": "fix: stabilize langfuse local stack and trace validation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-28T11:00:01+00:00"
+    },
+    {
+      "sha": "86461f077d1b5213ccee6de38403c9dbc28aa5ac",
+      "message": "fix: resolve observability pylint warning\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-28T11:09:48+00:00"
+    },
+    {
+      "sha": "4190fde0790431e93c585c093757376016587eda",
+      "message": "fix: harden langfuse observability traces\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-28T12:09:37+00:00"
+    },
+    {
+      "sha": "39612dbec43e9f3114fcad4211020239376993ff",
+      "message": "chore: refresh secrets baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-28T12:24:27+00:00"
+    },
+    {
+      "sha": "9ca5c25ec92412276325bea29e1d5c4ecd252be5",
+      "message": "feat: capture team names in trace context\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-28T13:16:13+00:00"
+    },
+    {
+      "sha": "8313d69a2a11edd5cd08f022ea3ae65c15ee3776",
+      "message": "fix: tolerate helper rows in batched auth context\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-28T13:37:10+00:00"
+    },
+    {
+      "sha": "4d65349764a9959ff57b3b43f58f877cc5a2ed36",
+      "message": "fix: normalize MCP prompt arguments\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-28T13:46:14+00:00"
+    },
+    {
+      "sha": "bc51353ba54e84e7df8c31116c060bb67875066f",
+      "message": "fix: harden langfuse observability security\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-28T17:17:01+00:00"
+    },
+    {
+      "sha": "61fb33c34781239526a868710e6bca912cd78d4b",
+      "message": "fix: clear remaining lint warnings\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-28T23:15:46+00:00"
+    },
+    {
+      "sha": "6dac27ec9226878cb48ddbd866b3988c1a88ccc6",
+      "message": "fix: harden rust runtime auth and parity\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-29T08:48:44+00:00"
+    },
+    {
+      "sha": "9c18604bbc6d9726f4df3a123abf115b71cf9615",
+      "message": "feat: complete rust observability parity\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-29T16:45:16+00:00"
+    },
+    {
+      "sha": "569cfeb4d45595cac9eb3d61ed88421bde4077f5",
+      "message": "fix: restore nginx mcp fallback in python mode\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-29T17:48:02+00:00"
+    },
+    {
+      "sha": "601b711dca2871942d0aa695587c3edd2769b64e",
+      "message": "chore: refresh secrets baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-29T17:52:01+00:00"
+    },
+    {
+      "sha": "15ef63826f5c5297f65ac067f6efbb1c729cc5c6",
+      "message": "fix: resolve rebased tool service regressions\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-29T19:50:00+00:00"
+    },
+    {
+      "sha": "df4e01c73a2c040b1fb7b92833aa2d17ada61e1c",
+      "message": "chore: stop tracking todo notes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-29T20:37:12+00:00"
+    },
+    {
+      "sha": "bf8cd6f3c0b5323c635a35ec595553e457e36b37",
+      "message": "chore: refresh secrets baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-29T20:41:58+00:00"
+    },
+    {
+      "sha": "8051b2f4381738ca0c3fc589b8d90054393d62ed",
+      "message": "fix: harden rust observability parity\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-29T22:40:42+00:00"
+    },
+    {
+      "sha": "e819ec97c2230dc0732b51bb0bbbc31c75a19f22",
+      "message": "fix: preserve plugin hook parity on rust reads\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T00:10:08+00:00"
+    },
+    {
+      "sha": "822bc5895e2d10938d8ac8a4d3071dbf92c9b9e4",
+      "message": "fix: stabilize python mcp langfuse tracing\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T02:53:32+00:00"
+    },
+    {
+      "sha": "230eb8e0763048d7968c9ec9f9cf7ebb15a39381",
+      "message": "fix: tighten initialize span coverage and linting\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T08:36:05+00:00"
+    },
+    {
+      "sha": "25ca2daffa8760f91fd436b4e00748c216468964",
+      "message": "fix: optimize rust observability hot path\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T12:26:28+00:00"
+    },
+    {
+      "sha": "edaff6c4a0e5d85e82102c54497b5e832c80a30e",
+      "message": "chore: refresh secrets baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-30T14:17:50+00:00"
+    },
+    {
+      "sha": "a5c7d0aa442c59c100d6a34f2fa2e8df148108fe",
+      "message": "fix: harden observability span API, Bearer redaction, and caplog tests\n\n- Replace all direct span.set_attribute() calls with set_span_attribute()\n  in a2a_service, gateway_service, mcp_client_chat_service, and\n  resource_service to enforce sanitization and export policy\n- Fix Bearer/Basic token redaction regex to handle quote delimiters\n  in both Python (trace_redaction.py) and Rust (observability.rs)\n- Fix caplog test fixtures to specify logger name explicitly,\n  resolving interaction with module-level basicConfig\n- Apply cargo fmt to Rust mcp_runtime\n- Refresh secrets baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-01T07:59:13+00:00"
+    },
+    {
+      "sha": "8d29cc74845b1df02e1bdf84e6955e08938cf895",
+      "message": "fix: skip Langfuse credential validation when observability is disabled\n\nThe Rust runtime's ObservabilityConfig::from_env() ran\nvalidate_langfuse_configuration() unconditionally, before checking\nthe `enabled` flag. This caused the sidecar to fail at startup when\na Langfuse OTLP endpoint was present in env but observability was\ndisabled — the Python side already short-circuits correctly.\n\nGuard the validation behind the enabled check to match Python parity.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-01T10:19:13+00:00"
+    }
+  ],
+  "files_changed": 75,
+  "additions": 37570,
+  "deletions": 8535,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:38.503825",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:38.504604",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3900,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3900.json"
+  }
+}

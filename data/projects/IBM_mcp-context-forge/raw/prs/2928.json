@@ -1,0 +1,88 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2928,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2928"
+  },
+  "metadata": {
+    "title": "feat-2893: maintain custom and original description for tools",
+    "state": "closed",
+    "created_at": "2026-02-13T15:20:30+00:00",
+    "updated_at": "2026-02-15T09:09:08+00:00",
+    "closed_at": "2026-02-15T09:09:08+00:00",
+    "merged_at": "2026-02-15T09:09:08+00:00",
+    "author": "KKNithin",
+    "labels": [
+      "internal-sari"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "resolves new feature request #2893 \r\ncloses #2893 \r\n\r\n- alembic db upgrade\r\n- when registering tools populate original_description from description column",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3798653229",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T17:50:52+00:00",
+      "body": "## Code Review: feat-2893 — maintain custom and original description for tools\n\n### Overview\n\nThis PR adds an `original_description` column to the `tools` table so that when a user customizes a tool's description, the original description from the upstream MCP server is preserved. It includes an Alembic migration, ORM model change, schema change, service layer updates, and test updates.\n\n### Issues\n\n#### 1. Critical: `original_description` is overwritten on every update (defeats the purpose)\n\nIn `tool_service.py:1557`, during bulk import with `conflict_strategy=\"update\"`:\n```python\nexisting_tool.original_description = tool.description\n```\nThis overwrites the original description with the *new* incoming description on every update. The same happens in the gateway re-sync path at `gateway_service.py:4140` — only `description` is updated, but `original_description` is never set on re-sync, meaning it won't track upstream changes either.\n\n**The core semantic question this PR needs to answer**: Should `original_description` capture the description *as first registered*, or should it track the *upstream MCP server's current description*? The current implementation does neither reliably:\n- On initial registration: `original_description = tool.description` ✓\n- On bulk update: `original_description = tool.description` (overwrites with new value — wrong for both semantics)\n- On `update_tool()` (line 3912): `original_description` is never updated (correct if \"original\" means \"first registered\", wrong if it means \"upstream current\")\n- On gateway re-sync (line 4140): `original_description` is not updated (same ambiguity)\n\n**Recommendation**: For bulk update and gateway re-sync, do NOT overwrite `original_description` — it should remain as the value from initial registration. Only update it if it's `None` (backfill scenario).\n\n#### 2. Critical: Migration `down_revision` uses a suspicious revision ID\n\nThe migration's `down_revision` is `c1c2c3c4c5c6` — this looks like a placeholder/test value, not a real Alembic revision ID. While a file with that name does exist in the versions directory, this sequential hex pattern is unusual and should be verified. If this doesn't match the actual current head on `main`, the migration chain will break.\n\n`alembic heads` reports `8a16a77260f0` as the single head, so the chain appears intact on this branch, but verify it merges cleanly with `main`.\n\n#### 3. Medium: `ToolUpdate` schema doesn't include `original_description`\n\nOnly `ToolRead` got the new field. `ToolUpdate` (the Pydantic schema for updating tools) doesn't expose `original_description`. This is probably correct behavior (users shouldn't be able to overwrite the original), but it should be an explicit design decision. Consider whether an admin should be able to correct it.\n\n#### 4. Medium: Import/export round-trip inconsistency\n\n`export_service.py` exports `original_description`, but there's no corresponding handling in the import path to consume it. If someone exports tools and re-imports them, the `original_description` will either be lost or set to the current `description` value.\n\n#### 5. Low: Test values don't match the feature semantics\n\nSeveral tests set `original_description` to different values than `description` (e.g., `description=\"A test tool\"`, `original_description=\"A test tool original\"`), which is good for verifying they're stored separately. However, `test_update_tool` at line 1574 asserts `original_description == \"A test tool original\"` after an update — this is testing that `original_description` is preserved, which is the correct behavior. But the *production code* at line 1557 would actually overwrite it on bulk update, contradicting this test's assumptions.\n\n#### 6. Low: No UI or API documentation\n\nNo router changes expose `original_description` for display or management in the admin UI. The field will be returned in API responses via `ToolRead`, but there's no way for users to see/use the original vs. custom description distinction in the UI.\n\n### Code Quality\n\n- The migration follows the idempotent pattern correctly (checks for table/column existence)\n- The data backfill in the migration (`UPDATE tools SET original_description = description`) is good\n- Column placement in `db.py` is logical (right after `url`, before `description`)\n- Test coverage is thorough for the new field\n\n### Summary\n\nThe main concern is the **semantic inconsistency** in how `original_description` is handled across create vs. update paths. The bulk update path at line 1557 should not overwrite `original_description` — it should preserve the value from initial registration. Similarly, the gateway re-sync path should decide whether to track upstream changes in `original_description` or leave it as the initial value."
+    },
+    {
+      "id": "3802993785",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-15T01:02:49+00:00",
+      "body": "Rebased onto main, squashed to a single commit, and fixed the following issues:\n\n1. **Alembic migration `down_revision`** pointed to nonexistent `c1c2c3c4c5c6` — updated to `ba202ac1665f` (current head). Without this fix, `alembic heads` would show multiple heads and break migrations.\n\n2. **Missing `original_description` in `_create_db_tool()`** (`gateway_service.py`) — tools created during gateway health-check refresh would have `original_description = NULL`. Added `original_description=tool.description` to the factory method.\n\n3. **Bulk import overwrote `original_description`** (`tool_service.py`) — when `conflict_strategy=\"update\"`, the code unconditionally reset `original_description` to the import's description, defeating the write-once semantics. Changed to only set when NULL: `if getattr(existing_tool, \"original_description\", None) is None`.\n\nAll unit tests pass. Feature design is consistent with the existing `original_name`/`custom_name` pattern."
+    },
+    {
+      "id": "3804031000",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-15T09:08:33+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2cb3b01bf1aeae4c0d82f01e19d6d140700284af",
+      "message": "feat: add original_description column to tools table (#2893)\n\nWhen tools are registered, preserve the original description from the\nsource MCP server in a new original_description field. This allows users\nto customize the tool description while retaining the original for\nreference.\n\n- Add original_description column to Tool model and ToolRead schema\n- Populate original_description at tool registration time\n- Include original_description in export service output\n- Add Alembic migration with data backfill from existing descriptions\n\nCloses #2893\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Nithin Katta",
+      "date": "2026-02-15T00:38:31+00:00"
+    },
+    {
+      "sha": "a8082f6edc8c42333e1d2b0031e2e520f54d5b8f",
+      "message": "fix: preserve custom descriptions during gateway refresh and harden original_description\n\n- Protect user-customized descriptions during gateway sync/refresh by\n  only overwriting description when it matches original_description\n- Add default value (None) to ToolRead.original_description for cache\n  compatibility across deployments\n- Add original_description to tool cache payload for consistency\n- Restore original_description during export/import cycle\n- Update tests to cover description preservation behavior\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T01:36:56+00:00"
+    },
+    {
+      "sha": "22eabc1894284d5107f29a616629c3147187c7c2",
+      "message": "fix: scope import original_description restore by batch ID and original_name\n\n- Use Tool.original_name (not computed Tool.name) for restore lookup\n- Generate import_batch_id to scope restore to newly created tools only\n- Skip restore when no tools were created (respects skip/fail semantics)\n- Add tests for restore-by-batch and skip-no-restore behaviors\n- Fix missing original_description on gateway service test mock\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T01:52:38+00:00"
+    },
+    {
+      "sha": "ca4479328d6408901b2e6cd7fe65d2094cf8949a",
+      "message": "fix: commit (not flush) import original_description restore\n\ndb.flush() without a subsequent commit loses the restore changes\nsince register_tools_bulk already committed its own transaction.\nVerified with E2E testing against running docker-compose cluster.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T02:10:13+00:00"
+    }
+  ],
+  "files_changed": 15,
+  "additions": 256,
+  "deletions": 5,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:28.649328",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:28.650233",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2928,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2928.json"
+  }
+}

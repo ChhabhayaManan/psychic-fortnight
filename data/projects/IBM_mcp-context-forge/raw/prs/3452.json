@@ -1,0 +1,63 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3452,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3452"
+  },
+  "metadata": {
+    "title": "[FIX][API]: Add runtime `servers.use` compensation for pre-existing API tokens",
+    "state": "closed",
+    "created_at": "2026-03-03T18:33:19+00:00",
+    "updated_at": "2026-03-09T01:51:32+00:00",
+    "closed_at": "2026-03-03T19:15:49+00:00",
+    "merged_at": "2026-03-03T19:15:49+00:00",
+    "author": "madhav165",
+    "labels": [
+      "ica",
+      "api"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# Bug-fix PR\n\n---\n\n## Summary\nAPI tokens generated before the `servers.use` auto-injection fix (PR #3442) are rejected with HTTP 403 on `/rpc`, `/mcp`, and `/sse` transport endpoints, despite carrying valid MCP method permissions (`tools.read`, `tools.execute`, etc.).\n\nThis PR adds runtime compensation in the token scoping middleware so pre-existing tokens work without requiring rotation.\n\nCloses #3451\n\n## Reproduction Steps\n\n1. Use an API token generated before commit `dbc43bb24` with permissions `[\"servers.create\", \"servers.read\", \"servers.update\", \"servers.delete\", \"gateways.read\", \"tools.read\", \"tools.execute\"]`.\n2. `POST /rpc` with a valid JSON-RPC payload (e.g., `tools/call`).\n3. Observe HTTP 403 — `servers.use` is missing from the token's `scopes.permissions`.\n\n## Root Cause\nThe auto-injection in `token_catalog_service._generate_token()` only runs at **token generation time**. Pre-existing long-lived API tokens were never updated, so they lack `servers.use`. The `token_scoping_middleware` blocks them at the transport layer before the RPC handler can enforce fine-grained per-method RBAC.\n\n## Fix Description\nAdded runtime compensation in `_check_permission_restrictions()` (`mcpgateway/middleware/token_scoping.py`):\n\n- When the required permission is `servers.use` and the token carries any MCP method permission (`tools.*`, `resources.*`, `prompts.*`), implicitly grant transport access.\n- Mirrors the generation-time injection logic for pre-existing tokens.\n- Non-MCP permissions (`gateways.*`, `servers.*`, `admin.*`, `llm.*`) do **not** get implicit transport access.\n\n## Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Lint suite                            | `make lint`          | -      |\n| Unit tests                            | `uv run pytest`      | pass   |\n| Coverage >= 80 %                      | `make coverage`      | -      |\n| Manual regression no longer fails     | Pre-fix token now works on /rpc, /mcp, /sse | pass |\n\n## MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed\n\n## Test Coverage\n152 new parametrized tests in `TestRuntimeMcpTransportCompensation`:\n- All 13 MCP permissions x 8 transport endpoints (104 allow-path tests)\n- 10 non-MCP permissions x 4 transport endpoints (40 deny-path tests)\n- Mixed permission lists, explicit `servers.use`, wildcard/empty edge cases\n- Exact pre-fix and post-fix token scenarios\n- Verification that compensation does not bleed into non-transport endpoints",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3884555375",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-03T19:12:22+00:00",
+      "body": "Rebased onto main (merge commit removed, 2 clean commits).\n\n**Code review — approved.** The runtime `servers.use` compensation logic is correct, secure, and consistent with the generation-time injection in `token_catalog_service._generate_token()`:\n\n- Compensation is properly scoped — only fires when `required_permission == Permissions.SERVERS_USE` (the 8 transport endpoints), does not leak to non-transport paths.\n- Downstream per-method RBAC (`_ensure_rpc_permission()`) still enforces fine-grained permissions, so transport access alone doesn't widen what a token can do.\n- `Permissions.MCP_METHOD_PREFIXES` constant is a good DRY improvement — single source of truth for both generation-time and runtime paths.\n- 152 new parametrized tests provide thorough coverage: all 13 MCP permissions × 8 transport endpoints, 10 non-MCP deny paths, mixed permission lists, edge cases, and the exact pre-fix token scenario.\n- All 1198 related tests pass, zero regressions."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "02db3a0a38cc5477bc154b2e922235acb15f6f02",
+      "message": "fix(auth): runtime servers.use compensation for pre-existing API tokens\n\nAPI tokens generated before the servers.use auto-injection fix lack\nthe servers.use transport permission, causing 403 on /rpc, /mcp, and\n/sse endpoints despite having valid MCP method permissions.\n\nAdd runtime compensation in the token scoping middleware: when the\nrequired permission is servers.use and the token carries any MCP\nmethod permission (tools.*, resources.*, prompts.*), implicitly grant\ntransport access. This mirrors the generation-time auto-injection\nfrom _generate_token() and ensures pre-existing tokens work without\nrequiring rotation.\n\nIncludes 152 new parametrized tests covering all MCP permission\nprefixes across all transport endpoints, deny paths for non-MCP\npermissions, mixed permission lists, and the exact pre-fix token\nscenario.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-03T18:28:27+00:00"
+    },
+    {
+      "sha": "c112b891fe4eec969b39905fb5dfd0ed86a1a3b0",
+      "message": "refactor(auth): extract MCP_METHOD_PREFIXES constant and add compensation logging\n\n- Extract duplicated (\"tools.\", \"resources.\", \"prompts.\") tuple to\n  Permissions.MCP_METHOD_PREFIXES in mcpgateway/db.py as single\n  source of truth.\n- Update token_scoping middleware and token_catalog_service to\n  reference the shared constant.\n- Add debug-level log when runtime servers.use compensation fires,\n  helping operators identify tokens that should be rotated.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-03T18:39:48+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 273,
+  "deletions": 29,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:20.185584",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:20.188682",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3452,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3452.json"
+  }
+}

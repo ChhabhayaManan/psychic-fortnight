@@ -1,0 +1,37 @@
+{
+  "id": "26036029-edae-4f24-a1d5-88d419223b6a",
+  "title": "fix: eliminate migration lock contention on multi-replica startup",
+  "summary": "## Summary",
+  "reasoning": "## Summary\n\nFixes the startup serialization bug reported in #4783 where all N gateway replicas\nunconditionally acquire the Alembic migration lock at boot, making startup time scale\nlinearly with replica count. Also surfaces the silent SQLite correctness bug where\nper-container `/tmp` file locks provide no cross-container coordination.\n\nThree complementary fixes are applied together:\n\n- **Fast-path head check** — before acquiring the advisory lock, each replica does a\n  single `SELECT` on `alembic_version` and compares to the known head revision. If\n  already at head the lock and `alembic upgrade head` are skipped entirely; only the\n  idempotent bootstrap helpers (admin user, RBAC roles, resource assignments) re-run.\n- **Init container** — the previously commented-out `migration:` service in\n  `docker-compose.yml` is enabled. It runs the full bootstrap once against Postgres\n  directly (bypassing PgBouncer), then exits. All gateway replicas depend on\n  `service_completed_successfully`, s",
+  "confidence": 0.65,
+  "related_services": [],
+  "contributors": [
+    "Lang-Akshay"
+  ],
+  "tags": [
+    "rest",
+    "docker",
+    "database",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "21d5dd9f-7ba9-4069-b7cb-7f0d7e25d20a",
+      "source_type": "pr",
+      "source_id": "4784",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/4784",
+      "contributor": "Lang-Akshay",
+      "timestamp": "2026-05-15T16:11:26Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4784.json"
+    }
+  ],
+  "timestamp": "2026-05-15T16:11:26Z",
+  "created_at": "2026-05-17T17:23:01.500617",
+  "updated_at": "2026-05-17T17:23:01.500620",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:01.501355",
+    "artifact_type": "decisions",
+    "artifact_id": "26036029-edae-4f24-a1d5-88d419223b6a"
+  }
+}

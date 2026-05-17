@@ -1,0 +1,168 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3295,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3295"
+  },
+  "metadata": {
+    "title": "chore(tests,lint): optimize slow tests and migrate pylint rules to ruff",
+    "state": "closed",
+    "created_at": "2026-02-26T13:53:00+00:00",
+    "updated_at": "2026-03-09T01:52:18+00:00",
+    "closed_at": "2026-02-27T10:03:27+00:00",
+    "merged_at": "2026-02-27T10:03:27+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n- **Test speed optimizations**: Mock real sleeps, subprocess delays, and crypto overhead across 10 slow tests, saving ~15s cumulative test time\n- **Pylint-to-ruff migration**: Enable ruff PL rule family (98 rules), disable them in pylint, and fix all resulting violations\n\n## Test Optimizations\n\n| Test | Before | After | Fix |\n|------|--------|-------|-----|\n| gRPC `test_initialize_connection_error` | 3.02s | 0.09s | Mock `asyncio.sleep` in retry loop |\n| `test_module_level_email_auth_*` | 1.83s | ~0.9s ea | Split dual module-reload |\n| `test_module_level_reverse_proxy_*` | 1.80s | ~0.9s ea | Split dual module-reload |\n| `test_runtime_logger_calls_*` | 1.73s | 1.44s | `\"logger.\"` pre-filter on AST scan |\n| e2e `test_server_startup_with_invalid_mappings` | 3.35s | ~0.8s | Reduce sleep 3s → 0.5s |\n| `test_ttl_expiration` | 2.24s | ~0.01s | Monkeypatch `_now()` clock |\n| `test_database_respond_message_check_loop` | 2.73s | ~0.03s | Mock `asyncio.sleep` in polling loop |\n| `test_database_respond_ready_to_respond_logging` | 1.21s | ~0.03s | Same polling loop fix |\n| `test_database_respond_message_remove_logging` | 1.21s | ~0.01s | Same polling loop fix |\n| `test_expired_certificate_detection` | 1.27s | 0.03s | RSA 4096→2048 bit keys |\n\n## Pylint → Ruff Migration\n\n- Added `\"PL\"` to ruff select with `[tool.ruff.lint.pylint]` thresholds matching `.pylintrc`\n- Disabled 98 migrated rules in both `.pylintrc` and `pyproject.toml [tool.pylint]`\n- Auto-fixed: PLC0207 (maxsplit), PLR1711 (useless return), PLW1514 (encoding), PLR1714 (repeated equality)\n- Added `noqa` for intentional violations: PLC2801 (dunder calls), PLR0917 (too many positional args), PLR0911 (too many returns)\n- 255 pylint rules remain active (non-overlapping with ruff)\n\n## Test plan\n- [x] All modified tests pass individually\n- [x] `test_main_extended.py` full suite passes (281 tests)\n- [x] Certificate validation suite passes (8 tests)\n- [x] Session registry tests pass (3 sibling tests)\n- [x] Ruff passes clean\n- [x] Pylint passes at 10.00/10",
+  "comments": [
+    {
+      "id": "2859203237",
+      "author": "Copilot",
+      "created_at": "2026-02-26T13:59:05+00:00",
+      "body": "`split(\":\", maxsplit=1)` will break image refs that include a registry port (e.g., `registry:5000/ns/img:tag`) because it splits at the first `:` and treats `registry` as the “name.” Use a right-split for the tag removal (or a proper Docker image reference parser) so `base_image_name` is derived from the full ref without being corrupted by `host:port`.\n```suggestion\n    if \":\" in image_tag:\n        image_path, image_version = image_tag.rsplit(\":\", maxsplit=1)\n    else:\n        image_path, image_version = image_tag, \"latest\"\n    base_image_name = image_path.split(\"/\")[-1]  # Extract base name (e.g., \"mcpgateway-gateway\")\n```"
+    },
+    {
+      "id": "2859203299",
+      "author": "Copilot",
+      "created_at": "2026-02-26T13:59:06+00:00",
+      "body": "These tests previously waited to allow a background task/polling loop to run; now they assert immediately after `respond()`. If `respond()` schedules work on the event loop rather than awaiting it inline, this becomes flaky (asserting before the background processing runs). A robust approach is to signal completion via an `asyncio.Event` set inside `generate_response` (via `side_effect`) and `await asyncio.wait_for(event.wait(), timeout=...)` before asserting; similarly for the caplog-based tests that rely on background logging."
+    },
+    {
+      "id": "2859203324",
+      "author": "Copilot",
+      "created_at": "2026-02-26T13:59:06+00:00",
+      "body": "This mutates `fake_redis_client._now` without restoring it, which can leak state if the fixture/client is reused later in the test (or across tests, depending on fixture scope). Prefer `monkeypatch.setattr(fake_redis_client, \"_now\", ...)` so pytest will restore automatically, or restore `fake_redis_client._now = original_now` in a `finally` block."
+    },
+    {
+      "id": "2859203353",
+      "author": "Copilot",
+      "created_at": "2026-02-26T13:59:07+00:00",
+      "body": "`ast.parse(source)` drops the filename context, which makes syntax errors and diagnostics harder to interpret (they’ll reference `<unknown>`). Pass the filename for better tracebacks and debugging (e.g., `ast.parse(source, filename=str(file_path))`).\n```suggestion\n            tree = ast.parse(source, filename=str(file_path))\n```"
+    },
+    {
+      "id": "2859203375",
+      "author": "Copilot",
+      "created_at": "2026-02-26T13:59:07+00:00",
+      "body": "A fixed 0.5s sleep can make this e2e test timing-sensitive on slower/loaded CI runners (process may not have exited yet). Instead of a single sleep, poll `process.poll()` in a short loop with a small sleep and an overall timeout (keeps it fast when the process exits quickly, but avoids flakes when it doesn’t).\n```suggestion\n            # Wait (with polling) to let process start and potentially exit on invalid args\n            timeout = 5.0\n            interval = 0.05\n            loop = asyncio.get_event_loop()\n            start_time = loop.time()\n            while process.poll() is None and (loop.time() - start_time) < timeout:\n                await asyncio.sleep(interval)\n```"
+    },
+    {
+      "id": "2859361830",
+      "author": "jonpspri",
+      "created_at": "2026-02-26T14:30:11+00:00",
+      "body": "Good catch — fixed in b67b2df. Now uses `rsplit(\":\", maxsplit=1)` to extract the version first, so `registry:5000/ns/img:tag` is handled correctly."
+    },
+    {
+      "id": "2859361984",
+      "author": "jonpspri",
+      "created_at": "2026-02-26T14:30:13+00:00",
+      "body": "`respond()` awaits the polling loop inline — it does not schedule background work. The mocked `asyncio.sleep` lets the loop complete immediately, and assertions run after `respond()` returns, so there is no race. No change needed."
+    },
+    {
+      "id": "2859362093",
+      "author": "jonpspri",
+      "created_at": "2026-02-26T14:30:14+00:00",
+      "body": "Agreed — fixed in b67b2df. Now uses `monkeypatch.setattr(fake_redis_client, \"_now\", ...)` for automatic cleanup."
+    },
+    {
+      "id": "2859362223",
+      "author": "jonpspri",
+      "created_at": "2026-02-26T14:30:16+00:00",
+      "body": "Good suggestion — fixed in b67b2df. Now passes `filename=str(file_path)` to `ast.parse()`."
+    },
+    {
+      "id": "2859362499",
+      "author": "jonpspri",
+      "created_at": "2026-02-26T14:30:18+00:00",
+      "body": "Agreed — fixed in b67b2df. Replaced the fixed sleep with a poll loop (50ms interval, 5s timeout) so it exits quickly when the process dies but remains robust on slow CI."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3861172610",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T13:59:07+00:00",
+      "body": "## Pull request overview\n\nThis PR speeds up the test suite by removing real waits/overhead in several slow tests, and migrates a large subset of Pylint checks to Ruff’s native `PL` rules while keeping remaining Pylint checks enabled.\n\n**Changes:**\n- Replace sleep-based waits in tests (TTL expiration, polling loops, subprocess startup) with clock mocking / patched `asyncio.sleep`.\n- Reduce cryptographic test overhead by generating smaller RSA keys for certificate fixtures.\n- Enable Ruff `PL` rules and disable corresponding migrated Pylint rules in `pyproject.toml` and `.pylintrc`, adding targeted `noqa` where needed.\n\n### Reviewed changes\n\nCopilot reviewed 22 out of 22 changed files in this pull request and generated 5 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| tests/unit/mcpgateway/transports/test_redis_event_store.py | Avoids real sleeping by advancing a fake Redis clock for TTL expiration tests. |\r\n| tests/unit/mcpgateway/test_main_extended.py | Splits combined module-level tests into separate success vs import-error tests to reduce reload work. |\r\n| tests/unit/mcpgateway/plugins/framework/external/mcp/test_client_certificate_validation.py | Reduces RSA key size to speed up certificate generation in tests. |\r\n| tests/unit/mcpgateway/plugins/framework/external/grpc/test_client.py | Mocks retry sleeps to speed up gRPC initialization failure test. |\r\n| tests/unit/mcpgateway/cache/test_session_registry_extended.py | Mocks polling-loop sleeps to eliminate test delays in DB-backed session registry tests. |\r\n| tests/security/test_input_validation.py | Optimizes AST scan by skipping files that don’t contain `logger.`. |\r\n| tests/e2e/test_translate_dynamic_env_e2e.py | Shrinks subprocess startup wait in an e2e invalid-mappings test. |\r\n| pyproject.toml | Enables Ruff `PL` rules, sets Ruff Pylint thresholds, and disables migrated rules in Pylint config. |\r\n| mcpgateway/utils/jwt_config_helper.py | Adds explicit UTF-8 encoding when reading key files. |\r\n| mcpgateway/translate.py | Adds Ruff `noqa` for intentional dunder-call usage. |\r\n| mcpgateway/tools/builder/pipeline.py | Adds explicit UTF-8 encoding when reading YAML config files. |\r\n| mcpgateway/tools/builder/common.py | Adjusts `split` usage to satisfy lint rule and improve parsing. |\r\n| mcpgateway/services/security_logger.py | Adds Ruff `noqa` for too-many-positional-arguments. |\r\n| mcpgateway/services/observability_service.py | Adds Ruff `noqa` for too-many-positional-arguments in query methods. |\r\n| mcpgateway/services/mcp_session_pool.py | Adds Ruff `noqa` for intentional dunder-call lifecycle management. |\r\n| mcpgateway/services/email_notification_service.py | Uses `maxsplit` for email local-part extraction. |\r\n| mcpgateway/services/audit_trail_service.py | Adds Ruff `noqa` for too-many-positional-arguments. |\r\n| mcpgateway/middleware/token_scoping.py | Adds Ruff `noqa` for too-many-returns. |\r\n| mcpgateway/middleware/compression.py | Simplifies MCP path check using set membership. |\r\n| mcpgateway/main.py | Removes a “useless return” to satisfy linting. |\r\n| mcpgateway/common/validators.py | Uses `maxsplit` for safer string splitting in validators. |\r\n| .pylintrc | Disables migrated Pylint rules so Ruff `PL` can enforce them instead. |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3861361300",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T14:30:11+00:00",
+      "body": ""
+    },
+    {
+      "id": "3861361552",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T14:30:13+00:00",
+      "body": ""
+    },
+    {
+      "id": "3861361750",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T14:30:14+00:00",
+      "body": ""
+    },
+    {
+      "id": "3861361964",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T14:30:16+00:00",
+      "body": ""
+    },
+    {
+      "id": "3861362366",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T14:30:18+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a6942559f0baace2b69fc805eae0298fc9ba32d5",
+      "message": "chore(tests,lint): optimize slow tests and migrate 98 pylint rules to ruff\n\nTest optimizations:\n- Mock asyncio.sleep in gRPC retry loop (3.02s → 0.09s)\n- Split dual module-reload tests into single-reload pairs\n- Add \"logger.\" pre-filter to AST scan security test (1.73s → 1.44s)\n- Reduce e2e translate sleep from 3s to 0.5s\n- Monkeypatch InMemoryRedisClient._now() for TTL test (2.24s → 0.01s)\n- Mock asyncio.sleep in database polling loop tests (1.21s → 0.03s each)\n- Reduce RSA key size from 4096 to 2048 in cert tests (1.27s → 0.03s)\n\nPylint-to-ruff migration:\n- Enable ruff PL rule family with thresholds matching pylint config\n- Disable 98 migrated rules in both .pylintrc and pyproject.toml\n- Auto-fix PLC0207, PLR1711, PLW1514, PLR1714 violations\n- Add noqa comments for intentional PLC2801, PLR0917, PLR0911\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-26T13:52:22+00:00"
+    },
+    {
+      "sha": "71b047182b1606d221bb58565237953b799bc829",
+      "message": "fix: address Copilot review feedback\n\n- Use rsplit for image tag parsing to handle registry:port refs correctly\n- Use monkeypatch.setattr for fake redis clock to avoid state leakage\n- Pass filename to ast.parse for better error diagnostics\n- Replace fixed sleep with poll loop in e2e translate test for CI robustness\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-26T14:07:37+00:00"
+    },
+    {
+      "sha": "10eb50bc6281b354758f3b39508c2b6dc792989e",
+      "message": "fix(lint): add maxsplit=1 to URL query string split in validators\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-26T16:34:13+00:00"
+    },
+    {
+      "sha": "ceea7654a6f8710188a6fb1d858c9e49f228fb86",
+      "message": "fix(lint): fix ruff PLC0206 and PLR0911 violations in plugins\n\n- Use .items() for dict iteration in regex_filter search_replace\n- Add noqa for PLR0911 on PII mask dispatch function (18 returns)\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-26T16:36:08+00:00"
+    }
+  ],
+  "files_changed": 25,
+  "additions": 393,
+  "deletions": 128,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:42.817279",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:42.819964",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3295,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3295.json"
+  }
+}

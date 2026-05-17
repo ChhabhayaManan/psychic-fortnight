@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2026,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2026"
+  },
+  "metadata": {
+    "title": "Startup Resilience with Exponential Backoff (postgres and redis)",
+    "state": "closed",
+    "created_at": "2026-01-11T11:27:19+00:00",
+    "updated_at": "2026-01-11T11:48:33+00:00",
+    "closed_at": "2026-01-11T11:48:32+00:00",
+    "merged_at": "2026-01-11T11:48:32+00:00",
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Closes #2025\r\n\r\n## Summary\r\n\r\n- Add exponential backoff with jitter for database and Redis connection retries at startup\r\n- Increase default retry attempts from 3 to 30 (~5 minutes total wait time)\r\n- Prevent CPU-intensive crash-respawn loops when dependencies are temporarily unavailable\r\n\r\n## Problem\r\n\r\nWhen PostgreSQL or Redis is temporarily unavailable during startup (network blip, rolling restart, slow container initialization), the Gateway workers would:\r\n\r\n1. Retry only 3 times with fixed 2-second intervals (6 seconds total)\r\n2. Exit after exhausting retries\r\n3. Get respawned immediately by Granian (`--respawn-failed-workers`)\r\n4. Repeat the cycle, causing **500%+ CPU usage** from rapid crash-respawn loops\r\n\r\n## Solution\r\n\r\nImplement exponential backoff with jitter in both `db_isready.py` and `redis_isready.py`:\r\n\r\n- **Backoff formula**: `min(interval * 2^(attempt-1), 30s)` - doubles each attempt, capped at 30 seconds\r\n- **Jitter**: ±25% randomization prevents thundering herd when multiple workers retry simultaneously\r\n- **Default retries**: Increased from 3 to 30 (~5 minutes total before worker exits)\r\n\r\n### Retry Progression Example\r\n\r\n| Attempt | Base Backoff | With Jitter (±25%)  |\r\n|---------|--------------|---------------------|\r\n| 1       | 2s           | 1.5s – 2.5s         |\r\n| 2       | 4s           | 3s – 5s             |\r\n| 3       | 8s           | 6s – 10s            |\r\n| 4       | 16s          | 12s – 20s           |\r\n| 5+      | 30s (cap)    | 22.5s – 37.5s       |\r\n\r\nNote: The 30s cap applies to the base backoff; jitter is applied after, so actual sleep times can range from 22.5s to 37.5s at the cap.\r\n\r\n## Test Plan\r\n\r\n- [x] Normal startup with all dependencies available\r\n- [x] PostgreSQL late startup (30+ seconds delay)\r\n- [x] Redis late startup (30+ seconds delay)\r\n- [x] SQLite mode (no external database)\r\n- [x] Memory cache mode (no Redis)\r\n\r\n## Files Changed\r\n\r\n### Core Implementation\r\n- `mcpgateway/utils/db_isready.py` - Add exponential backoff with jitter, skip sleep on final attempt\r\n- `mcpgateway/utils/redis_isready.py` - Add exponential backoff with jitter (already skipped sleep on final attempt)\r\n- `mcpgateway/config.py` - Update default retries from 3 to 30\r\n\r\n### Configuration\r\n- `docker-compose.yml` - Add retry configuration with documentation\r\n- `.env.example` - Update defaults and add explanatory comments\r\n\r\n### Documentation\r\n- `README.md` - Update configuration table\r\n- `docs/docs/index.md` - Update configuration table\r\n- `docs/docs/architecture/performance-architecture.md` - Add Startup Resilience section\r\n- `docs/docs/faq/index.md` - Add troubleshooting FAQ\r\n- `docs/docs/manage/configuration.md` - Add resilience configuration sections\r\n- `docs/docs/manage/scale.md` - Update scaling examples\r\n- `docs/docs/deployment/compose.md` - Add resilience reference\r\n- `docs/docs/deployment/kubernetes.md` - Add Startup Resilience tip\r\n- `docs/docs/deployment/helm.md` - Add troubleshooting info\r\n\r\n### Helm Charts\r\n- `charts/mcp-stack/values.yaml` - Update default values\r\n- `charts/mcp-stack/README.md` - Document new settings\r\n- `charts/mcp-stack/values.schema.json` - Update schema defaults\r\n\r\n### JSON Schemas\r\n- `docs/config.schema.json` - Update defaults\r\n- `docs/docs/config.schema.json` - Update defaults\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "3536ecff42a4ff7bd3dfc5c9270737e61c377548",
+      "message": "Update PostgreSQL ready check interval\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T10:09:05+00:00"
+    },
+    {
+      "sha": "873a607264d4427d3b51b551876d1184a3b9659e",
+      "message": "Add ready check and backoff to redis\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T10:19:49+00:00"
+    },
+    {
+      "sha": "1b742df69f6fc1a414461956811364dcca99f439",
+      "message": "Update docs\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T10:56:25+00:00"
+    },
+    {
+      "sha": "71e4ed8772765c09c52e69884b7f0ae61535250b",
+      "message": "Update docs\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T11:18:30+00:00"
+    },
+    {
+      "sha": "c87f227435f734f42bd8fe5b3dec120a595b9ea8",
+      "message": "Update lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T11:26:04+00:00"
+    },
+    {
+      "sha": "31ae7deb56495bc5929250e6cf6fbd152a796f46",
+      "message": "Make max backoff configurable\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T11:39:57+00:00"
+    }
+  ],
+  "files_changed": 20,
+  "additions": 321,
+  "deletions": 70,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:15.578267",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:15.579644",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2026,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2026.json"
+  }
+}

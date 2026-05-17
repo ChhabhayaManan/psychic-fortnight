@@ -1,0 +1,135 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1373,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1373"
+  },
+  "metadata": {
+    "title": "Upgrade Encryption: Argon2id KDF & Per-Record Salts",
+    "state": "closed",
+    "created_at": "2025-10-30T16:33:29+00:00",
+    "updated_at": "2025-11-05T00:46:40+00:00",
+    "closed_at": "2025-11-05T00:46:39+00:00",
+    "merged_at": "2025-11-05T00:46:39+00:00",
+    "author": "madhav165",
+    "labels": [
+      "python",
+      "security"
+    ],
+    "milestone": null,
+    "assignees": [
+      "madhav165"
+    ]
+  },
+  "description": "# ✨ Feature / Enhancement PR\r\n\r\n---\r\n\r\n## 🚀 Summary (1-2 sentences)\r\nMigrated encryption logic from `mcpgateway/utils/oauth_encryption.py` to `mcpgateway/services/encryption_service.py`, upgraded key derivation from PBKDF2-HMAC to **Argon2id** with a **per-record random salt**, refactored `sso_service.py` to use the new encryption service, removed the cached Fernet instance, and added an Alembic migration (with downgrade support) to re‑encrypt existing data.\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n\r\n---\r\n\r\n## 🔧 Detailed Changes\r\n\r\n1. **Relocation & Renaming**\r\n   - Moved: `mcpgateway/utils/oauth_encryption.py` ➜ `mcpgateway/services/encryption_service.py`.\r\n   - Centralizes crypto concerns under `services/` and clarifies usage scope beyond OAuth.\r\n\r\n2. **Key Derivation: PBKDF2-HMAC ➜ Argon2id**\r\n   - Switched to **Argon2id** for deriving the 32‑byte encryption key.\r\n   - **Why:** Argon2id is memory‑hard and substantially **more tolerant to brute‑force decryption attempts** than PBKDF2, raising attacker cost and reducing effectiveness of GPU/ASIC cracking.\r\n\r\n3. **Salt Strategy: Single Global Salt ➜ Per‑Record Random Salt**\r\n   - Each encrypted record now uses its **own random salt**.\r\n   - **Why:** Adds compartmentalization — **exposure of one key/salt pair does not help decrypt other records**, eliminating the prior single‑point‑of‑failure inherent in a global salt.\r\n\r\n4. **Runtime Change: Remove Cached Fernet Instance**\r\n   - Because salt is now **per record**, the derived key varies; a single cached `Fernet` object is no longer valid. The service derives per‑record and encrypts/decrypts accordingly.\r\n\r\n5. **SSO Service Refactor**\r\n   - Updated `mcpgateway/services/sso_service.py` to use the new centralized `EncryptionService` instead of its legacy inline encryption code.\r\n   - Eliminates duplicate PBKDF2-based encryption logic and ensures consistency across all secure token operations.\r\n\r\n6. **Database Migration (Alembic) – Re‑encrypt Existing Fields**\r\n   - Added a forward migration that reads legacy encrypted values, derives new Argon2id keys with per‑record salts, and writes back in the new format.\r\n   - Includes a **downgrade script** that reverses the migration, re‑encrypting with the legacy PBKDF2-HMAC method for rollback safety.\r\n   - **Updated fields (by table):**\r\n\r\n      | Table                         | Column / Field                                   | Notes                                                                 |\r\n      |-------------------------------|---------------------------------------------------|-----------------------------------------------------------------------|\r\n      | `gateways`                    | `oauth_config.client_secret`                      | `oauth_config` is a dict; the `client_secret` value is re‑encrypted.  |\r\n      | `a2a_agents`                  | `oauth_config.client_secret`                      | Same handling as in `gateways`.                                       |\r\n      | `oauth_tokens`                | `access_token`                                    | Token value re‑encrypted under Argon2id + per‑record salt.            |\r\n      | `oauth_tokens`                | `refresh_token`                                   | Token value re‑encrypted under Argon2id + per‑record salt.            |\r\n      | `registered_oauth_clients`    | `client_secret_encrypted`                         | Re‑encrypted.                                                         |\r\n      | `registered_oauth_clients`    | `registration_access_token_encrypted`             | Re‑encrypted.                                                         |\r\n      | `sso_providers`               | `client_secret_encrypted`                         | Re‑encrypted.                                                         |\r\n\r\n7. **Cross‑DB Validation**\r\n   - Verified migration **on SQLite and PostgreSQL** (both upgrade path and runtime decrypt/verify).\r\n\r\n---\r\n\r\n## 📎 Notes & Compatibility\r\n- Storage type remains string/`TEXT` — ciphertext continues to be Base64‑encoded and safe for `TEXT NOT NULL` columns.\r\n- The new format stores/associates a per‑record salt (and any required KDF params) so future decrypt can reproduce the exact key.\r\n- The migration and downgrade scripts are idempotent per row; re‑running won’t re‑encrypt already migrated values.\r\n\r\n---\r\n\r\n## ⚠️ Caveats & Performance Notes\r\n- **Argon2id** is intentionally **slower and more memory-intensive** than PBKDF2. This enhances brute-force resistance but may impact performance under high concurrent encryption/decryption load.\r\n- Requires **load testing** to benchmark latency in token-heavy or large OAuth operations.\r\n\r\n---\r\n\r\n## ✅ Outcome\r\n- Stronger at‑rest security posture (Argon2id + per‑record salts).\r\n- Unified encryption interface used across SSO, OAuth, and client registration.\r\n- Alembic upgrade + downgrade scripts ensure reversible migration and DB integrity.\r\n- Tested and verified on SQLite & PostgreSQL.\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3419098712",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-11-05T00:37:52+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "cac9f630044c840e53b29f791fb4cdf0d028d8cd",
+      "message": "Removes redundant base64\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T01:49:25+00:00"
+    },
+    {
+      "sha": "f53fcc5e4fbc62850aff0f22082a683fda4b906a",
+      "message": "Replace PBKDF2HMAC with Argon2Id encryption\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T02:15:08+00:00"
+    },
+    {
+      "sha": "90e4a156833893f9fd1955dc794ede51bf4d72c2",
+      "message": "Use Argon2id for key generation in fernet encryption\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T04:44:43+00:00"
+    },
+    {
+      "sha": "13e01d3bf6d308bbbd815ad7229f0c7ac8eb6244",
+      "message": "Add docstring\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T05:58:01+00:00"
+    },
+    {
+      "sha": "7c3cccc8a123629d61f157147de681138b081a8e",
+      "message": "Make sso_service use fernet_encryption utl\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T10:39:51+00:00"
+    },
+    {
+      "sha": "e0829ca7c308b38d52b3fce9c7f1873b8384064f",
+      "message": "wip migration script\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T10:54:22+00:00"
+    },
+    {
+      "sha": "5bcbd4ee06bdcdbbb2280142e4384148293a2fe7",
+      "message": "Fix import in alembic script\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T11:00:11+00:00"
+    },
+    {
+      "sha": "afc5c6da999491e6ac3d75d3609594f2532bd820",
+      "message": "Linting fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T12:31:03+00:00"
+    },
+    {
+      "sha": "91d9d39bc150b30c5e067e8735b123dd1e7d41c1",
+      "message": "Move encryption from util to service\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T13:39:33+00:00"
+    },
+    {
+      "sha": "ed9d3212d3305cb7d76cdb28c32ec919c72532a8",
+      "message": "Add missing docstrings\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T13:44:17+00:00"
+    },
+    {
+      "sha": "a2f0ca4ca7d9d5616bc135a689ac56969998f4fa",
+      "message": "flake8 fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T14:06:00+00:00"
+    },
+    {
+      "sha": "17c8ca6c8a6839f260e259a24178143ce5dbaa40",
+      "message": "Handle str inputs for encryption_secret\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-30T16:59:08+00:00"
+    },
+    {
+      "sha": "277ceb116ea675ddc10b6d34050f91a3ad3d9a3c",
+      "message": "Update alembic down revision number\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-10-31T08:04:56+00:00"
+    },
+    {
+      "sha": "8fccacf9e4a9fdcd5aaabfc53ed98037da3e37f8",
+      "message": "Fix bandit",
+      "author": "Mihai Criveti",
+      "date": "2025-11-05T00:33:18+00:00"
+    }
+  ],
+  "files_changed": 15,
+  "additions": 830,
+  "deletions": 296,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:22:21.185725",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:22:21.186565",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1373,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1373.json"
+  }
+}

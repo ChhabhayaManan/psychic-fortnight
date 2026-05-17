@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2056,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2056"
+  },
+  "metadata": {
+    "title": "feat(chart): support external postgresql (cloudnativepg compatible)",
+    "state": "closed",
+    "created_at": "2026-01-12T15:58:06+00:00",
+    "updated_at": "2026-01-15T19:48:05+00:00",
+    "closed_at": "2026-01-13T23:06:59+00:00",
+    "merged_at": null,
+    "author": "Aurelian-Shuttleworth",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Description\nResolves #2052\n\nThis PR adds support for using an external PostgreSQL database with the `mcp-stack` chart, instead of the internal bundled PostgreSQL. This is particularly useful for CloudNativePG integrations or managed database services.\n\n### Key Changes\n- **Values Schema**: Added `postgres.external` configuration block to `values.schema.json`.\n- **Gateway Deployment**: Updated `deployment-mcpgateway.yaml` to dynamically resolve `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` from the external secret if enabled.\n- **PgAdmin**: Updated `deployment-pgadmin.yaml` to use the external secret credentials for the UI default password, ensuring consistency.\n- **PgBouncer**: Updated `deployment-pgbouncer.yaml` to support external connection details.\n- **Migration Job**: Updated `job-migration.yaml` to use external connection details.\n- **Helper**: Updated `_helpers.tpl` to resolve the correct secret name (`postgres-secret` vs external).\n\n### Configuration\nUsers can now configure:\n```yaml\npostgres:\n  enabled: false\n  external:\n    enabled: true\n    existingSecret: \"my-db-secret\"\n    host: \"db.example.com\"\n    # Custom keys mapping\n    hostKey: \"host\"\n    portKey: \"port\"\n    databaseKey: \"dbname\"\n    userKey: \"user\"\n    passwordKey: \"password\"\n```\n\n## Verification\nTested on personal cluster with the following configuration:\n\n### App Config\n```yaml\n---\napiVersion: argoproj.io/v1alpha1\nkind: ApplicationSet\nmetadata:\n  name: mcp-context-forge\n  namespace: argocd\nspec:\n  template:\n    metadata:\n      name: \"mcp-context-forge\"\n    spec:\n      project: \"default\"\n      destination:\n        server: \"https://kubernetes.default.svc\"\n        namespace: mcp-system\n      sources:\n        - repoURL: https://github.com/user/mcp-context-forge.git\n          targetRevision: dev/test-branch\n          path: charts/mcp-stack\n          helm:\n            releaseName: mcp-context-forge\n            namespace: mcp-system\n            valuesObject:\n              postgres:\n                enabled: false\n                external:\n                  enabled: true\n                  existingSecret: \"mcp-db-app\"\n              redis:\n                enabled: true\n              migration:\n                enabled: false\n              mcpContextForge:\n                metrics:\n                  enabled: true\n                ingress:\n                  enabled: true\n                  hosts:\n                    - host: mcp.example.com\n                      paths:\n                        - path: /\n                extraEnvFrom:\n                  - secretRef:\n                      name: mcp-gateway-secrets\n                config:\n                  REQUIRE_STRONG_SECRETS: \"true\"\n                  SSO_GENERIC_ENABLED: \"true\"\n                  SSO_GENERIC_PROVIDER_ID: \"authentik\"\n                  SSO_GENERIC_CLIENT_ID: \"client-id\"\n                  SSO_GENERIC_ISSUER: \"https://auth.example.com\"\n                  SSO_GENERIC_SCOPE: \"openid profile email\"\n```\n\n### ArgoCD Status\n```console\nName:               mcp-context-forge\nProject:            default\nServer:             https://kubernetes.default.svc\nNamespace:          mcp-system\nStatus:             Synced\nHealth:             Healthy\n\nGROUP                      KIND                     NAMESPACE   NAME                                              STATUS  HEALTH\napps                       Deployment               mcp-system  mcp-context-forge-mcp-stack-mcpgateway            Synced  Healthy\napps                       Deployment               mcp-system  mcp-context-forge-mcp-stack-pgadmin               Synced  Healthy\nexternal-secrets.io        ExternalSecret           mcp-system  mcp-gateway-strong-secrets                        Synced  Healthy\npostgresql.cnpg.io         Cluster                  mcp-system  mcp-db                                            Synced  Healthy\n```",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "554f78e8c8ae4c8a2ca99e0cfc306dd261a2985b",
+      "message": "feat: add external postgres support\n\nSigned-off-by: Aurelian Shuttleworth <aurelian@shuttleworth.tech>",
+      "author": "Aurelian Shuttleworth",
+      "date": "2026-01-12T15:16:04+00:00"
+    },
+    {
+      "sha": "a7b0fb221a86996bd6c1702f8726ec00a564bcec",
+      "message": "fix: use external secret keys for DB, User, Password in mcpgateway\n\nSigned-off-by: Aurelian Shuttleworth <aurelian@shuttleworth.tech>",
+      "author": "Aurelian Shuttleworth",
+      "date": "2026-01-12T15:54:20+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 183,
+  "deletions": 11,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:25.525232",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:25.527334",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2056,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2056.json"
+  }
+}

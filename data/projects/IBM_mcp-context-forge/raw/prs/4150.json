@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4150,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4150"
+  },
+  "metadata": {
+    "title": "fix(admin): preserve OAuth client_secret when editing gateways and A2A agents",
+    "state": "open",
+    "created_at": "2026-04-13T14:56:48+00:00",
+    "updated_at": "2026-04-27T09:36:57+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "ecthelion77",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\n\n## 🔗 Issue\n\nCloses #4156\n\n## 📌 Summary\n\nEditing a gateway or A2A agent via the admin UI **silently erases** the OAuth `client_secret`, breaking all OAuth-authenticated gateways that are subsequently edited for any reason (e.g., changing tags, description, or team assignment).\n\n## 🔁 Reproduction Steps\n\n1. Create a gateway with OAuth authentication including a `client_secret`\n2. Verify the gateway works (tools are discovered, OAuth token exchange succeeds)\n3. Edit the gateway via the admin UI (change any field — description, tags, etc.)\n4. Save the edit\n5. The gateway is now broken — `client_secret` is gone from `oauth_config`\n6. Any OAuth token exchange attempt fails with invalid_client\n\n## 🐞 Root Cause\n\n**Two bugs that combine to cause data loss:**\n\n**Bug 1 — Frontend (`gateways.js`, `a2aAgents.js`):**\n\nWhen the edit modal populates form fields, all secret fields (bearer token, password, custom headers, query params) are set to `MASKED_AUTH_VALUE` (`\"*****\"`) — **except** `oauth_client_secret` which is set to `\"\"`:\n\n```javascript\n// All other secrets:\nauthTokenField.value = MASKED_AUTH_VALUE;       // ✅ Preserved\nauthPasswordField.value = MASKED_AUTH_VALUE;    // ✅ Preserved\n\n// OAuth client_secret:\noauthClientSecretField.value = \"\";              // ❌ Sends empty string\n```\n\n**Bug 2 — Backend (`admin.py`, `admin_edit_gateway` and `admin_edit_a2a_agent`):**\n\nWhen the form submits with `oauth_client_secret = \"\"`, the handler skips adding `client_secret` to the `oauth_config` dict entirely:\n\n```python\nif oauth_client_secret:               # False for \"\" → key never added\n    oauth_config[\"client_secret\"] = ...\n# No fallback → client_secret simply missing → lost on save\n```\n\nThe service layer's `protect_oauth_config_for_storage()` has preservation logic for `MASKED_AUTH_VALUE`, but it only works when the key **exists** in the dict. Since admin.py omits the key entirely, the preservation logic never fires.\n\n**Note:** The `admin_edit_server` handler (virtual servers) already has the correct preservation pattern, making the inconsistency clear.\n\n## 💡 Fix Description\n\n**Frontend:** Set `oauthClientSecretField.value` to `MASKED_AUTH_VALUE` when a secret exists (consistent with all other secret fields), or `\"\"` when no secret is configured.\n\n**Backend:** When `oauth_client_secret` is empty or equals `MASKED_AUTH_VALUE` and a `client_id` is present, send the masked placeholder value so the service layer preserves the existing encrypted secret:\n\n```python\nif oauth_client_secret and oauth_client_secret != settings.masked_auth_value:\n    # Encrypt new secret\n    oauth_config[\"client_secret\"] = await encryption.encrypt_secret_async(oauth_client_secret)\nelif oauth_client_id:\n    # Preserve existing secret via masked placeholder\n    oauth_config[\"client_secret\"] = settings.masked_auth_value\n```\n\n## 🧪 Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Lint suite                            | `make lint`          | ✅     |\n| Unit tests                            | `make test`          | ✅     |\n| Coverage ≥ 80 %                       | `make coverage`      | ✅     |\n| Manual regression no longer fails     | Edit gateway → secret preserved | ✅ |\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "38600d8fa29e548cf3fe5e0cdfdaa829d63d79a3",
+      "message": "fix(oauth): preserve OAuth client_secret when editing gateways and A2A agents\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-14T14:55:57+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 23,
+  "deletions": 6,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T17:17:32.876390",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:32.876827",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4150,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4150.json"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3750,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3750"
+  },
+  "metadata": {
+    "title": "fix(rate-limiter): shared state, eviction, thread safety, config validation",
+    "state": "closed",
+    "created_at": "2026-03-19T19:11:37+00:00",
+    "updated_at": "2026-03-21T15:00:53+00:00",
+    "closed_at": "2026-03-21T15:00:52+00:00",
+    "merged_at": "2026-03-21T15:00:52+00:00",
+    "author": "gandhipratik203",
+    "labels": [
+      "bug",
+      "security",
+      "performance",
+      "plugins",
+      "wxo",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "gandhipratik203"
+    ]
+  },
+  "description": "## Summary\n\nAddresses gaps documented in issue #3740 (sub-task of #3735). The rate limiter plugin had several correctness issues that made it silently ineffective in multi-instance deployments.\n\n## Gaps closed\n\n**Gap 1 (HIGH)** — No shared state across instances: each gateway process had its own \\`_store\\` dict, making the effective per-user limit \\`N × configured_limit\\` where N = number of instances. Fixed with \\`RedisBackend\\` using an atomic Lua INCR+EXPIRE script — all instances share the same counter.\n\n**Gap 2 (MEDIUM)** — No store eviction: the in-memory \\`_store\\` dict grew unboundedly as unique users accumulated. Fixed with a background asyncio sweep task in \\`MemoryBackend\\` that evicts expired windows every 0.5s.\n\n**Gap 3 (MEDIUM)** — No thread safety: dict access was not atomic under concurrent asyncio tasks. Fixed with \\`asyncio.Lock\\` in \\`MemoryBackend.allow()\\`.\n\n**Gap 5 (LOW)** — \\`prompt_pre_fetch\\` silently ignored \\`by_tool\\` config. Fixed by adding the same \\`by_tool\\` lookup to the prompt hook.\n\n**Gap 6 (MEDIUM)** — Malformed config (\\`\"abc/m\"\\`) raised \\`ValueError\\` at request time. Fixed with \\`_validate_config()\\` called at \\`__init__\\` — fails fast at startup.\n\n**Gap 7 (LOW)** — Unsupported rate unit (\\`\"60/d\"\\`) raised \\`ValueError\\` at request time. Fixed by \\`_parse_rate()\\` raising early during \\`_validate_config()\\`.\n\n**Gap 8 (MEDIUM)** — Any unexpected exception in the plugin propagated to the caller. Fixed with \\`try/except Exception\\` wrapping both hooks; logs and returns permissive result on unexpected error.\n\n**Gap 4 (sliding window)** intentionally deferred — the fixed window burst-at-boundary is a known trade-off. The \\`test_fixed_window_burst_at_boundary\\` xfail test documents the gap.\n\n## Additional hardening\n\n**PII fix** — violation descriptions previously included \\`user\\` and \\`tenant\\` identifiers in the human-readable string (e.g. \\`\"Rate limit exceeded for tool search, user alice@example.com, or tenant acme-corp\"\\`). This string is logged directly in permissive mode and embedded in \\`PluginViolationError\\` messages in enforce mode. Fixed to only include the tool/prompt name — structured metadata remains in the \\`details\\` dict.\n\n**Bypass resistance documented** — three bypass vectors identified and tested:\n- Whitespace-only user identity creates its own bucket (xfail, documented)\n- Tool name case sensitivity bypasses \\`by_tool\\` limits (xfail, documented)\n- Tool name whitespace bypasses \\`by_tool\\` limits (xfail, documented)\n\n**README rewritten** — the previous README described the old pre-fix implementation (in-memory only, Redis listed as a TODO). Now documents both backends, full configuration reference, response headers, multi-instance deployment guidance, and an accurate limitations table.\n\n## Architecture\n\n- \\`MemoryBackend\\`: \\`asyncio.Lock\\` + background TTL sweep; single-process only\n- \\`RedisBackend\\`: atomic Lua INCR+EXPIRE; shared across all gateway instances; falls back to \\`MemoryBackend\\` on Redis unavailability if \\`redis_fallback: true\\`\n- \\`_validate_config()\\`: parses all rate strings at \\`__init__\\`; collects all errors and raises \\`ValueError\\` with a full report\n- Both hooks: \\`try/except Exception\\` with permissive degradation on unexpected errors\n\n## Test results\n\n**Unit tests:** 70 passed, 4 xfailed\n- Core enforcement, headers, multi-dimensional limiting\n- Permissive vs enforce mode (via \\`PluginExecutor\\`)\n- Redis fallback (broken Redis → memory, limit still enforced, no-fallback graceful degradation)\n- Cross-tenant isolation and counter bleed prevention\n- Header accuracy (Retry-After bounds, Reset consistency, Remaining decrement)\n- Bypass resistance (None/whitespace identity, tool name normalisation gaps)\n- PII: violation description contains no user or tenant identifiers\n\n**Integration tests:** 16/16 passed (\\`tests/integration/test_rate_limiter.py\\`, \\`--with-integration\\`)\n\n**Plugin framework tests:** 53/53 passed\n\n**Performance profiling** (\\`tests/performance/test_plugins_performance.py\\`, 1000 iterations):\n\n| Hook | Memory backend | Redis backend | Delta |\n|---|---|---|---|\n| \\`tool_pre_invoke\\` | 0.047ms | 0.124ms | +0.077ms |\n| \\`prompt_pre_fetch\\` | 0.044ms | 0.117ms | +0.073ms |\n\nRedis adds ~0.075ms per hook call — well under 1ms.\n\n**Multi-instance load test** (\\`make benchmark-rate-limiter\\`, 3 gateway instances, 1 user at 60 req/min = 2× the 30/m limit, 120s):\n\n| Backend | Total requests | Allowed | Blocked | Verdict |\n|---|---|---|---|---|\n| Memory (before) | ~120 | ~120 | ~0 | Limit not enforced |\n| Redis (after) | 120 | 38 | 82 (40%\\*) | Limit correctly enforced |\n\n\\*40% observed vs ~50% theoretical: the first 30 requests in each 60-second window are always allowed before blocking starts. Over a longer run it converges toward ~50%.\n\nRedis MONITOR confirmed all 3 instances write to the same atomic counter:\n\\`\\`\\`\n[172.18.0.8]  EVAL <lua> \"rl:user:admin@example.com:60\" \"60\"\n[172.18.0.9]  EVAL <lua> \"rl:user:admin@example.com:60\" \"60\"\n[172.18.0.10] EVAL <lua> \"rl:user:admin@example.com:60\" \"60\"\n\\`\\`\\`\n\nCloses #3740",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3986025559",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-21T13:12:24+00:00",
+      "body": "## Review: Approved with fixes applied\n\nSolid PR addressing real gaps in the rate limiter plugin. The Redis backend with atomic Lua INCR+EXPIRE, memory eviction sweep, asyncio.Lock, and config validation are all well-designed and consistent with the codebase's plugin patterns.\n\n### Fixes applied in review commit\n\n**Bug: Dead code removed** — `_allow()` module-level function was never called by the plugin (which uses `self._rate_backend.allow()`). Removed.\n\n**Bug: False-positive test fixed** — `test_graceful_degradation_unexpected_runtime_error_does_not_crash_caller` patched `_allow()` (never called), so the try/except error path was never exercised. The test passed vacuously. Fixed to use `patch.object(plugin._rate_backend, \"allow\", ...)` which actually triggers the error handling.\n\n**Bug: Inconsistent by_tool lookup** — `tool_pre_invoke` had an unnecessary `hasattr(by_tool_config, \"__contains__\")` guard; `prompt_pre_fetch` didn't. Since `by_tool` is always `Optional[Dict]` from Pydantic, the hasattr check is redundant. Aligned both hooks.\n\n**Enhancement: Backend validation** — A typo like `backend: \"reddis\"` silently fell back to memory with no error. Added validation in `_validate_config()` to fail fast at startup.\n\n**Config: Mode changed to permissive** — All other security/safety plugins in the default `plugins/config.yaml` ship as `permissive`. Switching rate limiter to `enforce` would be inconsistent and could break existing deployments on update. Changed to `permissive` for safety — operators can opt into `enforce`.\n\n**Tests added** — Added 3 new tests: prompt_pre_fetch graceful degradation, invalid backend validation, malformed by_tool rate validation. Coverage at 97% (remaining 3% is defensive code for no-event-loop and real Redis client init — covered by integration tests).\n\n### Verified\n\n- 73 unit tests pass, 4 xfail (documented gaps)\n- 1508 plugin tests pass with no regressions\n- Architecture consistent with existing plugin patterns (Config model, __init__, error handling)\n- No security concerns: PII removed from violation descriptions, fail-open on errors, no sensitive data in headers\n- Redis Lua script is standard atomic INCR+EXPIRE pattern\n- xfail tests properly document known gaps (sliding window, whitespace bypass, case sensitivity)"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "4141ba928082904d8f203cc1207dcff9a4ec049c",
+      "message": "test(rate-limiter): harden rate limiter plugin — gaps #1-#8\n\nCloses #3740\n\n## What changed\n\n### Plugin fixes (plugins/rate_limiter/rate_limiter.py)\n- Config validation at __init__: _validate_config() parses all rate\n  strings at startup — bad config raises immediately, not mid-request\n- Graceful degradation: both hooks wrapped in try/except; unexpected\n  errors are logged and the request is allowed through (permissive)\n- prompt_pre_fetch now enforces by_tool limits using prompt_id as key\n- MemoryBackend: asyncio.Lock makes counter increments atomic\n- MemoryBackend: background TTL sweep evicts expired windows (0.5s interval)\n- RedisBackend: atomic INCR+EXPIRE via Lua script; shared state across\n  all gateway instances; native TTL expiry; falls back to memory on error\n\n### Test additions (tests/unit/.../test_rate_limiter.py)\n- Gap tests: 4 xfail -> pass (shared state, eviction, prompt by_tool,\n  graceful degradation); 1 xfail remains (fixed window burst, deferred)\n- Edge case tests: malformed/unsupported config raises at init (not\n  request time); runtime errors degrade gracefully via mock injection\n- Redis backend test uses injected FakeRedis — no live server required\n\n### Config changes\n- plugins/config.yaml: RateLimiterPlugin enabled with enforce mode\n- tests/performance/plugins/config.yaml: RateLimiterPlugin set to\n  permissive for inclusion in cProfile benchmark runs\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-19T16:23:15+00:00"
+    },
+    {
+      "sha": "4dd772da64c35837873aff2be2448f82beb50d11",
+      "message": "chore(config): enable Redis backend for RateLimiterPlugin in plugins/config.yaml\n\nSwitch the default stack config from in-memory to Redis-backed rate limiting.\nThis ensures the 30/m per-user limit is enforced as a true shared limit across\nall gateway instances rather than 30/m per process.\n\nValidated via Redis MONITOR: all 3 gateway instances atomically increment the\nsame rl:user:<id>:60 counter via the Lua INCR+EXPIRE script.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-19T19:07:58+00:00"
+    },
+    {
+      "sha": "a34af4060a418eb1028e111519ee46cede818c35",
+      "message": "test(rate-limiter): add benchmark-rate-limiter load test for multi-instance correctness\n\nAdds locustfile_rate_limiter.py and a make benchmark-rate-limiter target to\ndemonstrate the multi-instance rate limit enforcement gap and its fix.\n\nThe test sends 1 req/s (60 req/min = 2x the 30/m limit) through 3 gateway\ninstances. With a memory backend each instance only sees ~20 req/min and\nnever fires the limiter (~0% failures). With the Redis backend the shared\ncounter reaches 30/min and blocks ~50% of requests — clearly showing the fix\nworks across instances.\n\nExpected results:\n  Memory backend:  ~0% blocked  (each instance sees 20 req/min < 30/m limit)\n  Redis backend:  ~50% blocked  (shared counter: 60 req/min > 30/m limit)\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-19T20:28:37+00:00"
+    },
+    {
+      "sha": "bbd4e758d59ea2cc30fb82998707cc6ec1bca59b",
+      "message": "test(rate-limiter): add hardening tests, bypass resistance, PII fix, and updated docs\n\n- Add 22 new unit tests (70 passed total, 4 xfailed):\n  - Permissive vs enforce mode through PluginExecutor\n  - Redis fallback: memory takeover when Redis is down, limit still enforced, no-fallback graceful degradation\n  - Cross-tenant isolation: independent counters, no counter bleed between tenants\n  - Header accuracy: Retry-After bounds, X-RateLimit-Reset future/consistency, Remaining decrement\n  - Bypass resistance: None/whitespace user identity, tool name case sensitivity and whitespace (documented as xfail gaps)\n  - PII: violation description must not contain user or tenant identifiers\n\n- Fix PII leak in violation description: remove user/tenant from description string\n  in both prompt_pre_fetch and tool_pre_invoke — identifiers appeared in log output\n  via permissive-mode manager warning and enforce-mode PluginViolationError message\n\n- Rewrite plugins/rate_limiter/README.md: was describing the old pre-fix\n  implementation (in-memory only, no Redis, Redis as TODO). Now documents\n  both backends, full config reference, response headers, examples, and\n  accurate limitations table\n\n- Update plugin-manifest.yaml description to reflect Redis backend support\n\nCloses #3740\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-19T22:31:49+00:00"
+    },
+    {
+      "sha": "222ba22d17f05de5ab975131a5537b84e7928932",
+      "message": "fix(rate-limiter): review fixes — dead code, test correctness, config validation\n\n- Remove unused _allow() module-level function (dead code — plugin uses\n  self._rate_backend.allow() directly)\n- Fix test_graceful_degradation test: was patching _allow() which is never\n  called by the plugin; now patches backend.allow() via patch.object so the\n  try/except error path is actually exercised\n- Add prompt_pre_fetch graceful degradation test (was only tested for\n  tool_pre_invoke)\n- Fix inconsistent by_tool lookup in tool_pre_invoke: remove unnecessary\n  hasattr(__contains__) guard, align with prompt_pre_fetch pattern\n- Add backend validation to _validate_config(): typo like 'reddis' now\n  raises ValueError at startup instead of silently falling back to memory\n- Add test for malformed by_tool rate string validation\n- Add test for invalid backend name validation\n- Change default config mode from enforce to permissive for safety\n  (consistent with all other security plugins in the default config)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T13:12:01+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 2035,
+  "deletions": 135,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:58.596857",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:58.597604",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3750,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3750.json"
+  }
+}

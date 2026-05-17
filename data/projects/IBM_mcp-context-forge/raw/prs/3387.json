@@ -1,0 +1,76 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3387,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3387"
+  },
+  "metadata": {
+    "title": "[FIX][RBAC]: Check team-scoped permissions in AdminAuthMiddleware for team-scoped requests",
+    "state": "closed",
+    "created_at": "2026-03-02T12:04:18+00:00",
+    "updated_at": "2026-03-03T00:58:52+00:00",
+    "closed_at": "2026-03-03T00:58:50+00:00",
+    "merged_at": "2026-03-03T00:58:50+00:00",
+    "author": "madhav165",
+    "labels": [
+      "ui",
+      "api",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\nFixes #3380\r\n\r\n---\r\n\r\n## 📌 Summary\r\n`has_admin_permission()` in `AdminAuthMiddleware` only checked global/personal roles when determining admin UI access. Users with team-scoped roles (`developer`, `viewer`) that include `admin.dashboard` were denied access with 403 when accessing `/admin?team_id=...`, even though they should be able to view the dashboard within their team scope.\r\n\r\n## 🔁 Reproduction Steps\r\n1. Create a user with only a team-scoped `developer` role (no global `platform_viewer`)\r\n2. Access `/admin?team_id=<valid_team_id>` with that user's session JWT\r\n3. Observe 403 redirect to login page\r\n4. Server log: `\"Admin access denied for user without admin permissions: <email>\"`\r\n\r\n## 🐞 Root Cause\r\n`has_admin_permission()` (`permission_service.py:163`) called `get_user_permissions(user_email)` with no `team_id`, causing `_get_user_roles()` to return only global + personal roles. Team-scoped roles with `admin.dashboard` were invisible to the check.\r\n\r\nThe `AdminAuthMiddleware` (`main.py:1826`) never extracted or passed the `team_id` from the request query params.\r\n\r\n## 💡 Fix Description\r\n- **`AdminAuthMiddleware.dispatch()`**: Extract `team_id` from request query params, validate it against the DB-resolved `token_teams` (already computed earlier in the method), and pass the validated team_id to `has_admin_permission()`.\r\n- **`has_admin_permission()`**: Accept optional `team_id` parameter and forward it to `get_user_permissions()` so team-scoped roles are included.\r\n- Security: `team_id` is validated against server-side DB-resolved teams before use — no privilege escalation possible.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Unit tests                            | `uv run pytest`      | ✅     |\r\n| Coverage on changed lines             | `--cov-report`       | ✅ 99% |\r\n| Manual regression no longer fails     | see root cause trace | ✅     |\r\n\r\n## ✅ Checklist\r\n- [x] No secrets/credentials committed\r\n- [x] Tests added for new behavior (5 new test cases)\r\n- [x] Backward compatible (team_id defaults to None, preserving existing behavior)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3879289696",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-02T23:16:32+00:00",
+      "body": "## Review Summary\n\n### Security — PASS\n- **Privilege escalation**: `validated_team_id` only forwards `team_id` when it is non-empty and present in DB-resolved `token_teams`. All edge cases verified (empty string, admin bypass `None`, invalid team, repeated query keys).\n- **Two-layer model preserved**: Layer 1 (token scoping) still rejects public-only tokens before admin checks. Layer 2 (RBAC) still gates admin route entry via `has_admin_permission()`.\n- **Input trust**: Raw query `team_id` is never used directly — only `validated_team_id` reaches the permission lookup, and SQL is parameterized via SQLAlchemy.\n\n### Logic — PASS\n- `_get_user_roles()` correctly includes global/personal roles plus team-specific + `scope_id IS NULL` roles when `team_id` is set.\n- `has_admin_permission()` still short-circuits on DB admin flag, preserves wildcard/`admin.*` checks.\n- Backward compatible: `team_id` defaults to `None`, preserving original behavior for all existing call paths.\n\n### Consistency — PASS\n- RBAC middleware uses `request.state.team_id` (API routes); AdminAuthMiddleware uses `query_params` (admin UI) — correct for their contexts.\n- Same token-team normalization sources (`_resolve_teams_from_db`/`normalize_token_teams`).\n\n### Performance — PASS\n- No new DB queries. In-memory `in` check on small team list. Existing permission cache still used.\n\n### Test Coverage — PASS\n- 8 total tests covering the feature (5 from PR author + 3 edge-case tests added):\n  - Valid team_id grants access\n  - Invalid team_id falls back to global check (403)\n  - No team_id = original behavior\n  - Empty string team_id treated as absent\n  - Admin bypass (`token_teams=None`) ignores query team_id\n  - Repeated team_id query keys resolved correctly\n  - Permission service forwards team_id\n  - Permission service defaults to `None`\n- All 356 tests pass. 100% differential coverage on new production lines."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "05527f7a3f2f73ace6223ea88be888d63fcc0aec",
+      "message": "fix(rbac): check team-scoped permissions in AdminAuthMiddleware for team-scoped requests\n\nhas_admin_permission() only checked global/personal roles, ignoring team-scoped\nroles like developer/viewer that include admin.dashboard. When users access the\nadmin UI with ?team_id=..., the middleware now validates the team_id against\nDB-resolved token_teams and passes it to has_admin_permission() for team-scoped\npermission evaluation.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-02T12:02:53+00:00"
+    },
+    {
+      "sha": "07c9dab625a91ce5839d131666fb0933211b80e6",
+      "message": "test(rbac): add edge-case tests for AdminAuthMiddleware team_id validation\n\nCover three additional edge cases in the team-scoped admin permission check:\n- Empty string team_id in query params treated as absent\n- Admin bypass (token_teams=None) ignores query team_id\n- Repeated team_id query keys resolved via Starlette QueryParams.get()\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T23:05:57+00:00"
+    },
+    {
+      "sha": "e71c466a54216a74bf9871596303652a659aca8f",
+      "message": "fix(rbac): normalize team_id UUID format in AdminAuthMiddleware\n\nCanonicalize query-param team_id to hex before comparing against\nDB-resolved token_teams, so hyphenated UUIDs (e.g. from bookmarks or\nexternal clients) match the hex format stored in the database.\nWithout this, a valid team member using a hyphenated UUID would be\nincorrectly denied team-scoped admin access.\n\nUpdate all team-scoped middleware tests to use valid UUID hex strings\nand add regression tests for hyphenated UUID normalization and garbage\nteam_id rejection.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T00:00:57+00:00"
+    },
+    {
+      "sha": "be067b1d64b2a24b11f1775af9fe4330f10c5ee4",
+      "message": "fix(rbac): preserve non-UUID team_id for legacy token compatibility\n\nUUID normalization must fall back to the raw value instead of discarding\nnon-UUID team IDs, so that legacy/CLI tokens with non-UUID team strings\nin their claims can still match during the membership check.\n\nAdd regression test for non-UUID team_id matching legacy token_teams.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T00:36:49+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 419,
+  "deletions": 5,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:12.315472",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:12.316854",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3387,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3387.json"
+  }
+}

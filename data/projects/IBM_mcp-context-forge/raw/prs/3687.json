@@ -1,0 +1,81 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3687,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3687"
+  },
+  "metadata": {
+    "title": "fix(rbac): use check_any_team for API tokens in MCP transports",
+    "state": "closed",
+    "created_at": "2026-03-14T14:39:27+00:00",
+    "updated_at": "2026-04-23T16:26:52+00:00",
+    "closed_at": "2026-04-23T16:26:50+00:00",
+    "merged_at": "2026-04-23T16:26:50+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "security",
+      "rbac",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Non-admin users with team-scoped roles (`developer`, `team_admin`) were denied MCP tool access because the RBAC check only set `check_any_team=True` for session tokens, leaving API tokens with `check_any_team=False`\n- Since MCP transports have no route-level `team_id`, the permission service only found null-scoped team roles, missing team-specific role assignments that grant `tools.execute` and `servers.use`\n- Additionally, the `logging/setLevel` handler was missing `check_any_team` entirely — even session tokens could fail there\n\n### Changes\n\n| File | Fix |\n|------|-----|\n| `streamablehttp_transport.py` | Always use `check_any_team=True` in `call_tool`, `logging/setLevel`, and `handle_streamable_http` RBAC checks (MCP transport never has a team_id) |\n| `main.py` | `/rpc` endpoint: extract `team_id` from user dict; fall back to `check_any_team=True` when absent |\n| `rbac.py` | `@require_permission` decorator: extend team derivation to API tokens, not just session tokens |\n| Tests (3 files) | Updated existing assertions and added new test for API token with `team_id` |\n\nLayer 1 (token scope cap) already restricts what a token can access by team. Layer 2 (RBAC) just needs to verify the user has the capability — so `check_any_team=True` is safe when no route-level `team_id` is available.\n\nCloses #3660\n\n## Test plan\n\n- [x] All 1252 transport and middleware unit tests pass\n- [x] All 13 RBAC permission fallback regression tests pass\n- [x] All 15 permission service fallback tests pass",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4098732600",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-13T12:41:20+00:00",
+      "body": ""
+    },
+    {
+      "id": "4098741639",
+      "author": "madhu-mohan-jaishankar",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-13T12:42:42+00:00",
+      "body": "Looks good to me. LGTM."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "5b9e48c84ef41c81d6bdf3e287a3f70acec53366",
+      "message": "fix(rbac): use check_any_team for API tokens in MCP transports\n\nNon-admin users with team-scoped roles (developer, team_admin) were\ndenied access when invoking MCP tools because the RBAC permission\ncheck only set check_any_team=True for session tokens, missing API\ntokens entirely.  Since MCP transports have no route-level team_id,\nteam-scoped roles were invisible to the permission service.\n\n- streamablehttp_transport: always use check_any_team=True in\n  call_tool, logging/setLevel, and handle_streamable_http RBAC checks\n- main.py _ensure_rpc_permission: extract team_id from user context;\n  fall back to check_any_team=True when absent\n- rbac.py @require_permission: extend team derivation to API tokens,\n  not just session tokens\n- Update tests to match new behavior\n\nCloses #3660\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T14:39:09+00:00"
+    },
+    {
+      "sha": "3b75c63866ea1b3a5a05e73479ec16f39f04b300",
+      "message": "refactor(rbac): extract team derivation helper and fix set_logging_level permission\n\nExtract duplicated team-derivation logic from require_permission and require_any_permission into _resolve_team_and_check_mode. Restore set_logging_level Layer 2 permission to admin.system_config to match Layer 1.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T15:53:06+00:00"
+    },
+    {
+      "sha": "ba3dd0f7b68f91fae4c232c0aefe969a3b411afd",
+      "message": "test(rbac): add deny-path test for API token with team_id\n\nAdd test_ensure_rpc_permission_api_token_with_team_id_denied to verify RBAC denial when an API token targets a team where the user lacks the required role.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T15:53:15+00:00"
+    },
+    {
+      "sha": "b3818e3111d049f4a7e32562223be2c02d764129",
+      "message": "fix(test): use unique socket paths for xdist-safe plugin manager tests\n\nReplace fixed /tmp/mcpgateway-pm-test.sock with UUID-based paths to prevent socket collisions when pytest-xdist runs workers in parallel.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T15:53:26+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 154,
+  "deletions": 111,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:35.724935",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:35.726003",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3687,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3687.json"
+  }
+}

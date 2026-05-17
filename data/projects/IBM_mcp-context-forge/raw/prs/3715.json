@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3715,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3715"
+  },
+  "metadata": {
+    "title": "feat(auth): verify OAuth access tokens via JWKS for virtual server MCP",
+    "state": "closed",
+    "created_at": "2026-03-18T01:00:18+00:00",
+    "updated_at": "2026-04-12T09:01:37+00:00",
+    "closed_at": "2026-04-12T09:01:37+00:00",
+    "merged_at": "2026-04-12T09:01:37+00:00",
+    "author": "kimsehwan96",
+    "labels": [
+      "enhancement",
+      "security",
+      "mcp-protocol",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "jonpspri",
+      "crivetimihai"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nPartially addresses #2659 \r\n\r\n---\r\n\r\n## 📝 Summary\r\nVirtual servers with `oauth_enabled=True` advertise RFC 9728 Protected Resource Metadata, directing MCP clients to authenticate via an IdP (e.g., Keycloak, Authentik). However, when the client presents the IdP-issued access token, ContextForge rejects it with \"Invalid token\" because `verify_credentials()` only validates ContextForge-issued JWTs (`iss: \"mcpgateway\"`).\r\n\r\nThis PR adds IdP-issued OAuth access token verification via OIDC discovery + JWKS:\r\n\r\n- **Issuer-based routing**: Peeks at the token's `iss` claim before verification. ContextForge-issued tokens (`iss == settings.jwt_issuer`) go through the existing path; IdP-issued tokens are routed to JWKS-based verification.\r\n- **OIDC discovery + JWKS**: Fetches `/.well-known/openid-configuration` from the token's issuer, resolves `jwks_uri`, and verifies the signature using the IdP's public keys. Metadata is cached (300s TTL).\r\n- **Per-server issuer allowlist**: Each virtual server's `oauth_config.authorization_servers` determines which issuers are trusted. Server A (Authentik) and Server B (Keycloak) are fully independent.\r\n- **Audience validation**: When `oauth_config.client_id` is configured, the token's `aud` claim is validated. When not configured, audience check is skipped (opt-in).\r\n- **User resolution**: Verified tokens are resolved against the ContextForge user database. Users must already exist (no auto-creation) — the expected flow is SSO login first, then MCP client access.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n- **OIDC discovery cache duplication**: `sso_service.py` has a similar OIDC discovery + JWKS cache for SSO id_token verification. The two caches serve different request paths (SSO callback vs MCP transport) with different lifecycles. A shared utility extraction is possible as a follow-up.\r\n\r\n### Auth flow\r\n\r\n```\r\nMCP Client → POST /servers/{id}/mcp (Bearer <IdP token>)\r\n  → peek token iss claim\r\n  → iss != \"mcpgateway\" → _try_oauth_access_token()\r\n    → DB lookup: server.oauth_enabled? oauth_config?\r\n    → issuer in authorization_servers allowlist?\r\n    → OIDC discovery → JWKS → signature verification\r\n    → (optional) audience validation against client_id\r\n    → DB user lookup (must exist, must be active)\r\n    → teams resolved from DB → user_context populated\r\n```\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4074628060",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-08T11:02:41+00:00",
+      "body": "Approving with maintainer review fixes applied. The feature design is sound — issuer-based token routing, per-server allowlists, JWKS caching, and user pre-existence requirement are all correct.\n\nSecurity hardening (SSRF validation on both issuer and jwks_uri, discovery issuer mismatch check, audience validation persistence, 401 vs 503 classification) and error handling gaps (uncaught DB errors, missing trace context) have been addressed in the review commit. Full unit test coverage for all new code paths.\n\nNice work on the overall design, @kimsehwan96 — the auth flow is clean and well-structured."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7cf700b1c2b24d2ab6611df2c52daf0f4a3cc1b5",
+      "message": "feat(auth): verify OAuth access tokens via JWKS for virtual server MCP endpoints\n\nAdd OAuth access token verification for virtual servers with\noauth_enabled=True (RFC 9728). Routes to ContextForge-issued or\nIdP-issued verification based on token issuer claim. IdP-issued\ntokens are verified via OIDC discovery + JWKS. Validates audience\nwhen oauth_config.client_id is configured. Requires pre-existing\nContextForge user (no auto-creation).\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-03-18T00:58:52+00:00"
+    },
+    {
+      "sha": "1c6e056bdecfefc72928c81d132d0348b96f927a",
+      "message": "test(e2e): add OAuth JWKS verification e2e tests with Keycloak\n\nAdd end-to-end tests for the OAuth access token verification via JWKS\nfeature on virtual server MCP endpoints. Tests run against a real\nContextForge + Keycloak docker-compose stack and cover:\n\n- Valid Keycloak JWT accepted on oauth_enabled server\n- Non-OAuth server rejects IdP JWT (feature disabled deny-path)\n- Wrong issuer rejected (issuer allowlist deny-path)\n- Invalid/garbage token rejected (unauthenticated deny-path)\n- Unregistered user rejected (user not in CF DB deny-path)\n\nRequires: docker compose --profile sso up -d\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-04-01T23:50:18+00:00"
+    },
+    {
+      "sha": "540bfab8a334ad5ee3dbf2567f49081f42989426",
+      "message": "fix(auth): harden OAuth access token verification against replay and bypass\n\nFollow-up security hardening on top of the OAuth/JWKS verification feature\nfor virtual server MCP endpoints. Closes multiple replay and bypass paths\nsurfaced across several review rounds, and extends test coverage to lock\nthe resulting invariants.\n\nAudience binding (RFC 8707/9728):\n- Always enforce a non-empty expected_audience containing the canonical MCP\n  resource URL; callers no longer pass None when oauth_config.client_id is\n  absent.\n- Derive the resource URL from settings.app_domain, not the caller-controlled\n  Host / X-Forwarded-Host headers. Operators must set app_domain to the\n  gateway's public URL; the helper fails closed (401) when it is empty.\n- oauth_config.resource (scalar or list) and legacy client_id extend the\n  expected-audience list rather than replacing the resource URL.\n\nOIDC ID token rejection:\n- verify_oauth_access_token now rejects tokens carrying nonce or at_hash\n  claims before the JWKS signing-key lookup, so a front-channel OIDC ID\n  token obtained via SSO cannot be replayed as an MCP bearer token on a\n  server configured with a matching client_id in aud.\n\nRouting and fall-through:\n- OAuth dispatch in _route_idp_issued_token is independent of the\n  JWT_ISSUER_VERIFICATION toggle; that setting only governs how internal\n  ContextForge JWTs are checked.\n- _try_oauth_access_token decodes the token once (threaded from the\n  router) and returns NOT_APPLICABLE when the issuer is missing or outside\n  the server's allowlist, so legacy gateway JWTs whose iss predates\n  settings.jwt_issuer still flow to verify_credentials when issuer\n  verification is disabled.\n- oauth_enabled=True with empty oauth_config or empty authorization_servers\n  fails closed with 503 instead of falling through to internal\n  verification — no internal JWT can reach an advertised-OAuth resource.\n\nDiscovery:\n- _discover_oidc_metadata probes both the RFC 8414 OAuth authorization\n  server metadata URL and the OIDC discovery URL. Non-OIDC OAuth servers\n  are no longer blackholed by a single OIDC probe failure.\n- Negative caching distinguishes transient failures (network errors,\n  5xx, 408, 429; cached 5s) from permanent failures (404, malformed\n  JSON; cached 30s) so a brief IdP restart does not blackhole every\n  virtual server sharing that issuer.\n\nObservability:\n- New oauth_verify_events_counter with success / failed / not_applicable /\n  error outcomes. _route_idp_issued_token emits the error label on\n  unhandled exceptions before re-raising.\n- Allowlist-deferral, successful verification, and undecodable-token\n  paths log at DEBUG/INFO with sanitized server_id and issuer so auth\n  floods do not pollute WARN-level observability.\n- _build_public_base_url narrows its exception catch and logs malformed\n  ASGI scopes at WARNING with request path and client tuple.\n\nTests:\n- 14 new regression tests across TestOAuthAudienceEnforcement,\n  TestLegacyJwtOnOauthEnabledServer, TestOAuthServerMisconfigurationRejected,\n  TestRouteIdpIssuedToken, and TestVerifyOauthAccessToken.\n- Invariants locked: audience binding to app_domain, forwarded-host\n  header rejection (parametrized over Host / X-Forwarded-Host / Forwarded\n  / X-Original-Host), ID-token rejection ordering (asserting the JWKS\n  client is never consulted), RFC 8414 + OIDC dual-probe outcomes,\n  OAuth routing decoupled from JWT_ISSUER_VERIFICATION, metrics counter\n  labels, non-string iss handling, list-audience any-of semantics.\n\n730 unit tests passing.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-11T18:38:39+00:00"
+    },
+    {
+      "sha": "8c314adc6c14c2036825f803cc3bfd65cc42e720",
+      "message": "security(auth): SSRF defense, issuer verification, log hardening, and coverage\n\nFinal security hardening pass plus coverage for all new OAuth/JWKS\nerror branches. Addresses three findings from an independent pre-merge\naudit and raises test coverage to 99%/97% on the two changed files.\n\nSSRF defense-in-depth:\n- _resolve_authorization_servers rejects non-HTTPS issuer URLs with a\n  logged warning.\n- verify_oauth_access_token validates that jwks_uri shares the issuer's\n  scheme (https) and origin (netloc).\n- _discover_oidc_metadata validates the metadata issuer field against\n  the expected issuer per RFC 8414 section 3.3.\n\nPost-decode issuer re-verification:\n- After signature verification, the verified payload's iss claim is\n  re-checked against the normalized issuer used for JWKS resolution,\n  with trailing-slash normalization.\n\nLog-injection hardening:\n- All logger calls in verify_oauth_access_token that interpolate the\n  issuer URL or jwks_uri now pass through sanitize_for_log().\n\nCoverage (18 new tests):\n- TestTryOauthAccessTokenErrorBranches: missing server_id, DB error,\n  disabled server, empty oauth_config, missing email, unregistered user,\n  inactive user, team-resolution exception, full SUCCESS path.\n- TestBuildServerResourceUrlAppDomainError: app_domain __str__ raises.\n- TestAuthJwtRoutingReturn: _auth_jwt returns routed True/False.\n- TestVerifyOauthAccessToken extensions: cache-expiry pop, transient\n  probe failure, invalid JSON, non-dict metadata, missing jwks_uri,\n  PyJWKClient lazy construction.\n\n748 unit tests passing.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-11T19:34:04+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 2933,
+  "deletions": 36,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:48.251482",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:48.252249",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3715,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3715.json"
+  }
+}

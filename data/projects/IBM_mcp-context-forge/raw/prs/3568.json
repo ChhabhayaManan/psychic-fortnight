@@ -1,0 +1,128 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3568,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3568"
+  },
+  "metadata": {
+    "title": "feat(security): add custom Semgrep rules for MCP patterns (#2237)",
+    "state": "open",
+    "created_at": "2026-03-09T20:10:34+00:00",
+    "updated_at": "2026-04-09T21:00:52+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "Arnav08Sanghi",
+    "labels": [
+      "tcd",
+      "COULD"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": []
+  },
+  "description": "**Issue**  \r\n#2217  \r\n\r\n📝 **Summary**  \r\nThis PR adds MCP-specific Semgrep rules to the Source Scanner plugin to improve detection of critical and best-practice security issues in MCP server code. It also includes response validation rules to catch unsafe or sensitive data being returned from tools.  \r\n\r\n**Update/Fixes**  \r\n- Added new Semgrep rulesets: `mcp-security-critical`, `mcp-security-best-practices`, `mcp-response-security`.  \r\n- Each ruleset includes Python-specific patterns for:  \r\n  - **Command injection** (`os.system`, `subprocess`)  \r\n  - **SQL injection** (unparameterized queries)  \r\n  - **Path traversal & arbitrary file access**  \r\n  - **SSRF** (unvalidated URLs)  \r\n  - **Deserialization & response injection**  \r\n  - **Credential exposure & hardcoded secrets**  \r\n  - **Input validation, DoS prevention, maintainability checks**  \r\n  - **Response output validation and exception handling**  \r\n- Updated existing Semgrep runner to integrate the new rulesets.  \r\n- Minor fixes: logging instead of `print()`, copyright headers updated to 2026.  \r\n\r\n**New Functionality**  \r\n- Source Scanner now uses MCP-specific rules to detect security issues that are **critical**, **best-practice violations**, or **response/output risks**.  \r\n- Rules are packaged so they can be extended with additional MCP server-specific patterns in the future.",
+  "comments": [
+    {
+      "id": "3060629540",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:48+00:00",
+      "body": "The f-string pattern `os.system(f\"...{$ARG}...\")` uses `...` inside the string literal, but Semgrep’s `...` wildcard doesn’t apply inside Python string literals. This will only match code that literally contains three dots, so it will miss typical `os.system(f\"{user_input}\")` style cases. Consider matching `os.system(f$S)` and then constraining `$S` (e.g., via `metavariable-regex` / `pattern-regex`) instead of embedding `...` in the string."
+    },
+    {
+      "id": "3060629567",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:49+00:00",
+      "body": "These SQL-injection patterns use `...` inside string literals (e.g., `\"SELECT ... {$ARG} ...\"`), which makes `...` literal text rather than a Semgrep wildcard. As written, the rule will not match real-world dynamic SQL construction (f-strings, `%` formatting, concatenation). A more reliable approach is to match `cursor.execute($Q)` / `db.query($Q)` and then use metavariable constraints to detect formatting/concatenation with untrusted input, or use `pattern-regex` on the query expression.\n```suggestion\n          - pattern: cursor.execute($Q)\n          - pattern: db.execute($Q)\n          - pattern: db.query($Q)\n      - metavariable-pattern:\n          metavariable: $Q\n          patterns:\n            - pattern-either:\n                - pattern: f\"...{$ARG}...\"\n                - pattern: \"...\" + $ARG\n                - pattern: $ARG + \"...\"\n                - pattern: \"...\" % $ARG\n                - pattern: \"...\" % ($ARG, ...)\n```"
+    },
+    {
+      "id": "3060629598",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:49+00:00",
+      "body": "The hardcoded-secret patterns are currently matching literal placeholder strings like `\"sk_...\"` and `\"......\"`, which is unlikely to detect real secrets and may create a false sense of coverage. Consider using `metavariable-regex`/`pattern-regex` to match common secret formats (and keep the regex conservative to avoid noisy false positives).\n```suggestion\n          - pattern-regex: (?i)\\bapi_key\\s*=\\s*[\"']sk_[A-Za-z0-9]{16,}[\"']\n          - pattern-regex: (?i)\\bpassword\\s*=\\s*[\"'][^\"'\\\\s]{8,}[\"']\n          - pattern-regex: (?i)\\bAPIKEY\\s*=\\s*[\"'][A-Za-z0-9_-]{20,}[\"']\n          - pattern-regex: (?i)\\bSECRET_KEY\\s*=\\s*[\"'][A-Za-z0-9_./+=-]{20,}[\"']\n          - pattern-regex: (?i)\\btoken\\s*=\\s*[\"']Bearer\\s+[A-Za-z0-9._-]{16,}[\"']\n```"
+    },
+    {
+      "id": "3060629625",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:49+00:00",
+      "body": "`return {\"text\": ...$DATA...}` is not valid Python syntax (there’s no operator between the ellipsis and `$DATA`), and is likely to be rejected by Semgrep’s parser. If the intent is to catch returning external content derived from `$DATA`, match the value as an expression metavariable (e.g., `return {\"text\": $T}`) and constrain `$T` to include `$DATA` via `pattern`/`metavariable-pattern` rather than attempting `...$DATA...`.\n```suggestion\n                  return {\"text\": $TEXT}\n              - metavariable-pattern:\n                  metavariable: $TEXT\n                  pattern-either:\n                    - pattern: $DATA\n                    - pattern: $DATA.text\n                    - pattern: f\"...{$DATA}...\"\n                    - pattern: f\"...{$DATA.text}...\"\n```"
+    },
+    {
+      "id": "3060629644",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:50+00:00",
+      "body": "These patterns embed `...` inside Python f-strings (e.g., `logger.debug(f\"...{args['api_key']}...\")`). `...` will be treated as literal characters inside the string, so the rule won’t match typical log statements. Prefer matching the call shape (e.g., `logger.$LVL(f$S)` / `print(f$S)`) and then constraining `$S` to reference the sensitive argument via metavariable matching.\n```suggestion\n          - patterns:\n              - pattern: logger.debug(f$S)\n              - metavariable-pattern:\n                  metavariable: $S\n                  pattern: \"{...{args['api_key']}...}\"\n          - patterns:\n              - pattern: logger.info(f$S)\n              - metavariable-pattern:\n                  metavariable: $S\n                  pattern: \"{...{args['password']}...}\"\n          - patterns:\n              - pattern: print(f$S)\n              - metavariable-pattern:\n                  metavariable: $S\n                  pattern: \"{...{args['token']}...}\"\n          - patterns:\n              - pattern: logger.error(f$S)\n              - metavariable-pattern:\n                  metavariable: $S\n                  pattern: \"{...{args['secret']}...}\"\n          - patterns:\n              - pattern: logger.warning(f$S)\n              - metavariable-pattern:\n                  metavariable: $S\n                  pattern: \"{...{arguments['bearer']}...}\"\n```"
+    },
+    {
+      "id": "3060629653",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:50+00:00",
+      "body": "`return TextContent(text=f\"...{{...}}...\")` likely doesn’t do what’s intended: `{{`/`}}` in Python f-strings escapes literal braces, so this matches literal `{`/`}` characters rather than interpolation of unescaped content. If the goal is to detect returning interpolated/markup-like content, match `TextContent(text=f$S)` and then constrain `$S` (or match specific dangerous literals/constructs) rather than relying on `...{{...}}...`.\n```suggestion\n          - pattern: return TextContent(text=f$S)\n```"
+    },
+    {
+      "id": "3060629672",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:50+00:00",
+      "body": "Rule name/message indicate it detects *missing* try/except, but the patterns currently match any `requests.get/open/cursor.execute/urlopen` inside a function regardless of whether it’s already wrapped in a try/except. This will produce many false positives. Consider adding a `pattern-not-inside: try: ... except ...:` (or equivalent) so it only flags I/O that is not already guarded.\n```suggestion\n              ...\n      - pattern-not-inside: |\n          try:\n              ...\n          except ...:\n              ...\n```"
+    },
+    {
+      "id": "3060629692",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:50+00:00",
+      "body": "`mcp-response_schema_mismatch` is effectively unmatchable as written: the `pattern` uses literal keys named `\"...\"`, and the `patterns` list is ANDed with `pattern-inside` that already contains a `return $RESP`. If the intent is to flag returning a dict that doesn’t conform to MCP’s schema, match `return $RESP` and then constrain `$RESP` (e.g., dict literal missing required keys) using `pattern-either`/`pattern-not` with proper dict patterns rather than `{\"...\": ...}`.\n```suggestion\n      - pattern-either:\n          - pattern: return {}\n          - patterns:\n              - pattern: return {$KEY: $VAL, ...}\n              - pattern-not: return {\"text\": $TEXT, ...}\n              - pattern-not: return {\"result\": $RESULT, ...}\n```"
+    },
+    {
+      "id": "3060629710",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:51+00:00",
+      "body": "This rule is titled “missing input validation”, but it currently matches any assignment from `arguments[...]`/`args[...]` inside a `def $FUNC(arguments)` body, even if the function performs validation before/after. That will lead to pervasive false positives. If you want to flag missing validation, consider adding `pattern-not` / `pattern-not-inside` for common validation constructs (e.g., `isinstance`, regex, allowlist checks) or narrow the rule to clearly risky sinks (filesystem/network/subprocess) rather than all argument reads.\n```suggestion\n          - pattern: $x = args[$KEY]\n      - pattern-not-inside: |\n          def $FUNC(arguments):\n              ...\n              if isinstance(arguments[$KEY], $TYPE):\n                  ...\n              ...\n      - pattern-not-inside: |\n          def $FUNC(arguments):\n              ...\n              if isinstance(args[$KEY], $TYPE):\n                  ...\n              ...\n      - pattern-not-inside: |\n          def $FUNC(arguments):\n              ...\n              if re.match($REGEX, arguments[$KEY]):\n                  ...\n              ...\n      - pattern-not-inside: |\n          def $FUNC(arguments):\n              ...\n              if re.match($REGEX, args[$KEY]):\n                  ...\n              ...\n      - pattern-not-inside: |\n          def $FUNC(arguments):\n              ...\n              if arguments[$KEY] in $ALLOWED:\n                  ...\n              ...\n      - pattern-not-inside: |\n          def $FUNC(arguments):\n              ...\n              if args[$KEY] in $ALLOWED:\n                  ...\n              ...\n```"
+    },
+    {
+      "id": "3060629726",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:51+00:00",
+      "body": "These patterns include `...` inside f-strings, which will be treated as literal characters and will miss most real code. To detect “user-provided URL used in request”, match the call shape (e.g., `requests.get($URL)` / `urlopen($URL)`) and then constrain `$URL` to be derived from `args[...]` rather than trying to approximate with `f\"...{...}...\"`.\n```suggestion\n          - pattern: requests.get($URL)\n          - pattern: urllib.request.urlopen($URL)\n      - metavariable-pattern:\n          metavariable: $URL\n          pattern-either:\n            - pattern: args[$KEY]\n            - pattern: arguments[$KEY]\n```"
+    },
+    {
+      "id": "3060629748",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:51+00:00",
+      "body": "Like the response ruleset, this “missing error handling” rule currently matches I/O calls in any function, even when they are already inside a try/except. This will generate a lot of noise. Add a `pattern-not-inside: try: ... except ...:` (or similar) so it only flags unguarded external calls.\n```suggestion\n              ...\n      - pattern-not-inside: |\n          try:\n              ...\n          except ...:\n              ...\n```"
+    },
+    {
+      "id": "3060629764",
+      "author": "Copilot",
+      "created_at": "2026-04-09T21:00:51+00:00",
+      "body": "These rule files are described as being “used by the source scanner”, but in the current repo there doesn’t appear to be any source-scanner integration and the existing `make semgrep` target runs `uvx semgrep --config=auto` (no reference to `semgrep-rules/mcp/*`). Unless there’s another runner not included in this PR, these rules may never execute. Consider wiring these configs into the Semgrep invocation (e.g., adding `--config semgrep-rules/mcp/mcp-security-critical.yaml` etc., or a top-level aggregate config) and/or updating docs to reflect the actual integration point."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4085382317",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-09T21:00:52+00:00",
+      "body": "## Pull request overview\n\nThis PR adds MCP-focused Semgrep rule packs intended for the repository’s source-scanning/security workflow, targeting common MCP server risks (injection, file/network misuse, secret exposure) and response/output safety.\n\n**Changes:**\n- Added a **critical** security ruleset for high-impact vulnerabilities (command injection, SQLi, path traversal, SSRF, secrets, deserialization, response injection).\n- Added a **best-practices** ruleset for safer input handling, resource limits, error handling, and maintainability signals.\n- Added a **response security** ruleset to detect unsafe tool outputs (sensitive errors, secret logging, schema/protocol issues).\n\n### Reviewed changes\n\nCopilot reviewed 3 out of 3 changed files in this pull request and generated 12 comments.\n\n| File | Description |\n| ---- | ----------- |\n| `semgrep-rules/mcp/mcp-security-critical.yaml` | New “critical” MCP security patterns (injection/file/network/secrets/deserialization/response injection). |\n| `semgrep-rules/mcp/mcp-response-security.yaml` | New response/output-safety patterns (info leak, logging secrets, schema safety, subprocess args). |\n| `semgrep-rules/mcp/mcp-best-practices.yaml` | New MCP “best practices” patterns (validation, DoS/resource limits, error handling, maintainability). |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b0f0476276699bdcbc7fc9c52c4afe6752dd1f63",
+      "message": "2237 - created additional rules for semgrep\n\nSigned-off-by: Arnav08Sanghi <sanghia@tcd.ie>",
+      "author": "Arnav08Sanghi",
+      "date": "2026-03-09T20:07:17+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 666,
+  "deletions": 0,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:55.381411",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:55.382760",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3568,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3568.json"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4706,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4706"
+  },
+  "metadata": {
+    "title": "[BUG]: Authorization-code token exchange ignores `token_endpoint_auth_method`,   breaking DCR with strict OAuth 2.1 providers (e.g. Datadog)",
+    "state": "open",
+    "created_at": "2026-05-11T15:34:24+00:00",
+    "updated_at": "2026-05-12T09:53:15+00:00",
+    "closed_at": null,
+    "author": "mvgijssel",
+    "labels": [
+      "bug",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": [
+      "bogdanmariusc10"
+    ]
+  },
+  "description": "  ### Summary\n\n  When ContextForge registers a confidential OAuth client via DCR and the authorization server\n  defaults the client to `token_endpoint_auth_method: \"client_secret_basic\"` (the RFC 7591 §2\n  default), the subsequent authorization-code token exchange fails with `400 invalid_client`. The\n  stored `token_endpoint_auth_method` is silently ignored — credentials are always sent in the form\n  body (`client_secret_post`).\n\n  This breaks any OAuth 2.1 provider that strictly enforces the registered auth method. Confirmed\n  against Datadog's MCP server (`https://mcp.datadoghq.com`).\n\n  Related but distinct from #3991, which proposes UI exposure of `token_endpoint_auth_method` and\n  incorrectly states the backend already honors it.\n\n  ### Reproduction\n\n  1. Add a gateway pointing at an OAuth 2.1 provider that defaults DCR clients to\n  `client_secret_basic`, with only the **Issuer** set (no client_id/client_secret). DCR\n  auto-registration runs.\n\n     Example provider: Datadog MCP, `https://mcp.datadoghq.com/api/unstable/mcp-server/mcp`.\n\n  2. Trigger the OAuth flow. DCR succeeds, `/authorize` returns a code, but `/oauth/callback` fails:\n\n     ```\n     ❌ OAuth Authorization Failed\n     Failed to exchange code for token after 3 attempts:\n     Client error '400 Bad Request' for url '.../token'\n     ```\n\n  3. With debug logging added to surface the response body, the provider replies:\n\n     ```json\n     {\"error\":\"invalid_client\",\"error_description\":\"Invalid client_secret\"}\n     ```\n\n  4. Manual probe against the same endpoint with the same `client_id` + `client_secret` from\n  `registered_oauth_clients`:\n\n     | Auth style | Result |\n     |---|---|\n     | Credentials in form body (`client_secret_post`) | `400 invalid_client / Invalid client_secret`\n  |\n     | `Authorization: Basic` header (`client_secret_basic`) | `400 invalid_grant / Invalid\n  authorization code` (gets past auth) |\n\n     The secret is correct; only the *delivery method* is wrong.\n\n  ### Root cause\n\n  `mcpgateway/services/oauth_manager.py::_exchange_code_for_tokens` (around line 1416 in v1.0.0)\n  builds the token request as:\n\n  ```python\n  token_data = {\n      \"grant_type\": \"authorization_code\",\n      \"code\": code,\n      \"redirect_uri\": redirect_uri,\n      \"client_id\": client_id,\n  }\n  if client_secret:\n      token_data[\"client_secret\"] = client_secret\n  ```\n\n  …and posts via `_post_token_request(url, data=token_data)` — so credentials always go in the form\n  body. The function never reads `token_endpoint_auth_method` from `registered_oauth_clients` or from\n  `credentials`. The same issue exists in `exchange_code_for_token` (~line 580). The DCR call in\n  `dcr_service` also does not explicitly request `token_endpoint_auth_method: \"client_secret_post\"`,\n  so it inherits whatever default the AS picks — `client_secret_basic` per RFC 7591 §2.\n\n  `refresh_token` (~line 1538) has the same shape and is likely affected too.\n\n  ### Why other providers don't trip this\n\n  Auth0, Okta, Google, Microsoft, etc. accept either form for clients registered as\n  `client_secret_basic` — they're lenient per RFC 6749 §2.3.1. Datadog (and presumably other strict\n  OAuth 2.1 servers) enforce the registered method. The mismatch is invisible until ContextForge meets\n   a strict server.\n\n  ### Proposed fix\n\n  Honor `token_endpoint_auth_method` in `_exchange_code_for_tokens` (and `refresh_token`, and the\n  non-PKCE path):\n\n  ```python\n  method = runtime_credentials.get(\"token_endpoint_auth_method\", \"client_secret_post\")\n  auth = None\n  if client_secret and method == \"client_secret_basic\":\n      auth = (client_id, client_secret)\n      token_data.pop(\"client_secret\", None)\n      # client_id may also be omitted from the body when sent via Basic — RFC 6749 §2.3.1\n  elif method == \"none\":\n      token_data.pop(\"client_secret\", None)\n  # else client_secret_post — current behavior\n\n  response = await self._post_token_request(token_url, token_data, auth=auth, ...)\n  ```\n\n  Additionally, in `dcr_service`, explicitly send `\"token_endpoint_auth_method\": \"client_secret_post\"`\n   in the registration request so new DCR clients match ContextForge's current emit behavior — until\n  the broader fix above lands.\n\n  ### Workaround\n\n  Pre-register the client out-of-band with `\"token_endpoint_auth_method\": \"none\"` (public client +\n  PKCE) or `\"client_secret_post\"`, then paste the returned `client_id` into ContextForge and leave\n  Client Secret empty (for `none`).\n\n  ### Environment\n\n  - ContextForge: `ghcr.io/ibm/mcp-context-forge:v1.0.0`\n  - Provider: Datadog MCP server, US1 (`https://mcp.datadoghq.com`)\n  - Transport: streamable HTTP\n  - Grant: authorization_code with PKCE (S256)",
+  "comments": [
+    {
+      "id": "4428452078",
+      "author": "bogdanmariusc10",
+      "created_at": "2026-05-12T07:56:09+00:00",
+      "body": "Thanks for the detailed bug report, @mvgijssel ! Bug confirmed: `token_endpoint_auth_method` is not being honored in one of the authorization code exchange paths.\n\n### Confirmed Issue\n\nThe [`exchange_code_for_token()`](https://github.com/ibm/mcp-context-forge/blob/main/mcpgateway/services/oauth_manager.py#L620-L673) method (non-PKCE authorization code flow) always sends client credentials in the POST body, ignoring the `token_endpoint_auth_method` setting stored in the database.\n\n**Current behavior (lines 640-649):**\n```python\ntoken_data = {\n    \"grant_type\": \"authorization_code\",\n    \"code\": code,\n    \"redirect_uri\": redirect_uri,\n    \"client_id\": client_id,\n}\n\nif client_secret:\n    token_data[\"client_secret\"] = client_secret\n```\n\nThis hardcodes `client_secret_post` behavior and will fail with OAuth 2.1 providers that strictly enforce `client_secret_basic` (like Datadog).\n\n### Good News\n\nThe PKCE path ([`_exchange_code_for_tokens()`](https://github.com/ibm/mcp-context-forge/blob/main/mcpgateway/services/oauth_manager.py#L1470-L1550)) already implements this correctly:\n- Line 1486 reads `token_endpoint_auth_method` from credentials\n- Lines 1496-1510 properly handle both `client_secret_basic` (Authorization header) and `client_secret_post` (form body)\n\nThe [`refresh_token()`](https://github.com/ibm/mcp-context-forge/blob/main/mcpgateway/services/oauth_manager.py#L1554-L1610) method also handles this correctly (lines 1596-1610).\n\n### Recommended Fix\n\nApply the same pattern from `_exchange_code_for_tokens()` to `exchange_code_for_token()`:\n\n```python\n# Check token_endpoint_auth_method from runtime credentials\nuse_basic_auth = runtime_credentials.get(\"token_endpoint_auth_method\", \"client_secret_post\") == \"client_secret_basic\"\n\ntoken_data = {\n    \"grant_type\": \"authorization_code\",\n    \"code\": code,\n    \"redirect_uri\": redirect_uri,\n}\nheaders = {}\n\nif use_basic_auth and client_secret:\n    headers[\"Authorization\"] = self._build_basic_auth_header(client_id, client_secret)\nelse:\n    token_data[\"client_id\"] = client_id\n    if client_secret:\n        token_data[\"client_secret\"] = client_secret\n```\n\nThis ensures consistent behavior across all token exchange paths and maintains compatibility with strict OAuth 2.1 providers.\n\nI'll open a PR for this fix."
+    },
+    {
+      "id": "4429319742",
+      "author": "mvgijssel",
+      "created_at": "2026-05-12T09:53:15+00:00",
+      "body": "Wow thanks for quick response @bogdanmariusc10!"
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:27.600610",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:27.601160",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4706,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4706.json"
+  }
+}

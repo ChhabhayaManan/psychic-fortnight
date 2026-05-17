@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3389,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3389"
+  },
+  "metadata": {
+    "title": "fix(ui): preserve pagination page after edit modal save",
+    "state": "closed",
+    "created_at": "2026-03-02T12:48:43+00:00",
+    "updated_at": "2026-03-10T11:51:06+00:00",
+    "closed_at": "2026-03-10T11:51:03+00:00",
+    "merged_at": "2026-03-10T11:51:03+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "ui",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "## 📌 Summary\r\nAfter saving any edit modal in the Admin UI (tools, gateways, resources, prompts, servers, A2A agents), the table reloads on page 1 instead of returning to the page the user was on. This forces users to re-navigate every time they edit an item on any page other than page 1, breaking the expected workflow.\r\n\r\n## 🔗  Related Link\r\nCloses #3388 \r\n\r\n## 🐞 Root Cause\r\n`_navigateAdmin()` in `mcpgateway/static/admin.js` is the single function all 15 edit/save/toggle handlers use to redirect after a successful operation. It rebuilt the destination URL from scratch, copying only `team_id` and `include_inactive`, and silently discarded the namespaced pagination params (`tools_page`, `tools_size`, `tools_q`, `tools_tags`, etc.) that `buildTableUrl()` depends on to restore the correct page on load.\r\n\r\nThe params were present in `window.location.search` — written there by `pagination_controls.html`'s `updateBrowserUrl()` on every page click — but `_navigateAdmin` never forwarded them.\r\n\r\n## 💡 Fix Description\r\nIn `_navigateAdmin()`, before building the target URL, copy all params whose key ends with `_page`, `_size`, `_inactive`, `_q`, or `_tags` from `window.location.search` into the outgoing `searchParams` — but only when the caller has not already explicitly set that key (`!searchParams.has(key)` guard). This is a single-function change that fixes all 15 call sites at once without affecting any caller that intentionally overrides a param.\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite | `make lint` | |\r\n| Unit tests | `make test` | |\r\n| Coverage ≥ 90 % | `make coverage` | |\r\n| Manual: edit tool on page 3 → stays on page 3 | Browser — Tools tab, 55+ tools | |\r\n| Manual: delete tool on page 3 → stays on page 3 | Browser — Deactivate/Delete row button | |\r\n| Manual: add new tool while on page 3 → stays on page 3 | Browser — Add Tool form | |\r\n| Manual: page state not shared between tables | Navigate Tools to pg 3, then edit a Gateway → Gateways table unaffected | |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3921775985",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T11:46:42+00:00",
+      "body": "## Review: Approved\n\n**Code review, unit tests, and E2E verification all pass.**\n\n### What was reviewed\n- Single-function change in `_navigateAdmin()` (`admin.js:865-881`) that copies namespaced pagination params (`*_page`, `*_size`, `*_inactive`, `*_q`, `*_tags`) from `window.location.search` into outgoing `searchParams`\n- The `!searchParams.has(key)` guard correctly lets callers override any param\n- Bare `include_inactive` is correctly excluded (callers set it directly)\n\n### Changes made during review\n- **Rebased** onto current `main` (clean, no conflicts)\n- **Squashed** 2 commits into 1 (second commit was a bugfix of the first — forgetting to exclude bare `include_inactive`)\n- **Added 11 unit tests** for `_navigateAdmin` pagination preservation covering all suffix types, caller precedence, namespace isolation, null/undefined params, and the `include_inactive` exclusion\n- **Fixed pre-existing lint error** (`hasOwnProperty` direct access → `Object.prototype.hasOwnProperty.call()`)\n- All 53 tests pass (42 existing + 11 new)\n\n### E2E verification (Playwright)\n| Step | Result |\n|------|--------|\n| Navigate to Tools tab | 25 tools, 3 pages |\n| Click page 3 | URL → `tools_page=3`, shows items 21-25 |\n| Edit tool on page 3, save | Save succeeds |\n| After save redirect | URL retains `tools_page=3&tools_size=10`, page 3 still shown |\n\n### Security & Performance\n- No concerns — params come from same-origin `window.location.search`, encoded via `URLSearchParams.set()`\n- Negligible perf impact (iterating URL params on each navigation)\n\n### Consistency\n- Matches existing namespaced pagination architecture (`getPaginationParams`, `buildTableUrl`, `updateBrowserUrl`)"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e71967a1e7718eec2c1b6b6da1fe618f295d5afc",
+      "message": "fix(ui): preserve pagination page after edit modal save\n\n_navigateAdmin() now copies namespaced pagination params (*_page, *_size,\n*_inactive, *_q, *_tags) from the current URL into the outgoing\nsearchParams — but only when the caller has not already explicitly set\nthat key. Bare include_inactive is excluded (callers set it directly).\n\nCloses #3388\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-10T11:20:34+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 170,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:13.409348",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:13.410384",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3389,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3389.json"
+  }
+}

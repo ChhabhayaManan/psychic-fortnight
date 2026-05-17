@@ -1,0 +1,63 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3214,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3214"
+  },
+  "metadata": {
+    "title": "fix(#3002): correct visibility filtering logic for team-scoped queries",
+    "state": "closed",
+    "created_at": "2026-02-24T10:15:24+00:00",
+    "updated_at": "2026-03-09T01:52:09+00:00",
+    "closed_at": "2026-02-27T13:31:49+00:00",
+    "merged_at": "2026-02-27T13:31:49+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3008 due to repository maintenance. Your code and branch are intact. @KKNithin please verify everything looks good.\r\n\r\n## 🔗 Related Issue\r\nCloses #3002 [BUG][API]: team_id query parameter ignored for team-scoped JWT tokens on GET /gateways, /servers & /tools #3002\r\n\r\n---\r\n\r\n## 📝 Summary\r\nChanges done to keep inline and have same implementation across all resources on applying access filters\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [X] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n---\r\n\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3866707531",
+      "author": "jonpspri",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-27T12:31:06+00:00",
+      "body": "## Approval Summary\n\nReviewed the full diff against `main`. The PR consolidates duplicated visibility-filtering logic from 6 services into a single `BaseService` ABC and tightens several security behaviors.\n\n### What this PR does\n\n- **Consolidates visibility filtering** into `BaseService._apply_access_control()` / `_apply_visibility_filter()`, eliminating ~200 lines of duplicated access-control code across gateway, server, tool, prompt, resource, and A2A services.\n- **Fixes a bug** where `team_id` query parameter was silently ignored in the gateway and server `token_teams` branch — results from all teams were returned instead of the requested team.\n- **Tightens owner-based access** so `owner_email` matching only grants visibility for `visibility='private'` resources. Previously, owners could see their own team-scoped resources from teams outside their token scope, bypassing Layer 1 token scoping.\n- **Aligns A2A `_check_agent_access`** with the tool/prompt/resource services — admin bypass now consistently requires both `token_teams=None` and `user_email=None`.\n- **Applies `visibility` filter during admin bypass** — previously the query parameter was silently ignored for admin tokens.\n- **Fixes metrics serialization** with `jsonable_encoder` (follow-up issue #3311 filed for the underlying mixed-casing inconsistency).\n\n### Review findings addressed\n\n- **P1 (fixed):** Restored `protect_oauth_config_for_storage` imports dropped in a2a_service, gateway_service, and server_service during the refactor.\n- **P2 (fixed):** Added 16 dedicated unit tests for `BaseService` covering `__init_subclass__`, `_apply_access_control`, and `_apply_visibility_filter`.\n- **P2 (fixed):** Aligned A2A admin-bypass check and updated corresponding test.\n- **P2 (deferred):** Filed #3311 for metrics endpoint mixed camelCase/snake_case.\n\n### Documentation updated\n\n- `docs/docs/architecture/multitenancy.md` — enforcement summary, private visibility description, token scoping invariants.\n- `docs/docs/manage/rbac.md` — return value semantics table and owner-access admonition.\n\n### Tests\n\n952 tests pass across all affected test files, 0 failures."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "beff9d6d8fc11d9dde9c7806683c6dc7001e21ce",
+      "message": "fix(#3002): consolidate visibility filtering into BaseService ABC\n\nExtract duplicated _apply_visibility_filter() from 6 services into a\nshared BaseService(ABC) with _apply_access_control() entry point.\n\nFixes token-scoped owner access to restrict owner bypass to private\nvisibility only, preventing cross-team resource leakage via delegated\ntokens. Aligns A2A _check_agent_access with tool/prompt/resource\nservices: admin bypass now requires both token_teams=None and\nuser_email=None, and non-public agents are denied when user_email\nis absent.\n\nIncludes 16 dedicated unit tests for BaseService._apply_access_control\nand _apply_visibility_filter, updated gateway/server/a2a test suites,\nand documentation updates to multitenancy and RBAC docs.\n\nFixes metrics serialization with jsonable_encoder.\n\nCloses #3002\n\nCo-authored-by: Jonathan Springer <jps@s390x.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Nithin Katta",
+      "date": "2026-02-27T13:12:42+00:00"
+    },
+    {
+      "sha": "1b1743a21a2969c42a334118a154cb9a37c1ee6c",
+      "message": "fix(tests): skip e2e mcp-cli protocol tests from make test\n\nAdd pytest.mark.e2e marker to test_mcp_cli_protocol.py and ignore it\nin the make test target, consistent with test_entra_id_integration.py.\nThese tests require a live ContextForge instance and mcp-cli installed,\nso they should only run via make test-mcp-cli.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-27T13:30:07+00:00"
+    }
+  ],
+  "files_changed": 20,
+  "additions": 1017,
+  "deletions": 667,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:31.060078",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:31.065990",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3214,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3214.json"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4777,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4777"
+  },
+  "metadata": {
+    "title": "fix(sso): SSO callback redirect for non-admin users with team memberships",
+    "state": "open",
+    "created_at": "2026-05-15T10:35:03+00:00",
+    "updated_at": "2026-05-15T10:49:16+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "rbac",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4770\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes SSO callback redirect that was blocking non-admin users from accessing the platform. The SSO callback handler was unconditionally redirecting all authenticated users to `/admin` without a `team_id` parameter, which prevented the `AdminAuthMiddleware` from resolving team-scoped admin permissions.\r\n\r\n**The fix implements intelligent redirect logic:**\r\n- **Platform admins** (`is_admin=true`): Redirect to `/admin` (unchanged behavior)\r\n- **Non-admin users with teams**: Redirect to `/admin?team_id=<first_team_id>` (enables team-scoped admin access)\r\n- **Non-admin users without teams**: Redirect to `/` (root page)\r\n- **Error handling**: Falls back to `/admin` if team retrieval fails\r\n\r\nThis enables team members with `admin.*` permissions to access the admin UI in their team context, and provides appropriate landing pages for regular users (`platform_viewer`, `developer`, etc.).\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Implementation Details\r\n\r\n**Modified**: `mcpgateway/routers/sso.py` (lines 402-440)\r\n- Added JWT token decoding to determine user admin status\r\n- Added `TeamManagementService` integration to retrieve user teams\r\n- Implemented conditional redirect logic based on admin status and team membership\r\n- Added comprehensive error handling with logging\r\n\r\n**Test Coverage**: `tests/unit/mcpgateway/routers/test_sso_router.py`\r\n- Updated 3 existing tests to use valid JWT tokens with admin status\r\n- Added 4 new tests covering all redirect scenarios:\r\n  - `test_handle_sso_callback_non_admin_with_team_redirects_to_team` - Non-admin user with team membership redirects to team-scoped admin\r\n  - `test_handle_sso_callback_non_admin_no_teams_redirects_to_root` - Non-admin user without teams redirects to root page\r\n  - `test_handle_sso_callback_team_service_error_falls_back_to_admin` - Team service error falls back to /admin redirect\r\n  - `test_handle_sso_callback_invalid_jwt_falls_back_to_user_info` - Invalid JWT token triggers exception handler and falls back to user_info\r\n\r\n**Test Results**: All 50 SSO router tests passing ✅\r\n\r\n### Impact\r\n\r\n**Before**: Only platform admins could successfully use SSO login. Non-admin users were redirected to `/admin` without `team_id`, causing a 403 error.\r\n\r\n**After**: \r\n- ✅ Platform admins continue to work as before\r\n- ✅ Team admins with `admin.*` permissions can now access via SSO\r\n- ✅ Regular users are redirected to appropriate landing pages\r\n- ✅ All SSO providers benefit (Okta, Google, GitHub, Keycloak, Entra, ADFS, Generic OIDC)\r\n\r\n### Backwards Compatibility\r\n\r\nThe fix is fully backwards compatible:\r\n- Platform admins experience no change in behavior\r\n- Non-admin users who previously couldn't log in via SSO can now do so\r\n- Error handling ensures graceful degradation if team retrieval fails",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "d0162b51e2cee22ae4c05b202d5cd7643b8f0ae7",
+      "message": "fix: SSO callback redirect for non-admin users with team memberships\n\nResolves #4770\n\nThe SSO callback handler was unconditionally redirecting all authenticated\nusers to /admin without a team_id parameter. This prevented non-admin users\nfrom accessing the platform via SSO, as the AdminAuthMiddleware requires\neither platform admin status or team-scoped admin permissions (which need\na team_id query parameter).\n\nChanges:\n- Modified SSO callback to decode JWT and check user admin status\n- Platform admins: redirect to /admin (unchanged behavior)\n- Non-admin users with teams: redirect to /admin?team_id=<first_team_id>\n- Non-admin users without teams: redirect to / (root)\n- Added error handling with fallback to /admin\n\nThis enables team-scoped admin access for users with admin.* permissions\nand provides appropriate landing pages for regular users.\n\nTests:\n- Updated existing tests to use valid JWT tokens with admin status\n- Added test for non-admin user with team (team-scoped redirect)\n- Added test for non-admin user without teams (root redirect)\n- Added test for team service error (fallback to /admin)\n- All 49 SSO router tests passing\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-15T10:32:14+00:00"
+    },
+    {
+      "sha": "f8e3349d16ad9a007f117f7acb1880f025cc6e90",
+      "message": "test: add coverage for JWT decode exception handler in SSO callback\n\nAdds test case for invalid JWT token to cover exception handler\n(lines 412-415) that falls back to user_info when token decode fails.\n\nThis brings diff coverage to 96% (24/25 lines covered).\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-15T10:47:53+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 277,
+  "deletions": 8,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:49.343989",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:49.344470",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4777,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4777.json"
+  }
+}

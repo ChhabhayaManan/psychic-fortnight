@@ -1,0 +1,110 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4480,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4480"
+  },
+  "metadata": {
+    "title": "fix(rbac): block duplicate role/user_role rows on concurrent bootstrap",
+    "state": "open",
+    "created_at": "2026-04-27T20:57:57+00:00",
+    "updated_at": "2026-05-08T13:25:57+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "gandhipratik203",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nFollow-up to #4444. After the L1 fast-path landed in #4444, `bootstrap_default_roles` and the platform_admin user-role assignment run outside the migration advisory lock on every replica that takes the fast path. Both code paths were SELECT-then-INSERT with no DB-tier uniqueness, and the row IDs are client-generated UUIDs — so concurrent fast-path workers can write duplicate active rows. The next `get_role_by_name` / `get_user_role_assignment` then raises `MultipleResultsFound`.\n\nThis PR closes the race by adding the missing DB-tier guards and graceful app-tier handling for any in-flight retries.\n\n## What changed\n\n- **`mcpgateway/db.py`** — partial unique indexes:\n  - `roles(name, scope) WHERE is_active = true`\n  - `user_roles(user_email, role_id, scope) WHERE is_active = true AND scope_id IS NULL`\n  - `user_roles(user_email, role_id, scope, scope_id) WHERE is_active = true AND scope_id IS NOT NULL`\n\n  Two `user_roles` indexes are needed because `scope_id` is nullable and both Postgres and SQLite treat NULL as distinct in plain unique indexes.\n\n- **`mcpgateway/alembic/versions/c3d5e7f9a1b2_*.py`** — idempotent dedupe-then-constrain migration. Soft-deletes duplicate active rows via `is_active = false` (oldest by `created_at` / `granted_at` wins) so the indexes can be added on databases that already raced. Audit history preserved; downgrade drops the indexes only.\n\n- **`mcpgateway/services/role_service.py`** — `create_role` and `assign_role_to_user` wrap their inserts in `db.begin_nested()`. An `IntegrityError` that resolves to a winning row is treated as success and the winner is returned; an `IntegrityError` that does not resolve to a winning row surfaces as `ValueError` per the documented contract.\n\n- **Tests** — 5 new unit tests pinning the savepoint refetch path and the non-race `IntegrityError` → `ValueError` surface, plus 1 new integration test (6 concurrent seeders against real Postgres → exactly 1 active row per `(name, scope)` and exactly 1 active platform_admin assignment).\n\n## Verified on\n\n- Local docker-compose (Postgres + transaction-pool PgBouncer fixture)\n- OCP minimal profile (chart default `post-install,pre-upgrade` hookPhase)\n- OCP PGO profile (`pre-install,pre-upgrade` hookPhase)\n\nIn all three: migration upgrade is clean, gateway pods reach Ready with 0 restarts, all three partial unique indexes are present, no duplicate active rows, no advisory locks held.\n\nNegative control verified locally: removing the `roles` partial unique index makes the new integration test fail with three duplicate `platform_viewer` rows.\n\n## Notes\n\n- This PR's base is `fix/4051-alembic-pgbouncer-transaction-pool` (PR #4444). Once #4444 merges to `main`, GitHub will auto-retarget this PR's base to `main`.\n- Closes #4482",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "ab58f94ba145611fd5915ec7a8369c5da724b912",
+      "message": "test(4051): add reproduction harness and integration regression test\n\nAdds tests/integration/test_migrations_under_transaction_pool.py — three\n@pytest.mark.integration assertions pinning the PgBouncer transaction-pool\nbehavior that makes bootstrap_db.main() hang when gateway replicas start\nconcurrently:\n\n - a disconnected pgbouncer client's advisory lock persists on Postgres,\n - a fresh Postgres session is blocked from acquiring the orphaned lock,\n - a same-backend reuse via pgbouncer is reentrant (documents the gotcha\n   so future readers don't mistake TRUE for \"no bug\").\n\nTests are gated behind --with-integration so CI default runs are\nunaffected. The fixture stack (postgres + pgbouncer with pool_mode=\ntransaction and default_pool_size=2) lives at\ntests/integration/fixtures/transaction_pool/docker-compose.yml.\n\nAlso adds tests/reproduction/issue-4051/ with demonstrate_orphan.sh\n(deterministic mechanism proof) and reproduce.sh (replica-scaling symptom\nreproduction). These exist for PR-review evidence and local debugging\nduring development; they are expected to be removed when the fix PR\nlands, with the evidence preserved in the issue thread.\n\nNo runtime changes.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-24T16:25:34+00:00"
+    },
+    {
+      "sha": "e4b245fc4b989eab04d86b3051ced08ec53009b6",
+      "message": "fix(bootstrap): skip migration advisory lock when schema is at head\n\nMultiple gateway replicas starting concurrently through a transaction-\npooling connection pooler (PgBouncer pool_mode=transaction, pgcat, etc.)\ncan hang indefinitely on bootstrap. A previous replica's pg_advisory_lock\nis session-scoped on its Postgres server backend; when the pooler returns\nthat backend to its pool across a transaction boundary without clearing\nthe lock, the next replica's pg_try_advisory_lock sees it held by an\norphaned session and spins through its retry loop until the ~10-minute\ntimeout fires.\n\nAdd a fast-path in bootstrap_db.main() that probes alembic_version via\nMigrationContext before attempting the advisory lock: when the DB is\nalready at the Alembic script directory's head, skip the lock entirely\nand run only the idempotent post-migration bootstrap steps (team\nvisibility normalization, admin user, default roles, orphaned resource\nassignment). Replicas 2..N of a multi-pod deployment take this branch on\nevery normal restart, so the advisory-lock orphan is never contended.\n\nThe lock is still acquired for the slow path (empty DB, version\nmismatch, or any probe error), preserving the existing concurrent-\nmigration protection. Post-migration bootstrap was extracted into\n_run_post_migration_bootstrap() so both paths share it.\n\nAdds tests/integration/test_migrations_under_transaction_pool.py::\ntest_bootstrap_db_skips_lock_when_schema_already_at_head as a\nregression gate: it synthesizes the held-lock precondition via a\ndistinct direct-to-postgres session and runs bootstrap through\npgbouncer. Pre-fix, the test times out after 240s; post-fix, it\ncompletes in under a second.\n\nCloses #4051\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-24T17:01:54+00:00"
+    },
+    {
+      "sha": "4519d0fbfb8a26af3cc05dfc744aa51e83f98c92",
+      "message": "test(bootstrap): pin truth table for _alembic_at_head fast-path helper\n\nAdds TestAlembicAtHead with five unit tests covering the bool outcomes\nthat decide whether main() skips the migration advisory lock:\n\n - at head → True (fast-path fires)\n - no alembic_version in DB → False (slow path handles empty/partial DBs)\n - head mismatch → False (migrations actually need to run)\n - script directory has zero heads → False (defensive)\n - any probe exception → False (fallback to slow path)\n\nDirect coverage independent of the integration test; narrows the blast\nradius of a future refactor to this one helper.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-24T17:23:05+00:00"
+    },
+    {
+      "sha": "80dd4aeee56935bd11152e6b12f4fc293ee1a8e2",
+      "message": "test(bootstrap): assert fast-path fires exclusively on second bootstrap\n\nAdds test_bootstrap_db_is_idempotent_once_schema_is_at_head as an\nadditional invariant for the issue #4051 fast-path: after one successful\nbootstrap, a subsequent call must NOT enter advisory_lock at all — it\nshould take the fast-path exclusively.\n\nThe test wraps bootstrap_db.advisory_lock with a spy and asserts zero\nentries on the second invocation. This catches regressions where a\nfuture refactor accidentally re-routes bootstrap through the lock even\nwhen the schema is at head (the specific failure mode that would bring\nissue #4051 back under transaction-pooling connection poolers).\n\nAlso asserts the second call completes under 3s and leaves no advisory\nlock held.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-24T17:25:19+00:00"
+    },
+    {
+      "sha": "9f0345761fa40d94c2d46e113b1199f060e05e47",
+      "message": "feat(bootstrap): add MCPGATEWAY_SKIP_MIGRATIONS to suppress in-pod bootstrap\n\nAdds a settings flag (`mcpgateway_skip_migrations`, default False) that\ngates the gateway's lifespan call to bootstrap_db.main(). When set,\nthe gateway logs that it is yielding migration ownership to a separate\nrunner and skips the in-pod path entirely.\n\nThis is the operator-facing half of the issue #4051 fix. The L1\nfast-path (already on this branch) makes in-pod bootstrap safe under\ntransaction-pool connection poolers; this flag lets a Helm chart or\ninit-container deployment turn the in-pod path off entirely once a\ndedicated migration runner has populated the schema. Library default\nstays False so direct `docker run mcpgateway` continues to bootstrap\nitself with no operator action.\n\nWires the gate via a small lifespan helper (`_run_initial_db_bootstrap`)\nto keep the lifespan body unchanged and the gate trivially testable.\n\nTests:\n - settings.skip_migrations defaults False\n - MCPGATEWAY_SKIP_MIGRATIONS=true → True\n - MCPGATEWAY_SKIP_MIGRATIONS=false → False\n - lifespan helper invokes bootstrap_db when flag off\n - lifespan helper skips bootstrap_db AND logs an audit line when on\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-25T15:17:02+00:00"
+    },
+    {
+      "sha": "0fac0aeba8b6161f84ee63f09d4ebdd7280e51d6",
+      "message": "feat(charts): wire MCPGATEWAY_SKIP_MIGRATIONS from migration.enabled\n\nWires the gateway Deployment env var introduced in the prior commit\ninto the chart so the pairing \"migration Job runs → app pods skip\" is\nenforced at the chart layer rather than relying on operators to set\nboth flags consistently. The env entry is placed after extraEnv so a\nuser-supplied override cannot accidentally undo the contract.\n\nBehavior:\n  migration.enabled=true   → MCPGATEWAY_SKIP_MIGRATIONS=\"true\"\n  migration.enabled=false  → MCPGATEWAY_SKIP_MIGRATIONS=\"false\"\n  default values           → migration.enabled=true → SKIP=\"true\"\n\nAdds tests/unit/charts/test_deployment_mcpgateway.py with three\nhelm-template assertions pinning each branch. Tests skip automatically\nwhen helm is not on PATH; no cluster needed. Issue #4051 Layer 2.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-25T15:20:08+00:00"
+    },
+    {
+      "sha": "2ef5fe3b55b66688d5cad4e84479301047de5c01",
+      "message": "chore: remove temporary reproduction harness for #4051\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-27T11:35:10+00:00"
+    },
+    {
+      "sha": "25d84a32c9055d0d11eb5f5557c3792633d196e9",
+      "message": "test(4051): add end-to-end compose smoke for multi-replica startup\n\nAdds test_compose_three_replicas_complete_bootstrap_e2e — drives the\nfixture compose stack at the container level, scales the gateway\nservice to 3 replicas through transaction-pool PgBouncer, and asserts\nall three reach bootstrap completion within 60s. This is the closest\nre-runnable analog of the manual OCP cluster smoke captured in\ntodo/issue-4051-ocp-reproduction.md, exercising the full pod-startup\npath (gunicorn + lifespan + bootstrap_db.main()) inside real\ncontainers rather than calling the library entry point in-process.\n\nThe other 5 tests in this module already cover the bug at the\nmechanism (PgBouncer orphaning) and library (bootstrap_db) levels.\nThis e2e test catches regressions of the integration shape:\ngunicorn worker fan-out, lifespan ordering, image-level config\nloading, etc.\n\nThe test is destructive — it drops the fixture's public schema.\nSkipped unless MCPGATEWAY_TEST_ALLOW_DESTRUCTIVE_E2E=1 is set,\nmatching the opt-in pattern already used elsewhere in tests/\nconftest.py for external-DB safety. Also skips cleanly when docker\nis missing, the gateway image isn't built, or the fixture postgres/\npgbouncer aren't running — each with an actionable message\nexplaining the missing prerequisite.\n\nVerified locally: 14.78s post-fix, hangs to 240s pytest.mark.timeout\npre-fix.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-27T12:09:08+00:00"
+    },
+    {
+      "sha": "e6d194f24a7a471c6ce2966026390f170f2770dc",
+      "message": "docs: replace inline issue-number references with behavior descriptions\n\nIssue numbers are pointers, not content — they rot once the issue is\nclosed. The fix outlives the issue. Removes \"issue #4051\" / \"Layer 2\"\nreferences from code comments and test docstrings, replacing them with\nprose that names the BEHAVIOR being protected (advisory-lock orphaning\nbehind transaction-pool poolers, MCPGATEWAY_SKIP_MIGRATIONS contract,\netc).\n\nIssue references are kept where they belong — commit messages and the\nPR description — and removed where they don't (test docstrings, helper\ncomments, file-level docstrings, the test fixture's compose file).\n\nAlso renames the test fixture's docker compose project name from\n\"mcf4051\" to the more descriptive \"transaction-pool-fixture\" since\nthat file has no surviving link to the originating issue.\n\nNo behavior changes. 493 tests pass; 1 (e2e) skips cleanly without\nthe destructive opt-in.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-27T12:16:40+00:00"
+    },
+    {
+      "sha": "aabde00d6d82eb311fcf83f54f39a78a687edd6f",
+      "message": "chore: refresh detect-secrets baseline + apply black formatting\n\nCI's pre-commit run flagged two issues on this branch:\n\n1. .secrets.baseline was out-of-date — the new mcpgateway_skip_migrations\n   field in config.py shifted line numbers of pre-existing detected\n   patterns by +42 lines, and detect-secrets refused to pass while the\n   baseline still pointed at the old line numbers. Refreshed via\n   `detect-secrets scan --update --use-all-plugins`. Four new entries\n   from this PR's test fixtures (synthetic test passwords like\n   `reprosecret`) are present in the baseline marked is_secret=False:\n   they are clearly throwaway test values, not real credentials.\n\n2. Black wanted minor reformatting in three of the test/source files\n   we touch in this PR (mcpgateway/main.py, two test files). Applied.\n\nNo behavior changes. 488 unit tests still pass. The detect-secrets and\nblack pre-commit hooks now pass locally on the PR-relevant files.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-27T15:02:32+00:00"
+    },
+    {
+      "sha": "46f1d8494ca51fb0f6d5c7589a1c8ae7e1922651",
+      "message": "feat(chart): refuse Ready until alembic_version is at script-dir head\n\nReplaces the gateway Deployment's db_isready startup probe with a\nschema-at-head check so pods cannot serve traffic against an empty or\nmid-migration DB regardless of which entity ran the migration: the chart's\npre-install Job, post-install Job, an init container, an external CD\npipeline, or a manual operator step.\n\nAdds mcpgateway.utils.check_schema_at_head as the probe command. It exits\n0 only when ``alembic_version`` matches the script-directory head, and\nexits 1 on any error so probe failures fail closed.\n\nRefs IBM/mcp-context-forge#4051\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-27T20:53:37+00:00"
+    },
+    {
+      "sha": "41b66559474e5edeb4800969c3de609949097128",
+      "message": "fix(rbac): block duplicate active role/user_role rows under concurrent bootstrap\n\nAfter the L1 fast-path landed, ``bootstrap_default_roles`` and the\nplatform_admin user-role assignment run outside the migration advisory\nlock on every replica that takes the fast path. Both code paths were\nSELECT-then-INSERT with no DB-tier uniqueness on (roles.name, roles.scope)\nor (user_roles.user_email, role_id, scope, scope_id) — and ``Role.id`` /\n``UserRole.id`` are client-generated UUIDs, so the PK never saved us.\nConcurrent fast-path workers could write duplicate active rows, after\nwhich ``get_role_by_name`` / ``get_user_role_assignment`` raise\n``MultipleResultsFound``.\n\nAdds:\n\n  * Partial unique indexes (``WHERE is_active = true``) on the relevant\n    column tuples — split into two for ``user_roles`` because ``scope_id``\n    is nullable and both Postgres and SQLite treat NULL as distinct in\n    ordinary unique indexes.\n  * Idempotent dedupe-then-constrain Alembic migration that soft-deletes\n    duplicate active rows (oldest by created_at / granted_at wins) so the\n    indexes can be added on databases that already raced.\n  * Savepoint-and-refetch handling in ``RoleService.create_role`` and\n    ``RoleService.assign_role_to_user``: insert is wrapped in\n    ``db.begin_nested()``, an IntegrityError that resolves to a winning\n    row is treated as success, and any other IntegrityError surfaces as\n    ``ValueError``.\n  * Unit tests pinning the savepoint refetch path and the non-race\n    IntegrityError → ValueError surface.\n  * Integration test: 6 concurrent seeders against real Postgres must\n    converge on exactly one active row per (name, scope) and exactly one\n    active platform_admin user-role assignment.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-27T20:54:01+00:00"
+    }
+  ],
+  "files_changed": 17,
+  "additions": 1745,
+  "deletions": 54,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:05:22.946290",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:22.947613",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4480,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4480.json"
+  }
+}

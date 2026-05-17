@@ -1,0 +1,36 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4732,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4732"
+  },
+  "metadata": {
+    "title": "[BUG]: Admin UI hides public agents when a team is selected in the team switcher",
+    "state": "open",
+    "created_at": "2026-05-12T20:33:48+00:00",
+    "updated_at": "2026-05-13T03:09:25+00:00",
+    "closed_at": null,
+    "author": "a-effort",
+    "labels": [
+      "bug",
+      "triage",
+      "ui"
+    ],
+    "milestone": null,
+    "assignees": [
+      "marekdano",
+      "shoummu1"
+    ]
+  },
+  "description": "### 🐞 Bug Summary\nWhen a team is selected in the Admin UI team switcher, the A2A Agents tab (and other entity tabs) hide globally-public agents owned by other teams. Users expect \"public\" to mean visible regardless of team filter.\n\n### 🧩 Affected Component\n- [x] `mcpgateway` - UI (admin panel)\n- [x] `mcpgateway` - API (semantic question for `?team_id=` filter)\n\n### 🔁 Steps to Reproduce\n1. As a platform admin, register an A2A agent with `visibility: public` under team A.\n2. Sign in as a non-admin user who belongs only to team B.\n3. In the Admin UI, select team B in the team switcher.\n4. Navigate to the A2A Agents tab.\n\n### 🤔 Expected Behavior\nThe public agent registered by the platform admin should appear, because `visibility = \"public\"` is intended to be globally visible.\n\n### 🔍 Actual Behavior\nThe agent is not listed. The team switcher appends `&team_id={{ selected_team_id }}` to every entity list call (`mcpgateway/templates/admin.html:6801` and `:6854`), which causes `_apply_visibility_filter` (`mcpgateway/services/base_service.py:158-165`) to restrict the query to `team_id == X AND visibility IN ('team', 'public')`. Public rows owned by *other* teams are filtered out.\n\nDirect API calls without `?team_id=` (e.g. `curl $CF_URL/a2a`) return public agents as expected — confirming this is a UI-induced narrowing rather than an API-layer bug.\n\n### 💡 Suggested Approaches\n\nTwo reasonable directions, worth team discussion:\n\n1. **UI fix (smaller blast radius)**: Stop auto-appending `team_id` to entity list requests when the team switcher is set. The selection could still be used for display/routing without changing the visibility query semantics.\n\n2. **API semantic change (broader impact)**: Update `_apply_visibility_filter` so that even when `team_id` is supplied, `visibility = \"public\"` is always OR'd into the access conditions. This affects every entity type inheriting `BaseService` (tools, resources, prompts, gateways, servers, a2a) — would need explicit sign-off.\n\n\n### 🧠 Environment Info\n| Key | Value |\n|-----|-------|\n| Version or commit | `main` branch |\n| Runtime | Python 3.11+ |\n| Reproducible via | Admin UI + non-admin team-scoped user |",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:31.994824",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:31.995501",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4732,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4732.json"
+  }
+}

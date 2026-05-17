@@ -1,0 +1,153 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4407,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4407"
+  },
+  "metadata": {
+    "title": "feat(auth): add HTTP Basic Auth support for OAuth token exchange",
+    "state": "closed",
+    "created_at": "2026-04-23T08:58:03+00:00",
+    "updated_at": "2026-05-08T13:12:13+00:00",
+    "closed_at": "2026-05-08T13:12:06+00:00",
+    "merged_at": "2026-05-08T13:12:06+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "enhancement",
+      "ica",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4358\r\n**Jira Issue:** https://jsw.ibm.com/browse/ICACF-28\r\n\r\n---\r\n\r\n## 📝 Summary\r\nAdds HTTP Basic Authentication support for OAuth token exchange to enable compatibility with Notion MCP server and other OAuth providers that require RFC 6749 Section 2.3.1 compliant authentication.\r\n\r\n**Problem:** Notion MCP server requires client credentials to be sent as an HTTP Basic Auth header (`Authorization: Basic base64(client_id:client_secret)`) during OAuth token exchange, but ContextForge was only sending credentials in the POST body.\r\n\r\n**Solution:** Added configurable `token_endpoint_auth_method` parameter that supports both authentication methods:\r\n- `client_secret_post` (default) - credentials in POST body\r\n- `client_secret_basic` - credentials in Authorization header per RFC 6749 Section 2.3.1\r\n\r\n**Changes:**\r\n- Modified three OAuth flow methods in [`oauth_manager.py`](mcpgateway/services/oauth_manager.py): `_client_credentials_flow()`, `_exchange_code_for_tokens()`, and `refresh_token()`\r\n- Added comprehensive unit tests covering Basic Auth flows\r\n- Created Notion MCP server setup documentation\r\n\r\n**Backward Compatibility:** Fully maintained - defaults to existing `client_secret_post` behavior when `token_endpoint_auth_method` is not specified.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [x] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Configuration Example:**\r\n```json\r\n{\r\n  \"oauth_config\": {\r\n    \"client_id\": \"your-notion-client-id\",\r\n    \"client_secret\": \"your-notion-client-secret\",\r\n    \"token_endpoint_auth_method\": \"client_secret_basic\",\r\n    \"authorization_endpoint\": \"https://api.notion.com/v1/oauth/authorize\",\r\n    \"token_endpoint\": \"https://api.notion.com/v1/oauth/token\"\r\n  }\r\n}\r\n```\r\n\r\n**RFC Compliance:** Implementation follows RFC 6749 Section 2.3.1 for HTTP Basic Authentication, encoding `client_id:client_secret` as base64 in the Authorization header.\r\n\r\n**Testing:** Added three new unit tests (`test_client_credentials_flow_with_basic_auth`, `test_exchange_code_for_token_with_basic_auth`, `test_refresh_token_with_basic_auth`) that verify:\r\n- Basic Auth header is correctly formatted\r\n- Credentials are NOT included in POST body when using Basic Auth\r\n- Default behavior (POST body) remains unchanged\r\n\r\n**Documentation:** Created comprehensive setup guide at [`docs/docs/using/servers/external/notion-mcp-setup.md`](docs/docs/using/servers/external/notion-mcp-setup.md) covering both internal and public OAuth connection types.",
+  "comments": [
+    {
+      "id": "3200689872",
+      "author": "brian-hussey",
+      "created_at": "2026-05-07T10:21:55+00:00",
+      "body": "Please refactor this out to its own function.\nThis code is repeated verbatim here, line 1460 and line 1580 and if there are issues with it at any point there is no clear way to see that it would need to be fixed multiple times."
+    },
+    {
+      "id": "3200691226",
+      "author": "brian-hussey",
+      "created_at": "2026-05-07T10:22:11+00:00",
+      "body": "Repeated code from previous comment"
+    },
+    {
+      "id": "3200691905",
+      "author": "brian-hussey",
+      "created_at": "2026-05-07T10:22:20+00:00",
+      "body": "Repeated code from previous comment"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4161899116",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-23T11:14:26+00:00",
+      "body": "Minor RFC compliance gap in the Basic Auth header construction (lines 405, 1309, 1405).\n\nRFC 6749 Section 2.3.1 requires the client_id and client_secret to be URL percent-encoded (`application/x-www-form-urlencoded` per Appendix B) before combining and base64-encoding them. The current code skips that step:\n\n```python\ncredentials_str = f\"{client_id}:{client_secret}\"\n```\n\nShould be:\n\n```python\nfrom urllib.parse import quote\ncredentials_str = f\"{quote(client_id, safe='')}:{quote(client_secret, safe='')}\"\n```\n\nThis won't change behavior for Notion — their credentials are alphanumeric/UUIDs where `quote()` is a no-op. But it will break with any provider that issues credentials containing `:`, `%`, spaces, etc. Appendix B specifies the decoding obligation on the server side, so compliant servers expect the encoded form.\n\n`urllib.parse` is already imported in this file (line 23).\n\nA couple of other things I noticed:\n\n- The older `exchange_code_for_token` (singular, line 534) wasn't updated, but it has zero production callers — all real traffic goes through `complete_authorization_code_flow` → `_exchange_code_for_tokens` (plural). So not a concern.\n\n- In `_exchange_code_for_tokens` and `refresh_token`, when `use_basic_auth` is True but `client_secret` is falsy, the code silently falls through to POST body mode. The behavior is correct (public PKCE clients can't do Basic Auth anyway), but a `logger.warning` there would help catch misconfiguration."
+    },
+    {
+      "id": "4162043726",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-23T11:41:43+00:00",
+      "body": "PR looks good now - all the feedback has been addressed cleanly."
+    },
+    {
+      "id": "4243123058",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-07T10:24:09+00:00",
+      "body": "Hi @bogdanmariusc10 thank you for the submission.\nOverall this is a well implemented change that is backwards compatible with clear documentation for this example server.\n\nThere is one change needed for maintainability to follow DRY patterns, once that's addressed we'll be good to merge.\n\nThanks, Brian "
+    },
+    {
+      "id": "4251619443",
+      "author": "brian-hussey",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-08T10:41:29+00:00",
+      "body": "LGTM. thanks for making the change @bogdanmariusc10 I'll get this merged shortly."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "acc2968713b5656fd630dae59b6323f1c4546f9e",
+      "message": "feat: add HTTP Basic Auth support for OAuth token exchange\n\nAdd support for RFC 6749 Section 2.3.1 HTTP Basic Authentication in OAuth\ntoken exchange flows to enable compatibility with providers like Notion MCP\nthat require client credentials in Authorization header instead of POST body.\n\nChanges:\n- Add token_endpoint_auth_method configuration parameter\n- Implement Basic Auth in client_credentials_flow()\n- Implement Basic Auth in _exchange_code_for_tokens()\n- Implement Basic Auth in refresh_token()\n- Add comprehensive unit tests for Basic Auth flows\n- Add Notion MCP server setup documentation\n\nThe implementation maintains backward compatibility by defaulting to\nclient_secret_post (credentials in POST body) when token_endpoint_auth_method\nis not specified or set to any value other than 'client_secret_basic'.\n\nCloses #4358\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-23T08:52:30+00:00"
+    },
+    {
+      "sha": "0e85060a68e78c5715a85586164c1c5ab05de66d",
+      "message": "fix pre-commit issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-23T09:13:59+00:00"
+    },
+    {
+      "sha": "7c5b729d9d6e275f0992c0d64a4db468addf6f46",
+      "message": "implement minor RFC compliance changes\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-23T11:28:45+00:00"
+    },
+    {
+      "sha": "366a10e911207114264c06fca3a61b4ccc2a2edb",
+      "message": "improve test coverage\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-23T11:58:18+00:00"
+    },
+    {
+      "sha": "0bb14c069f94e7a3c8155f0a725bf5f465b138ad",
+      "message": "fix pre-commit issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-30T11:58:17+00:00"
+    },
+    {
+      "sha": "81575847b4f5ad3fb6d7aceaa6b5b364f3371dc1",
+      "message": "fix pre-commit issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-30T12:08:46+00:00"
+    },
+    {
+      "sha": "38878de2455a66641784890622502f75dc78df24",
+      "message": "refactor repeated basic auth header\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-07T10:46:07+00:00"
+    },
+    {
+      "sha": "386d40ea35cac3ec3b54f98cf1cfe71ae98d6a09",
+      "message": "update .secrets.baseline\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-07T10:57:13+00:00"
+    },
+    {
+      "sha": "6f8258582632fe97f3cc4a68e5f53dfb61b8c783",
+      "message": "Correct merged tests that were failing\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-05-08T12:13:50+00:00"
+    },
+    {
+      "sha": "a235242b7a9d86107eb1e128ad759892229c87ba",
+      "message": "Update .secrets.baseline\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-05-08T13:00:10+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 494,
+  "deletions": 31,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:59.284645",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:59.285214",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4407,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4407.json"
+  }
+}

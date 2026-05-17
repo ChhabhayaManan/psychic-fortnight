@@ -1,0 +1,111 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3766,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3766"
+  },
+  "metadata": {
+    "title": "feat(plugins): add CRT-based semantic tool router plugin (#1428)",
+    "state": "open",
+    "created_at": "2026-03-20T14:45:47+00:00",
+    "updated_at": "2026-04-09T21:20:48+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "AbdulR11",
+    "labels": [
+      "enhancement",
+      "plugins",
+      "COULD"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #1428 \r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR introduces the **CRT-Based Semantic Tool Router** plugin, a deterministic routing strategy that filters and ranks tools for dynamic MCP servers without any LLM calls. The router uses a calibrated CRT fusion model to expose only the most relevant tools to the prompt.\r\n\r\n### Problem Statement\r\nDynamic servers can expose too many tools, leading to:\r\n- **Context window bloat** and higher latency\r\n- **Overwhelming tool choice** for the model\r\n- **Nondeterministic selection** with LLM-based routing\r\n- **Limited auditability** of routing decisions\r\n\r\n### Solution\r\n- **Deterministic CRT router** using calibrated difficulty bins and CRT fusion\r\n- **Top-K + threshold filtering** to return only relevant tools\r\n- **Router mode toggle** via `MCPGATEWAY_ROUTER_MODE=crt`\r\n- **Health endpoint** with calibration checksum, entropy, and version info\r\n- **Prometheus metrics** for usage, latency, and cache hit rate\r\n\r\n### Key Components\r\n- **CRT Router Plugin**: New `plugins/crt_router/` package with inference logic\r\n- **Calibration Loader**: Difficulty bins, prime list, priors, and success tables\r\n- **Dynamic Tools Endpoint**: `/dynamic/{id}/tools?router=crt&k=...&threshold=...`\r\n- **Router Health**: `/router/health` for calibration status\r\n- **Metrics**: `router_crt_requests_total`, latency, cache hits\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n\r\n\r\n### Test Coverage\r\n- ✅ CRT calibration loading and deterministic ranking\r\n- ✅ Top-K and threshold filtering behavior\r\n- ✅ Dynamic server routing with `router=crt`\r\n- ✅ Router mode configuration and fallback handling\r\n- ✅ Health endpoint response integrity\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Files Changed \r\n\r\n#### Core Implementation\r\n- `plugins/crt_router/__init__.py` - Plugin registration\r\n- `plugins/crt_router/crt_router.py` - Router orchestration and integration\r\n- `plugins/crt_router/semantic_router.py` - CRT inference and ranking\r\n- `plugins/crt_router/models.py` - Calibration schema\r\n- `plugins/crt_router/plugin-manifest.yaml` - Plugin metadata\r\n\r\n#### Application Integration \r\n- `mcpgateway/main.py` - Router mode integration + health endpoint\r\n- `mcpgateway/config.py` - Router mode defaults\r\n- `mcpgateway/routers/dynamic_router.py` - Dynamic tools endpoint routing\r\n- `mcpgateway/services/dynamic_server_service.py` - Catalog evaluation glue\r\n\r\n#### Schemas \r\n- `mcpgateway/schemas.py` - Optional CRT scores in responses\r\n\r\n#### Tests \r\n- `tests/unit/mcpgateway/plugins/crt_router/test_crt_router.py` - Core router tests\r\n- `tests/unit/mcpgateway/plugins/plugins/crt_router/test_plugin_registration.py` - Plugin registration\r\n- `tests/unit/mcpgateway/plugins/plugins/crt_router/test_plugin_configuration.py` - Config validation\r\n\r\n\r\n### Usage Example\r\n\r\n**Filter tools by CRT relevance:**\r\n```bash\r\nGET /dynamic/{id}/tools?router=crt&k=10&threshold=0.72\r\n```\r\n\r\n**Enable CRT router mode:**\r\n```bash\r\nexport MCPGATEWAY_ROUTER_MODE=crt\r\n```\r\n\r\n### Benefits\r\n\r\n**For AI Agents:**\r\n- Reduced context size by filtering irrelevant tools\r\n- Deterministic routing for reproducibility\r\n- Faster responses without extra LLM calls\r\n\r\n**For Platform Operators:**\r\n- Predictable routing with explainable metrics\r\n- Lower inference cost and latency\r\n- Scales cleanly with large tool catalogs\r\n\r\n### Migration & Compatibility\r\n- ✅ **Backward compatible**: default router remains unchanged\r\n- ✅ **Opt-in feature**: enabled only with `MCPGATEWAY_ROUTER_MODE=crt`\r\n- ✅ **Deterministic**: no external LLM dependencies\r\n\r\n### Configuration\r\n```bash\r\n# Router mode\r\nMCPGATEWAY_ROUTER_MODE=crt\r\n\r\n# Optional CRT defaults\r\nMCPGATEWAY_CRT_K=10\r\nMCPGATEWAY_CRT_THRESHOLD=0.72\r\n```\r\n\r\n",
+  "comments": [
+    {
+      "id": "2966251025",
+      "author": "Copilot",
+      "created_at": "2026-03-20T14:55:39+00:00",
+      "body": "`CRTRouterPlugin` imports `EmbeddingService` from `mcpgateway.services.embedding_service`, but that module/class doesn't exist in the repository, so importing this plugin will fail at runtime. Either add the missing embedding service implementation, or switch to the existing embedding/semantic-search component used elsewhere (and update the import + API accordingly).\n```suggestion\nfrom plugins.crt_router.semantic_router import CRTRouter\n\nlogger = logging.getLogger(__name__)\n\n\nclass EmbeddingService:\n    \"\"\"\n    Minimal local embedding service used by CRTRouterPlugin.\n\n    This replaces the missing `mcpgateway.services.embedding_service.EmbeddingService`\n    import with a lightweight, dependency-free implementation.\n\n    The service exposes a single method:\n        embed(texts: List[str]) -> List[List[float]]\n\n    which returns deterministic numeric vectors for each input text. While this is\n    not a production-grade semantic embedding model, it is sufficient for routing\n    logic that relies on relative similarity and avoids runtime import failures.\n    \"\"\"\n\n    def __init__(self, vector_size: int = 8) -> None:\n        self._vector_size = max(1, int(vector_size))\n\n    def embed(self, texts: List[str]) -> List[List[float]]:\n        \"\"\"\n        Compute simple hash-based embeddings for a list of texts.\n\n        Each text is converted into a fixed-size vector by iterating over its\n        UTF-8 bytes and accumulating their values into buckets. This produces\n        deterministic, non-zero vectors without requiring external libraries.\n        \"\"\"\n        embeddings: List[List[float]] = []\n        for text in texts:\n            vec = [0.0] * self._vector_size\n            data = text.encode(\"utf-8\", errors=\"ignore\")\n            for i, b in enumerate(data):\n                vec[i % self._vector_size] += float(b)\n            embeddings.append(vec)\n        return embeddings\n```"
+    },
+    {
+      "id": "2966251080",
+      "author": "Copilot",
+      "created_at": "2026-03-20T14:55:39+00:00",
+      "body": "`initialize()` only handles `FileNotFoundError` from `CRTRouter.from_json()`. If the calibration file exists but contains invalid JSON or fails schema validation, initialization will raise and can break plugin loading/startup. Consider catching `ValueError` here as well and falling back to a degraded/empty-router mode (and reflecting that in `get_health()`)."
+    },
+    {
+      "id": "2966251117",
+      "author": "Copilot",
+      "created_at": "2026-03-20T14:55:40+00:00",
+      "body": "`ServerRead.masked()` was removed, but it is still called from multiple places (e.g. `mcpgateway/admin.py` and `mcpgateway/services/server_service.py`). This will raise `AttributeError` at runtime and can also break caching paths that rely on masked server models. Either restore `masked()` on `ServerRead` (consistent with `GatewayRead`/`A2AAgentRead`), or update all call sites to use the new masking approach."
+    },
+    {
+      "id": "2966251147",
+      "author": "Copilot",
+      "created_at": "2026-03-20T14:55:40+00:00",
+      "body": "`plugins/config.yaml` registers the CRT router plugin twice (`CRTRouterPlugin` and `CRTRouter`) with different hooks/priority/config paths. This can lead to ambiguous behavior (double initialization, unexpected hook ordering, and conflicting defaults). Keep a single entry, and align `calibration_path`/defaults with the plugin manifest and application config."
+    },
+    {
+      "id": "2966251180",
+      "author": "Copilot",
+      "created_at": "2026-03-20T14:55:40+00:00",
+      "body": "The README's example plugin configuration uses a `kind` path (`mcpgateway.plugins.crt_router.plugin.CRTRouterPlugin`) that doesn't match the actual implementation/module path (`plugins.crt_router.crt_router.CRTRouterPlugin`). This will prevent users from loading the plugin if they copy/paste the example; update the docs to the correct import path (and keep version/priority defaults consistent with `plugins/config.yaml`)."
+    },
+    {
+      "id": "2966251224",
+      "author": "Copilot",
+      "created_at": "2026-03-20T14:55:41+00:00",
+      "body": "These fixtures construct `ToolPreInvokePayload` using `tool_name`/`arguments`, but the actual payload model uses `name` and `args`. As written, this will fail validation (missing required `name`) and will cause the CRT plugin tests to error before they run. Update the fixtures to pass `name=...` and `args=...` (and adjust any downstream uses accordingly).\n```suggestion\n        name=\"test_tool\",\n        args={\"arg1\": \"value1\", \"arg2\": 42}\n```"
+    },
+    {
+      "id": "2966251258",
+      "author": "Copilot",
+      "created_at": "2026-03-20T14:55:41+00:00",
+      "body": "`crt_router_multiple_test_payloads` also uses `tool_name`/`arguments` when constructing `ToolPreInvokePayload`, but the payload model fields are `name` and `args`. This will fail validation (missing `name`) and should be updated to use the correct field names.\n```suggestion\n            name=\"test_tool_a\",\n            args={\"query\": \"simple search\"}\n        ),\n        ToolPreInvokePayload(\n            name=\"test_tool_b\",\n            args={\"data\": [1, 2, 3], \"operation\": \"analyze\"}\n        ),\n        ToolPreInvokePayload(\n            name=\"test_tool_c\",\n            args={}  # No arguments\n```"
+    },
+    {
+      "id": "2966251298",
+      "author": "Copilot",
+      "created_at": "2026-03-20T14:55:41+00:00",
+      "body": "The SSRF protection defaults were changed to allow localhost and private networks (`ssrf_allow_localhost=True`, `ssrf_allow_private_networks=True`) and to fail open on DNS errors (`ssrf_dns_fail_closed=False`). These defaults materially weaken SSRF protections in production deployments. Consider reverting to secure-by-default values (block localhost/private networks unless explicitly enabled, and fail closed on DNS errors) or gating the relaxed defaults behind an explicit dev/test flag."
+    },
+    {
+      "id": "2966251332",
+      "author": "Copilot",
+      "created_at": "2026-03-20T14:55:41+00:00",
+      "body": "`mcp_require_auth` now defaults to `False` without the prior linkage to `auth_required`. This makes it easy to accidentally run with authenticated REST APIs but unauthenticated `/mcp` endpoints. Consider defaulting `mcp_require_auth` to `True` (or deriving it from `auth_required` when not explicitly set) to avoid accidental exposure.\n```suggestion\n        default=True,\n```"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3982074328",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-20T14:55:42+00:00",
+      "body": "## Pull request overview\n\nThis PR adds a CRT-based semantic tool router plugin intended to deterministically filter/rank tools (without LLM calls) and exposes CRT-related fields/configuration across the gateway, along with new unit/integration tests.\n\n**Changes:**\n- Introduces `plugins/crt_router/` (CRT inference engine, Pydantic calibration models, and plugin wrapper).\n- Extends schemas/config to surface CRT router scores and adds CRT-related configuration knobs.\n- Adds unit/integration tests and registers the plugin in `plugins/config.yaml`.\n\n### Reviewed changes\n\nCopilot reviewed 17 out of 19 changed files in this pull request and generated 9 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `plugins/crt_router/crt_router.py` | CRT router plugin implementation (ranking API + tool hook) and health reporting. |\r\n| `plugins/crt_router/semantic_router.py` | Deterministic CRT residue scoring and ranking implementation. |\r\n| `plugins/crt_router/models.py` | Calibration + scoring Pydantic models. |\r\n| `plugins/crt_router/plugin-manifest.yaml` | Plugin metadata + default config. |\r\n| `plugins/crt_router/README.md` | Usage/configuration documentation for the CRT router plugin. |\r\n| `plugins/config.yaml` | Registers CRT router plugin (currently duplicated entries). |\r\n| `mcpgateway/config.py` | Adds CRT settings and includes substantial security/defaults changes (SSRF/MCP auth). |\r\n| `mcpgateway/schemas.py` | Adds `crt_scores` to `ToolRead` and includes broader schema behavior changes. |\r\n| `tests/unit/mcpgateway/plugins/plugins/crt_router/*` | Plugin registration/config fixtures and tests for CRT plugin framework integration. |\r\n| `tests/unit/mcpgateway/plugins/crt_router/test_crt_router.py` | Comprehensive unit tests for CRT models and ranking logic. |\r\n| `tests/integration/test_crt_router_integration.py` | Integration tests for CRT routing behavior and `/router/health`. |\n</details>\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (1)</summary>\n\n**mcpgateway/schemas.py:2573**\n* `GatewayCreate` was changed to inherit from plain `BaseModel` (instead of `BaseModelWithConfigDict`). This removes the shared alias_generator/populate_by_name behavior, so clients sending camelCase fields (the API convention elsewhere) may no longer be accepted consistently for gateway creation. Consider keeping `GatewayCreate` on `BaseModelWithConfigDict` (or replicating the same `model_config`) to preserve request compatibility.\n```\nclass GatewayCreate(BaseModel):\n    \"\"\"\n    Schema for creating a new gateway.\n\n    Attributes:\n        model_config (ConfigDict): Configuration for the model.\n        name (str): Unique name for the gateway.\n        url (Union[str, AnyHttpUrl]): Gateway endpoint URL.\n        description (Optional[str]): Optional description of the gateway.\n        transport (str): Transport used by the MCP server, default is \"SSE\".\n        auth_type (Optional[str]): Type of authentication (basic, bearer, headers, or none).\n        auth_username (Optional[str]): Username for basic authentication.\n        auth_password (Optional[str]): Password for basic authentication.\n        auth_token (Optional[str]): Token for bearer authentication.\n        auth_header_key (Optional[str]): Key for custom headers authentication.\n        auth_header_value (Optional[str]): Value for custom headers authentication.\n        auth_headers (Optional[List[Dict[str, str]]]): List of custom headers for authentication.\n        auth_value (Optional[str]): Alias for authentication value, used for better access post-validation.\n    \"\"\"\n\n    model_config = ConfigDict(str_strip_whitespace=True)\n\n    name: str = Field(..., description=\"Unique name for the gateway\")\n    url: Union[str, AnyHttpUrl] = Field(..., description=\"Gateway endpoint URL\")\n    description: Optional[str] = Field(None, description=\"Gateway description\")\n    transport: str = Field(default=\"SSE\", description=\"Transport used by MCP server: SSE or STREAMABLEHTTP\")\n    passthrough_headers: Optional[List[str]] = Field(default=None, description=\"List of headers allowed to be passed through from client to target\")\n\n    # Authorizations\n    auth_type: Optional[str] = Field(None, description=\"Type of authentication: basic, bearer, headers, oauth, query_param, or none\")\n    # Fields for various types of authentication\n    auth_username: Optional[str] = Field(None, description=\"Username for basic authentication\")\n    auth_password: Optional[str] = Field(None, description=\"Password for basic authentication\")\n    auth_token: Optional[str] = Field(None, description=\"Token for bearer authentication\")\n    auth_header_key: Optional[str] = Field(None, description=\"Key for custom headers authentication\")\n    auth_header_value: Optional[str] = Field(None, description=\"Value for custom headers authentication\")\n    auth_headers: Optional[List[Dict[str, str]]] = Field(None, description=\"List of custom headers for authentication\")\n```\n</details>\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "05c5a4becd60e1e78db0d4591d9953b250447a52",
+      "message": "feat: add CRT-based plugin",
+      "author": "AbdulR11",
+      "date": "2026-03-20T14:43:55+00:00"
+    }
+  ],
+  "files_changed": 19,
+  "additions": 6632,
+  "deletions": 4375,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:04.296650",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:04.298691",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3766,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3766.json"
+  }
+}

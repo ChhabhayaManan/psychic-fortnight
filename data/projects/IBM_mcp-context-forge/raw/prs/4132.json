@@ -1,0 +1,129 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4132,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4132"
+  },
+  "metadata": {
+    "title": "perf(main): defer DB bootstrap, lazy-load heavy routers, minimal test defaults",
+    "state": "closed",
+    "created_at": "2026-04-11T08:21:44+00:00",
+    "updated_at": "2026-04-11T12:35:10+00:00",
+    "closed_at": "2026-04-11T12:35:08+00:00",
+    "merged_at": "2026-04-11T12:35:08+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nTwo related commits that together cut `import mcpgateway.main` cold-start time in test runs and drop the four slowest unit tests from 3-5s to under 0.5s.\n\n**Commit 1 — `perf(main): defer DB bootstrap + lazy-load admin/rust proxy/llmchat`**\n\nSeveral expensive operations happened at module-import time in `mcpgateway/main.py`, forcing every test that imported main (directly or via a fixture) to pay the full cost.\n\n- Move `wait_for_db_ready()` and `bootstrap_db()` from module-level execution into the `lifespan()` startup hook. Module import no longer probes the database or runs Alembic.\n- Drop the eager `from mcpgateway.admin import admin_router, set_logging_service` at the top of main. The 19k-line admin module is now imported lazily inside `if ADMIN_API_ENABLED:` along with `set_logging_service()`.\n- Drop the eager `from mcpgateway.transports.rust_mcp_runtime_proxy import RustMCPRuntimeProxy`; import it inside `_build_mcp_transport_app()` on the branch that needs it.\n- Gate `init_llmchat_redis()` in lifespan on `settings.llmchat_enabled` so disabled deployments skip the langchain import chain.\n\n**Commit 2 — `test(conftest): disable admin/UI/LLM chat by default via reload fixture`**\n\nWith the lazy loading in place, the test harness can skip the admin module entirely for unit tests that don't exercise `/admin/...` routes. The tricky part: `mcpgateway.config.get_settings` is `@lru_cache`'d, so once main is imported with a given config, per-file env overrides can't flip the cached value back. This PR:\n\n- Adds `_force_minimal_main_app_features()` to `tests/conftest.py` (runs at conftest import time, before any test collection). Forces `MCPGATEWAY_ADMIN_API_ENABLED=false`, `MCPGATEWAY_UI_ENABLED=false`, and `LLMCHAT_ENABLED=false` in the process env, clears `get_settings.cache_clear()`, and drops `mcpgateway.main` from `sys.modules` if it somehow snuck in.\n- Adds a session-scoped `main_app_with_admin_api` fixture that clears the Settings lru_cache, strips shadowing instance attributes from the `LazySettingsWrapper` for the feature flags it cares about, pops `mcpgateway.main` from `sys.modules`, and reimports fresh with admin + UI flags flipped back on.\n- Migrates the four existing unit test files that hit `/admin/...` via the real main.app (`test_well_known.py`, `test_admin_catalog_htmx.py`, `test_ui_version.py`, `test_final_coverage_push.py`) to pull the app from the new fixture instead of `from mcpgateway.main import app`.\n- Flips `pyproject.toml` `[tool.pytest.ini_options].env` to `D:` defaults for the three feature flags, so host env can still override for manual runs.\n\n**Key discovery:** `LazySettingsWrapper` has no `__setattr__` override, so `monkeypatch.setattr(settings, field, value)` sets direct instance attributes that shadow `__getattr__`. Pytest cleanup isn't always reliable for these shadowed attrs — several survive past their test's monkeypatch undo via the `_import_fresh_main_module` helper in `test_main_extended`. The fixture explicitly strips the feature flags from `settings.__dict__` before reloading main.\n\n## Results\n\n| metric | before | after |\n|---|---|---|\n| Cold `import mcpgateway.main` (test env) | ~1356ms | ~938ms |\n| `test_main_registers_otel_request_middleware_when_tracing_is_enabled` | 5.20s | 0.34s |\n| `TestErrorHandling::test_openapi_json_with_auth` | 3.70s | 0.25s |\n| `test_module_level_reverse_proxy_router_success` | 3.00s | 0.24s |\n| `test_module_level_uses_settings_backed_plugin_enablement` | 2.87s | 0.14s |\n\nPass count unchanged: **2905 passed / 5 failed** across the affected suites. The 5 failures are pre-existing caplog pollution caused by `test_main_extended.py`'s `_import_fresh_main_module` clobbering the root logger config — verified reproducible on `main` with `git stash`.\n\n## Test plan\n\n- [x] `uv run pytest tests/unit/mcpgateway/test_main.py` — 275 passed\n- [x] `uv run pytest tests/unit/mcpgateway/test_main_extended.py` — all passed\n- [x] `uv run pytest tests/unit/mcpgateway/test_well_known.py tests/unit/mcpgateway/test_admin_catalog_htmx.py tests/unit/mcpgateway/test_ui_version.py tests/unit/mcpgateway/test_final_coverage_push.py` — all admin-dependent tests pass via the new fixture\n- [x] Full sweep of `tests/unit/mcpgateway/{test_main*, test_admin*, routers/}` — 2905 passed / 5 failed (matches `main` baseline)\n- [x] Measured cold import time before/after\n- [x] Verified the 4 previously-slow fresh-import tests drop from 3-5s to ~0.1-0.5s",
+  "comments": [
+    {
+      "id": "3067790070",
+      "author": "Copilot",
+      "created_at": "2026-04-11T08:27:16+00:00",
+      "body": "`wait_for_db_ready(..., sync=True)` is being called inside the async `lifespan()` startup hook, which blocks the running event loop (the helper’s own docstring warns about this). Consider offloading the probe to a worker thread (e.g., via `asyncio.to_thread`) or adding/using a truly-async readiness probe so startup doesn’t block the loop."
+    },
+    {
+      "id": "3067790073",
+      "author": "Copilot",
+      "created_at": "2026-04-11T08:27:16+00:00",
+      "body": "`tests/conftest.py` imports `mcpgateway.db` at module import time, and `mcpgateway.db` immediately reads `settings.database_url`, which instantiates and caches the full Settings object via `get_settings()` (lru_cache). This means later test modules that set env vars “before any mcpgateway imports” (e.g. e2e/integration/playwright suites) will no longer be able to influence settings without an explicit `get_settings.cache_clear()` + module reload, which those suites currently don’t do. To avoid breaking those suites, consider deferring `mcpgateway.db` (and any other settings-touching imports) until inside fixtures, or otherwise ensuring settings caching doesn’t occur before per-suite env setup.\n"
+    },
+    {
+      "id": "3067790075",
+      "author": "Copilot",
+      "created_at": "2026-04-11T08:27:16+00:00",
+      "body": "`main_app_with_admin_api` mutates process-global env vars and leaves them set to true for the rest of the session. That can create ordering-dependent behavior if other tests rely on the default-disabled feature flags. Consider capturing the prior env values and restoring them (and optionally unloading `mcpgateway.main` again) after the fixture yields, so tests that don’t request this fixture remain isolated from its side effects."
+    },
+    {
+      "id": "3067790080",
+      "author": "Copilot",
+      "created_at": "2026-04-11T08:27:17+00:00",
+      "body": "The comment here says host env can override these defaults for manual runs, but `tests/conftest.py::_force_minimal_main_app_features()` currently hard-sets the same env vars to false unconditionally at import time, overriding any host-provided values. Either adjust the conftest bootstrap to honor pre-set env vars (e.g., only set defaults when unset) or update this documentation to match actual behavior."
+    },
+    {
+      "id": "3067952961",
+      "author": "jonpspri",
+      "created_at": "2026-04-11T11:41:01+00:00",
+      "body": "Valid — fixed in 4e0875b5a by wrapping the probe in `asyncio.to_thread`:\n\n```python\nawait asyncio.to_thread(\n    wait_for_db_ready,\n    max_tries=int(settings.db_max_retries),\n    interval=int(settings.db_retry_interval_ms) / 1000,\n    sync=True,\n)\n```\n\nKeeps the sync helper (no new async probe needed) while unblocking the event loop."
+    },
+    {
+      "id": "3067953142",
+      "author": "jonpspri",
+      "created_at": "2026-04-11T11:41:14+00:00",
+      "body": "Acknowledged but not a regression introduced by this PR. `tests/conftest.py` already imported `mcpgateway.db` at module-import time on `origin/main` (that line predates this PR) and `mcpgateway.db` already reads `settings.database_url`, so the `get_settings` lru_cache was already populated before any test module was collected.\n\nWhat this PR adds *helps* the scenario you describe: `_force_minimal_main_app_features()` calls `get_settings.cache_clear()` *after* setting the minimal-feature env vars, and drops `mcpgateway.main` from `sys.modules`. So test files that still rely on \"set env before importing mcpgateway\" get a freshly-rebuilt settings object on their first access.\n\nThe remaining edge case — a test file that both caches settings itself at collection time *and* depends on its own env vars winning over what conftest set — is not handled, but that pattern is exactly what the new `main_app_with_admin_api` fixture exists to replace. Marking resolved."
+    },
+    {
+      "id": "3067953281",
+      "author": "jonpspri",
+      "created_at": "2026-04-11T11:41:25+00:00",
+      "body": "Partially addressed in 4e0875b5a. The fixture now captures the prior `MCPGATEWAY_ADMIN_API_ENABLED` / `MCPGATEWAY_UI_ENABLED` env values and restores them on teardown.\n\nI deliberately did **not** try to un-mount `admin_router` from `main.app`: FastAPI does not support reliable route removal, and the fixture is session-scoped, so any test that saw the mounted routes has already finished by the time teardown runs. Leaving the routes in place is also what the app would look like in production with admin enabled, so nothing should break.\n\nThe settings `get_settings` lru_cache is intentionally NOT cleared at teardown — clearing it while admin routes are still mounted would desync `settings.mcpgateway_admin_api_enabled` (false) from the live `main.app` routes (admin present), which is the worse of the two inconsistencies. Marking resolved."
+    },
+    {
+      "id": "3067953382",
+      "author": "jonpspri",
+      "created_at": "2026-04-11T11:41:34+00:00",
+      "body": "Valid — fixed in 4e0875b5a. `_force_minimal_main_app_features()` now uses `os.environ.setdefault(...)` instead of unconditional assignment:\n\n```python\nos.environ.setdefault(\"MCPGATEWAY_ADMIN_API_ENABLED\", \"false\")\nos.environ.setdefault(\"MCPGATEWAY_UI_ENABLED\", \"false\")\nos.environ.setdefault(\"LLMCHAT_ENABLED\", \"false\")\n```\n\nA developer running `MCPGATEWAY_ADMIN_API_ENABLED=true pytest ...` to debug a single admin test now sees admin mounted at import time, matching the pyproject.toml comment. Marking resolved."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4093567044",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T08:27:17+00:00",
+      "body": "## Pull request overview\n\nThis PR reduces `mcpgateway.main` cold-start/import overhead (especially in unit tests) by deferring DB initialization to app startup and lazily importing heavy optional routers/modules, then adjusts the pytest harness to keep admin/UI/LLM chat disabled by default unless a test explicitly requests an admin-enabled `main.app`.\n\n**Changes:**\n- Move DB readiness probing + bootstrap from `mcpgateway.main` import time into the FastAPI `lifespan()` startup hook.\n- Lazy-load heavy optional modules (admin router, Rust proxy transport, LLM chat redis init) behind feature flags / code paths.\n- Default unit tests to minimal features via `tests/conftest.py` + pytest env defaults, and add a session fixture to reload `mcpgateway.main` with admin/UI enabled for the few tests that need it.\n\n### Reviewed changes\n\nCopilot reviewed 8 out of 8 changed files in this pull request and generated 4 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| mcpgateway/main.py | Defers DB bootstrap to lifespan; lazy-loads admin + Rust proxy + LLM chat init to reduce import-time cost. |\r\n| tests/conftest.py | Forces minimal feature flags early; adds `main_app_with_admin_api` fixture that reloads `mcpgateway.main` with admin/UI enabled. |\r\n| pyproject.toml | Changes pytest env defaults to disable heavy optional features by default. |\r\n| tests/unit/mcpgateway/test_well_known.py | Switches to `main_app_with_admin_api` fixture to ensure admin routes are mounted when needed. |\r\n| tests/unit/mcpgateway/test_ui_version.py | Uses `main_app_with_admin_api` fixture instead of importing `app` at module import time. |\r\n| tests/unit/mcpgateway/test_final_coverage_push.py | Uses `main_app_with_admin_api` fixture for admin route testing. |\r\n| tests/unit/mcpgateway/test_admin_catalog_htmx.py | Uses `main_app_with_admin_api` fixture for admin route testing. |\r\n| .secrets.baseline | Regenerated baseline metadata (timestamp/line-number adjustments). |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "4093688870",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T11:41:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "4093688998",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T11:41:14+00:00",
+      "body": ""
+    },
+    {
+      "id": "4093689095",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T11:41:25+00:00",
+      "body": ""
+    },
+    {
+      "id": "4093689184",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T11:41:34+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "330d46c8d9e90c0dd6203d1d4d3dcc46822865bc",
+      "message": "perf(main): defer DB bootstrap + lazy-load admin/rust proxy/llmchat\n\nSeveral expensive operations happened at `import mcpgateway.main` time,\nforcing every test that imported main (directly or via a fixture) to\npay ~1.3s of cold-start cost. This change defers those operations and\ndrops the four slowest unit tests from 3-5s each to under 0.5s.\n\n## Runtime changes (mcpgateway/main.py)\n\n- Move `wait_for_db_ready()` and `bootstrap_db()` from module-level\n  execution into the `lifespan()` startup hook. Module import no longer\n  probes the database or runs Alembic. The sync DB probe is wrapped in\n  `asyncio.to_thread` so it does not block the event loop.\n- Drop the eager `from mcpgateway.admin import admin_router,\n  set_logging_service` at the top of main. The 19k-line admin module is\n  now imported lazily inside `if ADMIN_API_ENABLED:` along with\n  `set_logging_service()`.\n- Drop the eager `from mcpgateway.transports.rust_mcp_runtime_proxy\n  import RustMCPRuntimeProxy`; import it inside\n  `_build_mcp_transport_app()` on the branch that needs it.\n- Gate `init_llmchat_redis()` in lifespan on `settings.llmchat_enabled`\n  so disabled deployments skip the langchain import chain.\n\n## Test infrastructure (tests/conftest.py + pyproject.toml)\n\n- Add `_force_minimal_main_app_features()` bootstrap hook that defaults\n  MCPGATEWAY_ADMIN_API_ENABLED, MCPGATEWAY_UI_ENABLED, and\n  LLMCHAT_ENABLED to false via `os.environ.setdefault(...)` before any\n  mcpgateway module is imported. Host env values win when set.\n- Add a session-scoped `main_app_with_admin_api` fixture that\n  dynamically flips the admin + UI flags and mounts `admin_router` on\n  the live `main.app`. FastAPI's router is a mutable collection, so\n  dynamically-added routes are picked up by existing TestClient\n  instances. No module reload — other files that bind `app` at module\n  scope keep working. Captures and restores prior env on teardown.\n- Add a session-scoped `main_app_with_a2a_router` fixture that\n  dynamically mounts `main_mod.a2a_router` on the live app if missing,\n  for the few tests that hit /a2a/* routes.\n- pyproject.toml pytest env: flip admin/UI/LLM chat defaults to false\n  (via `D:` prefix) with documentation explaining the override path.\n\n## Test migrations\n\n- tests/e2e/test_admin_apis.py + tests/e2e/test_main_apis.py: migrate\n  to depend on `main_app_with_admin_api` via module- or fixture-level\n  dependencies. Drop the stale module-top `os.environ` overrides for\n  admin/UI/A2A that were no-ops on main and would now mask test intent.\n  Correct test_root_path_returns_api_info assertion to match the\n  actual `root_info()` response shape ({\"name\", \"description\"}).\n- tests/unit/mcpgateway/test_well_known.py /\n  test_admin_catalog_htmx.py / test_ui_version.py /\n  test_final_coverage_push.py: pull `main_app_with_admin_api` instead\n  of binding `app` at module scope.\n- tests/unit/mcpgateway/test_ui_version.py: drop the dead-code\n  module-top `os.environ[\"MCPGATEWAY_A2A_ENABLED\"] = \"false\"`. The\n  file's only real test is @pytest.mark.skip'd, so the env assignment\n  was pure collection-time pollution that broke every A2A test in any\n  xdist worker that collected it before importing main.\n\n## Ordering-sensitive test hardening\n\nSeveral tests had hidden coupling to `mcpgateway.main` /\n`mcpgateway.admin` module-import-time state and started failing\nintermittently under `pytest -n auto` as xdist-driven distribution\nchanged the order in which fixtures flip feature flags. Each is now\nself-contained:\n\n- test_main::test_root_redirect: branch on the actual response status\n  rather than the current `settings.mcpgateway_ui_enabled` value —\n  other fixtures may flip the flag after main.py registered its `/`\n  handler.\n- test_admin::TestA2AAgentManagement: class-level autouse fixture\n  monkeypatches `mcpgateway.admin.a2a_service` to a real\n  A2AAgentService instance (not MagicMock — several tests patch via\n  @patch.object which only intercepts calls through real instances)\n  and forces `settings.mcpgateway_a2a_enabled=True`.\n- test_admin::TestPublicVisibilityGuard {add,edit}_a2a_agent tests:\n  same treatment with MagicMock (these only need a truthy check).\n- test_main_extended::TestA2AEndpoints and\n  test_main_error_handlers::TestA2AAgentErrorHandlers: autouse\n  _ensure_a2a_router fixtures that pull main_app_with_a2a_router.\n\n## Coverage\n\ntest_lifespan_with_feature_flags flips `llmchat_enabled=True` so the\nnew lazy-import / init_redis branch in lifespan is exercised.\n\n## Results\n\n| metric | before | after |\n|---|---|---|\n| Cold `import mcpgateway.main` (test env) | ~1356ms | ~938ms |\n| test_main_registers_otel_request_middleware_when_tracing_is_enabled | 5.20s | 0.34s |\n| TestErrorHandling::test_openapi_json_with_auth | 3.70s | 0.25s |\n| test_module_level_reverse_proxy_router_success | 3.00s | 0.24s |\n| test_module_level_uses_settings_backed_plugin_enablement | 2.87s | 0.14s |\n\nUnit sweep: 2905 passed / 5 failed — same 5 pre-existing caplog\npollution failures as origin/main. E2E admin + main suites fully\ngreen. All 39 A2A tests that previously failed under xdist now pass.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-11T12:20:49+00:00"
+    }
+  ],
+  "files_changed": 14,
+  "additions": 346,
+  "deletions": 119,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:52.266051",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:52.267073",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4132,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4132.json"
+  }
+}

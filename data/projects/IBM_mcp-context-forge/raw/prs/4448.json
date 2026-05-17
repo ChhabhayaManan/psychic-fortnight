@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4448,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4448"
+  },
+  "metadata": {
+    "title": "refactor(tests): unify live-gateway dirs, use uv run",
+    "state": "closed",
+    "created_at": "2026-04-26T18:22:36+00:00",
+    "updated_at": "2026-05-06T19:43:20+00:00",
+    "closed_at": "2026-05-06T19:43:17+00:00",
+    "merged_at": "2026-05-06T19:43:17+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Migrate every Makefile pytest target to `uv run pytest` — `make test` no longer requires `make install-dev` or `source venv/bin/activate`.\n- Consolidate live-infrastructure tests under `tests/live_gateway/` (mcp + sso + e2e_rust + protocol_compliance + helpers) with a single `--ignore` and a new `make test-live-gateway` umbrella target.\n- Move dev-only deps (playwright, fuzz) from `[project.optional-dependencies]` to the dev group; rewire `fuzz-atheris` to layer atheris on demand via `uv run --with`.\n\n## Why\n\nTwo longstanding pain points motivated this:\n\n1. **`make test` required infrastructure setup** — `install-dev` had to run first, the venv had to be sourced, and pytest plugin pinning was scattered across the Makefile and CI workflows. Slower onboarding, harder-to-reason CI.\n2. **Live-gateway tests were sprinkled across `tests/e2e/{mcp,sso}`, `tests/e2e_rust/`, and `tests/protocol_compliance/`** — `PYTEST_IGNORE` had four entries, each with its own justification. The split between in-process vs live-gateway tests was implicit and easy to miss.\n\nBoth are addressed by leaning harder on `uv` and by giving live-gateway tests a single, self-documenting home.\n\n## What changed\n\n### Makefile / pytest invocation\n\n- ~30 pytest invocations migrated from `source $(VENV_DIR)/bin/activate && $(VENV_DIR)/bin/pytest ...` to `$(UV_BIN) run pytest ...`.\n- Inline env-var prefixes replace `export X=Y &&` chains inside bash subshells.\n- Every test target gains `uv` as an order-only dependency (verifies `uv` exists; skips `install-dev`).\n- `--extra plugins` added to broad-scope targets (test, test-verbose, test-profile, coverage*, async-test, test-docs) so cpex_* plugin imports continue to resolve.\n- New `test-live-gateway` umbrella target.\n- New `# help:` entries for previously-undocumented targets (test-mcp-rbac, test-mcp-access-matrix, test-mcp-plugin-parity, test-mcp-session-isolation, test-e2e-sso, test-live-gateway).\n\n### Test directory layout\n\n```\ntests/\n├── e2e/                 # in-process FastAPI tests (default `make test`)\n└── live_gateway/        # NEW — all live-infrastructure tests\n    ├── README.md        # documents prereqs per subsuite\n    ├── helpers/         # ← from tests/e2e/helpers/\n    ├── mcp/             # ← from tests/e2e/mcp/ + 3 live-infra files lifted up from tests/e2e/\n    ├── e2e_rust/        # ← from tests/e2e_rust/\n    ├── sso/             # ← from tests/e2e/sso/\n    └── protocol_compliance/  # ← from tests/protocol_compliance/\n```\n\n`PYTEST_IGNORE` collapses from 5 entries to 4 (`tests/fuzz tests/manual test.py tests/live_gateway` — three directory ignores plus the `test.py` stub file). `pyproject.toml` `addopts` likewise simplifies to a single `--ignore=tests/live_gateway`.\n\n### Dependency reshuffling\n\n- `pytest-html`, `pytest-playwright`, `playwright`, `python-owasp-zap-v2.4` moved from the `playwright` extra into `dev`.\n- `hypothesis`, `pytest-benchmark`, `schemathesis` (with the existing pytest-9 cap) moved from the `fuzz` extra into `dev`.\n- The `playwright`, `fuzz`, and `fuzz-atheris` extras are removed. `make fuzz-atheris` now layers atheris ad-hoc via `uv run --with 'atheris>=3.0.0'` — Linux gets the prebuilt wheel, macOS arm64 needs `brew install llvm` (documented in the target's help text).\n\n### Side-fixes that fell out\n\n- **Pytest-playwright auto-load conflict**: moving `pytest-playwright` into `dev` revealed that its session-scoped browser fixtures pollute the asyncio event loop and break `tests/e2e/test_oauth_protected_resource.py` and friends (\"Runner.run() cannot be called from a running event loop\"). Fix: `addopts = \"... -p no:playwright\"` globally; UI targets opt back in via `-p playwright` in the `run_playwright_test` macro.\n- **Three empty stub files** (`test_admin_workflow.py`, `test_client_workflow.py`, `test_federation_workflow.py`) deleted from `tests/e2e/`.\n\n### CI workflow path filters\n\n`.github/workflows/pytest{,-rust}.yml` updated their `paths:` triggers to point at `tests/live_gateway/e2e_rust/**`.\n\n## Verification\n\n- `make test` (in-process subset): 168 passed, 2 skipped — the 2 skips are pre-existing `skipif` markers, not regressions.\n- `tests/live_gateway/` collects cleanly across all 5 subsuites (mcp + sso + e2e_rust + protocol_compliance + helpers).\n- `make help` shows the new umbrella + previously-undocumented targets.\n- Both commits signed off (DCO). No pre-commit hooks bypassed.\n\n## Notes for reviewers\n\n- The big diff is mostly file renames (`R` flag in git) — content of moved tests is unchanged except for relative-import updates (`from .helpers` → `from ..helpers`) and a couple of black-driven reformats the pre-commit hook applied automatically.\n- `.secrets.baseline` was updated by detect-secrets to follow the moved files; entry counts before/after are identical (1111 entries / 413 paths).\n- `scripts/compliance_matrix.py` had two hardcoded path strings updated.\n- The second commit (`chore: drop UAID design doc and trim detect-secrets-scan`) is unrelated cleanup bundled in because both were tiny chores sitting in the working tree.\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "a8381ea285175fb43dc36f004a9cfeefe737be2a",
+      "message": "refactor(tests): unify live-gateway dirs, use uv run\n\nTests requiring a live ContextForge gateway, an SSO IdP, the Rust\ntransport, or the protocol compliance harness now live under a single\ntests/live_gateway/ tree (mcp/, sso/, e2e_rust/, protocol_compliance/,\nhelpers/). PYTEST_IGNORE collapses to one entry; a new\n`make test-live-gateway` umbrella runs the whole tree.\n\nMigrate every Makefile pytest target to `uv run pytest`: no more\n`source venv/bin/activate`, no more `install-dev` prerequisite. Move\nplaywright and fuzz dependencies from optional-deps to the dev group;\nextras are now reserved for production packaging options. Rewire\n`fuzz-atheris` to use `uv run --with` so atheris (and its clang/\nlibfuzzer build dependency) is layered on demand.\n\nSuppress pytest-playwright by default via `-p no:playwright`; UI\ntargets opt back in via `-p playwright`. The session-scoped browser\nfixtures were polluting the asyncio event loop in unrelated async\ntests (\"Runner.run() cannot be called from a running event loop\").\n\nAdd `--extra plugins` to broad-scope test targets so cpex_* plugin\nimports continue to resolve under `make test`.\n\nDelete three empty workflow stubs under tests/e2e/.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T17:15:14+00:00"
+    },
+    {
+      "sha": "e1dd326df73d4bb9a668a46c83fd06ac9d80239d",
+      "message": "chore: drop UAID design doc and trim detect-secrets-scan\n\nRemove UAID_APPROACH_B_IMPLEMENTATION.md, a stale design document\nleft over from the HCS-14 UAID work.\n\nDrop the trailing `git diff .secrets.baseline` from the\ndetect-secrets-scan target. The audit step already signals exit\nstatus; the diff dump after a clean run was just noise.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T17:16:01+00:00"
+    },
+    {
+      "sha": "f73027355918682f7f9aa1ffb1f6d83f0591a86a",
+      "message": "chore(test): suppress pytest-benchmark globally to avoid xdist conflict\n\npytest-benchmark's single-process timing model conflicts with pytest-xdist\n(`-n auto`/`-n N`) used by `make test` and friends — running both at once\neither skews benchmark numbers or breaks worker dispatch.\n\nMirror the existing pytest-playwright pattern: suppress the plugin globally\nvia `-p no:benchmark` in pyproject.toml `addopts`, and opt back in only\nwhere it's actually needed. `migration-test-performance` is the only\ntarget whose stated purpose is benchmarking, and it already runs without\n`-n`; add `-p benchmark` there so the plugin is available to those tests.\n\nDocument the suppress-then-opt-in pattern alongside the playwright comment\nin run_playwright_test so future targets follow the same convention.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-06T17:52:20+00:00"
+    },
+    {
+      "sha": "f4281e400a6fc8309bf3cfe6067b9b01cba06242",
+      "message": "fix(test): close post-review gaps in live-gateway reorg\n\nSelf-review surfaced four classes of missed cleanup after the test\nreorganization landed:\n\n* Five Makefile targets that exercise the pytest-playwright fixture\n  (`test-mcp-rbac`, `test-e2e-sso`, `test-live-gateway`, `test-owasp`,\n  `test-zap`) now opt back in via `-p playwright`. Without this they\n  fail at collection because addopts globally suppresses the plugin.\n* Three Makefile targets still ran pytest through an activated venv\n  instead of `uv run` (`async-debug`, `migration-test-rollback`,\n  `migration-test-cross-db`). Migrated to match the rest of the suite.\n* Three install docs still pointed at extras that were removed by this\n  PR (`docs/testing/fuzzing.md` for fuzz/fuzz-atheris,\n  `tests/playwright/README.md` for playwright). Replaced with\n  `make install-dev`/`make fuzz-atheris`.\n* Both pytest CI workflows still carried a stale\n  `--ignore=tests/e2e/test_entra_id_integration.py` line; the file\n  moved to `tests/live_gateway/sso/` and the `addopts`\n  `--ignore=tests/live_gateway` already covers it.\n\nPlus the boring sweep:\n\n* The `protocol_compliance` marker description, the `test_oauth_jwks_e2e`\n  direct-run example, and ~25 doc/comment cross-references now point at\n  the live_gateway paths.\n* File-header `Location:` docstrings inside `tests/live_gateway/protocol_compliance/`\n  rewritten in bulk (the rename was 100% similarity so headers had been\n  silently stale).\n* PR description updated: `PYTEST_IGNORE` is 4 paths (3 dirs + 1 stub\n  file), not 2 as previously claimed.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-06T19:25:55+00:00"
+    }
+  ],
+  "files_changed": 84,
+  "additions": 618,
+  "deletions": 1000,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:11.631970",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:11.632473",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4448,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4448.json"
+  }
+}

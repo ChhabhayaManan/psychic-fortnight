@@ -1,0 +1,104 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4368,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4368"
+  },
+  "metadata": {
+    "title": "fix(security): sanitize API validation error messages to prevent information disclosure",
+    "state": "closed",
+    "created_at": "2026-04-21T11:06:28+00:00",
+    "updated_at": "2026-05-09T21:02:07+00:00",
+    "closed_at": "2026-05-09T21:02:05+00:00",
+    "merged_at": "2026-05-09T21:02:05+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "security",
+      "observability",
+      "ica",
+      "SHOULD",
+      "pentesting"
+    ],
+    "milestone": null,
+    "assignees": [
+      "Lang-Akshay"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4325\r\n**Jira Issue:** https://jsw.ibm.com/browse/ICACF-23\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nMitigates **CWE-209 (Information Exposure Through Error Message)** and **CWE-117 (Log Injection)** in the RBAC and Token Management routers. The pentest finding ICACF-23 originally flagged 8 endpoints in 2 routers; this PR addresses those findings with a complete implementation of the security framework that can be extended to remaining routers in follow-up PRs.\r\n\r\n### What landed\r\n\r\n1. **`safe_error_detail()` helper** (`mcpgateway/utils/error_formatter.py`) — single point of policy for \"is it OK to expose this exception text?\". Used at 6 HTTPException raise sites in `rbac.py` and `tokens.py`.\r\n2. **Dual-flag verbose gate** (`should_expose_error_details()`) — verbose detail is exposed only when `EXPOSE_ERROR_DETAILS=true` OR (`DEBUG=true` AND `DEV_MODE=true`). **Bare `DEBUG=true` no longer unlocks verbose responses** — closes the residual surface where production environments commonly run with `DEBUG=true` for log verbosity.\r\n3. **`PublicValidationError` marker class** — opt-in sub-class of `ValueError` whose `str()` is intentionally safe to expose. Routers catch it before the generic `ValueError` branch and pass `str(e)` through unsanitised. Lets services migrate user-actionable business messages incrementally without weakening the default.\r\n4. **Log injection prevention** — all 17 new `logger.error()` statements wrap exception messages with `SecurityValidator.sanitize_log_message()` to prevent CWE-117 attacks via crafted input containing newlines or ANSI escapes.\r\n5. **Router fixes** — sanitised raise sites in 2 routers:\r\n   - `rbac.py`: 4 CWE-209 fixes, 13 CWE-117 fixes, 4 PublicValidationError catch blocks\r\n   - `tokens.py`: 2 CWE-209 fixes, 4 CWE-117 fixes, 2 PublicValidationError catch blocks, eliminated 26 lines of duplicated IntegrityError handling\r\n6. **Comprehensive test coverage** — 13 new tests added (7 in `test_error_formatter.py`, 4 in `test_rbac_router.py`, 2 in `test_tokens.py`). All 154 tests pass with 98% overall coverage.\r\n\r\n### Behavioural changes (heads-up)\r\n\r\n| Setting | Old behaviour | New behaviour |\r\n|---|---|---|\r\n| `DEBUG=true` only | Verbose error responses | Logs are verbose; responses are sanitised |\r\n| `DEV_MODE=true` only | (no effect on errors) | (no effect alone) |\r\n| `DEBUG=true` + `DEV_MODE=true` | Verbose | Verbose (developer machine) |\r\n| `EXPOSE_ERROR_DETAILS=true` | (didn't exist) | Verbose (production opt-in) |\r\n\r\n`make dev` and `make dev-echo` now export `DEV_MODE=true` and `DEBUG=true` so local developers retain verbose responses out of the box.\r\n\r\n---\r\n\r\n## 🔄 Scope & Follow-up Work\r\n\r\n**This PR (Phase 1):**\r\n- ✅ Core security framework implemented (`error_formatter.py`)\r\n- ✅ 2 routers fixed (`rbac.py`, `tokens.py`)\r\n- ✅ 154 tests passing, 98% coverage\r\n- ✅ All PR review findings addressed\r\n\r\n**Remaining Work (Phase 2 - Separate Issue):**\r\n\r\n16 additional routers need the same CWE-209/CWE-117 fixes (~100+ changes):\r\n\r\n| Router | Est. Changes | Priority |\r\n|--------|-------------|----------|\r\n| `teams.py` | ~30 | High |\r\n| `llm_config_router.py` | ~17 | High |\r\n| `email_auth.py` | ~12 | High |\r\n| `llm_admin_router.py` | ~7 | Medium |\r\n| `llmchat_router.py` | ~6 | Medium |\r\n| `log_search.py` | ~5 | Medium |\r\n| `oauth_router.py` | ~5 | Medium |\r\n| `llm_proxy_router.py` | ~3 | Medium |\r\n| `auth.py` | ~2 | Low |\r\n| `metrics_maintenance.py` | ~1 | Low |\r\n| `well_known.py` | ~1 | Low |\r\n| Plus 5 more | TBD | Medium |\r\n\r\n**Recommendation:** Track remaining routers in a separate issue and implement in a follow-up PR.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix (security vulnerability)\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass (98%) |\r\n| Doctests                  | `pytest --doctest-modules` | ✅ Pass |\r\n\r\nTests added/updated cover:\r\n- `test_error_formatter.py` — gate-logic table for `should_expose_error_details()` (all 8 flag combinations), `safe_error_detail()` verbose/production modes, `PublicValidationError` class\r\n- `test_rbac_router.py` — PublicValidationError handling in create_role, update_role, delete_role, assign_role_to_user; assert generic responses in production mode\r\n- `test_tokens.py` — PublicValidationError handling in create_token and create_team_token; IntegrityError handling with sanitized messages\r\n\r\n**Coverage Results:**\r\n- `error_formatter.py`: 100% (69/69 statements)\r\n- `rbac.py`: 98% (230/234 statements)\r\n- `tokens.py`: 98% (241/246 statements)\r\n- **Overall: 98% (540/549 statements)**\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (inline comments added)\r\n- [x] No secrets or credentials committed\r\n- [x] All PR review findings addressed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Migration path for callers that relied on raw error detail\r\n\r\nIf a service raises a business-rule message that is genuinely user-actionable (e.g. \"Cannot delete system roles\", \"Token expiration cannot exceed 365 days\"), raise `PublicValidationError` instead of `ValueError`. The router catches it *before* the generic `ValueError` branch and passes the message through. Two services (`role_service.py`, `token_catalog_service.py`) already use this pattern.\r\n\r\n### Security improvements delivered\r\n\r\n| Vulnerability | Status | Implementation |\r\n|--------------|--------|----------------|\r\n| CWE-209 (Information Exposure) | ✅ Fixed | Dual-flag gate prevents verbose errors with bare `DEBUG=true` |\r\n| CWE-117 (Log Injection) | ✅ Fixed | All user-supplied data in logs sanitized via `SecurityValidator.sanitize_log_message()` |\r\n| Code duplication | ✅ Refactored | Eliminated 26 lines of duplicated IntegrityError handling in `tokens.py` |\r\n\r\n### Files changed\r\n\r\n- `mcpgateway/utils/error_formatter.py` (+73 lines) - Core security framework\r\n- `mcpgateway/routers/rbac.py` (+21 lines) - 4 CWE-209 fixes, 13 CWE-117 fixes\r\n- `mcpgateway/routers/tokens.py` (+5 lines, -26 duplicated) - 2 CWE-209 fixes, 4 CWE-117 fixes\r\n- `tests/unit/mcpgateway/utils/test_error_formatter.py` (+70 lines) - 10 new tests\r\n- `tests/unit/mcpgateway/routers/test_rbac_router.py` (+48 lines) - 4 new tests\r\n- `tests/unit/mcpgateway/routers/test_tokens.py` (+38 lines) - 2 new tests\r\n\r\n**Total: 3 source files, 3 test files, 150+ lines changed, 13 new tests, 0 regressions**\r\n\r\n---\r\n\r\n## 🔗 PR Review Response\r\n\r\nAll findings from the security review have been addressed:\r\n\r\n✅ **Finding 1 (High)**: Weak dual-flag gate - Fixed with `should_expose_error_details()` requiring both `DEBUG` and `DEV_MODE`  \r\n✅ **Finding 2 (Medium)**: IntegrityError log injection - Fixed with `SecurityValidator.sanitize_log_message()`  \r\n✅ **Finding 3 (Medium)**: ValueError log injection - Fixed across all 17 log statements  \r\n✅ **Finding 4 (Medium)**: Missing components - All implemented (`safe_error_detail`, `PublicValidationError`, Pydantic sanitizer)  \r\n✅ **Redundant code**: Eliminated via `_handle_token_integrity_error()` helper and `safe_error_detail()` function\r\n\r\nSee detailed response in PR comments.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4229109888",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-05T14:46:59+00:00",
+      "body": "### Thanks for the PR @bogdanmariusc10 \n### Please implement following findings\nThis PR partially mitigates CWE-209 but introduces a weaker-than-described information gate and log-injection vectors in the new logging statements.\n\n| # | File                                                             | Line                                       | Severity         | CWE     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Fix                                                                                                                 |\n| - | ---------------------------------------------------------------- | ------------------------------------------ | ---------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |\n| 1 | `mcpgateway/routers/rbac.py`                                   | 122, 248, 292, 339                         | **High**   | CWE-209 | The gate uses `settings.debug` alone. The PR description explicitly states \"bare `DEBUG=true` no longer unlocks verbose responses\" and requires both `DEBUG=true` AND `DEV_MODE=true`, but the code only checks `settings.debug`. Any deployment running `DEBUG=true` for log verbosity (CI, staging, many cloud PaaS defaults) will expose full internal `ValueError` text to API clients — the exact vulnerability this PR aims to close. Same pattern repeated in `tokens.py`. | Change all `settings.debug` gates to `settings.debug and settings.dev_mode` to match the stated security model. |\n| 2 | `mcpgateway/routers/tokens.py`                                 | ~224, ~782                                 | **Medium** | CWE-117 | `err_str = str(e.orig)` — the raw PostgreSQL `IntegrityError` message, which can embed user-supplied column values (token names, email addresses) — is logged directly via `logger.error(f\"Token creation integrity error: {err_str}\")`. A crafted token name containing newlines or ANSI escapes can forge log lines or poison structured JSON logs. The success-path logs elsewhere in this file already use `SecurityValidator.sanitize_log_message()` for user data.                 | Wrap:`logger.error(\"Token creation integrity error: %s\", SecurityValidator.sanitize_log_message(err_str))`        |\n| 3 | `mcpgateway/routers/rbac.py`, `mcpgateway/routers/tokens.py` | All new `logger.error(f\"... {e}\")` lines | **Medium** | CWE-117 | All 10 new `logger.error` statements log `str(e)` verbatim. `ValueError` messages from service-layer validators include user-supplied data (role names, token names, emails). An attacker controlling those inputs can inject newlines or forged log fields into structured logs.                                                                                                                                                                                                            | Wrap `{e}` in `SecurityValidator.sanitize_log_message(str(e))` in all new log statements.                       |\n| 4 | `mcpgateway/routers/rbac.py`, `mcpgateway/routers/tokens.py` | —                                         | **Medium** | CWE-209 | The PR description asserts 18 routers were swept,`safe_error_detail()` was added to `error_formatter.py`, `PublicValidationError` was introduced, and a Pydantic sanitizer was added — none exist in the diff. The remaining 16 routers (`auth`, `email_auth`, `llm_admin`, `llm_config`, `llm_proxy`, etc.) retain unconditional `raise HTTPException(detail=str(e))` and remain vulnerable to CWE-209.                                                                        | Either complete the described sweep or update the PR description to accurately reflect the 2-router scope.          |\n\n## Redundant Code\n\n| # | File                                                             | Line(s)              | Type             | Description                                                                                                                                                                                | Suggestion                                                                              |\n| - | ---------------------------------------------------------------- | -------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |\n| 1 | `mcpgateway/routers/rbac.py`, `mcpgateway/routers/tokens.py` | Multiple             | Duplicated logic | The two-line pattern `settings = get_settings(); detail = str(e) if settings.debug else \"Invalid request. Please check your input and try again.\"` is copy-pasted 8 times across 2 files | Extract to a module-level or utility helper `_sanitize_error_detail(e)`               |\n| 2 | `mcpgateway/routers/rbac.py`, `mcpgateway/routers/tokens.py` | Exception handlers   | Duplicated logic | `get_settings()` called individually inside every `except` block instead of once at module scope or cached per-request                                                                 | Call once per function or rely on `lru_cache` but note test cache-invalidation risk   |\n| 3 | `mcpgateway/routers/tokens.py`                                 | ~220–233, ~779–792 | Duplicated logic | `create_token` and `create_team_token` contain identical IntegrityError-handling blocks — constraint string matching, settings lookup, and conditional detail — duplicated verbatim  | Extract to a shared private `_handle_token_integrity_error(err_str, settings)` helper |"
+    },
+    {
+      "id": "4236091685",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-06T12:40:41+00:00",
+      "body": "### Thanks for addressing this @bogdanmariusc10 . Really appreciate it. \n### Please address the following finding to seal the PR.\n\nThe PR establishes a solid dual-flag gate (`EXPOSE_ERROR_DETAILS` OR `DEBUG+DEV_MODE`) and a `PublicValidationError` opt-in mechanism. `rbac.py` applies the framework consistently. However, two handlers in `tokens.py` use a weaker inline check (`settings.debug` only) that the PR explicitly set out to eliminate.\n\n| # | File | Line | Severity | CWE | Description |\n| - | ---- | ---- | -------- | --- | ----------- |\n| 1 | mcpgateway/routers/tokens.py | L471–474 | **Medium** | CWE-209 | `update_token` checks only `settings.debug` (not `DEV_MODE`) to gate verbose error detail. An attacker with a production server running `DEBUG=true` for log verbosity receives the raw `ValueError` message, leaking internal business logic. **Fix:** Replace the inline `settings.debug` check with `safe_error_detail(e)`, which enforces the dual-flag policy centrally. |\n| 2 | mcpgateway/routers/tokens.py | L882–885 | **Medium** | CWE-209 | `list_team_tokens` has the identical debug-only exposure path as Finding #1. **Fix:** Replace `str(e) if settings.debug else \"...\"` with `safe_error_detail(e)`. |\n| 3 | mcpgateway/routers/tokens.py | L471 | Low | CWE-117 | `update_token` logs `f\"... {e}\"` without `SecurityValidator.sanitize_log_message()` — user-controlled input from a `ValueError` message can inject newlines or ANSI escapes into log files. **Fix:** Wrap with `SecurityValidator.sanitize_log_message(str(e))`. |\n| 4 | mcpgateway/routers/tokens.py | L882 | Low | CWE-117 | `list_team_tokens` logs `f\"... {e}\"` without sanitization for the same reason. **Fix:** Wrap with `SecurityValidator.sanitize_log_message(str(e))`. |\n"
+    },
+    {
+      "id": "4243831013",
+      "author": "Lang-Akshay",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-07T12:07:47+00:00",
+      "body": "Thanks for the PR @bogdanmariusc10 . \nPR introduces much needed guarded error-detail exposure and a safe fallback for validation errors in RBAC and token routers.\n\nAppreciate the efforts. "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "5c668de611540e5284616be5d1d15bd9ad6e7c1e",
+      "message": "fix: sanitize API validation error messages to prevent information disclosure\n\nAddresses pentest finding ICACF-23: Return generic error messages from API\nvalidation failures to prevent exposing sensitive implementation details.\n\nChanges:\n- Updated mcpgateway/routers/rbac.py to return generic error messages in\n  production mode (debug=False) for ValueError exceptions\n- Updated mcpgateway/routers/tokens.py to return generic error messages for\n  both ValueError and IntegrityError exceptions\n- Modified error handlers to log detailed errors server-side while returning\n  sanitized messages to clients\n- Updated corresponding unit tests to expect generic error messages\n\nSecurity Impact:\n- Production mode (DEBUG=false): Returns generic messages like 'Invalid\n  request. Please check your input and try again.'\n- Development mode (DEBUG=true): Returns detailed error messages for debugging\n- All detailed errors are still logged server-side for troubleshooting\n\nAffected endpoints:\n- POST /rbac/roles\n- PUT /rbac/roles/{role_id}\n- DELETE /rbac/roles/{role_id}\n- POST /rbac/users/{user_email}/roles\n- POST /tokens\n- PUT /tokens/{token_id}\n- POST /tokens/teams/{team_id}\n- GET /tokens/teams/{team_id}\n\nCloses #4325\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-21T11:01:55+00:00"
+    },
+    {
+      "sha": "eae3d17764b97d9819125946cc20f6ce6a75fe5f",
+      "message": "fix pre-commit issues\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-23T11:06:34+00:00"
+    },
+    {
+      "sha": "a14668ea14997ac3286c24ffd100a966b57be154",
+      "message": "fix review findings\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-06T08:41:44+00:00"
+    },
+    {
+      "sha": "d1fcd1212f330ba5c8959c17d7dde8c7fb44cc5a",
+      "message": "address second review gaps\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-06T13:18:51+00:00"
+    },
+    {
+      "sha": "3d0363e6ed8786de3d3767ae22bfa88f65e7f5ff",
+      "message": "fix errors related to cpex plugin repository\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-07T06:57:21+00:00"
+    },
+    {
+      "sha": "97439ef57a43b3766f674bd3b2b247059586de6f",
+      "message": "fix: address council review findings\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-09T20:46:57+00:00"
+    }
+  ],
+  "files_changed": 18,
+  "additions": 471,
+  "deletions": 69,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:47.662974",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:47.665384",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4368,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4368.json"
+  }
+}

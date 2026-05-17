@@ -1,0 +1,98 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3299,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3299"
+  },
+  "metadata": {
+    "title": "[TESTING][PERFORMANCE]: CONC-01 gateway parallel-create manual test runner",
+    "state": "closed",
+    "created_at": "2026-02-26T17:48:31+00:00",
+    "updated_at": "2026-03-20T15:20:46+00:00",
+    "closed_at": "2026-03-20T15:20:43+00:00",
+    "merged_at": "2026-03-20T15:20:43+00:00",
+    "author": "gandhipratik203",
+    "labels": [
+      "testing",
+      "performance",
+      "COULD",
+      "manual-testing",
+      "release-fix",
+      "ready"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": [
+      "gandhipratik203"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\n  Closes #3232\r\n\r\n  ---\r\n# Summary\r\n\r\nThis PR adds/updates CONC-01 manual concurrency test coverage for the `POST /gateways` endpoint and captures reproducible failure evidence in a parent-scope setup (Postgres + Redis).\r\n\r\nThe ticket acceptance for CONC-01 is:\r\n\r\n- 100 parallel creates with same name\r\n- Expected: exactly `1` success (`200/201`) + `N-1` conflicts (`409`)\r\n- No duplicate rows persisted\r\n\r\nLatest run on **March 2, 2026** still fails acceptance for `/gateways` under concurrency.\r\n\r\n---\r\n\r\n# Steps To Run This Test\r\n\r\n## 1) Start Postgres + Redis in Docker (Colima runtime)\r\n\r\n```bash\r\n# Start runtime first if needed\r\ncolima start\r\ndocker context use colima\r\n\r\n# Recreate clean containers\r\ndocker rm -f conc-postgres conc-redis 2>/dev/null || true\r\n\r\ndocker run -d --name conc-postgres -p 5432:5432 \\\r\n  -e POSTGRES_USER=postgres \\\r\n  -e POSTGRES_PASSWORD=postgres \\\r\n  -e POSTGRES_DB=concurrent_test \\\r\n  postgres:16\r\n\r\ndocker run -d --name conc-redis -p 6379:6379 redis:7\r\n\r\ndocker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}' | rg 'conc-postgres|conc-redis'\r\n```\r\n\r\n## 2) Terminal A: start gateway (Postgres + Redis + local SSRF overrides)\r\n\r\n```bash\r\nexport PROJECT_ROOT=\"<path-to-repo-root>\"\r\ncd \"$PROJECT_ROOT\"\r\npkill -f \"mcpgateway.main|uvicorn\" || true\r\n\r\nDATABASE_URL='postgresql+psycopg://postgres:postgres@127.0.0.1:5432/concurrent_test' \\\r\nREDIS_URL='redis://127.0.0.1:6379/0' \\\r\nCACHE_TYPE='redis' \\\r\nJWT_SECRET_KEY='my-test-key' \\\r\nSSRF_ALLOW_LOCALHOST=true \\\r\nSSRF_ALLOW_PRIVATE_NETWORKS=true \\\r\nmake dev\r\n```\r\n\r\n## 3) Terminal B: start translator\r\n\r\n```bash\r\nexport PROJECT_ROOT=\"<path-to-repo-root>\"\r\ncd \"$PROJECT_ROOT\"\r\npython -m mcpgateway.translate --stdio \"uvx mcp-server-git\" --port 9000\r\n```\r\n\r\n## 4) Terminal C: generate token and run matrix\r\n\r\n```bash\r\nexport PROJECT_ROOT=\"<path-to-repo-root>\"\r\ncd \"$PROJECT_ROOT\"\r\nexport CONC_TOKEN=\"$(python3 -m mcpgateway.utils.create_jwt_token --username admin@example.com --exp 120 --secret my-test-key)\"\r\nmake conc-01-gateways\r\n```\r\n\r\n## 5) Optional token sanity check (before matrix)\r\n\r\n```bash\r\ncurl -i -H \"Authorization: Bearer $CONC_TOKEN\" \"http://127.0.0.1:8000/servers?limit=1\"\r\n```\r\n\r\nExpected: `HTTP/1.1 200 OK`.\r\n\r\n---\r\n\r\n# Results Observed vs Expected\r\n\r\n## Expected (CONC-01)\r\n\r\n- `api_smoke_20`: `1x 200/201`, `19x 409`, uniqueness=1\r\n- `api_100`: `1x 200/201`, `99x 409`, uniqueness=1\r\n- `api_db_100`: same as above + DB uniqueness=1\r\n\r\n## Observed (latest run)\r\n\r\n- `api_smoke_20`: `200=20`, `409=0`, API uniqueness `20`\r\n- `api_100`: `200=49`, `500=3`, `502=32`, `ReadError=16`, `409=0`, API uniqueness `49`\r\n- `api_db_100`: `200=42`, `502=37`, `ReadError=21`, `409=0`, API uniqueness `42`, DB uniqueness `42`\r\n\r\n## Outcome\r\n\r\nCONC-01 acceptance is **NOT MET** for `/gateways` in this environment:\r\n\r\n- Conflict pattern is not enforced under concurrency.\r\n- Duplicate gateway rows are persisted for same-name create attempts.\r\n\r\n---\r\n\r\n# Scope\r\n\r\n- In scope: manual concurrency test artifact and evidence for `/gateways`\r\n- Out of scope: behavior fix for gateway concurrency race/uniqueness\r\n\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [x] Other (Testing)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |  ✅ Passed (Pylint score: 10/10)      |\r\n| Unit tests                | `make test`     | ✅ Passed (updated unit tests with the changes)        |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Passed (100% for modified files, 99%+ overal        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3915323795",
+      "author": "sco3",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-09T13:12:39+00:00",
+      "body": "looks good"
+    },
+    {
+      "id": "3982223986",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-20T15:17:32+00:00",
+      "body": "LGTM. Rebased, added unit tests (25/25 pass), aligned with CONC-02 conventions, verified against live deployment. See review comment for full details."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0eb06299d15a10fe56c243e1fccd8a7ce008be7c",
+      "message": "test: add CONC-01 manual concurrency scripts and results\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-02-26T22:55:43+00:00"
+    },
+    {
+      "sha": "76929bbc579804615070d5e71d32f5e32df384f8",
+      "message": "updated md\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-02-26T23:46:36+00:00"
+    },
+    {
+      "sha": "b41a19419872c41c45d3fa2bde76cf1f830b5320",
+      "message": "Refined the .sh and results.md files\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-03-02T01:35:34+00:00"
+    },
+    {
+      "sha": "8da577577ada704578e41c492444dbddf68715fb",
+      "message": "test: add CONC-01 unit tests and align with CONC-02 conventions\n\n- Add tests/unit/test_conc_01_helpers.py with 25 unit tests covering\n  _env_bool, _build_config, _db_mode, _normalize_pg_dsn, _Case, and\n  DEFAULT_CASES (mirrors test_conc_02_helpers.py pattern)\n- Replace hardcoded macOS paths in results.md with <repo-root>\n- Add platform-agnostic reviewer note (consistent with CONC-02)\n- Align import style with section markers (Future/Standard/Third-Party)\n- Use raise SystemExit(main()) to match CONC-02 entry point pattern\n- Remove unused sys import and stale encoding marker\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T15:05:14+00:00"
+    },
+    {
+      "sha": "b07b8521e0f4b0812835091ed16b1456784285d9",
+      "message": "style: apply black formatting and strip trailing whitespace\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T15:09:46+00:00"
+    },
+    {
+      "sha": "d0ef08c4e924d25644f951e16e05021bd24892a5",
+      "message": "fix: address codex review nits and add .playwright-cli to gitignore\n\n- Use 127.0.0.1 default in Python script to match shell wrapper/CONC-02\n- Replace bare curl -i with bounded curl -sS --max-time 5 -w pattern\n- Add .playwright-cli/ to .gitignore\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-20T15:16:59+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 788,
+  "deletions": 25,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:44.582847",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:44.583621",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3299,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3299.json"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4603,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4603"
+  },
+  "metadata": {
+    "title": "rate-limiter: remove obsolete redis_fallback config references",
+    "state": "open",
+    "created_at": "2026-05-05T13:48:41+00:00",
+    "updated_at": "2026-05-07T10:56:10+00:00",
+    "closed_at": null,
+    "author": "gandhipratik203",
+    "labels": [
+      "COULD"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nThe `redis_fallback` config key is referenced across `plugins/config.yaml`, docs, the OCP helm chart, and several tests, but the current rate-limiter plugin (`cpex-rate-limiter`, the Rust port) does not recognize it. Operators using the shipped configs see a `\"rate limiter: unknown config key(s): redis_fallback\"` WARN at gateway boot and no behavior change. The docs describe a mechanism that no longer exists.\n\n## Background\n\n`redis_fallback` was a real config key in the in-tree Python rate-limiter plugin and was honored as documented (fall back to in-memory counting when Redis was unavailable). It became silently no-op when the in-tree plugin was replaced by the `cpex-rate-limiter` package. Behavior under unreachable Redis is now governed by `fail_mode` (default `\"open\"`).\n\nWe don't plan to reintroduce the feature: `fail_mode` covers the same operator decision space without the silent-degradation footgun of memory fallback in load-balanced deployments. If graceful degradation under Redis loss is wanted later, it should be designed as an explicit, observable mode — separate issue.\n\n## Affected surfaces\n\n| File | Action |\n|---|---|\n| `plugins/config.yaml` | Remove the `redis_fallback` line |\n| `tests/performance/plugins/config.yaml` | Remove (3 occurrences) |\n| `charts/mcp-stack/profiles/ocp/values-pgo.yaml` | Remove |\n| `docs/docs/api/plugin-bindings-api.md` | Drop the `redis_fallback` row + remove from JSON examples |\n| `tests/integration/test_rate_limiter.py` | Rename / tighten the misleadingly-named `test_redis_fallback_to_memory_on_unavailable_redis` (passes today only by virtue of the `fail_mode: \"open\"` default) |\n| `tests/unit/.../test_gateway_plugin_manager.py`, `test_tool_plugin_bindings.py`, `test_tool_plugin_binding_service.py` | Drop `redis_fallback` from mock fixtures |\n\n## Regression guard\n\nAdd `test_shipped_plugins_config_has_no_unknown_keys` (drafted in #4582, pulled out when that PR was scoped down): loads `plugins/config.yaml`, instantiates each plugin via the framework loader, asserts zero `\"unknown config key\"` warnings. Lands with the cleanup so the door stays closed behind us.\n\n## Acceptance criteria\n\n- [ ] All references to `redis_fallback` removed from configs, docs, helm chart, and test fixtures\n- [ ] Misleadingly-named integration test renamed or removed\n- [ ] Schema-validation regression test added and green on `main`",
+  "comments": [
+    {
+      "id": "4379970685",
+      "author": "gandhipratik203",
+      "created_at": "2026-05-05T14:00:08+00:00",
+      "body": "Starting-point branch carrying the yaml drop + the schema-validation regression test (originally drafted in #4582 and pulled out when that PR was scoped down): [`chore/rate-limiter-redis-fallback-cleanup-wip`](https://github.com/IBM/mcp-context-forge/tree/chore/rate-limiter-redis-fallback-cleanup-wip).\n\nOnce #4582 lands, rebasing this branch onto `main` reduces it to the single `redis_fallback` cleanup commit, leaving room to layer the rest of the catalogue (perf configs, helm chart, docs rewrite, integration test rename, unit fixtures) on top."
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:40.974877",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:40.976127",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4603,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4603.json"
+  }
+}

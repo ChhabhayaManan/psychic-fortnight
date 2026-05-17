@@ -1,0 +1,48 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2319,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2319"
+  },
+  "metadata": {
+    "title": "fix: use short-lived DB sessions in RBAC permission checks",
+    "state": "closed",
+    "created_at": "2026-01-22T02:52:53+00:00",
+    "updated_at": "2026-02-15T13:04:33+00:00",
+    "closed_at": "2026-02-15T12:38:05+00:00",
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "do-not-merge"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Remove `db` parameter from `get_current_user_with_permissions()` to prevent holding DB sessions for entire request lifecycle\n- Update permission decorators to use `fresh_db_session()` for short-lived permission checks\n- Sessions are now released immediately after permission check, before slow downstream operations\n\n## Problem\n\nUnder high load (4000 concurrent users), the RBAC middleware was holding database sessions for entire request lifetimes, causing:\n- 433 \"idle in transaction\" connections (vs normal 40-50)\n- Max transaction age of 243 seconds\n- QueuePool exhaustion errors\n- Gateway availability dropping to 33%\n\n## Changes\n\n| File | Change |\n|------|--------|\n| `mcpgateway/middleware/rbac.py` | Remove `db` from function signature/return; use `fresh_db_session()` in decorators |\n| `mcpgateway/admin.py` | Use endpoint's `db` parameter instead of `user[\"db\"]` |\n| Test fixtures | Remove `\"db\"` from mock user contexts; add `fresh_db_session` mocks |\n\n## Test plan\n\n- [x] Unit tests pass (4863 passed)\n- [x] E2E tests pass (187 passed)\n- [x] Docker stack healthy\n- [ ] Load test with 4000 users shows stable idle-in-transaction count\n\nCloses #2318",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "63fba73e5b4e1e2846ad5c52f759a21b3860e4d2",
+      "message": "fix: use short-lived DB sessions in RBAC permission checks\n\nRemove db parameter from get_current_user_with_permissions() and update\npermission decorators to use fresh_db_session() for short-lived permission\nchecks. This prevents database connections from being held during slow\ndownstream operations, avoiding connection pool exhaustion under high load.\n\nChanges:\n- Remove db: Session = Depends(get_db) from get_current_user_with_permissions()\n- Remove \"db\" key from user context return value\n- Update require_permission, require_admin, require_any_permission decorators\n  to use fresh_db_session() for permission checks\n- Update PermissionChecker class to use fresh_db_session() in each method\n- Update test fixtures to remove \"db\" from mock user contexts\n- Add fresh_db_session mocks to unit tests\n\nCloses #2318\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T02:51:25+00:00"
+    }
+  ],
+  "files_changed": 20,
+  "additions": 363,
+  "deletions": 198,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:18:08.520543",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:08.522249",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2319,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2319.json"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1563,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1563"
+  },
+  "metadata": {
+    "title": "fix build and push stage in github workflow",
+    "state": "closed",
+    "created_at": "2025-12-08T10:18:30+00:00",
+    "updated_at": "2025-12-08T11:36:29+00:00",
+    "closed_at": "2025-12-08T11:36:27+00:00",
+    "merged_at": "2025-12-08T11:36:27+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nPull request builds from external contributors were failing in the multiplatform Docker workflow, because the GitHub Actions runner attempted to push container images to GHCR.\r\n\r\nFork PRs run with a read-only GITHUB_TOKEN, so any GHCR push resulted in:\r\n`denied: installation not allowed to Write organization package`\r\n\r\nThis PR fixes the issue by allowing PRs to run builds without pushing, while keeping full push/manifest/scan/sign behavior for merges into main.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Create a fork of the repository.\r\n2. Open a pull request modifying any file that triggers the Docker workflow.\r\n3. Wait for the Build amd64/arm64/s390x job.\r\n4. The workflow fails with GHCR permission errors when trying to push an image.\r\n\r\n## 🐞 Root Cause\r\nThe workflow always executed: `push: true` in docker/build-push-action, regardless of event type.\r\nExternal PRs cannot push to GHCR, causing:\r\n`failed to push ghcr.io/...: denied: installation not allowed to Write organization package`\r\nAdditionally, manifest creation, scanning, and signing jobs also assumed GHCR write access and were not gated behind conditions.\r\n\r\n## 💡 Fix Description\r\nThis PR introduces PR safe behavior:\r\n\r\n**PR builds:**\r\n1. Build multi-arch images\r\n2. Do not push (push: false, load: true)\r\n3. Skip manifest, scan, and signing jobs\r\n\r\n**Main branch and manual builds:**\r\n1. Full pipeline runs normally\r\n2. Build + Pus\r\n3. Manifest creation\r\n4. Security scanning\r\n5. Cosign signing\r\n\r\nAdded conditional logic:\r\n```yaml\r\npush: ${{ github.event_name != 'pull_request' }}\r\nload: ${{ github.event_name == 'pull_request' }}\r\n```\r\n\r\nAdded if: github.event_name != 'pull_request' to manifest, scan, and sign jobs.\r\nPRs now run securely without requiring GHCR write permissions.\r\nMerges into main maintain the original release workflow.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "244928e4b7d74b0b2ce9d112e877298e21cbee96",
+      "message": "fix build and push stage\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-08T10:13:40+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 10,
+  "deletions": 3,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:21:22.228506",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:21:22.228975",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1563,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1563.json"
+  }
+}

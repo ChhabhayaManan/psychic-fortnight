@@ -1,0 +1,87 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3701,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3701"
+  },
+  "metadata": {
+    "title": "fix(schemas): enforce visibility literals across entity schemas",
+    "state": "closed",
+    "created_at": "2026-03-17T08:56:40+00:00",
+    "updated_at": "2026-03-23T01:00:19+00:00",
+    "closed_at": "2026-03-23T01:00:17+00:00",
+    "merged_at": "2026-03-23T01:00:17+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "security",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "## :pushpin: Summary\r\nThis PR tightens visibility validation at the schema boundary so only supported enum values are accepted.\r\n\r\nPreviously, several schemas used plain string typing for `visibility`, which allowed arbitrary values such as `invalid_value`, empty strings, or wrong casing to pass validation. This could lead to inconsistent behavior in token-scoping logic that branches on visibility values.\r\n\r\nThe issue was reported for `GatewayUpdate`, but the same pattern existed across related entity schemas. This PR applies a consistent enum-based constraint across those schemas.\r\n\r\nAlso included: a follow-up consistency fix to align Team response typing with Team request enums.\r\n\r\n## :link: Related Issue\r\nCloses: #3525\r\n\r\n## :repeat: Reproduction Steps\r\n```bash\r\ncurl -X PUT /gateways/{id} \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -d '{\"visibility\": \"invalid_value\"}'\r\n# Before: accepted\r\n# After: 422 validation error\r\n```\r\n\r\n## 🐞 Root Cause\r\nVisibility fields in multiple schemas were typed as unconstrained strings (`str` / `Optional[str]`) while allowed values were only documented in prose. Without a type-level constraint, Pydantic accepted invalid values.\r\n\r\n## :bulb: Fix Description\r\n- Replaced unconstrained visibility string types with `Literal` enums for affected schemas so invalid values are rejected during request/response validation.\r\n- Removed redundant visibility validators that became dead code after the `Literal` migration:\r\n  - `ServerCreate.validate_visibility`\r\n  - `A2AAgentCreate.validate_visibility`\r\n  - `A2AAgentUpdate.validate_visibility`\r\n- Updated tests that previously called removed validator methods directly to use schema instantiation assertions.\r\n- Added broad literal-enum validation coverage (`test_visibility_literal_enum_validation`) for valid and invalid visibility inputs across impacted schemas.\r\n- Follow-up consistency update: `TeamResponse.visibility` now uses Team enum typing (`\"private\" | \"public\"`) to match Team create/update schemas.\r\n\r\n## :test_tube: Verification\r\n| Check | Command | Status |\r\n|---|---|---|\r\n| Targeted visibility/schema unit tests | `python3 -m pytest tests/unit/mcpgateway/test_schemas_validators_extra.py -q` | :white_check_mark: |\r\n| Schema-focused unit subset | `python3 -m pytest tests/unit/mcpgateway/ -k schema` | :white_check_mark: (379 passed, 6 skipped) |\r\n\r\n## :triangular_ruler: MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## :white_check_mark: Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3988828929",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T00:34:49+00:00",
+      "body": "Reviewed and rebased onto main. The Literal-enum approach is correct and addresses #3525.\n\n**Changes made during review (3 additional commits):**\n\n1. **Removed remaining redundant validators** — `validate_visibility` was left behind in ToolCreate, ResourceCreate, PromptCreate; now all 6 dead-code validators are removed consistently.\n\n2. **Preserved `default=None` for ToolCreate/ResourceCreate/PromptCreate** — these schemas are used in MCP discovery where `gateway_service.py` inherits gateway visibility via `getattr(resource, \"visibility\", None) or gateway.visibility`. A `\"public\"` default would have broken this inheritance, forcing all MCP-discovered entities to be public regardless of their gateway's visibility (security-relevant).\n\n3. **Added defensive coercion on Read schemas** — DB columns are unconstrained `String(20)` with no check constraints. Historical writes through previously unconstrained Update endpoints may have persisted invalid values. Added `_coerce_visibility` (mode=\"before\" field_validator) to all 7 Read schemas so invalid legacy values are coerced to `\"public\"` with a warning log instead of crashing list/get endpoints.\n\nAll 14,640 unit tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "44c1e9b94f0c03ace9a626ea9e5352b032982bfb",
+      "message": "fix schemas constrain visibility fields to Literal enum across all entity schemas\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-13T08:06:22+00:00"
+    },
+    {
+      "sha": "7ee1ce5bf3abf3b1a9f36e109b80adea879f070d",
+      "message": "remove redundant visibility validators and cover Optional None behavior\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-16T06:26:51+00:00"
+    },
+    {
+      "sha": "057816867eb795a6e7c49dfd61d523da8c69da56",
+      "message": "constrain TeamResponse visibility to literal enum\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-17T06:44:46+00:00"
+    },
+    {
+      "sha": "986c2aabcab9e0befece88afdcd1b93b0a946476",
+      "message": "fix(schemas): remove remaining redundant visibility validators\n\nRemove validate_visibility from ToolCreate, ResourceCreate, and\nPromptCreate — with Literal types enforcing valid values at the\nPydantic type level, these validators are unreachable dead code.\n\nThis completes the consistency fix started in the prior commits\nwhich removed the same validators from ServerCreate, A2AAgentCreate,\nand A2AAgentUpdate.\n\nUpdate test_schemas.py to match the new Pydantic literal_error\nmessage instead of the old validator's ValueError message.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T23:26:35+00:00"
+    },
+    {
+      "sha": "ae0718b78195315b2461c05b7d08c13700350f29",
+      "message": "fix(schemas): preserve None default for MCP-discoverable entity schemas\n\nRevert ToolCreate, ResourceCreate, and PromptCreate visibility defaults\nback to None (matching the original behavior) instead of \"public\".\n\nThese three schemas are used in MCP server discovery where the gateway\nservice inherits the gateway's visibility via the pattern:\n  visibility = getattr(resource, \"visibility\", None) or gateway.visibility\n\nA \"public\" default prevented this inheritance, causing MCP-discovered\nentities to always be public regardless of their gateway's visibility.\n\nOther Create schemas (GatewayCreate, ServerCreate, A2AAgentCreate) are\nunaffected — they are only created via explicit user API calls, never\nthrough MCP discovery.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T23:34:00+00:00"
+    },
+    {
+      "sha": "523d99dba0a68a6b537b6912cdcd26a490f8b655",
+      "message": "fix(schemas): add defensive visibility coercion on Read schemas\n\nDB visibility columns are unconstrained String(20) with no check\nconstraints.  Historical writes through Update endpoints (which\npreviously accepted any str) may have persisted invalid values.\n\nWith Literal types now on Read schemas, model_validate() would raise\nValidationError on such rows, crashing list/get endpoints.\n\nAdd a mode=\"before\" field_validator (_normalize_visibility) to all\n7 Read schemas that coerces invalid values to \"public\" (the DB\ndefault) with a warning log, instead of failing the read path.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T00:21:53+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 213,
+  "deletions": 136,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:42.031275",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:42.032591",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3701,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3701.json"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4640,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4640"
+  },
+  "metadata": {
+    "title": "fix(prompts): fix private conflict guard and stale argument_schema on template-only update",
+    "state": "open",
+    "created_at": "2026-05-07T10:01:44+00:00",
+    "updated_at": "2026-05-07T10:01:45+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 📌 Summary\r\n\r\nFour bugs in `prompt_service.py` caused silent data corruption and crashes. This PR fixes the two silent-failure cases and adds regression tests to prevent them from going undetected in future.\r\n\r\n- `register_prompt` skipped the duplicate-name guard for `private` visibility when `owner_email` was `None` and only `created_by` was supplied, allowing two private prompts with the same name and owner to be created silently.\r\n- `update_prompt` did not recompute `argument_schema.required` when only `template` was updated, leaving the schema tied to the old template's variables and producing spurious validation errors at call time.\r\n\r\n## 🔗 Related Issue\r\n\r\nCloses: #4611\r\n\r\n## 🔁 Reproduction Steps\r\n\r\nSee [#4611](https://github.com/IBM/mcp-context-forge/issues/4611) for full steps.\r\n\r\n**Private conflict (owner_email omitted):**\r\n1. `POST /prompts` with `{\"visibility\": \"private\", \"name\": \"my-prompt\", \"template\": \"hello\"}` using a token that sets `created_by` but not `owner_email`.\r\n2. Repeat the same request.\r\n3. Both succeed — no `409 Conflict`.\r\n\r\n**Stale argument schema:**\r\n1. `POST /prompts` with `{\"template\": \"Hello {{ name }}\"}` — `argument_schema.required` is `[\"name\"]`.\r\n2. `PATCH /prompts/{id}` with only `{\"template\": \"Hello {{ first }} {{ last }}\"}`.\r\n3. Call the prompt with `{\"first\": \"A\", \"last\": \"B\"}` — validation error claims `name` is missing.\r\n\r\n## 🐞 Root Cause\r\n\r\n**Private conflict:** `register_prompt` queried `DbPrompt.owner_email == owner_email` without the `created_by` fallback. When `owner_email=None`, no existing row matched and the duplicate check was silently bypassed. The same fallback (`owner_email or created_by`) was already used when persisting `db_prompt.owner_email` and in `update_prompt`'s private conflict check — the asymmetry was an omission.\r\n\r\n**Stale schema:** `update_prompt` only recomputed `argument_schema` inside the `if prompt_update.arguments is not None:` block. A template-only `PATCH` skipped that block entirely, leaving `argument_schema.required` referencing the previous template's variables.\r\n\r\n## 💡 Fix Description\r\n\r\n**`mcpgateway/services/prompt_service.py`**\r\n\r\n- Private conflict check: changed `DbPrompt.owner_email == owner_email` → `DbPrompt.owner_email == (owner_email or created_by)`, matching the expression used when persisting the record.\r\n- Template-only update: added an unconditional `_get_required_arguments` call immediately after `prompt.template` is assigned, updating `argument_schema[\"required\"]` in-place before the `arguments` block runs.\r\n\r\n**`tests/unit/mcpgateway/services/test_prompt_service.py`**\r\n\r\n- `test_register_prompt_private_conflict_via_created_by_fallback`: passes `owner_email=None, created_by=\"alice@example.com\"`, expects `PromptNameConflictError`.\r\n- `test_update_template_only_recomputes_required_args`: sends a template-only `PromptUpdate`, asserts `argument_schema.required` reflects the new variables and no longer contains old ones.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                             | Command             | Status |\r\n|-----------------------------------|---------------------|--------|\r\n| Lint suite                        | `make lint`         |   Pass     |\r\n| Unit tests                        | `make test`         |    Pass    |\r\n| Coverage ≥ 90 %                   | `make coverage`     |    Pass    |\r\n| Manual regression no longer fails | steps in issue #4611 |   Pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "c876e4d87787df13b153b978d25363d0c9d66510",
+      "message": "fix(prompts): guard private conflict check with created_by fallback and recompute argument_schema on template-only update\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-05-07T06:29:09+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 95,
+  "deletions": 11,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:01.941223",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:01.941770",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4640,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4640.json"
+  }
+}

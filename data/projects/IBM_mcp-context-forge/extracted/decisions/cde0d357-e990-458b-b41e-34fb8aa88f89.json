@@ -1,0 +1,40 @@
+{
+  "id": "cde0d357-e990-458b-b41e-34fb8aa88f89",
+  "title": "Upgrade Encryption: Argon2id KDF & Per-Record Salts",
+  "summary": "# ✨ Feature / Enhancement PR\r\n\r\n---\r\n\r\n## 🚀 Summary (1-2 sentences)\r\nMigrated encryption logic from `mcpgateway/utils/oauth_encryption.py` to `mcpgateway/services/encryption_service.py`, upgraded key derivation from PBKDF2-HMAC to **Argon2id** with a **per-record random salt**, refactored `sso_service.py` to use the new encryption service, removed the cached Fernet instance, and added an Alembic migration (with downgrade support) to re‑encrypt existing data.\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n\r\n---\r\n\r\n## 🔧 Detailed Changes\r\n\r\n1. **Relocation & Renaming**\r\n   - Moved: `mcpgateway/utils/oauth_encryption.py` ➜ `mcpgateway/services/encryption_service.py`.\r\n   - Centralizes crypto concerns under `services/` and clarifies usage scope beyond OAuth.\r\n\r\n2. **Key Derivation: PBKDF2-HMAC ➜ Argon2id**\r\n   - Switched to **Argon2id** for deriving the 32‑byte encryption key.\r\n   - **Why:** Argon2id is memory‑hard and substantially **more tolerant to brute‑force decryption attempts** than PBKDF2, raising attacker cost and reducing effectiveness of GPU/ASIC cracking.\r\n\r\n3. **Salt Strategy: Single Global Salt ➜ Per‑Record Random Salt**\r\n   - Each encrypted record now uses its **own random salt**.\r\n   - **Why:** Adds compartmentalization — **exposure of one key/salt pair does not help decrypt other records**, eliminating the prior single‑point‑of‑failure inherent in a global salt.\r\n\r\n4. **Runtime Change: Remove Cached Fernet Instance**\r\n   - Because salt is now **per record**, the derived key varies; a single cached `Fernet` object is no longer valid. The service derives per‑record and encrypts/decrypts accordingly.\r\n\r\n5. **SSO Service Refactor**\r\n   - Updated `mcpgateway/services/sso_service.py` to use the new centralized `EncryptionService` instead of its legacy inline encryption code.\r\n   - Eliminates duplicate PBKDF2-based encryption logic and ensures consistency across all secure token operations.\r\n\r\n6. **Database Migration (Alembic) – Re‑encrypt Existing Fields**\r\n   - Added a forward migration that reads legacy encrypted values, derives new Argon2id keys with per‑record salts, and writes back in the new format.\r\n   - Includes a **downgrade script** that reverses the migration, re‑encrypting with the legacy PBKDF2-HMAC method for rollback safety.\r\n   - **Updated fields (by table):**\r\n\r\n      | Table                         | Column / Field                                   | Notes                                                                 |\r\n      |-------------------------------|---------------------------------------------------|-----------------------------------------------------------------------|\r\n      | `gateways`                    | `oauth_config.client_secret`                      | `oauth_config` is a dict; the `client_secret` value is re‑encrypted.  |\r\n      | `a2a_agents`                  | `oauth_config.client_secret`                      | Same handling as in `gateways`.                                       |\r\n      | `oauth_tokens`                | `access_token`                                    | Token value re‑encrypted under Argon2id + per‑record salt.            |\r\n      | `oauth_tokens`                | `refresh_token`                                   | Token value re‑encrypted under Argon2id + per‑record salt.            |\r\n      | `registered_oauth_clients`    | `client_secret_encrypted`                         | Re‑encrypted.                                                         |\r\n      | `registered_oauth_clients`    | `registration_access_token_encrypted`             | Re‑encrypted.                                                         |\r\n      | `sso_providers`               | `client_secret_encrypted`                         | Re‑encrypted.                                                         |\r\n\r\n7. **Cross‑DB Validation**\r\n   - Verified migration **on SQLite and PostgreSQL** (both upgrade path and runtime decrypt/verify).\r\n\r\n---\r\n\r\n## 📎 Notes & Compatibility\r\n- Storage type remains string/`TEXT` — ciphertext continues to be Base64‑encoded and safe for `TEXT NOT NULL` columns.\r\n- The new format stores/associates a per‑record salt (and any required KDF params) so future decrypt can reproduce the exact key.\r\n- The migration and downgrade scripts are idempotent per row; re‑running won’t re‑encrypt already migrated values.\r\n\r\n---\r\n\r\n## ⚠️ Caveats & Performance Notes\r\n- **Argon2id** is intentionally **slower and more memory-intensive** than PBKDF2. This enhances brute-force resistance but may impact performance under high concurrent encryption/decryption load.\r\n- Requires **load testing** to benchmark latency in token-heavy or large OAuth operations.\r\n\r\n---\r\n\r\n## ✅ Outcome\r\n- Stronger at‑rest security posture (Argon2id + per‑record salts).\r\n- Unified encryption interface used across SSO, OAuth, and client registration.\r\n- Alembic upgrade + downgrade scripts ensure reversible migration and DB integrity.\r\n- Tested and verified on SQLite & PostgreSQL.",
+  "reasoning": "# ✨ Feature / Enhancement PR\r\n\r\n---\r\n\r\n## 🚀 Summary (1-2 sentences)\r\nMigrated encryption logic from `mcpgateway/utils/oauth_encryption.py` to `mcpgateway/services/encryption_service.py`, upgraded key derivation from PBKDF2-HMAC to **Argon2id** with a **per-record random salt**, refactored `sso_service.py` to use the new encryption service, removed the cached Fernet instance, and added an Alembic migration (with downgrade support) to re‑encrypt existing data.\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [x] `make lint` passes\r\n- [x] `make test` passes\r\n\r\n---\r\n\r\n## 🔧 Detailed Changes\r\n\r\n1. **Relocation & Renaming**\r\n   - Moved: `mcpgateway/utils/oauth_encryption.py` ➜ `mcpgateway/services/encryption_service.py`.\r\n   - Centralizes crypto concerns under `services/` and clarifies usage scope beyond OAuth.\r\n\r\n2. **Key Derivation: PBKDF2-HMAC ➜ Argon2id**\r\n   - Switched to **Argon2id** for deriving the 32‑byte encryption key.\r\n   - **Why:** Argon2id is memory‑hard and substantially **more tolerant to brute‑for",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "madhav165",
+    "crivetimihai"
+  ],
+  "tags": [
+    "security",
+    "caching",
+    "rest",
+    "python",
+    "database",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "01fa067b-49e0-4d4e-97bc-8ec11469e871",
+      "source_type": "pr",
+      "source_id": "1373",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/1373",
+      "contributor": "madhav165",
+      "timestamp": "2025-10-30T16:33:29Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1373.json"
+    }
+  ],
+  "timestamp": "2025-10-30T16:33:29Z",
+  "created_at": "2026-05-17T17:24:18.859518",
+  "updated_at": "2026-05-17T17:24:18.859520",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:24:18.860144",
+    "artifact_type": "decisions",
+    "artifact_id": "cde0d357-e990-458b-b41e-34fb8aa88f89"
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3144,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3144"
+  },
+  "metadata": {
+    "title": "perf(api): reduce CPU cost for request processing",
+    "state": "open",
+    "created_at": "2026-02-24T09:19:30+00:00",
+    "updated_at": "2026-04-10T07:53:41+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "performance",
+      "COULD"
+    ],
+    "milestone": "Release 1.3.0",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #2320 due to repository maintenance. Your code and branch are intact. @rakdutta please verify everything looks good.\n\ncloses issue #1807\r\nThis pull request introduces a set of performance optimizations and configurability improvements to the validation middleware. The main focus is on making validation and sanitization more efficient for large payloads and high-throughput scenarios, as well as providing more flexible control over which endpoints are validated. It adds new environment variables and settings, implements an LRU cache for validation results, enables conditional skipping of validation/sanitization for large payloads, and improves endpoint exclusion logic.\r\n\r\n**Validation Performance Optimization:**\r\n\r\n- Added new environment variables in `.env.example` to control validation middleware performance, including maximum body/response sizes, endpoint skip patterns, validation result caching, and response sampling options.\r\n- Extended the `Settings` class in `mcpgateway/config.py` to support the new performance-related configuration options, making them available throughout the application. [[1]](diffhunk://#diff-628a7ee520f2dc2401c177833a25b8e5eaf2cbc22a7ca51b4c0e3343a4c99815R268-R280) [[2]](diffhunk://#diff-628a7ee520f2dc2401c177833a25b8e5eaf2cbc22a7ca51b4c0e3343a4c99815R1590)\r\n\r\n**Validation Middleware Enhancements:**\r\n\r\n- Implemented an `LRUCache` class in `validation_middleware.py` to cache validation results for identical payloads, reducing redundant validation work on repeated requests.\r\n- Updated the `ValidationMiddleware` to:\r\n  - Respect new settings (body/response size limits, endpoint skip patterns, cache, and sampling).\r\n  - Skip validation for endpoints matching configured patterns and for request bodies exceeding the size threshold. [[1]](diffhunk://#diff-f6f7752bf0cbf74a06455aded6344f9044de56faa2fdb414e67f060d7db4737dL87-R179) [[2]](diffhunk://#diff-f6f7752bf0cbf74a06455aded6344f9044de56faa2fdb414e67f060d7db4737dL130-R280)\r\n  - Use the cache to avoid re-validating identical payloads and cache both successful and failed validations.\r\n  - Skip or sample sanitization for large responses, only performing full sanitization when necessary.\r\n\r\n### ✅ Tested & Working\r\n- **Endpoint Filtering**: Health/metrics endpoints skip validation (`VALIDATION_SKIP_ENDPOINTS`)\r\n- **Large Request Bodies**: Requests >1MB skip validation (`VALIDATION_MAX_BODY_SIZE=1048576`)\r\n- **Request Caching**: Identical payloads use cached results \r\n  - `VALIDATION_CACHE_ENABLED=true`\r\n  - `VALIDATION_CACHE_MAX_SIZE=1000` (max entries)\r\n  - `VALIDATION_CACHE_TTL=300` (5 min expiry)\r\n \r\n### ⚠️ Existing Issue\r\n **Response Sampling**: Streaming responses bypass sanitization entirely\r\n- Log shows: `response type: _StreamingResponse does not have body`\r\n- Large responses (>5MB) not being sampled as configured\r\n- Config set: `VALIDATION_SAMPLE_LARGE_RESPONSES=true`, `VALIDATION_SAMPLE_SIZE=10240`\r\n\r\n\r\n  ",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "b9a06a0be13ae770df07197436aa3bdff7df1f3c",
+      "message": "initial\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-19T09:32:16+00:00"
+    },
+    {
+      "sha": "f264f6d2fc27c869e0c65b9d30ee680515e19203",
+      "message": "test\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-20T08:30:21+00:00"
+    },
+    {
+      "sha": "1df36a7bfb308c2c455fe4b63a7bdc73c1a4d7bf",
+      "message": "skip endpoint\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-21T07:11:03+00:00"
+    },
+    {
+      "sha": "65029aec5a88b71aa2f82d55329d6683c9fdf2d9",
+      "message": "test\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-21T08:24:38+00:00"
+    },
+    {
+      "sha": "1e38606a913037a12c384ef8ed7da8fe28e70e4f",
+      "message": "doc\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-21T10:52:09+00:00"
+    },
+    {
+      "sha": "4c90a9dae72aff4871517dfafe98849fc374ee75",
+      "message": "remove temp file\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-22T05:31:39+00:00"
+    },
+    {
+      "sha": "214a0db727fda305d7acc5ef39dda9c0f297e75a",
+      "message": "ruff\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-22T05:38:25+00:00"
+    },
+    {
+      "sha": "44b7fe91feb1a24acb428ec0d84bd712cf590c5d",
+      "message": "test case fixed\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-01-22T05:59:18+00:00"
+    },
+    {
+      "sha": "4fbcafe5ebe9868bdaee3e242b0a00b5fc9f91d0",
+      "message": "test fix after rebase\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-02-02T06:41:55+00:00"
+    },
+    {
+      "sha": "a6f833791f598639f171c7c4ae6f1563588db06c",
+      "message": "testcase fix\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-02-16T11:58:34+00:00"
+    },
+    {
+      "sha": "736c674394bd22e2a965c2b55c0333ede8cf2a85",
+      "message": "precommit\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2026-02-16T12:19:10+00:00"
+    },
+    {
+      "sha": "3ca58acb0e91e0b6270428d8b7f66e7920173649",
+      "message": "review\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-20T05:17:51+00:00"
+    },
+    {
+      "sha": "dfbf7f7a49f19b34a0ebd50ea550e3a81fadbb14",
+      "message": "test coverage fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-20T05:49:22+00:00"
+    },
+    {
+      "sha": "e5a52dd9a4efbba01c355bf1fa6878cf8707288c",
+      "message": "test coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-20T06:30:59+00:00"
+    },
+    {
+      "sha": "a407c561e3c117b5fbaf2ac8448954d8eff5c262",
+      "message": "test coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-20T06:36:38+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 1229,
+  "deletions": 11,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:42.460596",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:42.461928",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3144,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3144.json"
+  }
+}

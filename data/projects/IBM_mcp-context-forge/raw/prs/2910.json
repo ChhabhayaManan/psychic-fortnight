@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2910,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2910"
+  },
+  "metadata": {
+    "title": "2874 - Add HX-Redirect header to HTMX on auth fail",
+    "state": "closed",
+    "created_at": "2026-02-13T10:09:02+00:00",
+    "updated_at": "2026-02-14T03:22:32+00:00",
+    "closed_at": "2026-02-14T03:22:30+00:00",
+    "merged_at": "2026-02-14T03:22:30+00:00",
+    "author": "gcgoncalves",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n---\r\n\r\n## 📌 Summary\r\nWhen an HTMX partial request hit AdminAuthMiddleware with an expired or invalid session, the 302 redirect was swapped into the active tab content instead of performing a full-page navigation. HTMX intercepts XHR 302 responses and treats the response body as swap content.\r\n\r\nReturn a 200 response with HX-Redirect header for HTMX requests, which instructs HTMX to perform a client-side full-page redirect to the login page. Non-HTMX and API request flows are unchanged.\r\n\r\nCloses #2874\r\n\r\n## 🔁 Reproduction Steps\r\n1. Log in and navigate to any admin module tab.\r\n2. Open browser DevTools → Application → Cookies.\r\n3. Delete or modify the `jwt_token` cookie to an invalid value.\r\n4. Click any HTMX-powered link/tab within the admin panel.\r\n5. **Observe:** Login form appears inside the tab content.\r\n\r\n## 🐞 Root Cause\r\n**File:** `mcpgateway/main.py`, lines 1457–1478 — `AdminAuthMiddleware._error_response()`\r\n\r\n```python\r\nis_htmx = request.headers.get(\"hx-request\") == \"true\"\r\nif \"text/html\" in accept_header or is_htmx:\r\n    login_url = f\"{root_path}/admin/login\" if root_path else \"/admin/login\"\r\n    if error_param:\r\n        login_url = f\"{login_url}?error={error_param}\"\r\n    return RedirectResponse(url=login_url, status_code=302)  # <-- BUG\r\n```\r\n\r\nThe method already detects HTMX requests (`is_htmx`) but treats them identically to regular browser HTML requests. HTMX does **not** follow standard 302 redirects as full-page navigations — it treats the response body as content to swap into the target element.\r\n\r\nHTMX supports a special `HX-Redirect` response header that instructs the client to perform a full-page redirect. This header is not being used.\r\n\r\n## 💡 Fix Description\r\nReturn a 200 response with HX-Redirect header for HTMX requests, which instructs HTMX to perform a client-side full-page redirect to the login page. Non-HTMX and API request flows are unchanged.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3800576819",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-14T03:19:38+00:00",
+      "body": "LGTM — clean, correct, well-tested fix.\n\n**Correctness**: `HX-Redirect` with status 200 is the documented HTMX mechanism for triggering full-page redirects from XHR responses. The fix is scoped correctly inside the existing browser-redirect branch of `_error_response`, and non-HTMX/API flows are untouched.\n\n**Security**: No new attack surface. The change only affects *how* the redirect is delivered after auth checks have already failed — not *when* or *where*. The login URL construction is identical for both paths.\n\n**Tests**: Two good end-to-end tests covering revoked-token and no-auth HTMX scenarios. All 19 existing `AdminAuthMiddleware` tests still pass.\n\n**Follow-up note**: The same HTMX redirect bug exists in `mcpgateway/middleware/rbac.py` (lines 174–180, 207–212, 274, 335–337) and `mcpgateway/utils/verify_credentials.py`, which use `HTTPException(302)` for HTMX requests instead of `HX-Redirect`. Since `AdminAuthMiddleware` runs first for `/admin/*` routes this PR fixes the primary issue, but worth a follow-up to fix the RBAC/verify_credentials paths for consistency."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "13df26ac3dbb2c67a7829df8a172db78851723e8",
+      "message": "2874 - Add HX-Redirect header to HTMX on auth fail\n\nWhen an HTMX partial request hit AdminAuthMiddleware with an expired or\ninvalid session, the 302 redirect was swapped into the active tab content\ninstead of performing a full-page navigation. HTMX intercepts XHR 302\nresponses and treats the response body as swap content.\n\nReturn a 200 response with HX-Redirect header for HTMX requests, which\ninstructs HTMX to perform a client-side full-page redirect to the login\npage. Non-HTMX and API request flows are unchanged.\n\nCloses #2874\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-02-13T09:54:28+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 42,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:16.809284",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:16.810740",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2910,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2910.json"
+  }
+}

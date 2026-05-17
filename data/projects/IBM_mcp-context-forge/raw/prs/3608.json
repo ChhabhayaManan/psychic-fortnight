@@ -1,0 +1,116 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3608,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3608"
+  },
+  "metadata": {
+    "title": "fix: Synchronize is_admin flag when platform_admin role is assigned during bootstrap",
+    "state": "closed",
+    "created_at": "2026-03-11T08:46:22+00:00",
+    "updated_at": "2026-03-18T21:11:22+00:00",
+    "closed_at": "2026-03-18T21:11:20+00:00",
+    "merged_at": "2026-03-18T21:11:20+00:00",
+    "author": "rakdutta",
+    "labels": [
+      "bug",
+      "rbac"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "🐛 Bug Fix\r\n\r\n## Description\r\n\r\nFixes a bootstrap synchronization gap where the `is_admin` flag was not updated when the `platform_admin` RBAC role was re-assigned during server startup, causing inconsistency between the two-layer security model.\r\n\r\n### Problem\r\n\r\nWhen an admin user was manually demoted in the database (bypassing API protections):\r\n1. The `is_admin` flag was set to `False`\r\n2. The `platform_admin` RBAC role was removed\r\n3. On server restart, bootstrap would re-assign the `platform_admin` RBAC role\r\n4. However, the `is_admin` flag remained `False`\r\n\r\nThis created an inconsistency where:\r\n- The user had the `platform_admin` RBAC role (Layer 2 security)\r\n- But the `is_admin` flag was `False` (Layer 1 security - token scoping)\r\n\r\n### Root Cause\r\n\r\nThe `bootstrap_default_roles()` function in `mcpgateway/bootstrap_db.py` would re-assign the `platform_admin` RBAC role to the admin user, but it did not synchronize the `is_admin` flag. The `bootstrap_admin_user()` function only runs when the user doesn't exist, so it wouldn't update an existing demoted admin.\r\n\r\n### Solution\r\n\r\nAdded synchronization logic in `bootstrap_default_roles()` to ensure the `is_admin` flag is set to `True` whenever the `platform_admin` RBAC role is assigned during bootstrap. This maintains consistency between both security layers.\r\n\r\n## Changes\r\n\r\n### Modified Files\r\n- `mcpgateway/bootstrap_db.py` - Added `is_admin` flag synchronization in `bootstrap_default_roles()`\r\n\r\n### Code Changes\r\n\r\n```python\r\n# Synchronize is_admin flag with platform_admin role assignment\r\n# This ensures consistency when admin is manually demoted in DB but role is re-assigned during bootstrap\r\nif not admin_user.is_admin:\r\n    logger.info(f\"Synchronizing is_admin flag for {admin_user.email} (was False, setting to True)\")\r\n    admin_user.is_admin = True\r\n    db.commit()\r\n```\r\n\r\nThe synchronization happens after both new and existing `platform_admin` role assignments, ensuring the flag is always consistent with the RBAC role state.\r\n\r\n## Testing\r\n\r\n### Test Scenario 1: Manual Database Demotion (Bypassing API)\r\n\r\nThis scenario tests the fix when an admin is manually demoted directly in the database, bypassing API protections.\r\n\r\n#### Reproduction Steps (Before Fix)\r\n```bash\r\n# 1. Start with fresh database\r\nrm mcp.db\r\nmake dev\r\n# Wait for bootstrap, then stop (Ctrl+C)\r\n\r\n# 2. Manually demote admin (bypassing API)\r\nsqlite3 mcp.db \"UPDATE email_users SET is_admin = 0 WHERE email = 'admin@example.com';\"\r\nsqlite3 mcp.db \"DELETE FROM user_roles\r\nWHERE user_id = (SELECT id FROM email_users WHERE email = 'admin@example.com')\r\nAND role_id = (SELECT id FROM roles WHERE name = 'platform_admin');\"\r\n\r\n# 3. Verify demotion\r\nsqlite3 mcp.db \"SELECT email, is_admin FROM email_users WHERE email = 'admin@example.com';\"\r\n# Output: admin@example.com|0\r\n\r\n# 4. Restart server\r\nmake dev\r\n\r\n# 5. Check inconsistency (BEFORE FIX)\r\ncurl -X GET http://localhost:8080/auth/email/admin/users/admin@example.com \\\r\n  -H \"Authorization: Bearer $MCPGATEWAY_BEARER_TOKEN\"\r\n# Result: \"is_admin\": false  ❌\r\n\r\ncurl -X GET http://localhost:8080/rbac/users/admin@example.com/roles \\\r\n  -H \"Authorization: Bearer $MCPGATEWAY_BEARER_TOKEN\"\r\n# Result: platform_admin role present  ✓\r\n```\r\n\r\n#### Verification (After Fix)\r\nAfter applying the fix and following the same reproduction steps:\r\n```bash\r\n# Check admin flag\r\ncurl -X GET http://localhost:8080/auth/email/admin/users/admin@example.com \\\r\n  -H \"Authorization: Bearer $MCPGATEWAY_BEARER_TOKEN\"\r\n# Result: \"is_admin\": true  ✓\r\n\r\n# Check RBAC role\r\ncurl -X GET http://localhost:8080/rbac/users/admin@example.com/roles \\\r\n  -H \"Authorization: Bearer $MCPGATEWAY_BEARER_TOKEN\"\r\n# Result: platform_admin role present  ✓\r\n```\r\n\r\nBoth the `is_admin` flag and RBAC role are now consistent.\r\n\r\n---\r\n\r\n### Test Scenario 2: Admin UI Demotion with Bootstrap Re-promotion\r\n\r\nThis scenario tests the fix when an admin is demoted via the Admin UI, then the platform admin is changed to that user and the server is restarted.\r\n\r\n#### Setup and Reproduction Steps\r\n```bash\r\n# 1. Configure environment\r\nexport PROTECT_ALL_ADMINS=false  # Allow admin demotion via UI\r\n\r\n# 2. Start server\r\nmake serve\r\n\r\n# 3. Create a new admin user via Admin UI\r\n# User: testadmin@example.com\r\n# Password: abcd1234\r\n# Grant admin privileges via UI\r\n\r\n# 4. Verify platform_admin role was created\r\ncurl -X GET http://localhost:8080/rbac/users/testadmin@example.com/roles \\\r\n  -H \"Authorization: Bearer $MCPGATEWAY_BEARER_TOKEN\"\r\n# Result: platform_admin role present  ✓\r\n\r\n# 5. Demote testadmin@example.com via Admin UI\r\n# Navigate to Admin UI → Users → testadmin@example.com → Demote\r\n# Verify: is_admin = false, platform_admin role removed\r\n\r\n# 6. Update environment to make testadmin the platform admin\r\nexport PLATFORM_ADMIN_EMAIL=testadmin@example.com\r\nexport PLATFORM_ADMIN_PASSWORD=abcd1234\r\n\r\n# 7. Restart server to trigger bootstrap\r\nmake serve\r\n```\r\n\r\n#### Results\r\n\r\n**Before Fix:**\r\n- `is_admin` flag: `false` ❌\r\n- `platform_admin` RBAC role: present ✓\r\n- **Inconsistency**: User has admin role but flag is false\r\n\r\n**After Fix:**\r\n- `is_admin` flag: `true` ✓\r\n- `platform_admin` RBAC role: present ✓\r\n- **Consistent**: Both flag and role are synchronized\r\n\r\n#### Verification Commands\r\n```bash\r\n# Check is_admin flag\r\ncurl -X GET http://localhost:8080/auth/email/admin/users/testadmin@example.com \\\r\n  -H \"Authorization: Bearer $MCPGATEWAY_BEARER_TOKEN\" | jq '.is_admin'\r\n# Expected: true\r\n\r\n# Check platform_admin role\r\ncurl -X GET http://localhost:8080/rbac/users/testadmin@example.com/roles \\\r\n  -H \"Authorization: Bearer $MCPGATEWAY_BEARER_TOKEN\" | jq '.[] | select(.name==\"platform_admin\")'\r\n# Expected: platform_admin role object\r\n```\r\n\r\n---\r\n\r\n### Summary\r\n\r\nBoth test scenarios confirm that the fix successfully synchronizes the `is_admin` flag when the `platform_admin` RBAC role is assigned during bootstrap, regardless of whether the demotion happened via:\r\n1. Direct database manipulation (bypassing API)\r\n2. Admin UI demotion followed by environment variable change\r\n\r\n## Impact\r\n\r\n### Security\r\n- **Positive**: Ensures consistency between token scoping (Layer 1) and RBAC (Layer 2) security models\r\n- **No regression**: Only affects bootstrap path when `platform_admin` role is assigned\r\n- **Maintains invariants**: Upholds the security invariant that `platform_admin` role holders must have `is_admin=True`\r\n\r\n### Performance\r\n- **Minimal**: Single database update during bootstrap only when flag is out of sync\r\n- **No runtime impact**: Only executes during server startup\r\n\r\n### Compatibility\r\n- **Backward compatible**: No breaking changes to API or database schema\r\n- **Idempotent**: Safe to run multiple times (only updates when needed)\r\n\r\n## Related Issues\r\n\r\nCloses #3501 \r\n\r\n\r\n## Additional Notes\r\n\r\nThis fix ensures that the two-layer security model remains consistent:\r\n- **Layer 1 (Token Scoping)**: Controls what resources a user CAN SEE (data filtering via `is_admin` flag)\r\n- **Layer 2 (RBAC)**: Controls what actions a user CAN DO (permission checks via role assignments)\r\n\r\nThe synchronization only occurs during bootstrap when the `platform_admin` role is assigned, making it a targeted fix with minimal surface area for potential issues.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3939322417",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-12T19:47:47+00:00",
+      "body": "This PR fixes bootstrap_default_roles() syncing is_admin after role assignment, but doesn't address the gap Mihai flagged in the triage in the issue #3501: create_platform_admin() in email_auth_service.py sets is_admin = True without assigning the platform_admin RBAC role.\n\nConsider fixing that reverse inconsistency also in this PR."
+    },
+    {
+      "id": "3969561675",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-18T17:18:23+00:00",
+      "body": "## Review Summary\n\nRebased onto main (clean, no conflicts), reviewed the implementation, and applied three reviewer fixes.\n\n### Original PR Assessment\n\nThe two-fix approach is sound and correctly addresses both directions of the Layer 1 / Layer 2 inconsistency:\n\n1. **bootstrap_db.py**: Syncs `is_admin=True` after confirming/assigning the `platform_admin` role — correctly placed, idempotent, minimal surface area.\n2. **email_auth_service.py**: `create_platform_admin()` now also assigns the `platform_admin` RBAC role for existing users — follows the established pattern from `update_user()`.\n\nTest coverage is 100% for all new code paths.\n\n### Reviewer Fixes Applied\n\n1. **Sanitized log message in bootstrap_db.py** — The `is_admin` sync log line used `admin_user.email` without `SecurityValidator.sanitize_log_message()`, inconsistent with every other log line in the file. Fixed for CWE-117 log injection prevention.\n\n2. **Session rollback after role sync failure in create_platform_admin()** — `assign_role_to_user()` does `self.db.commit()` internally. If that commit fails, the shared session enters a failed transaction state, and the subsequent `self.db.commit()` would raise `PendingRollbackError`, losing the admin user update. Added defensive `self.db.rollback()` + re-apply of admin flags in the except clause.\n\n3. **Sanitized exception text in create_platform_admin() error log** — `{role_error}` was interpolated directly; changed to `SecurityValidator.sanitize_log_message(str(role_error))` to match `bootstrap_db.py`.\n\n### Pre-existing issue (not fixed here, not a regression)\n\n`get_user_role_assignment()` filters `is_active` but not `expires_at`, while `permission_service.get_user_roles()` does exclude expired grants. This affects both `create_platform_admin()` and `update_user()` identically. Since bootstrap role assignments never have `expires_at` set, this is not reachable in practice. Warrants a separate issue if TTL-based role assignments are planned.\n\n### Also fixed (pre-existing, on main)\n\n- **test_tool_service_coverage.py**: `mock_gateway` fixture was missing `CommonAttributes` audit fields, causing `PydanticGateway.model_validate()` to fail on MagicMock objects. Added explicit `None` values matching the `mock_tool` fixture pattern."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c827492b592a328a5f68e0a981c7acb3d11a0227",
+      "message": "is_admin flag fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-11T08:01:53+00:00"
+    },
+    {
+      "sha": "31966b0e01630395dad4fc7236a4f4d1ff17807a",
+      "message": "test coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-11T09:05:02+00:00"
+    },
+    {
+      "sha": "3bab7d3f07d70bf4e52e24d7479c2b86fbcc2f25",
+      "message": "test\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-11T10:18:09+00:00"
+    },
+    {
+      "sha": "8c64ab91a55fbb2aeaae1890e6bde5f76fe8e5be",
+      "message": "missing role update\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-13T07:55:10+00:00"
+    },
+    {
+      "sha": "841ed154e6a249ab74461d6aebcdf5cc6a1db17d",
+      "message": "test and log msg\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-13T08:15:15+00:00"
+    },
+    {
+      "sha": "7f22c9189cc1e5779d1850990d97c3537af30826",
+      "message": "fix: sanitize email in bootstrap is_admin sync log message\n\nUse SecurityValidator.sanitize_log_message() for the email address\nin the is_admin synchronization log line to prevent log injection\n(CWE-117) and maintain consistency with all other log messages in\nbootstrap_db.py.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T16:17:40+00:00"
+    },
+    {
+      "sha": "6eeeccd751f33ec9616c24e79b7825b7f177b414",
+      "message": "fix(tests): add missing audit fields to mock_gateway fixture\n\nThe mock_gateway fixture was missing CommonAttributes audit fields\n(created_by, created_from_ip, etc.), causing PydanticGateway\nmodel_validate to fail when MagicMock auto-generated these as\nMagicMock objects instead of strings/None.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T16:32:56+00:00"
+    },
+    {
+      "sha": "af5063fad914086147cad1d5720d0b6e92c77d2e",
+      "message": "fix: rollback session after role sync failure and sanitize exception log\n\nAddress two issues in create_platform_admin() role synchronization:\n\n1. If assign_role_to_user() fails during its internal db.commit(),\n   the SQLAlchemy session enters a failed transaction state. Without\n   a rollback, the subsequent self.db.commit() raises\n   PendingRollbackError, losing the admin user update. Add defensive\n   rollback + re-apply of admin flags to keep the session usable.\n\n2. Sanitize exception text in the error log message using\n   SecurityValidator.sanitize_log_message() to prevent log injection\n   (CWE-117), matching the pattern used in bootstrap_db.py.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T16:47:05+00:00"
+    },
+    {
+      "sha": "572cafcd67c7fc1654f2e331dcdc47a32f957690",
+      "message": "test: cover rollback failure branch in create_platform_admin role sync\n\nAdd test for the case where both role sync and session rollback fail,\ncovering the except branch at lines 1178-1179 to satisfy diff-cover.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T17:42:04+00:00"
+    },
+    {
+      "sha": "0ab922defab63ce5f4a0e137d367c2200bdca400",
+      "message": "style: reformat long log line in create_platform_admin\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T18:22:04+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 372,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:12.007049",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:12.008629",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3608,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3608.json"
+  }
+}

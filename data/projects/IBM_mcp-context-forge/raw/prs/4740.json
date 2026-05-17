@@ -1,0 +1,96 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4740,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4740"
+  },
+  "metadata": {
+    "title": "feat(mcp): implement sessionless MCP protocol semantics (>= 2025-11-25)",
+    "state": "open",
+    "created_at": "2026-05-13T11:03:51+00:00",
+    "updated_at": "2026-05-14T14:34:13+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "enhancement",
+      "mcp-protocol",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4686\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR implements **sessionless MCP protocol semantics** for protocol versions >= `2025-11-25`, enabling MCP clients to communicate with the gateway without requiring `Mcp-Session-Id` headers. This is a major architectural improvement that simplifies client implementations and aligns with the MCP specification's evolution toward stateless communication patterns.\r\n\r\n### What Changed\r\n\r\n**Core Implementation:**\r\n- Added `SessionlessConnectionPool` for managing connections without session IDs, keyed by `(gateway_id, url, transport, auth_fingerprint)`\r\n- Implemented protocol version gating via `uses_sessionless_mcp_semantics()` utility function\r\n- Created `mcp_protocol` utility module for semantic version comparison\r\n- Updated `StreamableHTTPTransport` to support both sessionless (new) and sessionful (legacy, marked deprecated) semantics\r\n- Added Rust runtime support for sessionless protocol detection\r\n\r\n**Backward Compatibility:**\r\n- Legacy sessionful protocols (< `2025-11-25`) continue to work with existing session-based connection management\r\n- The stateful StreamableHTTP implementation remains in place but is marked as deprecated for future removal\r\n- Protocol version detection automatically routes requests to appropriate connection pool\r\n\r\n**Testing & Documentation:**\r\n- Added 5 passing unit tests (`tests/unit/mcpgateway/services/test_sessionless_pool_paths.py`)\r\n- Added 1 passing integration test (`tests/integration/test_sessionless_pool_coverage.py`)\r\n- Added 1 comprehensive E2E manual test suite (`tests/e2e/test_sessionless_manual.py`) - **5/5 tests passing**\r\n- Created detailed documentation at `docs/docs/architecture/sessionless-mcp-protocol.md` (398 lines)\r\n\r\n**Bug Fixes:**\r\n- Fixed `MockPermissionService.check_permission()` signature mismatch by adding missing parameters (`token_teams`, `allow_admin_bypass`, `check_any_team`)\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Feature / Enhancement\r\n- [x] Bug fix (MockPermissionService signature)\r\n- [x] Documentation\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ PASS |\r\n| Unit tests                | `make test`     | ✅ PASS |\r\n| E2E manual tests          | `uv run python tests/e2e/test_sessionless_manual.py` | ✅ 5/5 PASS |\r\n\r\n### Test Results Summary\r\n\r\n**New Tests Added:**\r\n- ✅ 5 unit tests for sessionless pool code paths (all passing)\r\n- ✅ 1 integration test for sessionless pool coverage (passing)\r\n- ✅ 1 E2E manual test suite with 5 test cases (all passing):\r\n  1. Initialize with sessionless protocol (>= 2025-11-25)\r\n  2. List tools without session ID\r\n  3. List prompts without session ID\r\n  4. List resources without session ID\r\n  5. Initialize with legacy sessionful protocol (< 2025-11-05) - backward compatibility\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort autoflake ruff`)\r\n- [x] Tests added/updated for changes (7 new tests, all passing)\r\n- [x] Documentation updated (`docs/docs/architecture/sessionless-mcp-protocol.md`)\r\n- [x] No secrets or credentials committed\r\n- [x] Backward compatibility maintained\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Design Decisions\r\n\r\n**1. Dual Connection Pool Strategy**\r\n- Kept the existing stateful StreamableHTTP implementation intact but marked it as **deprecated**\r\n- New sessionless implementation coexists with legacy code for smooth migration\r\n- Protocol version detection (`uses_sessionless_mcp_semantics()`) automatically routes to appropriate pool\r\n\r\n**2. Connection Pool Keying**\r\n- Sessionless connections are keyed by `(gateway_id, url, transport, auth_fingerprint)` instead of session IDs\r\n- This enables connection reuse across multiple requests without session state\r\n- Auth fingerprint ensures security isolation between different authentication contexts\r\n\r\n**3. Test Coverage Strategy**\r\n- **Integration test** validates sessionless pool behavior with real service interactions\r\n- **E2E manual test** (`tests/e2e/test_sessionless_manual.py`) provides end-to-end verification against a running gateway:\r\n  - Tests initialize, tools/list, prompts/list, resources/list without session IDs\r\n  - Verifies backward compatibility with legacy sessionful protocol\r\n  - Can be run manually for regression testing: `TOKEN=<jwt> uv run python tests/e2e/test_sessionless_manual.py`\r\n\r\n- **Unit tests**\r\n- `test_invoke_tool_sessionless_pool_path` in `tool_service.py` \r\n- `tests/unit/mcpgateway/services/test_sessionless_pool_missing_coverage.py` with 9 comprehensive tests\r\n- `tests/unit/mcpgateway/services/test_sessionless_pool_paths.py` - Unit tests for sessionless pool code paths\r\n- `tests/unit/mcpgateway/services/test_sessionless_connection_pool_comprehensive.py` - Comprehensive unit tests for SessionlessConnectionPool (95%+ coverage)\r\n- `tests/unit/mcpgateway/services/test_sessionless_pool_missing_coverage.py` - **NEW** - 9 tests covering edge cases (health check method=None, METHOD_NOT_FOUND continue, transport errors, connection close)\r\n- `tests/unit/mcpgateway/services/test_resource_service.py` - **FIXED** - `test_invoke_resource_sessionless_pool_path` now passes\r\n- `tests/unit/mcpgateway/services/test_tool_service.py` - **NEW** - `test_invoke_tool_sessionless_pool_path` covers tool invocation via sessionless pool\r\n\r\n### Migration Path\r\n\r\n**For Operators:**\r\n- No configuration changes required\r\n- Protocol version detection is automatic\r\n- Legacy clients continue to work unchanged\r\n\r\n**For Client Developers:**\r\n- Update `protocolVersion` to `\"2025-11-25\"` or later in initialize request\r\n- Remove `Mcp-Session-Id` header handling from client code\r\n- Connection pooling is now handled transparently by the gateway\r\n\r\n### Files Changed\r\n- **33 files modified** (2,220 insertions, 178 deletions)\r\n- **7 new files created** (connection pool, utilities, tests, documentation)\r\n- **Core services updated**: tool_service, prompt_service, resource_service, server_service\r\n- **Transport layer enhanced**: streamablehttp_transport with dual-mode support\r\n- **Rust runtime aligned**: protocol detection support added",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "23e47881b72c27ebc3262a9d4dcf28fe358bac34",
+      "message": "feat: implement sessionless MCP protocol semantics (>= 2025-11-25)\n\n- Add SessionlessConnectionPool for connection management without session IDs\n- Implement protocol version gating via uses_sessionless_mcp_semantics()\n- Add mcp_protocol utility module for protocol version comparison\n- Update StreamableHTTPTransport to support sessionless semantics\n- Fix MockPermissionService signature (add token_teams, allow_admin_bypass, check_any_team)\n- Add comprehensive documentation at docs/docs/architecture/sessionless-mcp-protocol.md\n- Add unit tests for sessionless pool paths (5 passing tests)\n- Add integration test for sessionless pool coverage (1 passing test)\n- Add e2e manual test suite (5/5 tests passing)\n- Maintain backward compatibility with legacy sessionful protocols (< 2025-11-25)\n- Add Rust runtime support for sessionless protocol detection\n\nCloses #4686\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-13T10:57:34+00:00"
+    },
+    {
+      "sha": "5d5138b24b7c32349fdf1f980baa81f667410ae8",
+      "message": "fix rust compilation errors and pylint errors\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-14T12:06:54+00:00"
+    },
+    {
+      "sha": "ced4fe15d5dde660f0acf1a15381faf5cd1e841a",
+      "message": "Merge branch 'main' into 4686-feature-implement-sessionless-mcp-protocol-semantics",
+      "author": "Bogdan-Marius Cătănuș",
+      "date": "2026-05-14T12:07:56+00:00"
+    },
+    {
+      "sha": "8dece4a7edfdf3b24595928a9a4ff7744cdf6da4",
+      "message": "update rust tests and add python unit tests to improve coverage\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-14T13:54:31+00:00"
+    },
+    {
+      "sha": "bf375fc80a4c576e37d6d00c6381bca31234fac8",
+      "message": "update rust tests and add python unit tests to improve coverage\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-14T13:55:42+00:00"
+    },
+    {
+      "sha": "a72c968df7b1633343ca5114f69a77ecb24b3846",
+      "message": "Merge branch 'main' into 4686-feature-implement-sessionless-mcp-protocol-semantics",
+      "author": "Bogdan-Marius Cătănuș",
+      "date": "2026-05-14T13:57:00+00:00"
+    },
+    {
+      "sha": "f3292bb12eff9ac58519c1aed1afa6885bd2eb59",
+      "message": "delete .pre-commit-lite.yaml from changes",
+      "author": "Bogdan-Marius Cătănuș",
+      "date": "2026-05-14T14:12:40+00:00"
+    },
+    {
+      "sha": "ce7048bb0249ec34c07bcff25543078e4cf959c1",
+      "message": "chore: restore .pre-commit-lite.yaml with Python 3.12 for CI compatibility\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-14T14:21:42+00:00"
+    },
+    {
+      "sha": "5d9d5c644e887ab459b90310e53b723969e95775",
+      "message": "fix .secrets.baseline\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-14T14:34:10+00:00"
+    }
+  ],
+  "files_changed": 29,
+  "additions": 4210,
+  "deletions": 709,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:37.263748",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:37.264215",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4740,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4740.json"
+  }
+}

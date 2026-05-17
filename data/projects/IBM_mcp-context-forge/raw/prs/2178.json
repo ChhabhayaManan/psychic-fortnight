@@ -1,0 +1,132 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2178,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2178"
+  },
+  "metadata": {
+    "title": "Support _meta field propagation",
+    "state": "closed",
+    "created_at": "2026-01-19T09:05:20+00:00",
+    "updated_at": "2026-01-22T01:56:42+00:00",
+    "closed_at": "2026-01-20T16:15:08+00:00",
+    "merged_at": "2026-01-20T16:15:08+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": "Release 1.0.0-BETA-2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nCloses #2094\r\n\r\nRefactored the mcpgateway RPC handlers and service layers to correctly propagate the _meta field from incoming JSON-RPC requests to upstream MCP servers. This change aligns the gateway with the [MCP Specification](https://modelcontextprotocol.io/specification/2025-06-18/basic#_meta) for tools, resources and prompts for both sse as well as streamable http transports.\r\n\r\n## 🐞 Root Cause\r\nThe standard JSON-RPC handlers in mcpgateway/main.py for tools/call, resources/read and prompts/get were retrieving specific arguments (like uri, name, arguments) from the params dictionary but ignoring the `_meta` field. Furthermore, the underlying service methods (ToolService.call_tool, ResourceService.read_resource, PromptService.get_prompt) and their helper functions (e.g., invoke_tool, get_prompt and invoke_resource) did not accept or propagate this metadata to the mcp.ClientSession.\r\n\r\n## 💡 Fix Description\r\nImplemented a comprehensive propagation path for _meta in the json rpc:\r\n1. RPC Handlers: `tools/call`, `resources/read` and `prompts/get`\r\n2. Service Signatures:  `invoke_tool`, `get_prompt` and `invoke_resource`\r\n3. Client Session Integration: Updated internal helpers (`connect_to_sse_session`, `connect_to_streamablehttp_server`) to pass the extracted meta_data to the `mcp.ClientSession.call_tool` method as the meta argument.\r\n\r\nThis design ensures that _meta allows context such as progress tokens and distributed tracing IDs to flow transparently through the gateway to the destination server, preserving the fidelity of the MCP protocol.\r\n\r\n## 🧪 Testing:\r\n\r\nUse this MCP server to test client to server _meta propagation via gateway, as well as server to client via gateway.\r\n\r\n1. Add the below mcp server in the Context Forge Gateway.\r\n2. Create a virtual server with the MCP server tools.\r\n3. Connect to the virtual server in MCP inspector, use metadata field for sending the metadata from inspector to the gateway and eventually to the mcp server.\r\n\r\nMetadata in MCP inspector:\r\n<img width=\"959\" height=\"213\" alt=\"image\" src=\"https://github.com/user-attachments/assets/bb036b43-b683-49f4-bb57-fa8608001bdb\" />\r\n\r\n\r\nMCP Server to Test with:\r\n\r\n```python\r\nfrom typing import Annotated\r\n\r\nfrom pydantic import BaseModel\r\nimport json\r\n\r\n# from mcp.server.fastmcp import FastMCP\r\nfrom fastmcp import FastMCP, Context\r\nfrom mcp.types import CallToolResult, TextContent\r\n\r\nmcp = FastMCP(\"CallToolResult Example\")\r\n\r\n\r\nclass ValidationModel(BaseModel):\r\n    \"\"\"Model for validating structured output.\"\"\"\r\n\r\n    status: str\r\n    data: dict[str, int]\r\n\r\n@mcp.tool()\r\ndef advanced_tool(context: Context = None) -> CallToolResult:\r\n    \"\"\"Return CallToolResult directly for full control including _meta field.\"\"\"\r\n    meta = context.request_context.meta\r\n\r\n    return CallToolResult(\r\n        content=[TextContent(type=\"text\", text=\"Response visible to the model\")],\r\n        _meta={\"hidden\": \"data for client applications only\"},\r\n    )\r\n\r\n\r\n@mcp.tool()\r\ndef validated_tool() -> CallToolResult:\r\n    \"\"\"Return CallToolResult with data visible to the Model.\"\"\"\r\n    response_data = {\"status\": \"success\", \"data\": {\"result\": 42}}\r\n    \r\n    return CallToolResult(\r\n        content=[\r\n            TextContent(\r\n                type=\"text\", \r\n                text=json.dumps(response_data, indent=2)\r\n            )\r\n        ],\r\n        structuredContent=response_data, \r\n        _meta={\"internal\": \"test metadata for validated_tool\"},\r\n        isError=False\r\n    )\r\n\r\n@mcp.tool()\r\ndef empty_result_tool() -> CallToolResult:\r\n    \"\"\"For empty results, return CallToolResult with empty content.\"\"\"\r\n    return CallToolResult(content=[])\r\n\r\n\r\n# -------------------------------------------------\r\n# Run MCP server\r\n# -------------------------------------------------\r\nif __name__ == \"__main__\":\r\n    # Use 'sse' for streamable support\r\n    mcp.run(transport=\"http\", host=\"127.0.0.1\", port=8001)\r\n```\r\n\r\n\r\n\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3683051601",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-20T16:14:53+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b89f96a2f1f8b7e9950ecb0f7d44e828fb1fdaf7",
+      "message": "added _meta support for streamable http\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-18T14:44:09+00:00"
+    },
+    {
+      "sha": "f8b90ef57b70e5a896b03567a89767e7ea72dc51",
+      "message": "updated test cases with meta field\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-18T14:44:42+00:00"
+    },
+    {
+      "sha": "b15511a6baf5de8bd6a9b67cce41fb9a272e03b5",
+      "message": "_meta extraction for sse\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-18T15:51:00+00:00"
+    },
+    {
+      "sha": "8f0efad818a855ef9662c71599080b7c27058663",
+      "message": "handle _meta field with resources and prompts\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-19T06:40:04+00:00"
+    },
+    {
+      "sha": "ab0946bf4aa0a7721c2b3bb03d82fc2956b58a45",
+      "message": "update test cases to test _meta field\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-19T06:48:52+00:00"
+    },
+    {
+      "sha": "9380f2ff9e798fa73d1fe723319840eef39099a0",
+      "message": "linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-19T08:41:06+00:00"
+    },
+    {
+      "sha": "dec22652a1a188eab76241a14c6bf3d131476dee",
+      "message": "linting fixes\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-19T08:51:52+00:00"
+    },
+    {
+      "sha": "5c4a99b2a9139a4bc3d65fb11bedf27ce1ca6cb6",
+      "message": "fix test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-19T11:15:26+00:00"
+    },
+    {
+      "sha": "c6ada2b543f2527cb3d6633ff339b9c0c8824fb2",
+      "message": "extract _meta for fallback\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-19T11:29:46+00:00"
+    },
+    {
+      "sha": "ed34c4156405f655845cd52eaf7ab65072b9ae87",
+      "message": "linting fixes\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-19T11:50:56+00:00"
+    },
+    {
+      "sha": "9f6bd85a436d2cef6d347b581c953954b8e2ea5c",
+      "message": "fix: Complete _meta propagation for prompts and resources in streamablehttp transport\n\n- Add None check before model_dump() to prevent AttributeError when meta is not present\n- Pass _meta_data to prompt_service.get_prompt() call\n- Pass meta_data to resource_service.read_resource() call\n\nThis completes the _meta field propagation for streamablehttp transport that was\npartially implemented in the original PR.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T13:22:50+00:00"
+    },
+    {
+      "sha": "c6b1ba1f787b19c8f343ebe78dbe5cc762bd536c",
+      "message": "fix: Remove unsupported meta parameter from read_resource calls\n\nMCP SDK 1.25.0 ClientSession.read_resource() only accepts uri parameter,\nnot meta. The meta parameter is only supported by call_tool().\n\nRemove meta=meta_data from all 4 read_resource() calls to prevent TypeError\nat runtime. Add comments explaining the SDK limitation.\n\nNote: _meta propagation for resources will require a future MCP SDK version\nthat adds meta support to read_resource().\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T14:42:45+00:00"
+    },
+    {
+      "sha": "da4f42ce25f711f78b69df46687d9842e797f6d9",
+      "message": "chore: Remove unused meta_data params from resource helper functions\n\nThe internal helper functions connect_to_sse_session() and\nconnect_to_streamablehttp_server() had meta_data parameters that\nwere unused after removing the unsupported meta kwarg from\nread_resource() calls.\n\n- Remove meta_data parameter from both helper function signatures\n- Update docstrings to note MCP SDK 1.25.0 limitation\n- Update call sites to not pass meta_data\n- Keep meta_data parameter in invoke_resource() and read_resource()\n  service methods for future SDK compatibility\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T15:16:54+00:00"
+    },
+    {
+      "sha": "b76603821c55e297cc0c774b09104c38d1a4b6c9",
+      "message": "fix: Simplify _meta extraction to use ctx.meta directly\n\nRemove the problematic fallback to ctx.request.params.meta which could\nraise AttributeError if ctx.request is None. The ctx.meta field on\nRequestContext is the canonical source for _meta and is always available.\n\nSimplified pattern:\n  if ctx and ctx.meta is not None:\n      meta_data = ctx.meta.model_dump()\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-20T15:32:03+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 175,
+  "deletions": 11,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:46.029959",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:46.032674",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2178,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2178.json"
+  }
+}

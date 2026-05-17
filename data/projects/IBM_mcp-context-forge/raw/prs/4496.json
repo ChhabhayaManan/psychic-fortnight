@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4496,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4496"
+  },
+  "metadata": {
+    "title": "fix(health): unauthenticated liveness probe for authorization_code gateways + POST ping for StreamableHTTP",
+    "state": "open",
+    "created_at": "2026-04-28T10:42:33+00:00",
+    "updated_at": "2026-04-28T10:42:34+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "ecthelion77",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Fixes #4495\n\n## Summary\n\nThe gateway health check marks all `authorization_code` OAuth gateways as unreachable after pod restarts because the system account (`PLATFORM_ADMIN_EMAIL`) has no stored OAuth tokens. This PR introduces an **unauthenticated liveness probe** strategy: when no token is available, the health check proceeds without auth — HTTP 401/403 proves the server is alive, while timeouts/DNS/connection errors indicate a real outage.\n\nAdditionally, replaces the full MCP SDK `ClientSession.initialize()` for StreamableHTTP health checks with a lightweight JSON-RPC POST `initialize` request. The SDK opens a GET SSE stream after initialize which returns 405 on servers that don't support server-initiated messages (the MCP spec says GET is optional).\n\n## Changes\n\n**`mcpgateway/services/gateway_service.py`** — `_check_single_gateway_health()`:\n\n### 1. Unauthenticated liveness probe (`unauthenticated_probe` flag)\n\nFor `authorization_code` gateways, the health check now:\n- Tries to use a stored token if available (existing behavior)\n- If no token exists (typical for system accounts): **proceeds without auth** instead of calling `_handle_gateway_failure()`\n- Sets `unauthenticated_probe = True` so that HTTP 401/403 responses are treated as \"server alive\" for both SSE and StreamableHTTP transports\n- Timeouts, DNS failures, and connection errors still trigger `_handle_gateway_failure` as before\n\nPreviously, the code did an early return to `_handle_gateway_failure()` when `user_email` was missing or when no stored token was found, making it impossible for authorization_code gateways to pass health checks under a system account.\n\n### 2. Lightweight StreamableHTTP health check\n\nReplaced the full SDK client session:\n```python\n# Before (causes 405 on servers without server-initiated messages):\nasync with streamablehttp_client(url=...) as (read, write, _):\n    async with ClientSession(read, write) as session:\n        response = await session.initialize()\n\n# After (lightweight POST only):\nresponse = await client.post(url, json=init_payload, headers=..., timeout=...)\n```\n\nThe MCP SDK `ClientSession.initialize()` opens a GET SSE stream after the initialize handshake. Servers that don't support server-initiated messages (M365 MCP, Kubernetes MCP, GitHub MCP) return 405 on GET, causing a false health failure. A successful POST `initialize` is sufficient proof of health per the MCP spec.\n\n### 3. Observability\n\nAdded `health.probe_type: unauthenticated_liveness` span attribute when probing without auth, for tracing visibility.\n\n## Testing\n\nValidated in production with 13 gateways (8 `authorization_code` + 5 non-OAuth). After deployment:\n- All 13 gateways report `reachable=true`\n- Previously, all 8 authorization_code gateways were stuck at `reachable=false` after every pod restart\n- StreamableHTTP gateways (M365, Kubernetes, GitHub) no longer fail with 405\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "97701f39b9cf692b1d2a4b9662c4a6058f22ddcf",
+      "message": "fix(transport): POST ping for StreamableHTTP health check (fix 405)\n\nReplace the full MCP SDK client session.initialize() with a lightweight\nJSON-RPC POST for StreamableHTTP health checks. The SDK opens a GET SSE\nstream after initialize which returns 405 on servers that don't support\nserver-initiated messages (M365, Kubernetes MCP, GitHub MCP).\n\nFor authorization_code OAuth gateways, the health check no longer marks\nthe gateway as failed when the system account has no stored token.\nInstead, it proceeds without auth — a 401/403 proves the server is\nalive, while timeouts/DNS/connection errors indicate a real outage.\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-28T10:15:50+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 74,
+  "deletions": 43,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:29.468435",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:29.468978",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4496,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4496.json"
+  }
+}

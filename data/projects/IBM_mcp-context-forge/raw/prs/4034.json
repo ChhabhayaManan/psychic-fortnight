@@ -1,0 +1,77 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4034,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4034"
+  },
+  "metadata": {
+    "title": "fix: honor fail_on_plugin_error during plugin init",
+    "state": "closed",
+    "created_at": "2026-04-03T14:02:50+00:00",
+    "updated_at": "2026-04-04T19:42:09+00:00",
+    "closed_at": "2026-04-04T19:42:08+00:00",
+    "merged_at": "2026-04-04T19:42:08+00:00",
+    "author": "lucarlig",
+    "labels": [
+      "wxo",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\n\nBefore opening this PR please:\n\n1. `make lint`            - passes `ruff`, `mypy`, `pylint`\n2. `make test`            - all unit + integration tests green\n3. `make coverage`        - ≥ 80 %\n4. `make docker docker-run-ssl` or `make podman podman-run-ssl`\n5. Update relevant documentation.\n6. Tested with sqlite and postgres + redis.\n7. Manual regression no longer fails. Ensure the UI and /version work correctly.\n\n---\n\n## 📌 Summary\nHonor `plugin_settings.fail_on_plugin_error` during plugin-manager startup so an unavailable external plugin can be skipped instead of aborting gateway boot. Add a regression test that locks the fail-open startup behavior in place.\n\n## 🔁 Reproduction Steps\nCloses #4033\n\n1. Enable plugins with `plugin_settings.fail_on_plugin_error: false`.\n2. Configure an external MCP plugin whose streamable HTTP endpoint is unavailable at startup.\n3. Start the gateway.\n4. Observe that startup aborts from `PluginManager.initialize()` instead of logging and skipping the failing plugin.\n\n## 🐞 Root Cause\n`PluginManager.initialize()` unconditionally raised `RuntimeError` on plugin instantiation failures, even when config explicitly requested fail-open behavior via `fail_on_plugin_error: false`.\n\n## 💡 Fix Description\nCheck `plugin_settings.fail_on_plugin_error` inside the plugin-load failure path during manager initialization. When it is `false`, log the failure, skip the plugin, and continue startup. Add a unit regression test that patches `load_and_instantiate_plugin()` to raise and asserts initialization still completes with an empty registry.\n\n## 🧪 Verification\n\n| Check                                 | Command                                                                  | Status |\n|---------------------------------------|--------------------------------------------------------------------------|--------|\n| Lint suite                            | `make lint`                                                              | Not run |\n| Unit tests                            | `uv run pytest tests/unit/mcpgateway/plugins/framework/test_manager.py tests/unit/mcpgateway/plugins/framework/test_manager_extended.py -q` | Passed |\n| Coverage ≥ 80 %                       | `make coverage`                                                          | Not run |\n| Manual regression no longer fails     | Startup with unreachable external MCP plugin and `fail_on_plugin_error: false` | Not run |\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4055934922",
+      "author": "madhu-mohan-jaishankar",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-03T14:25:14+00:00",
+      "body": "`logger.warning` message for the skip behavior should be asserted."
+    },
+    {
+      "id": "4055999981",
+      "author": "madhu-mohan-jaishankar",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-03T14:43:16+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "4058690787",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-04T17:27:35+00:00",
+      "body": "Rebased onto main (was 6 commits behind) — clean, no conflicts.\n\n**Code review:**\n\n- Logic is correct and minimal: the 3-line addition checks `fail_on_plugin_error` before raising, logs a warning, and `continue`s to the next plugin. Clean fix.\n- The `self._config` null guard is consistent with the runtime checks in `execute_plugin()` (lines 388/400/404).\n- The existing `test_manager_initialization_edge_cases` was correctly updated to set `fail_on_plugin_error=True` explicitly — previously relied on the unconditional raise, so it needs the explicit flag now.\n- New test covers the skip path with the right assertions (warning logged, init completes, plugin count is 0).\n- 100% differential coverage confirmed — lines 823-825 are all covered.\n- No security or performance concerns. The skip is gated behind an explicit opt-in setting, and failures are logged at both ERROR and WARNING levels.\n\n**One minor design note** (non-blocking): The runtime error handling in `execute_plugin()` also raises for `PluginMode.ENFORCE` regardless of `fail_on_plugin_error`. The init path only checks `fail_on_plugin_error`. This is reasonable since at init time there's no request to enforce against, and the admin has explicitly opted into fail-open. Worth considering as a follow-up if stricter init behavior is desired for ENFORCE-mode plugins.\n\nLGTM — nice clean fix, Luca."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "be4106d8d1d4026057d1861a5bc27c0645835bfa",
+      "message": "fix: honor fail_on_plugin_error during plugin init\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T14:01:58+00:00"
+    },
+    {
+      "sha": "db66fc7c88be127ae2b44c7b3c915ec734528d60",
+      "message": "test: assert skip warning for plugin init failure\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T14:33:07+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 25,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:17.089024",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:17.092038",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4034,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4034.json"
+  }
+}

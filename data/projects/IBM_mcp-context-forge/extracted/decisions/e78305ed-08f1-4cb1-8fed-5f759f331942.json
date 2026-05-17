@@ -1,0 +1,38 @@
+{
+  "id": "e78305ed-08f1-4cb1-8fed-5f759f331942",
+  "title": "fix(chore): centralize FastAPI Query validators to prevent drift",
+  "summary": "## 🔗 Related Issue\r\nCloses #4436\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR centralizes ~87 duplicated inline `Query(pattern=...)` validators across 13 files into a shared module (`mcpgateway/common/query_params.py`), eliminating maintenance drift risk and simplifying security review.\r\n\r\n**Problem:** PR #4337 correctly added input validation at the Query layer but inlined regex patterns at every call-site. This created:\r\n- **Drift risk**: `admin.py:17577` already hard-coded a pattern that exists in `SecurityValidator.TOOL_NAME_PATTERN`\r\n- **Refactor friction**: Updating cursor format or gateway_id requires touching 8+ files\r\n- **Review friction**: Security reviewers must diff 87 inline regexes instead of ~15 centralized aliases\r\n\r\n**Solution:** Extract patterns into `Annotated[..., Query(...)]` aliases backed by `Settings` validation patterns and `SecurityValidator` constants, following existing codebase conventions.\r\n\r\n**Changes:**\r\n- Created `mcpgateway/common/query_params.py` with 30+ shared query parameter aliases\r\n- Added 6 new validation patterns to `mcpgateway/config.py` (relationship, entity_type, time_range, status_filter, period_type, aggregation)\r\n- Replaced 87 inline `Query(pattern=...)` declarations across admin.py, main.py, and 11 routers\r\n- Updated `tests/security/test_query_param_validation.py` to import from centralized module\r\n- Fixed `admin.py:17577` drift (now uses `SecurityValidator.TOOL_NAME_PATTERN`)\r\n- Increased SSO authorization code `max_length` from 512 to 4096 for Microsoft Entra ID support (reported in Issue ##4490 and an open PR #4491)\r\n- Documented new patterns in `.env.example`\r\n\r\n**Benefits:**\r\n- Eliminates drift between inline patterns and centralized validators\r\n- Reduces refactor friction (update once vs 8+ files)\r\n- Simplifies security review (30 aliases vs 87 inline regexes)\r\n- Maintains endpoint-specific OpenAPI `parameter.schema.pattern` metadata\r\n- Preserves per-param 422 validation responses\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [x] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n**Additional verification:**\r\n- All 87 inline `Query(pattern=...)` declarations successfully replaced\r\n- No remaining inline regex patterns in mcpgateway/ (verified via `search_files`)\r\n- FastAPI `Annotated` types correctly defined (no defaults inside `Query()`)\r\n- OpenAPI schema generation preserved (patterns visible in `/docs`)\r\n- Test suite `tests/security/test_query_param_validation.py` continues at 160+ cases\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Design Decisions\r\n\r\n**Why `Annotated` types instead of middleware validation?**\r\n- Preserves endpoint-specific OpenAPI `parameter.schema.pattern` metadata\r\n- Maintains per-param 422 validation error responses\r\n- Keeps validation declarative at the endpoint signature level\r\n\r\n**Why separate aliases for similar patterns?**\r\n- `team_id` and `gateway_id` both use `^[a-zA-Z0-9_-]+$` today but are semantically different\r\n- They may diverge in the future (e.g., team UUIDs vs gateway identifiers)\r\n- Separate aliases prevent unintended coupling\r\n\r\n**FastAPI Annotated Pattern:**\r\n```python\r\n# In query_params.py (NO default inside Query)\r\nQueryTeamId = Annotated[\r\n    Optional[str],\r\n    Query(max_length=100, pattern=settings.validation_team_id_pattern),\r\n]\r\n\r\n# At call site (default set here)\r\nasync def endpoint(team_id: QueryTeamId = None):\r\n    ...\r\n```\r\n\r\nFastAPI automatically extracts and applies validation rules from the `Annotated` metadata. The `= None` is just the default when the parameter is missing.\r\n\r\n### Files Changed (17 total)\r\n- **Created:** `mcpgateway/common/query_params.py` (342 lines)\r\n- **Modified:** `.env.example`, `.secrets.baseline`, `mcpgateway/config.py`, `mcpgateway/admin.py`, `mcpgateway/main.py`, 11 routers, test file\r\n- **Net change:** +556 lines, -157 lines\r\n\r\n### Security Impact\r\n- **Positive:** Centralization reduces drift risk and simplifies audit\r\n- **Neutral:** No change to validation semantics or runtime behavior\r\n- **Verified:** All existing test vectors continue to pass, including CRLF/NUL rejection",
+  "reasoning": "## 🔗 Related Issue\r\nCloses #4436\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR centralizes ~87 duplicated inline `Query(pattern=...)` validators across 13 files into a shared module (`mcpgateway/common/query_params.py`), eliminating maintenance drift risk and simplifying security review.\r\n\r\n**Problem:** PR #4337 correctly added input validation at the Query layer but inlined regex patterns at every call-site. This created:\r\n- **Drift risk**: `admin.py:17577` already hard-coded a pattern that exists in `SecurityValidator.TOOL_NAME_PATTERN`\r\n- **Refactor friction**: Updating cursor format or gateway_id requires touching 8+ files\r\n- **Review friction**: Security reviewers must diff 87 inline regexes instead of ~15 centralized aliases\r\n\r\n**Solution:** Extract patterns into `Annotated[..., Query(...)]` aliases backed by `Settings` validation patterns and `SecurityValidator` constants, following existing codebase conventions.\r\n\r\n**Changes:**\r\n- Created `mcpgateway/common/query_params.py` with 30+ shared",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "bogdanmariusc10"
+  ],
+  "tags": [
+    "security",
+    "chore",
+    "python",
+    "performance",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "e30b7001-987d-4e0f-b2b5-17680bf43246",
+      "source_type": "pr",
+      "source_id": "4540",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/4540",
+      "contributor": "bogdanmariusc10",
+      "timestamp": "2026-04-30T10:45:28Z",
+      "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4540.json"
+    }
+  ],
+  "timestamp": "2026-04-30T10:45:28Z",
+  "created_at": "2026-05-17T17:23:38.866030",
+  "updated_at": "2026-05-17T17:23:38.866034",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:38.866823",
+    "artifact_type": "decisions",
+    "artifact_id": "e78305ed-08f1-4cb1-8fed-5f759f331942"
+  }
+}

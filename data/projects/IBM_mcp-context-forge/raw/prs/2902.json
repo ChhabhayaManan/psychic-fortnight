@@ -1,0 +1,410 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2902,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2902"
+  },
+  "metadata": {
+    "title": "feat: Implement Subresource Integrity (SRI) for CDN resources",
+    "state": "closed",
+    "created_at": "2026-02-13T08:39:18+00:00",
+    "updated_at": "2026-02-16T09:19:16+00:00",
+    "closed_at": "2026-02-16T09:19:15+00:00",
+    "merged_at": null,
+    "author": "suciu-daniel",
+    "labels": [
+      "security"
+    ],
+    "milestone": null,
+    "assignees": [
+      "suciu-daniel"
+    ]
+  },
+  "description": "## Summary\n\nImplements complete Subresource Integrity (SRI) protection for all external CDN resources to cryptographically verify that fetched resources have not been tampered with.\n\n## Changes\n\n### Phase 1 & 2: Infrastructure\n- Created `scripts/generate-sri-hashes.py` for SHA-384 hash generation\n- Created `scripts/verify-sri-hashes.py` for hash verification\n- Added `load_sri_hashes()` function in `admin.py`\n- Generated `mcpgateway/sri_hashes.json` with all resource hashes\n- Pinned all CDN library versions (Alpine.js, Chart.js, Marked, DOMPurify)\n\n### Phase 3: Template Updates\n- Added SRI to all 15 CDN resources in `admin.html`\n- Added SRI to Font Awesome in `login.html`\n- Added SRI to Font Awesome in `change-password-required.html`\n- All resources include `integrity` and `crossorigin=\"anonymous\"` attributes\n\n### Phase 4: CI Integration\n- Updated `make sri-verify` to use verification script\n- Added SRI verification step to `.github/workflows/full-build-pipeline.yml`\n- CI fails build on hash mismatch\n\n### Phase 5: Documentation\n- Updated `docs/docs/architecture/adr/014-security-headers-cors-middleware.md`\n- Updated `docs/docs/manage/securing.md`\n- Documented CDN library update workflow\n\n## Protected Resources (15 total)\n\n- HTMX (1.9.10)\n- Alpine.js (3.14.1)\n- Chart.js (4.4.1)\n- Marked (11.1.1)\n- DOMPurify (3.0.6)\n- CodeMirror core + 6 modes/themes (5.65.18)\n- Font Awesome (6.4.0)\n\n## Security Benefits\n\n✅ CDN Compromise Protection - Malicious code blocked\n✅ MITM Attack Prevention - Tampered content detected\n✅ DNS Hijacking Defense - Redirected content rejected\n✅ Version Drift Detection - CI catches unexpected changes\n✅ Automated Verification - Every build validates hashes\n\n## Testing\n\n```bash\n$ make sri-verify\n🔐 Verifying SRI hashes against CDN content...\n  Verifying htmx... ✓\n  Verifying alpinejs... ✓\n  Verifying chartjs... ✓\n  Verifying marked... ✓\n  Verifying dompurify... ✓\n  Verifying codemirror_js... ✓\n  Verifying codemirror_addon_simple... ✓\n  Verifying codemirror_mode_javascript... ✓\n  Verifying codemirror_mode_python... ✓\n  Verifying codemirror_mode_shell... ✓\n  Verifying codemirror_mode_go... ✓\n  Verifying codemirror_mode_rust... ✓\n  Verifying codemirror_css... ✓\n  Verifying codemirror_theme_monokai... ✓\n  Verifying fontawesome... ✓\n\n✅ All 15 SRI hashes verified successfully!\n```\n\nCloses #2558",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3796260434",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T09:56:49+00:00",
+      "body": "Thanks for this solid SRI implementation, @suciu-daniel. The CI verification pipeline and centralized hash storage are well-designed. A few items:\n\n**Bug — Invalid HTML in `login.html` (lines 509-514 of diff)**\nThe Font Awesome `<link>` tag has a broken closing. `crossorigin=\"anonymous\">` closes the tag, then `/>` becomes stray literal text in the page output. Compare with the correct form in `change-password-required.html` and `admin.html`. Fix: remove the extra `>` and close with just `/>`.\n\n**URL mismatch for HTMX between template and hash generator**\n`admin.html` uses `src=\"https://unpkg.com/htmx.org@1.9.10\"` but `generate-sri-hashes.py` hashes `https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js`. The short URL 302-redirects. Browsers compute SRI against the final response body so it *may* work, but this is fragile. Recommend aligning the template `src` to the canonical `/dist/htmx.min.js` path.\n\n**`CDN_RESOURCES` duplicated across two scripts**\n`generate-sri-hashes.py` and `verify-sri-hashes.py` maintain identical `CDN_RESOURCES` dicts. Extract to a shared module to prevent drift.\n\n**Tailwind CSS excluded but undocumented in templates**\nAll three templates load Tailwind from CDN without SRI. The generate script has a comment explaining the JIT exclusion, but the templates have no comment. A brief `<!-- No SRI: Tailwind JIT -->` in each template would help maintainability."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "10824695011cdeb3494132cbf3e40034773fee52",
+      "message": "feat: implement SRI hash generation for CDN resources (Phase 1 & 2)\n\n- Add scripts/generate-sri-hashes.py to generate SHA-384 hashes for all CDN resources\n- Generate mcpgateway/sri_hashes.json with hashes for 15 CDN resources:\n  * HTMX 1.9.10\n  * Alpine.js 3.14.1 (pinned from @3.x.x)\n  * Chart.js 4.4.1 (pinned from latest)\n  * Marked 11.1.1 (newly added)\n  * DOMPurify 3.0.6 (newly added)\n  * CodeMirror 5.65.18 (7 files)\n  * Font Awesome 6.4.0\n- Update scripts/download-cdn-assets.sh to download marked and dompurify\n- Add Makefile targets: make sri-generate and make sri-verify\n- Pin all CDN versions to exact semver for reproducibility\n\nAddresses Phase 1 (Version Pinning) and Phase 2 (Hash Generation) of issue #2558\n\nRelated to #2558\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-13T07:45:23+00:00"
+    },
+    {
+      "sha": "8a2080be50f8600228f6a2a54f31638c72f9dd69",
+      "message": "feat: add SRI hashes to admin.html CDN resources (Phase 3)\n\n- Add integrity and crossorigin attributes to all CDN resources\n- Pin Alpine.js to 3.14.1 (was using @3.x.x)\n- Pin Chart.js to 4.4.1 (was using latest)\n- Pin Marked to 11.1.1 (was using latest)\n- Pin DOMPurify to 3.0.6 (was using latest)\n- Add SRI to all 7 CodeMirror JS files\n- Add SRI to 2 CodeMirror CSS files\n- Add SRI to Font Awesome CSS\n\nAll SRI hashes loaded from sri_hashes.json via load_sri_hashes()\nfunction. Changes only apply in CDN mode (ui_airgapped=false).\n\nCloses #2558 (Phase 3)\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-13T08:28:53+00:00"
+    },
+    {
+      "sha": "d05b334581e4f9383356ca7c9e601b9be59c4ec4",
+      "message": "feat: add SRI hash verification to CI pipeline (Phase 4)\n\n- Create scripts/verify-sri-hashes.py to verify CDN content matches stored hashes\n- Update Makefile sri-verify target to use new verification script\n- Add SRI verification step to full-build-pipeline.yml CI workflow\n- Verification fetches each CDN URL and compares SHA-384 hash\n- Fails CI build if any hash mismatch detected\n- Provides clear error messages for debugging\n\nThe verification script:\n- Fetches all 15 CDN resources\n- Calculates SHA-384 hashes\n- Compares against mcpgateway/sri_hashes.json\n- Reports mismatches with expected vs actual hashes\n- Detects missing or extra hashes in config\n\nCloses #2558 (Phase 4)\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-13T08:33:28+00:00"
+    },
+    {
+      "sha": "d3709b7d25858fca7e89db8f764db11e1c99abee",
+      "message": "feat: add SRI hash support infrastructure (Phases 1 & 2)\n\nPhase 1: Add load_sri_hashes() function to admin.py\n- Load SRI hashes from mcpgateway/sri_hashes.json\n- Cache hashes in memory for performance\n- Pass sri_hashes to all template contexts (admin, login, change-password)\n\nPhase 2: Update login.html and change-password-required.html\n- Add SRI integrity attributes to Font Awesome CSS\n- Add crossorigin=\"anonymous\" for CORS compliance\n- Use sri_hashes.fontawesome from template context\n\nAdditional: Clean up generate-sri-hashes.py formatting\n- Add UTF-8 encoding declaration\n- Fix trailing whitespace and newlines\n- Improve code consistency\n\nRelated to #2558\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-13T08:34:21+00:00"
+    },
+    {
+      "sha": "99f4d21d04844c457c44d485a7896ac47fe76f7b",
+      "message": "docs: add SRI implementation documentation (Phase 5)\n\nUpdate ADR-0014 (Security Headers):\n- Add comprehensive SRI implementation section\n- Document all 15 protected CDN resources\n- Explain security benefits and usage\n- Include CDN library update workflow\n- Mark SRI as implemented in version 1.0.0\n\nUpdate securing.md (Security Guide):\n- Add SRI subsection under Network Security\n- Document protected resources and verification commands\n- Provide step-by-step CDN library update workflow\n- Add security checklist for SRI compliance\n- Explain threats mitigated (CDN compromise, MITM, DNS hijacking)\n\nThe documentation provides:\n- Clear usage instructions for make sri-generate and sri-verify\n- Step-by-step guide for updating CDN library versions\n- Security benefits and threat mitigation details\n- Integration with CI pipeline verification\n\nCloses #2558 (Phase 5)\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-13T08:37:34+00:00"
+    },
+    {
+      "sha": "97dd82cea9900c3e123f6c190b23424fa338bae5",
+      "message": "fix: include sri_hashes.json in sdist via MANIFEST.in\n\nAdd recursive-include rule for *.json files in mcpgateway/ directory\nto ensure sri_hashes.json is included in source distributions.\n\nFixes check-manifest warning about missing mcpgateway/sri_hashes.json\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-13T08:43:14+00:00"
+    },
+    {
+      "sha": "dff0941bf5b77a0fb21d4f9a139ae16c33ffc6c6",
+      "message": "chore: fix linting issues in SRI implementation\n\n- Remove trailing whitespace in template files\n- Add missing newlines at end of Python scripts\n- Fix indentation in HTML script/link tags\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-13T08:47:56+00:00"
+    },
+    {
+      "sha": "97a33fcfdf25b3d002f07e4d7ee0ddb1b2ccbc62",
+      "message": "fix: address SRI implementation feedback from PR review\n\n- Fix invalid HTML in login.html (broken closing tag on Font Awesome link)\n- Fix HTMX URL mismatch (use canonical /dist/htmx.min.js path)\n- Extract CDN_RESOURCES to shared scripts/cdn_resources.py module\n- Add Tailwind JIT exclusion comments to all three templates\n- Regenerate SRI hashes with corrected HTMX URL\n\nCloses feedback items from PR #2902 review\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-13T10:40:08+00:00"
+    },
+    {
+      "sha": "042c3b1e9ce1085c014e33ff11528bd7b5241627",
+      "message": "refactor: replace global variable with lru_cache for SRI hash loading\n\n- Remove global _sri_hashes_cache variable\n- Use @lru_cache(maxsize=1) decorator instead\n- Simplifies code and eliminates pylint global-statement warning\n- Maintains same caching behavior without global state\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-16T09:00:51+00:00"
+    },
+    {
+      "sha": "03f97617ed173df1991b9c4ce0c1d77684cfc39e",
+      "message": "Playwright CI/CD (#2911)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T11:13:13+00:00"
+    },
+    {
+      "sha": "4fbf2c842cd8bdd840447cb968660f61bdf9cfe5",
+      "message": "test: add comprehensive RBAC regression test suite (373 tests) (#2912)\n\n* test: add comprehensive RBAC regression test suite (373 tests)\n\nCloses #2387\n\nAdd systematic RBAC test coverage across 7 new test files:\n- Permission matrix: 235 parametrized tests for all 5 roles × permissions\n- Token scoping: 20 tests for normalize_token_teams() truth table\n- Admin bypass: 11 tests for allow_admin_bypass=True/False enforcement\n- Fail-closed: 10 tests for error/expired/deactivated role denial\n- Cross-team isolation: 18 tests including #2900 personal team regression\n- Endpoint coverage: 69 tests verifying decorator usage across all routers\n- Management endpoints: 10 HTTP-level integration tests for RBAC admin\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* test: add Playwright E2E tests for RBAC on tools, resources, prompts, and teams\n\nExtends test_rbac_permissions.py with 15 new E2E tests covering:\n- Tool CRUD: developer create (team + all-teams view), viewer denied\n- Resource CRUD: developer create, viewer denied\n- Prompt CRUD: developer create, viewer denied\n- Team management: viewer denied manage members, team_admin granted\n- REST API: developer/viewer create tool/resource/prompt via API\n\nCloses #2387\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: resolve Playwright RBAC test failures for prompts, teams, and API\n\n- Prompt form: skip template fill (textarea has default content)\n- Team management: test POST add-member (viewer denied) + verify\n  team_admin passes RBAC (ownership check is business logic, not RBAC)\n- REST API viewer deny: assert not in (200, 201) since FastAPI may\n  return 422 (schema validation) before RBAC check runs\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: use Apache-2.0 license identifier consistently across all test files\n\nReplace SPDX-License-Identifier: MIT with Apache-2.0 to match the\nrest of the project.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T11:18:56+00:00"
+    },
+    {
+      "sha": "c72f3b98ed039106437da0dca781dd2bcc8ae220",
+      "message": "fix: replace overflow-hidden with overflow-auto on login pages (#2897)\n\noverflow-hidden prevented scrolling when the viewport became smaller\n(e.g., page zoom). overflow-auto restores normal scrolling while\nkeeping layout styles intact.\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Nayana R Gowda",
+      "date": "2026-02-13T12:24:15+00:00"
+    },
+    {
+      "sha": "fbe409278b7cb1e86225558dcc768597d0e22893",
+      "message": "Update files to clean (#2918)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T12:33:42+00:00"
+    },
+    {
+      "sha": "7e1fcb4687b4852fd1b3b4df8f8a831d38489087",
+      "message": "Add Lightweight Docker Compose Configuration for Local Load Testing and Monitoring (#2816)\n\n* feat: add lightweight local load testing and monitoring setup\n\nAdd docker-compose-lite.yml and Makefile targets for local development\nenvironments with limited resources (10 CPU / 18GB memory).\n\nChanges:\n- docker-compose-lite.yml: 2-replica gateway stack with reduced resource limits\n- Makefile: compose-lite-up/down, monitoring-lite-up/down, load-test-ui targets\n- LocalTest.md: Documentation for lite setup and resource allocation\n\nResource optimization:\n- Gateway: 3→2 replicas, 8→3.5 CPU limit, 8→3GB memory limit per replica\n- Core services: 6.75 CPU / 8.125GB reserved (vs 12 CPU / 12GB original)\n- With monitoring: 8.75 CPU / 9.625GB reserved\n- Excludes pgAdmin/redis_commander to save 0.75 CPU / 384MB\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>\n\n* fixup:formatting\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>\n\n* feat: enhance local load testing setup with resource-optimized configurations and override file for easy maintenance and documentation\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>\n\n* feat: add resource limits and reservations for monitoring services in lite configuration\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>\n\n* docs: update LocalTest.md to remove redundant file modification details for lite setup\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>\n\n* fix: improve lite compose targets consistency and documentation\n\n- Use $(COMPOSE_CMD) and $(COMPOSE_CMD_MONITOR) variables instead of\n  hardcoded 'docker compose' for podman compatibility\n- Add missing # help: entries for compose-lite-up/down and\n  monitoring-lite-up/down targets\n- Add monitoring-lite-up/down to .PHONY declarations\n- Add missing Grafana user preferences curl in monitoring-lite-up\n  (matching monitoring-up behavior)\n- Fix wrong filename references in LocalTest.md\n  (docker-compose-lite.yml -> docker-compose.override.lite.yml)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: restore .pages indentation, correct Redis docs, remove port check\n\n- Restore .pages YAML indentation to match project convention (2-space\n  indented list under nav:) consistent with all other .pages files\n- Fix Redis resource table: original values were wrong (CPU limit 2 not\n  1.5, memory reservation 1G not 1.5G), add missing CPU reservation row\n- Remove port 8080 preflight check from monitoring-lite-up since the\n  documented workflow runs compose-lite-up first (nginx already bound)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-02-13T12:35:13+00:00"
+    },
+    {
+      "sha": "eb5d11ecb304485068821e3ae487de7cefe00a16",
+      "message": "fix: remove duplicate loading spinner on A2A agents page (#2892)\n\nRemove inline placeholder spinner from #agents-table div, keeping only the HTMX #agents-loading indicator. This matches the pattern already used for servers and tools tabs (commit 6b3283e4). Fixes #2887.\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>",
+      "author": "Oriol Morros Vilaseca",
+      "date": "2026-02-13T12:43:50+00:00"
+    },
+    {
+      "sha": "1376dac3576fc9148203b827afb74498c2b8b6bd",
+      "message": "fix: simplify OSError handling in send_to_stdout (#2380) (#2884)\n\nRemove redundant conditional logic where both if/else branches\ncalled _mark_shutdown() identically. Add error logging with lazy\nformatting and remove unused errno import.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "msureshkumar88",
+      "date": "2026-02-13T13:15:25+00:00"
+    },
+    {
+      "sha": "75b85b834f97e6bf9ee03caefbfcef9752bcf3a9",
+      "message": "test: add Playwright E2E tests for security, teams, entities, and operations (#2919)\n\nAdd 88 REST API E2E tests organized into 4 groups:\n\n- security/ (30 tests): RBAC admin, token lifecycle, user management, SSO\n- teams/ (15 tests): invitations, join requests, member roles\n- entities/ (32 tests): CRUD + activate/deactivate for tools, resources,\n  prompts, servers with RBAC permission checks\n- operations/ (13 tests): export/import, observability, LLM config, health\n\nKnown server bugs tracked as xfail(strict=True):\n- #2916: selective export AttributeError on Tool.rate_limit\n- #2917: RBAC role DELETE broken SQLAlchemy query\n\nCloses #2387\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T13:20:05+00:00"
+    },
+    {
+      "sha": "8c99a3b75629f09c855f29c20e42e28bcd7f47f6",
+      "message": "docs: fix File Header Management section link in CONTRIBUTING.md (#2862)\n\nSigned-off-by: jayananden m <jayananden@gmail.com>",
+      "author": "Jay",
+      "date": "2026-02-13T13:28:16+00:00"
+    },
+    {
+      "sha": "1093ee0780aa78f8e55c62a64826275deb78114d",
+      "message": "fix: resolve selective export AttributeError and RBAC role deletion failures (#2921)\n\n* fix: resolve selective export AttributeError and RBAC role deletion failures\n\n- Fix selective export using non-existent model attributes (rate_limit,\n  timeout, is_active) by using getattr() and .enabled (#2916)\n- Fix broken SQLAlchemy query in role deletion: select().update() →\n  update().where().values() (#2917)\n- Add ValueError handler for system role deletion returning 400 not 500\n- Harden browser UI RBAC tests against intermittent cookie auth failures\n\nCloses #2916\nCloses #2917\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: harden flaky browser UI tests and add ValueError coverage\n\n- test_delete_prompt: use retry-based wait_for_entity_deleted() instead\n  of immediate assertion after API delete (race condition fix)\n- test_delete_server_ui_button: add scroll_into_view, force click, and\n  expect_navigation (mirrors gateways_page pattern from #2890)\n- test_auth_type_filter/category_filter: wait for HTMX swap completion\n  instead of fixed 1000ms timeout; skip if filter option not available\n- Add unit test for ValueError handler in rbac.py delete_role (line 286)\n  to satisfy diff-cover threshold\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T14:54:41+00:00"
+    },
+    {
+      "sha": "8a72addf8f561603b0deebc8bb87bf14de4ddba5",
+      "message": "Fix invoke_tool crash on duplicate tool names across teams (#2880)\n\n* fix: handle duplicate tool names across teams in invoke_tool\n\nChange scalar_one_or_none() to scalars().all() to prevent\nMultipleResultsFound crash when the same tool name exists in\nmultiple teams. Filter candidates through _check_tool_access\nand prioritize by visibility (team > private > public).\n\nCloses #2863\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: reuse _check_tool_access for multi-tool filtering, skip cache on duplicates\n\n- Replace hand-rolled visibility filtering with _check_tool_access\n  to ensure consistent access control (is_public_only_token, admin\n  bypass, team DB fallback)\n- Skip cache when multiple tools share a name since resolution is\n  user-dependent\n- Fix duplicate comment block and misleading test names\n- Add tests for cache-skip behavior and public-only token filtering\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-13T15:42:48+00:00"
+    },
+    {
+      "sha": "e3d63b9272def64c07a51a7377a87650d9a81a56",
+      "message": "feat(`gateway_mode`): Add gateway mode feature with `direct_proxy` support for pass-through MCP operations (#2723)\n\n* feat: add direct_proxy gateway mode for pass-through MCP operations\n\nImplements a new `direct_proxy` gateway mode that enables pass-through proxying of MCP operations directly to remote servers without database caching. This complements the existing `cache` mode (default) and provides flexibility for different use cases.\n\n:warning: The direct proxy assumes a stateless MCP server is built using Streamable HTTP transport. Further, RBAC architecture need to be analyzed.\n\n- **New field**: Added `gateway_mode` column to `gateways` table with values `cache` (default) or `direct_proxy`\n- **Migration**: Created idempotent Alembic migration\n- **Models**: Updated `Gateway` ORM model in `db.py` with new field and documentation\n\n- **GatewayCreate**: Added `gateway_mode` field with validation pattern `^(cache|direct_proxy)$`\n- **GatewayUpdate**: Added optional `gateway_mode` field for updates\n- **GatewayRead**: Added `gateway_mode` field to response schema\n\n**gateway_service.py**\n- Added `gateway_mode` field handling in gateway creation and updates\n- Passes gateway mode through initialization flow\n\n**tool_service.py**\n- Implements direct proxy mode detection via `X-Gateway-Id` header\n- When in `direct_proxy` mode:\n  - Bypasses database tool lookup/tool call\n  - Creates minimal tool payload for direct proxying\n  - Skips access control checks (delegated to remote server)\n  - Skips metrics recording (no tool_id in direct mode)\n- Enhanced error handling for `extract_using_jq` failures\n- Added comprehensive logging for streamablehttp requests\n- Fixed `Accept` header to include both `application/json` and `text/event-stream` for MCP compatibility\n\n**resource_service.py**\n- Implements direct proxy mode for resource operations\n- Proxies `resources/read` and `resources/list` requests directly to remote MCP servers when in direct_proxy mode\n- Uses MCP SDK for proper protocol handling\n\n**streamablehttp_transport.py**\n- Proxy methods for all MCP methods\n\n- Fast lookups, access control enforced, metrics recorded\n- Existing behavior unchanged\n- All MCP operations proxied directly to remote server\n- No database caching of tools/resources/prompts\n- Client sends `X-Context-Forge-Gateway-Id` header to specify gateway\n- Gateway must have `gateway_mode: \"direct_proxy\"`\n- Minimal overhead, real-time data from remote server\n- Access control delegated to remote server\n- Existing tests should pass (default cache mode unchanged)\n\nThis is a backward-compatible feature addition with sensible defaults.\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* chore: lint code\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* test(gateway_mode): Schema + Gateway Service tests\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* chore(lint): More lint fixes\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* chore(lint): More lint fixes\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* chore(lint): flake8 fix\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* chore(rebase): Rebase with main\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* chore(tests): Use integration tests\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* fix: User access check to Gateway for all direct_proxy mode\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* fix(headers): Helper for auth header propagation\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* fix: inconsistent initialize()\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* fix(tests): coverage fixes\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\n\n* fix(migration): update alembic down_revision to current head\n\nThe migration pointed to an old parent revision (04cda6733305) causing\nmultiple alembic heads. Updated to current head (c1c2c3c4c5c6).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix(security): add missing RBAC checks in direct_proxy mode\n\nAdd check_gateway_access() calls to two code paths that were missing\naccess control before proxying requests in direct_proxy mode:\n\n- streamablehttp_transport.py call_tool(): was forwarding tool calls\n  without verifying the user had access to the target gateway\n- resource_service.py read_resource(): was proxying resource reads\n  without verifying gateway access permissions\n\nAlso adds a defensive access check inside invoke_tool_direct() to\nprevent RBAC bypass if called from new contexts, fixes the migration\ndocstring Revises mismatch, removes stale attribution comment, and\ndefines GATEWAY_ID_HEADER constant for the header name.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* feat(direct_proxy): add feature flag, configurable timeout, and full test coverage\n\n- Add MCPGATEWAY_DIRECT_PROXY_ENABLED (default: false) and\n  MCPGATEWAY_DIRECT_PROXY_TIMEOUT (default: 30s) config settings\n  across config.py, .env.example, Helm values, docker-compose, admin UI\n- Add extract_gateway_id_from_headers() helper in gateway_access.py,\n  replacing 6 repeated header-scanning loops with unified constant\n- Add registration-time guards in gateway_service (register + update)\n  that reject direct_proxy mode when the feature flag is disabled\n- Add runtime guards in tool_service, resource_service, and\n  streamablehttp_transport that fall through to cache mode when disabled\n- Replace 5 hardcoded timeout=30.0 with configurable setting\n- Remove all pragma: no cover markers from direct_proxy code paths\n- Add 41 new unit tests covering config defaults, header helper,\n  gateway service guards, invoke_tool_direct, invoke_tool header branch,\n  call_tool direct_proxy, and read_resource direct_proxy\n- Add documentation section in configuration.md and config.schema.json\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix(direct_proxy): address review feedback for security and consistency\n\n- call_tool: add feature-flag gate (settings.mcpgateway_direct_proxy_enabled)\n  matching list_tools/list_resources/read_resource\n- call_tool: return error on proxy failure instead of falling through to\n  cache mode (fail-closed)\n- call_tool: sanitize error message to avoid leaking exception details\n- read_resource: return empty string directly on access denial instead of\n  raising HTTPException that gets swallowed by outer handler\n- read_resource: remove _meta from session.read_resource() call (MCP SDK\n  only accepts uri parameter)\n- GatewayCreate: change gateway_mode from Optional[str] to str with\n  before-validator defaulting None to 'cache' (prevents DB integrity error)\n- admin: expose direct_proxy_timeout in Connection Timeouts section\n- list_tools docstring: fix refresh_strategy -> gateway_mode\n- Fix jq test assertions to match TextContent return type\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* test(direct_proxy): add coverage tests for 20 missing diff lines\n\nCovers meta extraction, gateway fallback paths, passthrough headers,\njq filter error handling, and isError attribute fallback.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix(direct_proxy): restore session.initialize() and resolve tool name prefix\n\nTwo bugs discovered during E2E testing:\n\n1. session.initialize() was commented out in all 5 direct_proxy code\n   paths, causing 422 errors from remote MCP servers (MCP protocol\n   requires initialization before operations).\n\n2. invoke_tool_direct sent the gateway-prefixed slug name (e.g.\n   \"fast-test-get-system-time\") to the remote server, which only\n   knows the original name (\"get_system_time\"). Fixed by looking up\n   the tool's original_name from the DB, with a slug-prefix stripping\n   fallback for tools not yet cached locally.\n\nSigned-off-by: Venkat Ramachandran <venkat@contextforge.ai>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: 010gvr <010gvr@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nSigned-off-by: Venkat Ramachandran <venkat@contextforge.ai>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Venkat",
+      "date": "2026-02-13T21:31:29+00:00"
+    },
+    {
+      "sha": "75a9f17617303e5b19a5545742fc881be4250e4f",
+      "message": "Fix Default Visibility to Reflect Selected Team Context (#2922)\n\n* dynamic default selected scope\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\n\n* fix gateways visibilitiy ids\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\n\n* fix duplicate ids\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\n\n* Minor bug fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n---------\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nCo-authored-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-13T21:43:54+00:00"
+    },
+    {
+      "sha": "23b516a8d07154b8f505cc6892758dd7f1822ec4",
+      "message": "feat: add pagination for token listing (#2833)\n\n- Add server-side paginated HTMX endpoint (GET /admin/tokens/partial)\n- Extract token listing into tokens_partial.html template with OOB pagination\n- Fix token list auto-refresh after create/revoke\n- Add count_user_tokens(), list_user_and_team_tokens() to TokenCatalogService\n- Add /tokens/search API for server-side token search by name\n- Add alembic migration for token permissions on team_admin role\n- Batch fetch revocation info to eliminate N+1 queries\n- Allow team admins to view and manage team tokens\n\nCloses #2764\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T22:17:41+00:00"
+    },
+    {
+      "sha": "518801b79ba12ac194a7cc5adff7c8aec3e1af76",
+      "message": "fix: remove unsafe br replacement in server team column display (#2924)\n\nRemove the fragile |e|replace|safe Jinja2 filter chain that converted\nspaces to <br> tags. With autoescape=True globally enabled, the |safe\nfilter bypassed escaping protections unnecessarily.\n\nReplace with the standard team column pattern used across all other\npartial templates (tools, resources, prompts, gateways): plain variable\noutput with whitespace-nowrap and consistent styling.\n\nCloses #2923\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T22:52:28+00:00"
+    },
+    {
+      "sha": "89b6f30c60653525cd1ae94733a9105eb8348a0c",
+      "message": "fix: set OBJC_DISABLE_INITIALIZE_FORK_SAFETY on macOS to prevent gunicorn worker crashes (#2927)\n\nOn macOS, Objective-C is not fork-safe. When gunicorn forks workers after\ncertain libraries (SSL, cryptography) have initialized Objective-C, it causes\ncrashes with \"+[NSCharacterSet initialize] may have been in progress\".\n\nThis fix sets OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES on macOS in both:\n- run-gunicorn.sh (before any Python code runs)\n- gunicorn.config.py (at module import time)\n\nThe previous fix (PR #2838) only disabled --preload on macOS, which was\ninsufficient since the crashes can occur even without preloading.\n\nSigned-off-by: Madhav Kandukuri <madhav.kandukuri@gmail.com>\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-13T23:01:23+00:00"
+    },
+    {
+      "sha": "c7af65bb31e939c004cfb810984334532a5a0d41",
+      "message": "Replace hardcoded user roles with configurable settings (#2909)\n\n* roles from env\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* rename alembic script\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* update migration to only auto assigned roles\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* fix test failures\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* flake8 fixes\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* improve coverage\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* feat: assign RBAC roles when team members are added or removed\n\n- Add RoleService lazy initialization to TeamManagementService\n- Assign team-scoped RBAC role when adding members via add_member_to_team\n- Assign team-scoped RBAC role when approving join requests\n- Revoke team-scoped RBAC role when removing team members\n- Add unit tests for role assignment and revocation\n- Fix existing test to mock role service\n\nThis closes the gap where DEFAULT_TEAM_MEMBER_ROLE was not applied\nwhen users were added to teams through admin UI or join requests.\n\n* feat: update migration to include team member role\n\n- Add team member role to migration (viewer -> DEFAULT_TEAM_MEMBER_ROLE)\n- Create team-scoped roles for existing team members who don't have any\n- Update downgrade to handle team member role\n\n* test: add coverage for RBAC role edge cases\n\n- Add tests for role not found scenarios\n- Add tests for role assignment exceptions\n- Add tests for reactivate membership path\n- Add tests for approve_join_request role assignment\n- Add test for role revocation exception\n\n* remove plan\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* feat: update RBAC roles when team member role changes\n\n- Add RBAC role transitions in update_member_role\n- member -> owner: revoke member role, assign owner role\n- owner -> member: revoke owner role, assign member role\n- Add tests for RBAC role transition scenarios\n\n* bug fixes\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* flake8 fix\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* fix tests\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* flake8 fix\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\n\n* fix: resolve critical issues in configurable role settings implementation\n\n- Fix alembic migration down_revision to point to actual head (a31c6ffc2239)\n  eliminating multiple-heads breakage\n- Remove duplicate UPDATE block in migration upgrade (copy-paste bug)\n- Add missing granted_at to migration INSERT avoiding NOT NULL violation\n- Fix remove_member_from_team to revoke correct RBAC role based on\n  membership.role (owner vs member) instead of always revoking member role\n- Replace hardcoded \"platform_admin\" in sso_service with\n  settings.default_admin_role for consistency\n- Fix incomplete migration downgrade: revert non-self-granted roles and\n  clean up system_migration rows\n- Update SSO test mocks with default_admin_role setting\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: disable plugin manager in tool lookup tests\n\nThe invoke_tool tests that reach the plugin metadata section\n(line 2940) fail because PydanticTool.model_validate() cannot\nvalidate MagicMock attributes. Set _plugin_manager = None since\nthese tests exercise lookup prioritization logic, not plugins.\n\nCherry-picked from 473f0f65 (lost during squash merge of #2924).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-14T01:26:31+00:00"
+    },
+    {
+      "sha": "b138e80907222327de4ded43d397ee776f42e734",
+      "message": "fix: preserve team_id filter during pagination (#2934)\n\nThe pagination_controls.html template was not preserving team_id when\nbuilding HTMX pagination request URLs, causing the team filter to be\nlost when navigating between pages in the admin UI.\n\nRead team_id from the current browser URL in loadPage() and include\nit in the pagination request so the backend continues to filter by\nthe selected team.\n\nCloses #2932\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-14T01:55:10+00:00"
+    },
+    {
+      "sha": "9b59d1dea5a0b525f986d8e580be5c3d899e1328",
+      "message": "chore: fixed resource assignment (sonar S3923) (#2936)\n\nSigned-off-by: ParasSalonia <parassalonia22@gmail.com>",
+      "author": "Paras Salonia",
+      "date": "2026-02-14T02:18:18+00:00"
+    },
+    {
+      "sha": "605fb272f0a034e26775328210eb97ce80c663fc",
+      "message": "2626 - Semantic autocomplete on password fields (#2888)\n\n* 2626 - Semantic autocomplete on password fields\n\nUse autocomplete=\"new-password\" on the user creation field so browsers\noffer strong password generation, add autocomplete=\"off\" to the\ncommented-out A2A agent auth field, and add unit + Playwright tests to\nprevent autocomplete regressions across all templates.\n\nCloses #2626\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>\n\n* fix: remove unused imports and dead code in autocomplete tests\n\nRemove unused `re` and `BASE_URL` imports in the Playwright test\n(ruff F401) and unused `_in_comment` field and unreachable\n`handle_comment` method in the unit test parser.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Gabriel Costa",
+      "date": "2026-02-14T02:49:38+00:00"
+    },
+    {
+      "sha": "d0331a25515aab927d4f17971999277643ff92b0",
+      "message": "ADR: adr for rust plugins architecture (#2904)\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Luca",
+      "date": "2026-02-14T03:03:17+00:00"
+    },
+    {
+      "sha": "69ee7f329b18ed5984f18d3612dab5a9c96df42f",
+      "message": "2874 - Add HX-Redirect header to HTMX on auth fail (#2910)\n\nWhen an HTMX partial request hit AdminAuthMiddleware with an expired or\ninvalid session, the 302 redirect was swapped into the active tab content\ninstead of performing a full-page navigation. HTMX intercepts XHR 302\nresponses and treats the response body as swap content.\n\nReturn a 200 response with HX-Redirect header for HTMX requests, which\ninstructs HTMX to perform a client-side full-page redirect to the login\npage. Non-HTMX and API request flows are unchanged.\n\nCloses #2874\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-02-14T03:22:30+00:00"
+    },
+    {
+      "sha": "9f7c07ad82f4f666102719de316f3589480bb7e0",
+      "message": "fix: add members to team and delete team without reloading page (#2925)\n\n* fix: add members to team and delete team without reloading page\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>\n\n* fix: use swap none for leave/cancel to avoid stale UI flash\n\n- leaveTeamSafe and cancelJoinRequest now use swap:'none' like\n  deleteTeamSafe, preventing the team list from being briefly replaced\n  by partial response HTML before HX-Trigger refresh fires\n- Move pytest import to Third-Party section per isort convention\n- Add reason parameter to flaky markers for consistency\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-14T03:44:59+00:00"
+    },
+    {
+      "sha": "4e771f9f5ac0ebfb509498aaff40fbb16975792b",
+      "message": "feat: add multi-language license compliance checker with CI/CD (#2940)\n\nAdd a comprehensive license policy checker that scans Python (pip +\nsub-venvs), Go, and Rust dependencies against a TOML-based policy file.\nIncludes SPDX normalization, OR-expression handling, per-package\nallowlisting, and a CI workflow that runs on push, PR, and weekly.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T03:45:54+00:00"
+    },
+    {
+      "sha": "4391cf4d9ef2f6d176fa2dd0862cfb1f4dc74ef0",
+      "message": "fix: prevent admin self-demotion via user edit form (#2929)\n\nHide the Administrator checkbox when an admin edits their own profile,\nand preserve admin status server-side when the checkbox is absent from\nform data (self-edit case). This follows the existing self-protection\npatterns used by deactivate and delete operations.\n\nCloses #2794\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai-Vlad Rusu <vladrusu@MacBookPro.lan>",
+      "author": "Rusu Vlad",
+      "date": "2026-02-14T04:00:17+00:00"
+    },
+    {
+      "sha": "9455860772b248183d898579e944cda638b0f9b6",
+      "message": "fix: Use the correct method from MetadataCapture for grpc endpoints (#2855)\n\n* fix: Use the correct method from MetadataCapture for grpc endpoints\n\nBranch: FixGrpcRegCrash\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>\n\n* fix: align gRPC metadata keys with MetadataCapture API\n\nThe grpc_service.py was reading metadata with short keys (\"ip\", \"via\",\n\"user_agent\") that don't match what MetadataCapture returns\n(\"created_from_ip\", \"created_via\", \"created_user_agent\"). This caused\nall audit metadata to silently resolve to None.\n\n- Fix register_service to read \"created_*\" prefixed keys\n- Fix update_service to read \"modified_*\" prefixed keys\n- Use extract_modification_metadata for the update endpoint\n- Update tests to use correct MetadataCapture method names and keys\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* test(fix): Update tests for new metadata fields\n\nBranch: FixGrpcRegCrash\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>\n\n* lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Gabe Goodhart",
+      "date": "2026-02-14T04:12:47+00:00"
+    },
+    {
+      "sha": "3491e80e09b8034e4caccd5fd14aec1d7ae3a5e4",
+      "message": "RFC 9728 OAuth Protected Resource Metadata Compliance (#2866)\n\n* feat: implement RFC 9728 OAuth Protected Resource Metadata compliance\n\n- Add RFC 9728 compliant endpoint: /.well-known/oauth-protected-resource/servers/{UUID}/mcp\n- Use authorization_servers (plural, JSON array) per RFC 9728 Section 2 and MCP spec\n- Deprecate non-compliant endpoints (query-param returns 404, server-scoped returns 301)\n- Fix MCPPathRewriteMiddleware to exclude well-known paths from rewriting\n- Ensure authorization_servers always returns as array, even for single values\n- Add 30+ comprehensive unit tests for RFC 9728 compliance\n- Update existing tests to expect array format for authorization_servers\n- Remove redundant tests and consolidate deprecation tests\n- Fix docstring issues (remove Returns sections from functions that raise HTTPException)\n\nCloses #2706\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: clean up RFC 9728 endpoint implementation\n\n- Remove dead ServerService import and instantiation from server_well_known.py\n- Remove unused db dependency from deprecated endpoints\n- Add well_known_enabled check to deprecated endpoints (prevent info leak)\n- Remove unused JSONResponse import from server_well_known.py\n- Use ServerService directly instead of lazy singleton import in router\n- Update test mocks to match new instantiation pattern\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-02-14T04:35:22+00:00"
+    },
+    {
+      "sha": "42c20009653320e7ffc392800c0766a6b882bb53",
+      "message": "fix: re-raise asyncio.CancelledError after cleanup (S7497) (#2941)\n\nCloses #2163\n\nRe-raise asyncio.CancelledError in 13 locations across transports,\ncaches, and services where it was previously swallowed, preventing\nproper task cancellation propagation which caused hanging tasks and\nzombie connections during shutdown.\n\nLocations where CancelledError was intentionally caught after\nself-initiated cancellation (task.cancel(); await task) in shutdown\nmethods are left unchanged as they follow the standard asyncio pattern.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T09:50:33+00:00"
+    },
+    {
+      "sha": "a0e93cbed46af6e25af20fd31ca75b80807539dc",
+      "message": "Additional locust testing (#2944)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T10:13:15+00:00"
+    },
+    {
+      "sha": "2f3bc2718d448d851a8f232e1e663ffa285a7ec2",
+      "message": "fix: gRPC registration UI fixes (#2885)\n\n* fix: Fix redirects for grpc to /admin/grpc\n\nBranch: FixGrpcRegCrash\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>\n\n* fix(ui): Partial fix for gRPC service registration flow in UI\n\nBranch: FixGrpcRegCrash\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>\n\n* fix: Correctly bind gRPC registration form to javascript handler\n\nBranch: FixGrpcRegCrash\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>\n\n* fix: eslint fixes\n\nBranch: GrpcRegistrationUIFixes\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>\n\n* fix: move grpcFormError inside form container with correct indentation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: improve gRPC form with visibility selector, loading indicator, and stricter target validation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: prevent prometheus registry contamination across metric tests\n\ntest_metrics.py was clearing the global REGISTRY without restoring it,\nleaving registered gauges (app_info, database_info, etc.) that caused\nValueError: Duplicated timeseries when services/test_metrics.py ran after.\n\nFix by snapshotting and restoring the registry state in both test files.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: eslint regex escape and robust prometheus registry cleanup\n\n- Remove unnecessary escape in character class (\\- -> -)\n- Format long error string for prettier compliance\n- Fix test fixture to clean registry before AND after each test,\n  preventing cross-file contamination of prometheus gauges\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Gabe Goodhart",
+      "date": "2026-02-14T10:33:39+00:00"
+    },
+    {
+      "sha": "7a784b257a56a53919b076d84ad1c54368721724",
+      "message": "fix: constrain Team Manage Members modal height to viewport (#2930) (#2937)\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>",
+      "author": "Oriol Morros Vilaseca",
+      "date": "2026-02-14T11:36:35+00:00"
+    },
+    {
+      "sha": "6b92f97155b3f9b36de22020fa597e880a36f50e",
+      "message": "test: add Playwright security suites for manual-testing priorities (#2945)\n\n* test: add Playwright security suites for manual-testing coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* Additional locust testing\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* playwright tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T12:10:05+00:00"
+    },
+    {
+      "sha": "7f12d41111325ac9ba19ad233cd476a72a9aa001",
+      "message": "feat-2905: add team members api (#2938)\n\n* feat-2905: add team members api\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>\n\n* feat-2905: add tests\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>\n\n* fix: add team-level authorization check to add_team_member endpoint\n\n- Add owner role check before allowing member addition (consistent with\n  update_team_member, invite_team_member, remove_team_member endpoints)\n- Set status_code=201 for POST endpoint (consistent with create_team,\n  invite_team_member)\n- Add except HTTPException: raise to avoid swallowing 403 errors\n- Fix 5 tests still asserting result is True after return type change\n  from bool to EmailTeamMember\n- Add test for insufficient permissions on add_team_member\n- Add get_user_role_in_team mock to all add_team_member router tests\n- Apply black formatting to schemas.py\n\nCloses #2905\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: block adding members to personal teams\n\nadd_member_to_team was missing the is_personal guard that all other\nmember management operations enforce (remove_member, update_member_role,\ncreate_invitation). Without this, an owner could add members to a\npersonal team, creating stuck access state since those members could not\nbe removed or updated through normal paths.\n\n- Add is_personal check in add_member_to_team service method\n- Catch TeamManagementError in router for proper 400 response\n- Add tests at both service and router levels\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Nithin Katta <Nithin.Katta@ibm.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Nithin Katta",
+      "date": "2026-02-14T12:15:15+00:00"
+    },
+    {
+      "sha": "da06839b93800780b1fdcf0099e8850628fee373",
+      "message": "feat: add GitHub workflow for tools_rust/wrapper CI/CD (#2914)\n\n* feat: add GitHub workflow for tools_rust/wrapper CI/CD\n\n- Add rust-tools.yml workflow for tools_rust/wrapper project\n- Include formatting, linting, testing, and build checks\n- Add security audit with cargo-deny\n- Add code coverage with cargo-llvm-cov\n- Run checks on ubuntu, macos, and windows\n\nSigned-off-by: Dima Zakharov <zakharov@ibm.com>\n\n* remove macos and windows\n\nSigned-off-by: Dima Zakharov <zakharov@ibm.com>\n\n* add current branch for test\n\nSigned-off-by: Dima Zakharov <zakharov@ibm.com>\n\n---------\n\nSigned-off-by: Dima Zakharov <zakharov@ibm.com>",
+      "author": "dima-zakharov",
+      "date": "2026-02-14T12:34:52+00:00"
+    },
+    {
+      "sha": "f0c727cb5f99aeb634e68120dfbd2caff2fa6d45",
+      "message": "feat: add Rust-accelerated secrets detection plugin (#2785)\n\nImplements high-performance secrets detection plugin using Rust with\nPyO3 bindings. Provides pattern-based scanning for API keys, tokens,\nand other sensitive data with graceful fallback to Python implementation.\n\nCloses #2729\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: lucarlig <luca.arlig@ibm.com>",
+      "author": "Luca",
+      "date": "2026-02-14T13:33:12+00:00"
+    },
+    {
+      "sha": "9bf5094755b3ff66748007249397a920b993e332",
+      "message": "fix: Implement pagination for gRPC listing in grpc_service and admin.py (#2889)\n\n* fix: Implement pagination for gRPC listing in grpc_service and admin.py\n\nBranch: GrpcRegistrationUIFixes\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>\n\nAI-usage: full\n\n* test: Update tests and add a new one for multi-page grpc results\n\nBranch: GrpcPagination\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>\n\nAI-usage: full\n\n* test: Add coverage for gRPC service team name resolution and team_id-only filtering\n\nSigned-off-by: Gabe Goodhart <ghart@us.ibm.com>\n\nAI-usage: full\n\n* fix: add missing team field to GrpcServiceRead and error handling to conversion loop\n\nAdd the `team` field to `GrpcServiceRead` schema to match all other Read schemas\n(ToolRead, ResourceRead, GatewayRead, PromptRead), so team name resolution\nactually populates the response. Add try/except around model_validate to\ngracefully skip corrupted records, consistent with other services.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Gabe Goodhart",
+      "date": "2026-02-14T15:39:57+00:00"
+    },
+    {
+      "sha": "642555510d71ca89781139d24a7fc18aca0259c1",
+      "message": "feat: add JWT claims extraction plugin (Issue #1439)-sweng5 (#2853)\n\n* feat: add JWT claims extraction plugin (Issue #1439)\n\nImplements JWT claims and metadata extraction plugin for downstream\nauthorization plugins (Cedar, OPA, etc.).\n\nFeatures:\n- Extracts standard JWT claims (sub, iss, aud, exp, iat, nbf, jti)\n- Extracts custom claims (roles, permissions, groups, attributes)\n- Supports RFC 9396 Rich Authorization Requests\n- Non-blocking permissive mode\n- Stores claims in global_context.metadata['jwt_claims']\n\nPlugin hooks into HTTP_AUTH_RESOLVE_USER to extract claims after JWT\nverification and makes them available to policy enforcement plugins.\n\nImplementation:\n- Uses PluginContext correctly to access global_context\n- Proper hook method naming (http_auth_resolve_user)\n- Returns continue_processing=True for passthrough behavior\n- Error handling with graceful fallback\n\nIncludes:\n- Plugin implementation with error handling\n- Configuration file (YAML)\n- Comprehensive test suite (5 tests, all passing)\n- Documentation with usage examples for Cedar/OPA\n\nTesting:\n- All 5 plugin tests passing\n- Linting clean (ruff + flake8)\n- Coverage: 90%\n\nRelated to:\n- Issue #1439: JWT claims and metadata extraction plugin\n- Issue #1422: [EPIC] Agent and tool authentication and authorization\n- RFC 9396: Rich Authorization Requests\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>\n\n* fix: address PR code review feedback\n\nAddressed all 5 review comments from @[reviewer-name]:\n\n1. Security documentation (verify_signature=False):\n   - Added prominent SECURITY NOTE in module docstring\n   - Added Security Considerations section to README\n   - Documented token pre-verification assumption and risks\n\n2. Logging sensitivity (PII leak prevention):\n   - Changed logger.info() to logger.debug() for claim extraction\n   - Only log claim count, not claim contents\n   - Prevents sensitive data exposure in production logs\n\n3. Safer header access pattern:\n   - Replaced hasattr() with getattr(payload.headers, 'root', {})\n   - More robust against header model changes\n   - Fails gracefully with empty dict default\n\n4. Copyright year correction:\n   - Updated from 2025 to 2026 in all files\n\n5. Coverage badge deletion:\n   - File is auto-generated (in .gitignore)\n   - Not present in upstream/main\n   - Correctly excluded from version control\n\nAll tests passing (5/5), linting clean, ready for review.\n\nRelated to: #1439\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>\n\n* fix: align JWT claims extraction plugin with framework conventions\n\n- Move plugin from mcpgateway/plugins/ to plugins/ (correct location)\n- Rename plugin.py to jwt_claims_extraction.py, config.yaml to\n  plugin-manifest.yaml (match naming conventions)\n- Fix critical security doc: http_auth_resolve_user fires BEFORE JWT\n  verification, not after — document the actual security model\n- Write to global_context.state instead of metadata (metadata is\n  read-only from plugin perspective per framework docs)\n- Add Pydantic config model (JwtClaimsExtractionConfig) with\n  configurable context_key\n- Add __init__ constructor calling super().__init__(config)\n- Add from __future__ import annotations\n- Add Bearer scheme validation in _extract_token\n- Use lazy logging format strings instead of f-strings\n- Remove unnecessary hasattr check on metadata\n- Remove error string leak from result metadata\n- Fix copyright year consistency (2026 across all files)\n- Fix SPDX-License-Identifier: Apache-2.0 headers\n- Revert unnecessary MANIFEST.in additions\n- Move tests to tests/unit/plugins/ and add new test cases\n  for non-Bearer scheme rejection and custom context_key config\n\nCloses #1439\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: register JWT claims extraction plugin in config.yaml\n\nAdds disabled-by-default registration entry so the plugin can be\nactivated by setting mode to \"permissive\".\n\nCloses #1439\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Ioannis Ioannou",
+      "date": "2026-02-14T17:37:32+00:00"
+    },
+    {
+      "sha": "eaec13f678832281e03bcd6730e07643bdbd1496",
+      "message": "chore: add linting-full workflow and pre-commit gate (#2948)\n\n* chore: add linting-full workflow and pre-commit gate\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: bootstrap pre-commit with uv in pipless venvs\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: exclude known pre-commit false positives\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: support helm plugin verify toggle in linting target\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: resolve gosec findings and enforce linting gosec gate\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-14T19:56:05+00:00"
+    },
+    {
+      "sha": "1816e591bfb5d75cad172af8fe330f3ec68a1035",
+      "message": "feat(keycloak): add keycloak to docker-compose and enable sso by default for development testing (#2949)\n\n* feat(keycloak): add Keycloak SSO to docker-compose for development testing\n\n- Add Keycloak service to docker-compose.yml (pinned to v26.1) with\n  pre-configured realm export for local SSO development\n- Add docker-compose.sso.yml overlay for SSO-specific configuration\n- Add \"sso\" to testing and inspector service profiles so --profile sso\n  brings up the full dev stack (Keycloak + testing + inspector)\n- Implement SSO bootstrap utility for automatic Keycloak realm/client setup\n- Add Keycloak discovery helper with well-known endpoint support\n- Enhance SSO service with id_token claims fallback for split-host\n  configurations (restricted to 401 + split-host detection only)\n- Improve admin.py SSO logout with proper id_token_hint RP-initiated flow\n- Skip expired id_token_hint in logout URL to avoid Keycloak rejection\n- Add cookie size validation for id_token storage (>3.8KB warning)\n- Use dynamic max_age for SSO cookies matching token_expiry setting\n- Improve error handling and logging throughout SSO flows\n- Add sso-keycloak-tutorial and developer workstation documentation\n- Add test-sso-flow.sh script for manual SSO flow verification\n- Add Makefile targets for Keycloak lifecycle management\n\nCloses #2949\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* test(keycloak): add and update tests for Keycloak SSO integration\n\n- Add SSO service tests for Keycloak userinfo fallback, callback error\n  handling, personal team resolution, and user authentication flows\n- Add Keycloak discovery and SSO bootstrap unit tests\n- Update SSO router tests to use handle_oauth_callback_with_tokens\n- Update admin module tests for Keycloak-aware logout behavior with\n  separate coverage for keycloak-enabled and keycloak-disabled paths\n- Add expired id_token_hint omission test\n- Add id_token cookie size and max_age validation tests\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T00:22:10+00:00"
+    },
+    {
+      "sha": "73b3bf4d5f09b6c1d940727dca7378b9f534ee9b",
+      "message": "feat-2893: maintain custom and original description for tools (#2928)\n\n* feat: add original_description column to tools table (#2893)\n\nWhen tools are registered, preserve the original description from the\nsource MCP server in a new original_description field. This allows users\nto customize the tool description while retaining the original for\nreference.\n\n- Add original_description column to Tool model and ToolRead schema\n- Populate original_description at tool registration time\n- Include original_description in export service output\n- Add Alembic migration with data backfill from existing descriptions\n\nCloses #2893\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: preserve custom descriptions during gateway refresh and harden original_description\n\n- Protect user-customized descriptions during gateway sync/refresh by\n  only overwriting description when it matches original_description\n- Add default value (None) to ToolRead.original_description for cache\n  compatibility across deployments\n- Add original_description to tool cache payload for consistency\n- Restore original_description during export/import cycle\n- Update tests to cover description preservation behavior\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: scope import original_description restore by batch ID and original_name\n\n- Use Tool.original_name (not computed Tool.name) for restore lookup\n- Generate import_batch_id to scope restore to newly created tools only\n- Skip restore when no tools were created (respects skip/fail semantics)\n- Add tests for restore-by-batch and skip-no-restore behaviors\n- Fix missing original_description on gateway service test mock\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: commit (not flush) import original_description restore\n\ndb.flush() without a subsequent commit loses the restore changes\nsince register_tools_bulk already committed its own transaction.\nVerified with E2E testing against running docker-compose cluster.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Nithin Katta <Nithin.Katta@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Nithin Katta <Nithin.Katta@ibm.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Nithin Katta",
+      "date": "2026-02-15T09:09:08+00:00"
+    },
+    {
+      "sha": "0305e7dec20f1e12c54ffdd13a70870e6eca2519",
+      "message": "feat(plugins): add encoded exfiltration detector plugin (#2954)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T10:51:17+00:00"
+    },
+    {
+      "sha": "0174c5647d2d465f7084e5ad89aedb299616ae74",
+      "message": "feat: enforce token expiration policy via REQUIRE_TOKEN_EXPIRATION setting (#2898)\n\nEnforce the existing REQUIRE_TOKEN_EXPIRATION config setting at\ntoken creation time. Previously the setting only validated incoming\ntokens but allowed creation of tokens without expiration.\n\n- Add validation in TokenCatalogService.create_token() to reject\n  tokens without expiration when REQUIRE_TOKEN_EXPIRATION=true\n- Pass require_token_expiration flag to admin UI template context\n- Add conditional required field indicator and helper text in the\n  token creation form\n- Update existing tests to provide expires_in_days where needed\n- Add new test cases covering policy enabled/disabled scenarios,\n  team tokens, and edge cases (zero expiry days)\n\nCloses #2836\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "rakdutta",
+      "date": "2026-02-15T11:42:16+00:00"
+    },
+    {
+      "sha": "ec9fbc75fdc94bef4647c1968506de9c491538bf",
+      "message": "feat(auth): implement password reset recovery and lockout fixes (#2951)\n\n* feat(auth): implement password reset and recovery workflows\n\nAdd self-service forgot/reset password APIs and admin UI flows with one-time reset tokens, SMTP notifications, account unlock actions, lockout expiry fixes, metrics, migration, docs, and recovery tooling.\n\nCloses #2542\n\nCloses #2543\n\nCloses #2628\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* lint fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* Test coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* Fix password reset issues\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* Rebase\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: mark hash_password utility executable\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T12:23:26+00:00"
+    },
+    {
+      "sha": "46684e3ae3ef4b9254204cb34de166a9eec3399c",
+      "message": "fix(ui): standardize loading indicators on MCP Registry, Teams, API T… (#2950)\n\n* fix(ui): standardize loading indicators across admin pages (#2946)\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>\n\n* fix(ui): standardize Users loading indicator to match pattern\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\nCo-authored-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Oriol Morros Vilaseca",
+      "date": "2026-02-15T14:01:33+00:00"
+    },
+    {
+      "sha": "ec4c4fac68b519b1471d44c012e8cd7bcbb35baa",
+      "message": "feat: add slow-time-server for timeout, resilience, and load testing (#2865)\n\n* feat: add slow-time-server for timeout, resilience, and load testing\n\nImplements #2783. A configurable-latency Go MCP server modelled on\nfast-time-server that introduces artificial delays on every tool call,\nserving as a testing target for gateway timeout enforcement, circuit\nbreaker behaviour, session pool resilience, and load testing.\n\nServer features:\n- 5 MCP tools: get_slow_time, convert_slow_time, get_instant_time,\n  get_timeout_time, get_flaky_time\n- 2 MCP resources: latency://config, latency://stats\n- 1 MCP prompt: test_timeout\n- 4 latency distributions: fixed, uniform, normal, exponential\n- Failure simulation with configurable rate and mode\n- Runtime reconfiguration via REST POST /api/v1/config\n- Invocation statistics with p50/p95/p99 percentiles\n- Multi-transport: stdio, SSE, Streamable HTTP, dual, REST\n- 32 unit tests with race detection, all passing\n\nIntegration:\n- docker-compose.yml: testing profile (port 8889) + auto-registration\n- docker-compose-performance.yml: dedicated performance testing service\n- Locust load test with 4 scenarios (slow, timeout storm, mixed, circuit breaker)\n- Documentation in docs/docs/using/servers/go/slow-time-server.md\n\nCloses #2783\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: address review issues in slow-time-server PR\n\n- Fix healthcheck in docker-compose-performance.yml to use binary's\n  built-in health check instead of curl (scratch image has no curl)\n- Replace mixed atomic+mutex with plain increments under mutex in\n  invocationStats.record() for clarity\n- Remove dead generateTestTimeoutPrompt() function and unused strings\n  import from rest_handlers.go\n- Remove unused json and uuid imports from locust test file\n- Align env var naming (SLOW_TIME_LATENCY) between compose files\n\nCloses #2783\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: move slow-time-server to dedicated resilience profile\n\nThe slow-time-server deliberately introduces latency and failures,\nwhich breaks existing tests when included in the testing profile.\nMove it to a dedicated 'resilience' profile so it must be explicitly\nopted into.\n\n- docker-compose.yml: profiles [\"testing\"] -> [\"resilience\"]\n- Makefile: add resilience-up/down/logs targets\n- docs: update profile references\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* feat: add Makefile targets for resilience load testing\n\nAdd dedicated targets for running Locust and JMeter tests against\nthe slow-time-server, ensuring these tests only run when explicitly\ninvoked rather than as part of the regular testing profile.\n\nNew targets:\n- resilience-locust: headless Locust run (10 users, 120s)\n- resilience-locust-ui: Locust web UI on port 8090\n- resilience-jmeter: JMeter baseline (20 threads, 5min)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T15:01:59+00:00"
+    },
+    {
+      "sha": "301b09dd53aa406a2cec20fc90a220277c8ab074",
+      "message": "feat(charts): add optional compose profile parity components (#2942)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T17:05:48+00:00"
+    },
+    {
+      "sha": "0f7e50f37cf185b4a3d3078fc1286817f6dc9cc7",
+      "message": "fix: add alembic upgrade validation and migration compatibility fixes (#2943)\n\n* fix: add alembic upgrade validation and migration compatibility fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix(db): handle psycopg JSON deserialization in alembic migrations\n\nCloses #2955\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* format\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T17:30:31+00:00"
+    },
+    {
+      "sha": "e42717981745e8ebefeaf1af690b6a0448db7a53",
+      "message": "[EPIC][TESTING][PROTOCOL]: Implement MCP 2025-11-25 protocol compliance suite (#2956)\n\n* feat: implement MCP 2025-11-25 compliance suite and dated make targets\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* format\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: exclude compliance tests from default pytest and resolve gosec findings\n\n- Add --ignore=tests/compliance to pytest addopts so compliance suite\n  only runs via dedicated make targets (make 2025-11-25, etc.)\n- Lazy-import mcpgateway.main in compliance conftest to avoid triggering\n  bootstrap_db during test collection\n- Fix gosec G114: replace bare http.ListenAndServe with http.Server\n  using ReadHeaderTimeout in slow-time-server (4 instances)\n- Suppress gosec G404/G705 false positives with nosec annotations\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-15T18:12:08+00:00"
+    },
+    {
+      "sha": "bfebfe454cab08f4b9510012dd07f3ac31fa0bd1",
+      "message": "fix: improve encryption service error handling and v2 format markers (#2724)\n\n- Add AlreadyEncryptedError and NotEncryptedError (extend ValueError)\n  for explicit validation in strict mode\n- Introduce v2: format prefix for unambiguous encrypted data detection\n- Add strict vs idempotent API modes (decrypt_secret vs\n  decrypt_secret_or_plaintext) with backward-compatible async wrappers\n- Replace length heuristic in oauth_manager with explicit is_encrypted()\n- Add null checks after decryption in dcr_service update/delete\n- Migrate encryption tests to dedicated test_encryption_service.py\n- Add comprehensive test coverage for edge cases, concurrent operations,\n  and real-world token formats (JWT, OAuth2, API keys)\n\nCloses #2405\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-02-15T19:10:44+00:00"
+    },
+    {
+      "sha": "a465f9736034f8fb49f5bf985ff67aa11f793f1b",
+      "message": "chore: replace copier with cookiecutter for template scaffolding (#2962)\n\n* chore: replace copier with cookiecutter for template scaffolding (#2361)\n\nCopier pulled jinja2-ansible-filters (GPL-licensed). Cookiecutter is a\nsimpler, widely-adopted alternative with no problematic transitive deps.\n\n- Migrate all 4 template sets (Go server, Python server, native plugin,\n  external plugin) from copier YAML configs to cookiecutter.json with\n  {{cookiecutter.*}} directory conventions\n- Update mcpplugins CLI to use cookiecutter.main.cookiecutter() API,\n  add --template_type flag to select native/external plugin templates\n- Replace copier>=9.11.3 with cookiecutter>=2.6.0 in pyproject.toml\n  and tox.ini\n- Update scaffold shell scripts to invoke cookiecutter CLI\n- Update tests, AGENTS.md, llms docs, and roadmap\n\nCloses #2361\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: exclude cookiecutter template dirs from pre-commit linting\n\nTemplate files containing Jinja2 syntax ({{ cookiecutter.* }}, {% set %})\nare invalid YAML/TOML/Python from linters' perspective. Add plugin_templates/\nto the global exclude in both pre-commit configs and yamllint. Also restore\nexecutable bit on run-server.sh and update uv.lock.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: exclude cookiecutter templates from gosec and tomllint\n\nTemplate go.mod and pyproject.toml contain Jinja2 variables that are\ninvalid from the perspective of Go tooling and TOML parsers. Skip\ntemplate directories in gosec, govulncheck, and tomllint find commands.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n* fix: exclude cookiecutter templates from tomllint CI workflow\n\nThe lint.yml workflow runs tomlcheck directly via find, not through the\nMakefile target. Add the same template directory exclusions.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\n---------\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T08:37:03+00:00"
+    },
+    {
+      "sha": "ea011b364a6dc87aafc07c5bb619494590fe322a",
+      "message": "feat: add SRI hash support infrastructure (Phases 1 & 2)\n\nPhase 1: Add load_sri_hashes() function to admin.py\n- Load SRI hashes from mcpgateway/sri_hashes.json\n- Cache hashes in memory for performance\n- Pass sri_hashes to all template contexts (admin, login, change-password)\n\nPhase 2: Update login.html and change-password-required.html\n- Add SRI integrity attributes to Font Awesome CSS\n- Add crossorigin=\"anonymous\" for CORS compliance\n- Use sri_hashes.fontawesome from template context\n\nAdditional: Clean up generate-sri-hashes.py formatting\n- Add UTF-8 encoding declaration\n- Fix trailing whitespace and newlines\n- Improve code consistency\n\nRelated to #2558\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-13T08:34:21+00:00"
+    }
+  ],
+  "files_changed": 371,
+  "additions": 104277,
+  "deletions": 58355,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:16:13.707041",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:13.707941",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2902,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2902.json"
+  }
+}

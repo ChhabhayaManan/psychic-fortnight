@@ -1,0 +1,100 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3937,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3937"
+  },
+  "metadata": {
+    "title": "fix(ui): harden ensureNoResultsElement() against stale DOM IDs",
+    "state": "closed",
+    "created_at": "2026-03-31T06:41:47+00:00",
+    "updated_at": "2026-05-09T16:14:43+00:00",
+    "closed_at": "2026-05-09T16:14:41+00:00",
+    "merged_at": "2026-05-09T16:14:41+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "ui",
+      "release-fix"
+    ],
+    "milestone": "Release 1.2.0",
+    "assignees": [
+      "marekdano",
+      "gcgoncalves"
+    ]
+  },
+  "description": "# Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\n`ensureNoResultsElement()` in `mcpgateway/admin_ui/search.js` resolved the `spanId` parameter via a global `document.getElementById()` call without verifying that the found element actually belonged to the expected `msg` parent. This could return a span from an entirely different part of the DOM, causing the \"no results\" query text to be written into the wrong element. Additionally, when `msg` was absent (e.g., after an HTMX partial re-render), the create branch unconditionally stamped a new `<span id=spanId>` without checking for a pre-existing stale element with the same ID, producing duplicate `id` attributes in the DOM — a violation of the HTML spec that makes subsequent `getElementById` calls non-deterministic.\r\n\r\n## 🔗 Related Issue\r\n\r\nCloses: #3326\r\n\r\n## 🔁 Reproduction Steps\r\n\r\nSee issue #3326 for full reproduction steps. In brief:\r\n\r\n**Edge case 1 — wrong span returned:**\r\n```js\r\n// A rogue span elsewhere in the DOM shares the spanId\r\nconst rogueSpan = document.createElement(\"span\");\r\nrogueSpan.id = \"searchQueryTools\";\r\ndocument.body.appendChild(rogueSpan);\r\n\r\nconst { msg, span } = ensureNoResultsElement(\r\n    \"associatedTools\", \"noToolsMessage\", \"searchQueryTools\", \"tool\"\r\n);\r\nconsole.log(msg.contains(span)); // false — wrong element returned\r\n```\r\n\r\n**Edge case 2 — duplicate IDs:**\r\n```js\r\n// msg is absent but an orphaned span with the same id exists\r\nconst orphanSpan = document.createElement(\"span\");\r\norphanSpan.id = \"searchQueryTools\";\r\ndocument.body.appendChild(orphanSpan);\r\n\r\nensureNoResultsElement(\"associatedTools\", \"noToolsMessage\", \"searchQueryTools\", \"tool\");\r\nconsole.log(document.querySelectorAll(\"#searchQueryTools\").length); // 2 — duplicate id\r\n```\r\n\r\n## 🐞 Root Cause\r\n\r\nIn `mcpgateway/admin_ui/search.js` — `ensureNoResultsElement()`:\r\n\r\n1. `document.getElementById(spanId)` was called globally at the top of the function with no subsequent check that the found element was a descendant of `msg`. If another element in the DOM happened to carry the same `id` (e.g., a stale element left by HTMX or a browser extension), that foreign element was returned to callers.\r\n\r\n2. In the create branch (when `msg` is absent), `span.id = spanId` was assigned unconditionally without first checking for an existing element with that ID, producing duplicate `id` attributes.\r\n\r\n## 💡 Fix Description\r\n\r\nTwo targeted changes to `ensureNoResultsElement()`:\r\n\r\n**Fix 1 — Scope span lookup to `msg`:**\r\n```js\r\n// Before\r\nlet span = document.getElementById(spanId); // global, no parent check\r\nif (msg) {\r\n    if (!span) { span = msg.querySelector(\"span\"); }\r\n    return { msg, span }; // span may NOT be inside msg\r\n}\r\n\r\n// After\r\nif (msg) {\r\n    const span = document.getElementById(spanId);\r\n    return { msg, span: span && msg.contains(span) ? span : msg.querySelector(\"span\") };\r\n}\r\n```\r\nThe `msg.contains(span)` guard ensures the globally-found span is actually a descendant of `msg`. If not, it falls back to `msg.querySelector(\"span\")` — the same safe fallback already used when `span` was null.\r\n\r\n**Fix 2 — Strip stale ID before creating new elements:**\r\n```js\r\n// Before (create branch)\r\nspan = document.createElement(\"span\");\r\nspan.id = spanId; // no duplicate check\r\n\r\n// After\r\nconst staleSpan = document.getElementById(spanId);\r\nif (staleSpan) { staleSpan.removeAttribute(\"id\"); } // dedup guard\r\n// ... then create fresh span\r\nconst span = document.createElement(\"span\");\r\nspan.id = spanId;\r\n```\r\nAny orphaned element that already holds `spanId` has its `id` stripped before the new element is created, maintaining the HTML uniqueness invariant.\r\n\r\nTwo regression tests were added to `tests/js/admin-edit-server-selection.test.js` directly targeting each edge case.\r\n\r\nAlso corrected `tests/unit/js/gateway.test.js`: an existing test had `searchQueryServers` as a sibling element instead of nested inside `noGatewayMessage`, which didn't match the real template DOM structure. Updated to reflect the actual layout.\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|---|---|---|\r\n| Lint suite | `make lint` | ✅ |\r\n| Unit tests (JS) | `make test-js` | ✅ |\r\n| Edge case 1: wrong span | New test `falls back to querySelector when globally-found span is not inside msg` | ✅ |\r\n| Edge case 2: duplicate ID | New test `removes stale span id before creating new elements to prevent duplicate IDs` | ✅ |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [
+    {
+      "id": "3064154236",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-10T12:12:58+00:00",
+      "body": "This is a redeclaration of an existing const (from line 390), no? Maybe make the previous one a let, or use a different var name here."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4035301064",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-31T07:31:17+00:00",
+      "body": "## Pull request overview\n\nThis PR hardens the `ensureNoResultsElement()` helper in the admin UI to prevent accidentally writing “no results” query text into an unrelated DOM node and to avoid creating duplicate `id` attributes after partial re-renders (e.g., HTMX swaps).\n\n**Changes:**\n- Validate that a globally-resolved `spanId` element is actually a descendant of the expected `msg` element before returning it (otherwise fall back to `msg.querySelector(\"span\")`).\n- In the create path (when `msg` is missing), strip `id=spanId` from any stale existing element before creating a new span to prevent duplicate IDs.\n- Add regression tests covering both edge cases (wrong span returned; duplicate IDs).\n\n### Reviewed changes\n\nCopilot reviewed 3 out of 3 changed files in this pull request and generated 1 comment.\n\n| File | Description |\n| ---- | ----------- |\n| `mcpgateway/static/admin.js` | Adds containment guarding for `spanId` lookup and de-duplication of stale `spanId` before creating new elements. |\n| `tests/js/admin-edit-server-selection.test.js` | Adds targeted regression tests for the two reported DOM edge cases. |\n| `.secrets.baseline` | Regenerated baseline metadata / line number shifts (no functional code impact). |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "4089497841",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-10T12:11:39+00:00",
+      "body": "### Summary of Changes\n\n#### Problem\n`ensureNoResultsElement()` had two DOM edge cases:\n1. Global `getElementById()` could return a span from a different part of the DOM\n2. Creating new elements without checking for stale IDs could produce duplicate IDs\n\n#### Solution\n1. Added `msg.contains(span)` guard to verify span is inside msg before returning it\n2. Strip `id` attribute from any stale element before creating new span\n\nBoth fixes are minimal, targeted, and maintain backward compatibility.\n\nThis is a well-crafted fix that:\n1. Correctly addresses both reported edge cases\n2. Includes comprehensive regression tests\n3. Maintains existing functionality\n4. Follows project coding standards\n5. Has minimal risk and no breaking changes\n\nLGTM 🚀 "
+    },
+    {
+      "id": "4089503786",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-10T12:12:58+00:00",
+      "body": ""
+    },
+    {
+      "id": "4089637763",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-10T12:39:19+00:00",
+      "body": ""
+    },
+    {
+      "id": "4090422892",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-10T14:40:58+00:00",
+      "body": "This PR hardens `ensureNoResultsElement()` against DOM ID scoping bugs: when multiple search widgets share the same page, a globally-found spanId might belong to a different widget's msg, or exist as an orphaned stale element. \n\nThe fix scopes span lookups to inside msg (with a `msg.contains()` guard) and strips stale span IDs before creating new elements. The `gateway.test.js` fixture is also corrected to match the actual DOM structure the function produces.\n\nLGTM 🚀 \n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "5cb423079abb7d47bdca0fff5ad116dd8a0df7d0",
+      "message": "fix(ui): harden ensureNoResultsElement() against stale DOM IDs\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-24T06:22:25+00:00"
+    },
+    {
+      "sha": "d3e7ba63eb113659bb14d635906aab1b39b95b05",
+      "message": "fix(ui): rename span variable to avoid redeclaration\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-04-10T12:30:11+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 66,
+  "deletions": 12,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:51.213036",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:51.214315",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3937,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3937.json"
+  }
+}

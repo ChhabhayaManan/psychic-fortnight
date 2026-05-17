@@ -1,0 +1,260 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3566,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3566"
+  },
+  "metadata": {
+    "title": "fix: implement permission-based menu hiding in admin UI",
+    "state": "closed",
+    "created_at": "2026-03-09T17:17:56+00:00",
+    "updated_at": "2026-03-24T08:21:30+00:00",
+    "closed_at": "2026-03-23T20:12:53+00:00",
+    "merged_at": "2026-03-23T20:12:53+00:00",
+    "author": "vishu-bh",
+    "labels": [
+      "bug",
+      "security",
+      "ui",
+      "rbac",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3554\r\nCloses #3416\r\nCloses #3619\r\n\r\n## 📌 Summary\r\n\r\nImplements permission-based hiding in the admin UI so users only see sections and create actions they are allowed to use.\r\n\r\nThis PR fixes two related UI/RBAC regressions:\r\n- `#3554`: non-admin users could see menu sections that returned 403 when opened\r\n- `#3416`: users without `teams.create` could still see the `Create New Team` button and hit a 403 on submit\r\n\r\n**Key architectural improvement**: Added automatic validation of section-to-permission mapping against route decorators to prevent drift.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n**Issue #3554**\r\n1. Log in as a non-admin user such as `developer` or `viewer`\r\n2. Open the admin UI\r\n3. Navigate to a tab that requires higher permissions (e.g: `#users`, `#plugins`)\r\n4. Before this fix, the request returned `403 Forbidden`\r\n\r\n**Issue #3416**\r\n1. Log in as a user without `teams.create`\r\n2. Open the `Teams` section in the admin UI\r\n3. Observe the `Create New Team` button\r\n4. Click it and submit the form\r\n5. Before this fix, the request returned `403 Forbidden` because the action was visible without the required permission\r\n\r\n## 🐞 Root Cause\r\n\r\nThe admin UI mixed static hiding, a few `is_admin` checks, and no granular permission checks for most navigation and create actions. That let users see controls they could not actually use, resulting in avoidable `403` responses.\r\n\r\n## 💡 Fix Description\r\n\r\n**Core implementation:**\r\n\r\n1. **SECTION_PERMISSIONS mapping** (`mcpgateway/admin.py`):\r\n   - Explicit mapping of UI sections to required RBAC permissions\r\n   - Examples: `\"plugins\": \"admin.plugins.read\"`, `\"tools\": \"tools.read\"`\r\n\r\n2. **Automatic validation** (`mcpgateway/admin.py` + `mcpgateway/main.py`):\r\n   - `_extract_permission_from_route()` introspects `@require_permission` decorators\r\n   - `validate_section_permissions()` runs at startup to verify mapping consistency\r\n   - Logs warnings if mappings drift from actual route decorators\r\n\r\n3. **Permission-based section hiding** (`mcpgateway/admin.py`):\r\n   - `get_hidden_sections_for_user()` evaluates section visibility with `PermissionService`\r\n   - Static config and dynamic RBAC hiding are merged server-side\r\n   - Fail-closed behavior hides sections on permission check errors\r\n\r\n4. **Permission-based action hiding** (`mcpgateway/admin.py` + `mcpgateway/templates/admin.html`):\r\n   - `UI_ACTION_PERMISSIONS` maps create controls to RBAC permissions\r\n   - `get_user_action_permissions()` evaluates action visibility for the authenticated user\r\n   - The `Create New Team` button is now hidden when `teams.create` is missing, addressing `#3416`\r\n\r\n5. **Template cleanup** (`mcpgateway/templates/admin.html`):\r\n   - Removed redundant inline admin-only checks\r\n   - Relies on server-side permission flags for sections and actions\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|---|---|---|\r\n| Unit tests | `pytest tests/unit/mcpgateway/test_admin_rbac_ui.py -q` | ✅ Passed |\r\n| Existing unit and integration coverage on branch | Included in PR branch history | ✅ Present |\r\n| Playwright regression coverage | `tests/playwright/test_admin_menu_visibility.py` | ✅ Updated to assert `Create New Team` visibility |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] N/A - UI/RBAC visibility fix only\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted\r\n- [x] No secrets committed\r\n- [x] DCO sign-off included in commits\r\n- [x] Unit tests cover create-action permission mapping\r\n- [x] Playwright coverage now includes `#3416` regression behavior\r\n- [x] Fail-closed behavior preserved\r\n- [x] Section-to-route validation preserved\r\n",
+  "comments": [
+    {
+      "id": "2925129014",
+      "author": "marekdano",
+      "created_at": "2026-03-12T14:39:18+00:00",
+      "body": "Why are we adding this old table back? I was removed in the PR https://github.com/IBM/mcp-context-forge/pull/3370 to fix Playwright tests. "
+    },
+    {
+      "id": "2925162577",
+      "author": "marekdano",
+      "created_at": "2026-03-12T14:44:31+00:00",
+      "body": "Is it ok to add it to the top of the file where `from mcpgateway.admin...` is?"
+    },
+    {
+      "id": "2929881934",
+      "author": "vishu-bh",
+      "created_at": "2026-03-13T08:52:24+00:00",
+      "body": "I think this happened in merge. I will remove it."
+    },
+    {
+      "id": "2960499988",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-19T14:34:50+00:00",
+      "body": "The value of `len(SECTION_PERMISSIONS)` is 24, but only 15 sections are actually validated (the ones in `_SECTION_TO_ROUTE_PATH`). Sections on other routers (version-info, settings, llm-providers, llm-models, llm-api-info and roots) are skipped. \n\nThe log message implies all 24 sections were checked, maybe edit the message to say something like \"all N mapped sections verified\" or mention the gap."
+    },
+    {
+      "id": "2960520809",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-19T14:38:04+00:00",
+      "body": "`overview` is in `_SECTION_TO_ROUTE_PATH` (line 274). Maybe edit the comment to say \"Section's route located on a different sub-router, skipping validation\""
+    },
+    {
+      "id": "2960543570",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-19T14:41:44+00:00",
+      "body": "Checking for the string \"403\" in the page HTML is not ideal: version strings, status codes in other contexts, or other text could contain \"403\" as a substring. The check should look for the actual response status instead."
+    },
+    {
+      "id": "2960587455",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-19T14:48:39+00:00",
+      "body": "This runs for each permission, performing a trip to the db. Could be consolidated befor the `for` section, with something like below:\n\n```python\nuser_perms = await permission_service.get_all_permissions_for_user(user_email, token_teams)\n```\n\nThen, checked like this:\n\n```python\nfor section, permission in SECTION_PERMISSIONS.items():\n    (...)\n    if permission not in user_perms:\n        hidden.add(section)\n```"
+    },
+    {
+      "id": "2965976074",
+      "author": "vishu-bh",
+      "created_at": "2026-03-20T14:07:13+00:00",
+      "body": "Fixed it!"
+    },
+    {
+      "id": "2965976960",
+      "author": "vishu-bh",
+      "created_at": "2026-03-20T14:07:24+00:00",
+      "body": "Makes sense. Addressed"
+    },
+    {
+      "id": "2966008776",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-20T14:13:23+00:00",
+      "body": "Good solution with the fallback. 👍 "
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3937178512",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-12T15:02:02+00:00",
+      "body": "@vishu-bh - Thanks for the PR\r\n\r\nI can see some issues:\r\n\r\n1. Dead HTML block in template (medium)\r\nThe diff adds a 160-line <!-- Old table for reference (hidden) --> block with style=\"display: none;\" to admin.html (around line 6895+). This is dead code that shouldn't be committed — it adds weight to every page load for no reason. Remove it or move to a comment in the PR if it's reference material.\r\n\r\n2. _extract_permission_from_route is fragile (medium)\r\n\r\nThe closure introspection in _extract_permission_from_route() (lines 277-312) walks __closure__ cells looking for strings matching \"word.word\" patterns. This is fragile:\r\n  - If the decorator implementation changes (e.g., uses a dataclass, tuple, or dict instead of a bare string), it silently breaks.\r\n  - Other closure variables that happen to match the \"x.y\" pattern (e.g., a module path like \"mcpgateway.admin\") could be false positives. The startswith(\"/\") filter helps but doesn't cover all cases.\r\n  - Since this only runs at startup and only logs warnings, the blast radius is low — but it could silently stop validating if the decorator changes.\r\n\r\nConsider: Could you just read the permission from a route attribute or metadata instead? e.g., if @require_permission sets endpoint._required_permission = permission, the extraction becomes trivial and robust.\r\n\r\n3. allow_admin_bypass=False might be too restrictive (question)\r\n\r\nIn both get_hidden_sections_for_user (line 498) and get_user_action_permissions (line 577), allow_admin_bypass=False is passed. This means a platform admin with team-scoped token (is_admin=True, token_teams=[\"team1\"]) will have their permissions checked the same as a regular user. Is this intentional? The comment says \"UI visibility matches API permissions\" — but if the API routes do allow admin bypass, then the menu would hide items the admin can actually access, which is the same bug in reverse (accessible items hidden instead of inaccessible items shown).\r\n\r\n  4. get_user_action_permissions called even when email auth is disabled (low)\r\n\r\n  At line 3515, get_user_action_permissions() is called unconditionally, but get_hidden_sections_for_user() at line 3500 is gated on email_auth_enabled. If email auth is disabled, the permission service calls in get_user_action_permissions will likely fail or return unexpected results. Should this also be gated?\r\n\r\n  5. N+1 permission checks (low, potential perf)\r\n\r\n  Both get_hidden_sections_for_user and get_user_action_permissions call check_permission() in a loop — ~24 calls for sections + 9 for actions = ~33 individual permission checks per admin page load. If check_permission hits the DB each time, this could be slow. Consider whether PermissionService has batch-check capability, or whether the results are cached. Since this only applies to /admin page loads it's probably fine in practice."
+    },
+    {
+      "id": "3942535437",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-13T08:52:24+00:00",
+      "body": ""
+    },
+    {
+      "id": "3943750792",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-13T12:37:42+00:00",
+      "body": "The PR correctly implements server-side permission-based menu hiding, fixing the UX bug (#3554) where users saw menu items that returned 403 when clicked. The architecture is sound — defense-in-depth with both UI hiding and backend `@require_permission` enforcement.\n\n#### Good implementation with a few findings\n\n1. Remaining `is_admin` checks in template content panels create inconsistency (Medium)\n\nThe PR removed `is_admin` from sidebar navigation (correct), but content panels at lines 1002, 1223, 1655, 1660, 1665, 6177, 7990 still use is_admin and 'X' not in `hidden_sections`. This means:\n \n- A team_admin with admin.system_config permission would see the \"Logs\" sidebar item (hidden_sections check passes) but not the logs content panel (line 1002: is_admin and 'logs' not in hidden_sections).\n- Same issue for export-import, version-info, maintenance, plugins, metrics, and users.\n\nThis isn't a security vulnerability (the backend still enforces RBAC), but it's a broken UX — users see menu items that show empty/missing content panels. The PR summary says \"Removed 9 redundant is_admin checks\" but these content panel checks were not addressed.\n\n2. user_permissions dict not populated when `email_auth_enabled=False` (Medium)\n```bash\n  user_permissions = {}\n  if getattr(settings, \"email_auth_enabled\", False):\n      user_permissions = await get_user_action_permissions(...)\n```\n\nWhen email_auth_enabled=False, user_permissions is {}. In the template:\n  `{% if user_permissions.can_create_server %}`\n\nJinja2 treats missing dict keys as falsy (undefined), so all create forms are hidden when email auth is disabled. This is likely a regression — previously these forms were always visible without email auth. Should default to` {flag: True for flag in UI_ACTION_PERMISSIONS}` when email auth is disabled.\n\n3. SECTION_PERMISSIONS includes \"overview\": \"admin.overview\", but the comment says \"no permission requirement\" (Low)\n\nIn get_hidden_sections_for_user():\n```bash\n  # Skip sections with no permission requirement (e.g., overview)\n  if required_permission is None:\n      continue\n```\n\nThe comment references \"overview\", but overview actually has \"admin.overview\" permission in the mapping — so the comment is misleading, but the code is correct. The overview section will be correctly checked against permissions.\n\n4. Platform admin bypass is correctly scoped (Positive)\n```bash\n  if is_admin and token_teams is None:\n      return hidden  # bypass permission checks\n```\n\nThis correctly follows the project's two-layer security model: only admins with unrestricted tokens (teams: null) bypass checks. An admin with teams: [] or specific teams is still permission-checked. This matches normalize_token_teams()\n  semantics.\n\n5. Fail-closed on errors (Positive)\n```bash\n  except Exception as e:\n      LOGGER.warning(f\"Error checking permission '{required_permission}' for user {user_email}: {e}\")\n      hidden.add(section)  # hide on error\n```\n\nBoth get_hidden_sections_for_user and get_user_action_permissions correctly deny access on exceptions.\n\n6. Startup validation is warning-only, not enforcing (Low)\n\nvalidate_section_permissions() logs warnings on mismatches but doesn't raise or fail startup. A mismatch between SECTION_PERMISSIONS and @require_permission decorators could silently go unnoticed in production logs. Consider making this a\n  hard error in test/CI environments.\n\n7. _required_permission attribute on decorator wrapper (Positive)\n\nThe metadata approach (setattr(wrapper, '_required_permission', permission)) is clean and avoids fragile closure introspection. Correctly placed after wrapper definition, before return.\n\n8. UI-only hiding — backend still enforces (Positive, important)\n\nThis is defense-in-depth. Even if a user manipulates the frontend, every admin route has @require_permission(...) decorators that enforce server-side. Menu hiding is purely UX improvement."
+    },
+    {
+      "id": "3975610900",
+      "author": "gcgoncalves",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-19T14:48:56+00:00",
+      "body": ""
+    },
+    {
+      "id": "3981765483",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-20T14:07:13+00:00",
+      "body": ""
+    },
+    {
+      "id": "3981766465",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-20T14:07:24+00:00",
+      "body": ""
+    },
+    {
+      "id": "3981802051",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-20T14:13:23+00:00",
+      "body": ""
+    },
+    {
+      "id": "3992572041",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T15:21:43+00:00",
+      "body": ""
+    },
+    {
+      "id": "3994284469",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T19:52:40+00:00",
+      "body": "Approved after rebase, review, and fixes. All security issues addressed, test coverage comprehensive."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "48fadb56a361aaf3ecdec46cb2230f11b19e4d34",
+      "message": "test: add Playwright integration tests for admin menu visibility\n\n- Add comprehensive E2E tests for permission-based menu hiding\n- Test platform admin, team admin, developer, and viewer roles\n- Verify sections are hidden/shown based on RBAC permissions\n- Validate no 403 errors on accessible menu items (fixes #3554)\n- Use real user/team/role setup via REST API\n- Module-scoped fixtures for efficient test execution\n- 6 tests covering all role-based visibility scenarios\n\nRelated to #3554\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-09T17:14:08+00:00"
+    },
+    {
+      "sha": "12876baf26f32a3880e0c2e6b876e05c137f786a",
+      "message": "fix: implement permission-based menu hiding in admin UI\n\n- Add SECTION_PERMISSIONS mapping (24 sections → required permissions)\n- Implement get_hidden_sections_for_user() helper function\n- Integrate permission-based hiding into admin_ui() route handler\n- Remove redundant is_admin checks from admin.html template (9 locations)\n- Add comprehensive unit tests (9 tests, all passing)\n- Fail-closed security: errors hide sections\n- Platform admins with unrestricted tokens bypass checks\n\nFixes #3554\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-09T17:16:43+00:00"
+    },
+    {
+      "sha": "890a1d9eb90e3c61398d93016f767013ed6b042b",
+      "message": "refactor: add validation for section-to-permission mapping\n\n- Keep SECTION_PERMISSIONS as explicit mapping for clarity\n- Add _SECTION_TO_ROUTE_PATH for validation\n- Implement _extract_permission_from_route() to introspect decorators\n- Add validate_section_permissions() called at startup\n- Logs warnings if mapping drifts from route decorators\n- Maintains single source of truth (route decorators)\n- No runtime overhead (validation only at startup)\n- All tests passing (9 unit + 6 integration)\n\nThis addresses the concern about hardcoded permissions by adding\nautomatic validation against actual @require_permission decorators,\nensuring the mapping stays in sync with route definitions.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-10T09:31:30+00:00"
+    },
+    {
+      "sha": "9fc031549bbeba1b5e80310e0af06c7d550b556d",
+      "message": "fix: hide/show create actions based on user permission\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-11T16:09:29+00:00"
+    },
+    {
+      "sha": "c64d42593248f29bcaf6a6af1150a3b9a09d75a6",
+      "message": "fix: corrected linting errors and added new unit tests\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-12T11:32:31+00:00"
+    },
+    {
+      "sha": "c4764a0a9f10e7711c7a6a65bf80a3df053526b1",
+      "message": "fix: addressed PR comments and added tests to improve coverage\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-13T11:11:56+00:00"
+    },
+    {
+      "sha": "eb310c08314c3cb33996853ecedf95f87feaf9d8",
+      "message": "fix: correcting assertion for breaking unit test\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-13T11:32:54+00:00"
+    },
+    {
+      "sha": "11bf52a288b040b8ca60d1c65e93fe49c7abd26b",
+      "message": "fix: hardening UI implementation to match server side rbac\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-13T14:47:05+00:00"
+    },
+    {
+      "sha": "18a230d04bd39a843e561da9425f826c58e92d8a",
+      "message": "fix: linter errors fix\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-18T15:41:46+00:00"
+    },
+    {
+      "sha": "9ad1661ef321ec5475b87a7bbd47e54db9a7ba61",
+      "message": "fix: adding tests\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-20T11:39:57+00:00"
+    },
+    {
+      "sha": "b2e67ec32d9e819a6ef08b0323ac39f085c941b7",
+      "message": "test: add #3416 coverage for create team visibility\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-23T12:06:23+00:00"
+    },
+    {
+      "sha": "2ef2c1f89b6f95437f343b329730d3bc6acd57a6",
+      "message": "test: document #3416 action visibility regression\n\nFixes #3416\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-03-23T12:10:26+00:00"
+    },
+    {
+      "sha": "f30428308ebe7b903c053e0db5c7da8273f1cc00",
+      "message": "fix: use valid RBAC permissions and harden batch path for public-only tokens\n\n- Replace undefined admin.version.read and admin.settings.read with\n  admin.system_config in SECTION_PERMISSIONS (aligns with actual route\n  decorators and Permissions class definitions)\n- Add public-only token guard to batch get_user_permissions() path in\n  get_hidden_sections_for_user(), mirroring the check_permission()\n  security invariant that token_teams=[] must never satisfy admin.*\n- Add tests for batch permission path, wildcard grant, fallback on\n  exception, production warning path, and public-only token denial\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T18:57:18+00:00"
+    },
+    {
+      "sha": "7caf9f5762f8cf2c34fb9f0a18aba2407a4d2671",
+      "message": "fix: separate gRPC visibility from A2A, fix roots and monitoring guards\n\n- Split grpc-services into its own section with admin.grpc permission,\n  preventing users with only a2a.read from seeing gRPC admin content\n  and triggering cross-team gRPC service preloads\n- Promote grpc-services from alias to first-class hidable section in\n  config.py and UI_SECTION_TO_TABS\n- Fix roots section: change roots.read (undefined) to admin.system_config\n  to match actual @require_permission decorators on roots routes\n- Add is_admin guard to performance and observability sidebar links\n  to match their panel guards, preventing empty-tab visibility\n- Add regression tests validating all SECTION_PERMISSIONS map to\n  defined Permissions class constants\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T19:38:42+00:00"
+    },
+    {
+      "sha": "fa9054f341762f74f0d1de15605209b19280f75c",
+      "message": "fix: correct team admin create button assertion in Playwright test\n\nThe team_admin role does not include teams.create permission, so the\n\"Create New Team\" button is correctly hidden by permission-based action\nhiding. Update the Playwright test assertion to expect the button is\nabsent, matching the actual RBAC role definition.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T20:10:20+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 2179,
+  "deletions": 60,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:55.575879",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:55.577125",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3566,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3566.json"
+  }
+}

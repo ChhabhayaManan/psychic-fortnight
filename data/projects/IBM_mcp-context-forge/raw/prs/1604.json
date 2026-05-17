@@ -1,0 +1,104 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1604,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1604"
+  },
+  "metadata": {
+    "title": "[Bug Fix] Fixes to findings from standalone app building.",
+    "state": "closed",
+    "created_at": "2025-12-15T15:56:24+00:00",
+    "updated_at": "2025-12-16T08:47:57+00:00",
+    "closed_at": "2025-12-16T08:47:55+00:00",
+    "merged_at": "2025-12-16T08:47:55+00:00",
+    "author": "rwhitnah",
+    "labels": [],
+    "milestone": "Release 1.0.0-BETA-1",
+    "assignees": []
+  },
+  "description": "Making user ID extraction more flexible across different authentication contexts\r\n\r\nFixes:\r\n```\r\nbug in the authentication middleware. The backend's /admin/plugins endpoints expect a user object but receive a dict.\r\n```\r\n\r\nStandardizing admin endpoint authentication to use permission-based context\r\nFixes:\r\n```\r\n🐞 Bug Summary\r\nThe /auth/email/admin/users endpoint uses Depends(get_current_user) instead of Depends(get_current_user_with_permissions), causing the @require_permission decorator to fail with \"User authentication required\" despite valid authentication.\r\n\r\n🧩 Affected Component\r\n mcpgateway - API\r\n🔁 Steps to Reproduce\r\nAuthenticate successfully and obtain a valid Bearer token\r\nVerify authentication works by calling /auth/email/me (returns user with is_admin: true)\r\nCall /auth/email/admin/users with the same Bearer token\r\nObserve \"User authentication required\" error\r\n🤔 Expected Behavior\r\nThe endpoint should work like other permission-protected endpoints (e.g., /teams, /sso/*) that correctly use get_current_user_with_permissions.\r\n````\r\n\r\n\r\nEnsuring proper tag format conversion between database and API schema representations\r\n\r\nFixes:\r\n```\r\nWhen registering a catalog server via the `/admin/mcp-registry/{server_id}/register` endpoint, the tags from the catalog are copied to the gateway but in an incompatible format, causing validation errors when listing gateways.\r\n```",
+  "comments": [
+    {
+      "id": "2620090151",
+      "author": "gabe-l-hart",
+      "created_at": "2025-12-15T16:34:30+00:00",
+      "body": "This seems brittle as it's only checking the first element and it requires the `len > 0` check. I think it would be cleaner (and tighter) as:\n```suggestion\n        if isinstance(gateway.tags, list) and all(isinstance(val, str) for val in gateway.tags):\n            # First-Party\n            from mcpgateway.validation.tags import validate_tags_field  # pylint: disable=import-outside-toplevel\n\n            gateway.tags = validate_tags_field(gateway.tags)\n```"
+    },
+    {
+      "id": "2620112944",
+      "author": "gabe-l-hart",
+      "created_at": "2025-12-15T16:40:03+00:00",
+      "body": "The logic here is interesting. The `.get(key)` method on `dict` will return `None` if not found. It can also take an optional default value as a second argument. As written, this order of precedence will move to the next option any time the value returned by the `.get` is \"falsey\" which would include the default value `None` AND any \"falsey\" value that is actually set (eg empty string, `false`, `None` being explicitly set, `0`). The alternative would be to use a chain of `.get` with default values that would only move to the next option if the key is not present in the dict, allowing \"falsey\" values that are _explicitly_ set to be returned.\n\nI _suspect_ that this behavior (discarding any \"falsey\" value) is what you want, but any time I see this kind of chain in `python` without a comment explicitly acknowledging the ambiguity, I assume that the author did not carefully analyze the explicitly-falsey case, so I'd like to see a comment explaining how this case is being handled intentionally."
+    },
+    {
+      "id": "2620120535",
+      "author": "gabe-l-hart",
+      "created_at": "2025-12-15T16:41:56+00:00",
+      "body": "🏌\n\n```suggestion\n    return \"unknown\" if user is None else str(getattr(user, \"id\", user))\n```"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3579126054",
+      "author": "gabe-l-hart",
+      "state": "COMMENTED",
+      "submitted_at": "2025-12-15T16:43:15+00:00",
+      "body": "A couple of suggestions for tightening. I haven't actually tried the fix directly, so this is only commenting on the code itself."
+    },
+    {
+      "id": "3579199263",
+      "author": "madhav165",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-15T16:49:39+00:00",
+      "body": "Regular functionality with gateways, tools, servers working as expected."
+    },
+    {
+      "id": "3581679970",
+      "author": "rakdutta",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-16T07:21:20+00:00",
+      "body": "> Tested the following:\r\n>\r\n> * `/admin/plugins` (authenticated user) – Fails on main, works with this PR.\r\n> * `/auth/email/admin/users` with `@require_permission` – Fails on main, works with this PR.\r\n> * Gateway listing after registering a catalog server with tags – Works on both main and this PR.\r\n"
+    },
+    {
+      "id": "3581969547",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-16T08:47:23+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "4fa02270ee458726d285336e7283aee2543cd1d7",
+      "message": "Quick fixes to enable API client app\n\nSigned-off-by: Rynne Whitnah <rpwhitna@us.ibm.com>",
+      "author": "Rynne Whitnah",
+      "date": "2025-12-15T04:46:33+00:00"
+    },
+    {
+      "sha": "3a25fa78b39c5234ac11795c39e92149cd0bcebc",
+      "message": "Fix for linting errors\n\nSigned-off-by: Rynne Whitnah <rpwhitna@us.ibm.com>",
+      "author": "Rynne Whitnah",
+      "date": "2025-12-15T15:42:52+00:00"
+    },
+    {
+      "sha": "3c5d27cab5e832a389e8ce3c4d937b397a1bbc00",
+      "message": "fixes per code review\n\nSigned-off-by: Rynne Whitnah <rpwhitna@us.ibm.com>",
+      "author": "Rynne Whitnah",
+      "date": "2025-12-16T01:05:43+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 90,
+  "deletions": 32,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:21:39.285282",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:21:39.285789",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1604,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1604.json"
+  }
+}

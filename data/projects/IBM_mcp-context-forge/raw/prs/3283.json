@@ -1,0 +1,169 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3283,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3283"
+  },
+  "metadata": {
+    "title": "chore(tests): fix slow tests by mocking unmocked network calls",
+    "state": "closed",
+    "created_at": "2026-02-26T09:09:35+00:00",
+    "updated_at": "2026-03-09T01:52:15+00:00",
+    "closed_at": "2026-02-26T10:13:37+00:00",
+    "merged_at": "2026-02-26T10:13:37+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Move non-deterministic performance benchmark test to `tests/fuzz/`\n- Fix 6 unit tests that were 5-60x slower than necessary due to unmocked network calls, wrong mock targets, or hardcoded sleeps:\n  - **content moderation** (60s to <1s): mock primary/fallback HTTP providers to avoid real timeout cascade\n  - **OAuth health check** (10s to <1s): mock `get_isolated_http_client` instead of unused `_http_client`\n  - **OAuth init failure** (5s to <1s): mock `_connect_to_sse_server_without_validation` (the method actually called) instead of `connect_to_sse_server`\n  - **gateway activation** (5s to <1s): mock `_initialize_gateway` and `_publish_event` to skip real HTTP connects\n  - **gateway mode update** (5s to <1s): same `_initialize_gateway`/`_publish_event` mocking\n  - **UDS fixture** (5.4s to 0.5s): replace `time.sleep(5)` with UDS connection readiness poll\n- CI and Makefile tweaks: `pytest -n auto`, `--durations=5`, coverage target refactoring\n\n## Test plan\n- [x] `make test` passes (12,965 passed, 455 skipped)\n- [x] All 6 previously slow tests verified fast individually",
+  "comments": [
+    {
+      "id": "2857908189",
+      "author": "Copilot",
+      "created_at": "2026-02-26T09:21:57+00:00",
+      "body": "This test no longer verifies that the refreshed OAuth tokens are actually used in the outgoing health-check request. Since the SSE health check path calls `client.stream(..., headers={Authorization: Bearer ...})`, consider asserting the `mock_client.stream` call args include `Bearer token1` on the first call and `Bearer token2` on the second call (in addition to `get_access_token` call count).\n```suggestion\n\n        # Verify the HTTP client was called twice (once per health check)\n        assert mock_client.stream.call_count == 2\n\n        # Verify that the correct OAuth tokens were used in the Authorization header\n        first_call_args = mock_client.stream.call_args_list[0]\n        second_call_args = mock_client.stream.call_args_list[1]\n\n        first_headers = first_call_args[1].get(\"headers\") or {}\n        second_headers = second_call_args[1].get(\"headers\") or {}\n\n        assert first_headers.get(\"Authorization\") == \"Bearer token1\"\n        assert second_headers.get(\"Authorization\") == \"Bearer token2\"\n```"
+    },
+    {
+      "id": "2857908226",
+      "author": "Copilot",
+      "created_at": "2026-02-26T09:21:57+00:00",
+      "body": "The `coverage-pytest` help text says it runs \"doctests + unit tests\", but the command only runs `tests/` (and explicitly ignores fuzz/manual/e2e), while doctests run under the separate `coverage` target. Update the help text to match the actual behavior, or add doctest collection to `coverage-pytest` if that’s the intent.\n```suggestion\n# help: coverage-pytest      - Run pytest unit tests with coverage collection\n```"
+    },
+    {
+      "id": "2857908258",
+      "author": "Copilot",
+      "created_at": "2026-02-26T09:21:58+00:00",
+      "body": "Removing `pre-commit` from the `LINTERS` list changes what `make lint-all` runs (it will no longer execute the pre-commit hooks). If this is intentional, it should be called out in the PR description (or consider keeping it in `LINTERS` to avoid silently reducing lint coverage)."
+    },
+    {
+      "id": "2857908289",
+      "author": "Copilot",
+      "created_at": "2026-02-26T09:21:58+00:00",
+      "body": "This test now mocks `_initialize_gateway`, but the docstring says `only_update_reachable` “skips full re-initialization”. In `GatewayService.set_gateway_state`, transitioning from unreachable→reachable still calls `_initialize_gateway` before the `only_update_reachable` branch is applied. Consider either asserting `_initialize_gateway` was awaited (to document the current behavior) or updating the test description/name to avoid a misleading claim."
+    },
+    {
+      "id": "2857946801",
+      "author": "jonpspri",
+      "created_at": "2026-02-26T09:29:50+00:00",
+      "body": "Good catch — restored the token assertions on `mock_client.stream` call args to verify `Bearer token1` and `Bearer token2` are used in the outgoing requests. Fixed in 7f72d94."
+    },
+    {
+      "id": "2857946913",
+      "author": "jonpspri",
+      "created_at": "2026-02-26T09:29:51+00:00",
+      "body": "Fixed — updated the help text to say \"Run pytest unit tests with coverage collection\". Fixed in 7f72d94."
+    },
+    {
+      "id": "2857947062",
+      "author": "jonpspri",
+      "created_at": "2026-02-26T09:29:53+00:00",
+      "body": "Intentional removal — `pre-commit` runs its own superset of checks that overlap with the individual linters, and we prefer to run it separately (e.g. as a git hook) rather than as part of `make lint-all`."
+    },
+    {
+      "id": "2857947223",
+      "author": "jonpspri",
+      "created_at": "2026-02-26T09:29:55+00:00",
+      "body": "Good point — updated the docstring to clarify that `only_update_reachable` skips tool/resource/prompt bulk updates but not gateway initialization, and added `gateway_service._initialize_gateway.assert_awaited_once()` to document the actual behavior. Fixed in 7f72d94."
+    },
+    {
+      "id": "2858064063",
+      "author": "gcgoncalves",
+      "created_at": "2026-02-26T09:54:31+00:00",
+      "body": "Nice!"
+    },
+    {
+      "id": "2858102159",
+      "author": "jonpspri",
+      "created_at": "2026-02-26T10:02:50+00:00",
+      "body": "Thank my robot."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3859599847",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T09:21:58+00:00",
+      "body": "## Pull request overview\n\nThis PR targets test-suite performance and determinism by eliminating unintended real network waits in unit tests, relocating a non-deterministic benchmark-style test into the fuzz suite, and updating local/CI test runners to surface slow tests and parallelize appropriately.\n\n**Changes:**\n- Mock previously-unmocked network paths in several gateway/OAuth/content-moderation unit tests to avoid real HTTP/SSE timeouts.\n- Replace a hardcoded `sleep(5)` in a UDS subprocess fixture with a readiness probe (connect loop).\n- Update test/coverage invocations in the Makefile and GitHub Actions workflow (xdist `-n auto`, durations reporting, coverage target refactor).\n\n### Reviewed changes\n\nCopilot reviewed 7 out of 7 changed files in this pull request and generated 4 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| tests/unit/mcpgateway/services/test_gateway_service_oauth_comprehensive.py | Fixes slow OAuth tests by mocking the actual health-check HTTP client and the correct SSE connect method. |\r\n| tests/unit/mcpgateway/services/test_gateway_service.py | Avoids slow gateway-mode/state tests by mocking gateway initialization/event publication. |\r\n| tests/unit/mcpgateway/plugins/plugins/content_moderation/test_content_moderation.py | Prevents real moderation-provider HTTP calls by mocking all provider fallbacks. |\r\n| tests/unit/mcpgateway/plugins/framework/external/mcp/test_client_streamable_http.py | Replaces a fixed sleep with a UDS accept/readiness probe to reduce flakiness and time. |\r\n| tests/fuzz/test_security_performance_compatibility.py | Updates file header path after moving the test into `tests/fuzz/`. |\r\n| Makefile | Parallelizes pytest with `-n auto`, adds durations, refactors coverage targets, tweaks lint target list and tomllint excludes. |\r\n| .github/workflows/pytest.yml | Runs pytest/doctests with xdist `-n auto` and ignores an e2e test in the main unit run. |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3859647016",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T09:29:50+00:00",
+      "body": ""
+    },
+    {
+      "id": "3859647125",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T09:29:51+00:00",
+      "body": ""
+    },
+    {
+      "id": "3859647282",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T09:29:53+00:00",
+      "body": ""
+    },
+    {
+      "id": "3859647536",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T09:29:55+00:00",
+      "body": ""
+    },
+    {
+      "id": "3859795162",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T09:55:12+00:00",
+      "body": ""
+    },
+    {
+      "id": "3859844539",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-26T10:02:50+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "dc853578f6ee1c8b343947882e72586d88c7148d",
+      "message": "chore(tests): fix slow tests by mocking unmocked network calls\n\n- Move non-deterministic performance test to tests/fuzz/\n- Fix content moderation test (60s→<1s): mock primary/fallback providers\n  to avoid real HTTP timeouts through the fallback chain\n- Fix OAuth health check test (10s→<1s): mock get_isolated_http_client\n  instead of unused service._http_client\n- Fix OAuth initialization failure test (5s→<1s): mock correct method\n  (_connect_to_sse_server_without_validation vs connect_to_sse_server)\n- Fix gateway activation test (5s→<1s): mock _initialize_gateway and\n  _publish_event to avoid real HTTP connect timeouts\n- Fix gateway mode update test (5s→<1s): same _initialize_gateway and\n  _publish_event mocking\n- Fix UDS fixture (5.4s→0.5s): replace time.sleep(5) with connection\n  readiness poll on the unix domain socket\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-26T09:07:04+00:00"
+    },
+    {
+      "sha": "7f72d94071ec0494a564be7d6e8d49527e6968ed",
+      "message": "fix: address Copilot review feedback\n\n- Restore token assertions in OAuth health check test to verify\n  refreshed tokens are used in outgoing requests\n- Fix coverage-pytest help text to match actual behavior (unit tests only)\n- Restore pre-commit in LINTERS list to preserve lint-all coverage\n- Update test_activate_only_update_reachable docstring and add assertion\n  that _initialize_gateway is still called (only_update_reachable only\n  skips tool/resource/prompt bulk updates, not gateway initialization)\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-26T09:28:58+00:00"
+    },
+    {
+      "sha": "f1c2cbc4764bb7f166d104afad73a62110ac8967",
+      "message": "chore: remove pre-commit from LINTERS list (intentional)\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-26T09:29:15+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 78,
+  "deletions": 29,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:37.815612",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:37.817408",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3283,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3283.json"
+  }
+}

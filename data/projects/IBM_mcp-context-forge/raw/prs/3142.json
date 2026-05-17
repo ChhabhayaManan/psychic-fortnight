@@ -1,0 +1,77 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3142,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3142"
+  },
+  "metadata": {
+    "title": "feat(metrics): add Redis-backed metrics cache for multi-instance deployments",
+    "state": "closed",
+    "created_at": "2026-02-24T09:19:03+00:00",
+    "updated_at": "2026-04-13T12:30:34+00:00",
+    "closed_at": "2026-04-13T12:28:26+00:00",
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #2857 due to repository maintenance. Your code and branch are intact. @gcgoncalves please verify everything looks good.\n\n# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nImplements centralized metrics aggregation cache using Redis to solve metric fluctuation issue in multi-instance deployments behind load balancers. This change is behind the `METRICS_CACHE_USE_REDIS` feature flag.\r\n\r\nThe downside of this approach is that the metrics are updated on the UI only after the cache TTL is expired. The cache TTL is defined using the `METRICS_CACHE_TTL_SECONDS` environment setting.\r\n\r\nCloses #2643\r\n\r\n## 🔁 Reproduction Steps\r\n1. Navigate to `http://localhost:8080/admin/#metrics`\r\n2. Note the \"Total Executions\" value\r\n3. Refresh the page (F5 or Ctrl+R)\r\n4. Observe the value changes significantly (up or down)\r\n5. Repeat several times - values appear random\r\n\r\nhttps://github.com/IBM/mcp-context-forge/issues/2643\r\n\r\n## 🐞 Root Cause\r\n- Each gateway instance had its own in-memory cache of PostgreSQL aggregates\r\n- Load balancer routing to different instances showed different cached values\r\n- Metrics fluctuated non-monotonically on page refresh (e.g., 32075 → 21858)\r\n\r\n## 💡 Fix Description\r\n- Shared Redis cache for aggregated query results across all instances\r\n- Cache invalidation after buffer flush ensures consistency\r\n- Automatic fallback to local cache if Redis unavailable\r\n- Default enabled (`METRICS_CACHE_USE_REDIS=true`)\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "762c21515a80490ce3f0f03c7c925b0c81b1073d",
+      "message": "2643 - add Redis-backed metrics cache for multi-instance deployments\n\nImplements centralized metrics aggregation cache using Redis to solve\nmetric fluctuation issue in multi-instance deployments behind load balancers.\n\nProblem:\n- Each gateway instance had its own in-memory cache of PostgreSQL aggregates\n- Load balancer routing to different instances showed different cached values\n- Metrics fluctuated non-monotonically on page refresh (e.g., 32075 → 21858)\n\nSolution:\n- Shared Redis cache for aggregated query results across all instances\n- Cache invalidation after buffer flush ensures consistency\n- Automatic fallback to local cache if Redis unavailable\n- Default enabled (METRICS_CACHE_USE_REDIS=true)\n\nChanges:\n- mcpgateway/cache/metrics_cache.py: Add Redis backend with async methods,\n  Prometheus metrics, automatic fallback to local cache\n- mcpgateway/config.py: Add metrics_cache_use_redis setting (default: true)\n- mcpgateway/services/metrics_buffer_service.py: Invalidate cache after flush\n- docs/docs/manage/configuration.md: Document METRICS_CACHE_USE_REDIS\n- docs/docs/deployment/container.md: Add Docker Compose Redis example\n- docs/docs/deployment/kubernetes.md: Add multi-instance deployment guide\n- docs/docs/architecture/performance-architecture.md: Add to caching architecture\n\nTechnical Details:\n- PostgreSQL aggregation (func.sum/count) was already correct\n- Issue was per-instance caching, not aggregation\n- Redis provides shared invalidation signal for all instances\n- Cache TTL: 60 seconds (configurable via METRICS_CACHE_TTL_SECONDS)\n\nCloses #2643\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-02-06T14:51:46+00:00"
+    },
+    {
+      "sha": "b42adda9e3b4dc24b9ed427d9fb2954b3fbb26d0",
+      "message": "Use async methods\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-02-10T15:29:22+00:00"
+    },
+    {
+      "sha": "47571d4e3cf347eca08d3251af2114958315ad92",
+      "message": "Use async mock methods\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-02-11T14:19:16+00:00"
+    },
+    {
+      "sha": "6311ec424c29984397d9e7a985799917f86a9720",
+      "message": "Increased coverage\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-02-13T10:28:03+00:00"
+    },
+    {
+      "sha": "d34795333e31a0c78368828d030fdf907b5328a8",
+      "message": "fixup:formatting\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-16T11:35:56+00:00"
+    },
+    {
+      "sha": "94607707c4105a9cad9a1464e281492ddd3ebf16",
+      "message": "fix-text: cache write AttributeError handling in list_agents\n\nSigned-off-by: Akshay Shinde <akshay.shinde26@ibm.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-16T11:50:13+00:00"
+    }
+  ],
+  "files_changed": 29,
+  "additions": 2119,
+  "deletions": 165,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:12:41.549790",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:41.552315",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3142,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3142.json"
+  }
+}

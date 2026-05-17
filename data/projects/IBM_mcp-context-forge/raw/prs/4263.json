@@ -1,0 +1,69 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4263,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4263"
+  },
+  "metadata": {
+    "title": "fix: clean up server_tool_association before tool deletion",
+    "state": "closed",
+    "created_at": "2026-04-17T07:26:19+00:00",
+    "updated_at": "2026-04-27T07:46:22+00:00",
+    "closed_at": "2026-04-27T07:46:20+00:00",
+    "merged_at": "2026-04-27T07:46:20+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "ica",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\n\n---\n\n## 📌 Summary\nDeleting an A2A agent (or its associated tool) from the Admin UI fails with `sqlite3.IntegrityError: FOREIGN KEY constraint failed` because `server_tool_association` rows referencing the tool are not cleaned up before the tool row is deleted.\n\n## 🔁 Reproduction Steps\nCloses #4261\n\n1. Register an A2A agent (auto-creates a tool and may associate it with a virtual server)\n2. Attempt to delete the A2A agent from the Admin UI\n3. Observe: `FOREIGN KEY constraint failed` on the `tools` table\n\n## 🐞 Root Cause\n`ToolService.delete_tool()` uses a Core SQL `delete(DbTool).where(...)` statement which bypasses SQLAlchemy ORM cascades. The `server_tool_association` table has a FK to `tools.id` with **no `ondelete` cascade** at the DB level, so the delete is rejected when association rows exist.\n\nOther FK references to `tools.id` are unaffected:\n- `tool_metrics` — explicitly purged, ORM `cascade=\"all, delete-orphan\"`\n- `tool_metrics_hourly` — `ondelete=\"SET NULL\"`\n- `a2a_agents.tool_id` — `ondelete=\"SET NULL\"`\n\n## 💡 Fix Description\nAdded an explicit `DELETE FROM server_tool_association WHERE tool_id = ?` before the tool row deletion in `delete_tool()`. This matches the existing pattern used in `gateway_service.py` for stale tool cleanup.\n\n## 🧪 Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Lint suite                            | `make lint`          | ⬜     |\n| Unit tests                            | `make test`          | ✅     |\n| Coverage ≥ 80 %                       | `make coverage`      | ⬜     |\n| Manual regression no longer fails     | steps / screenshots  | ⬜     |\n\n- All 8 `delete_tool` unit tests pass (including new `TestDeleteToolServerAssociationCleanup`)\n- All 4 `delete_a2a_agent` admin tests pass\n\n## 📐 MCP Compliance (if relevant)\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4179029623",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-27T07:45:59+00:00",
+      "body": "Approved based on others feedback."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7a3c670998a1207e3e57e0f3561bc09ce5ac67f3",
+      "message": "fix: clean up server_tool_association before tool deletion\n\ndelete_tool() uses a Core SQL DELETE which bypasses ORM cascades.\nThe server_tool_association FK to tools.id has no ondelete cascade,\nso deleting a tool that is associated with a virtual server (e.g. an\nA2A agent tool) raises sqlite3.IntegrityError.\n\nExplicitly delete server_tool_association rows for the tool before\nthe tool row itself, matching the pattern already used in\ngateway_service.\n\nCloses #4261\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-17T07:23:52+00:00"
+    },
+    {
+      "sha": "f7b8c8de49feecaeb35b61ba8fd69e9f59d3122a",
+      "message": "fix(tests): update tool delete test to expect association cleanup execute call\n\ndelete_tool now calls db.execute twice: once for server_tool_association\ncleanup and once for the tool DELETE. The test assertion was stale after\ncommit 5be84b4d4 added the association cleanup step.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-17T07:38:11+00:00"
+    },
+    {
+      "sha": "8c793648bb5901e6c0f4b7185a473d6faab043d9",
+      "message": "docs(test): correct stale 'DELETE ... RETURNING' docstring in concurrency test\n\ntest_concurrent_tool_delete_operations described an 'atomic\nDELETE ... RETURNING' implementation that no longer reflects the production\ncode. delete_tool currently uses get_for_update(nowait=True) to acquire a\nrow-level lock, then a Core-SQL DELETE with a rowcount check. Update the\ndocstring so it accurately describes the two paths a losing concurrent\ncaller can take (lock-conflict 409 or not-found 404).\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T19:23:08+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 100,
+  "deletions": 32,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:22.646363",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:22.646996",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4263,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4263.json"
+  }
+}

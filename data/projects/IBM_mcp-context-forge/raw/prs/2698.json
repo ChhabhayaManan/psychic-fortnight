@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2698,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2698"
+  },
+  "metadata": {
+    "title": "fix: correct servers.create permission pattern for Virtual MCP Server access",
+    "state": "closed",
+    "created_at": "2026-02-04T13:01:56+00:00",
+    "updated_at": "2026-02-11T10:24:52+00:00",
+    "closed_at": "2026-02-11T10:24:51+00:00",
+    "merged_at": "2026-02-11T10:24:51+00:00",
+    "author": "xiajacob",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# Fix: Correct servers.create permission pattern for Virtual MCP Server access\r\n\r\n## 📝 Description\r\n\r\nFixes a permission pattern bug where accessing Virtual MCP Server endpoints incorrectly required `servers.create` permission instead of just `servers.read`.\r\n\r\n## 🐛 Problem\r\n\r\nThe regex pattern `^/servers(?:$|/)` was too broad, matching:\r\n- ✅ `POST /servers` (correct - creating a server)\r\n- ✅ `POST /servers/` (correct - creating a server)\r\n- ❌ `POST /servers/{id}/mcp` (INCORRECT - accessing MCP endpoint)\r\n- ❌ `POST /servers/{id}/sse` (INCORRECT - accessing SSE endpoint)\r\n\r\nThis violated the principle of least privilege, forcing users to grant unnecessary creation permissions just to access existing servers.\r\n\r\n## ✅ Solution\r\n\r\nChanged the regex pattern from `^/servers(?:$|/)` to `^/servers/?$` to match only exact paths.\r\n\r\n**Before:**\r\n```python\r\n(\"POST\", re.compile(r\"^/servers(?:$|/)\"), Permissions.SERVERS_CREATE)\r\n```\r\n\r\n**After:**\r\n```python\r\n(\"POST\", re.compile(r\"^/servers/?$\"), Permissions.SERVERS_CREATE)\r\n```\r\n\r\n## 🧪 Testing\r\n\r\n### Test Results\r\n\r\nAll 8 test cases pass, including:\r\n\r\n1. ✅ Server creation still requires `servers.create`\r\n2. ✅ Virtual MCP Server access no longer requires `servers.create`\r\n3. ✅ SSE endpoint access no longer requires `servers.create`\r\n4. ✅ Other server operations (GET, PUT, DELETE) work correctly\r\n5. ✅ No breaking changes to existing functionality\r\n\r\n### Run Tests\r\n\r\n```bash\r\n# Run the validation test suite\r\npython3 test_permission_fix.py\r\n\r\n# Run existing unit tests\r\npytest tests/unit/mcpgateway/middleware/test_token_scoping.py -v\r\n```\r\n\r\n## 📊 Impact\r\n\r\n### Before Fix (Minimum Required Permissions)\r\n```json\r\n{\r\n  \"permissions\": [\r\n    \"servers.read\",\r\n    \"servers.create\",  // ❌ Unnecessary for accessing existing servers\r\n    \"tools.read\",\r\n    \"tools.execute\"\r\n  ]\r\n}\r\n```\r\n\r\n### After Fix (Minimum Required Permissions)\r\n```json\r\n{\r\n  \"permissions\": [\r\n    \"servers.read\",    // ✅ Sufficient for accessing existing servers\r\n    \"tools.read\",\r\n    \"tools.execute\"\r\n  ]\r\n}\r\n```\r\n\r\n## 🔒 Security Benefits\r\n\r\n1. **Least Privilege**: Users only need read permissions to access servers\r\n2. **Reduced Attack Surface**: Fewer users need create permissions\r\n3. **Clearer Permissions**: Permission names match their actual usage\r\n4. **Better Auditing**: Permission logs are more meaningful\r\n\r\n## 🔄 Migration Notes\r\n\r\n### For Existing Deployments\r\n\r\n**Option 1: No Action Required (Recommended)**\r\n- Existing tokens with `servers.create` will continue to work\r\n- This is backward compatible\r\n\r\n**Option 2: Update Tokens for Better Security**\r\n- Remove unnecessary `servers.create` from tokens that only need to access Virtual MCP Servers\r\n- Keep `servers.create` only for tokens that actually create servers\r\n\r\n### Example Migration\r\n\r\n**Before (overprivileged token):**\r\n```json\r\n{\r\n  \"permissions\": [\"servers.read\", \"servers.create\", \"tools.read\", \"tools.execute\"]\r\n}\r\n```\r\n\r\n**After (properly scoped token):**\r\n```json\r\n{\r\n  \"permissions\": [\"servers.read\", \"tools.read\", \"tools.execute\"]\r\n}\r\n```\r\n\r\n## 📁 Files Changed\r\n\r\n- `mcpgateway/middleware/token_scoping.py` - Fixed regex pattern\r\n- `tests/unit/mcpgateway/middleware/test_token_scoping.py` - Added test cases\r\n- `test_permission_fix.py` - Comprehensive validation suite (can be removed after merge)\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Bug fix (non-breaking change that fixes an issue)\r\n- [x] Follows the existing code style\r\n- [x] Includes test cases demonstrating the fix\r\n- [x] All existing tests pass\r\n- [x] No breaking changes to existing functionality\r\n- [x] Documentation updated (if needed)\r\n- [x] Security implications considered and addressed\r\n\r\n\r\n## 📸 Screenshots/Evidence\r\n\r\n### Test Output\r\n```\r\n====================================================================================================\r\nPERMISSION PATTERN FIX VALIDATION TEST SUITE\r\n====================================================================================================\r\n\r\nTest 4: Access Virtual MCP Server - BUG HERE\r\n  Path: POST /servers/3d7c7ab6a5264dadb8c7f4e04758295b/mcp\r\n  Permissions: ['servers.read', 'tools.read']\r\n  Current: ❌ FAIL - Matched but missing servers.create\r\n  Fixed:   ✅ PASS - No pattern matched - default allow\r\n  🐛 BUG DETECTED: Current behavior is incorrect, fix resolves it\r\n```\r\n\r\n## 🙏 Credits\r\n\r\n- Bug discovered and reported by: @[your-github-username]\r\n- Analysis and fix by: @[your-github-username]\r\n\r\n---\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3783653836",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-11T09:19:40+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6f310972ac5a0f884a412e6c77d65a500c857eca",
+      "message": "fix: correct servers.create permission pattern for Virtual MCP Server\n\n- Changed regex from ^/servers(?:$|/) to ^/servers/?$ to only match exact paths\n- Virtual MCP Server access (/servers/{id}/mcp) no longer requires servers.create\n- Added comprehensive test cases to prevent regression\n- Maintains backward compatibility with existing tokens\n\nThis fixes a security design flaw where accessing existing Virtual MCP\nServers incorrectly required servers.create permission, violating the\nprinciple of least privilege.\n\nBefore: POST /servers/abc/mcp required servers.create\nAfter: POST /servers/abc/mcp only requires servers.read\n\nResolves the issue where API tokens needed unnecessary creation\npermissions just to access existing Virtual MCP Server endpoints.\n\nSigned-off-by: xiajinyang <xiajinyang@miaozhen.com>",
+      "author": "xiajinyang",
+      "date": "2026-02-04T12:50:44+00:00"
+    },
+    {
+      "sha": "f919cc905e37c8e1c4ba706838c812be7ae7aa79",
+      "message": "fix: apply consistent permission patterns across all resource types\n\nExtend the servers.create regex fix to all resource types,\napplying the same gateways convention consistently:\n\n- POST /collection (exact) → *.create\n- POST /collection/{id}/sub-resource → *.update (state, toggle)\n- POST /prompts/{id} (exact, no sub-path) → prompts.read (MCP spec)\n- POST /resources/subscribe → resources.read (SSE subscription)\n- POST /servers/{id}/state|toggle → servers.update (management)\n- POST /servers/{id}/mcp|sse|message → servers.read (access)\n\nBefore: POST /tools/{id}/state required tools.create (wrong)\nAfter:  POST /tools/{id}/state requires tools.update (correct)\n\nSame fix applied to /resources, /prompts, and /servers sub-path\nPOST endpoints, ensuring all resource types follow the gateways\nconvention for create-vs-subresource permission patterns.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-11T08:13:47+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 230,
+  "deletions": 4,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:07.583820",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:07.585493",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2698,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2698.json"
+  }
+}

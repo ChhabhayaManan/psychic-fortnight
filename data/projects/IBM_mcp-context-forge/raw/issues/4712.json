@@ -1,0 +1,49 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4712,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4712"
+  },
+  "metadata": {
+    "title": "[BUG]:  Admin UI token creation fails with CSRF validation due to cookie name mismatch",
+    "state": "open",
+    "created_at": "2026-05-12T06:48:27+00:00",
+    "updated_at": "2026-05-15T05:43:03+00:00",
+    "closed_at": null,
+    "author": "rakdutta",
+    "labels": [
+      "bug",
+      "triage",
+      "security",
+      "ui"
+    ],
+    "milestone": null,
+    "assignees": [
+      "rakdutta"
+    ]
+  },
+  "description": "\n\n**Title**\n`[BUG]: Admin UI token creation fails with CSRF validation due to cookie name mismatch`\n\n**Body**\n```md\n## Bug description\n\nCreating an API token from the Admin UI fails with:\n\n`Error creating token: CSRF validation failed`\n\nThis happens even after a fresh login and also in Chrome incognito mode.\n\n## Steps to reproduce\n\n1. Start the app and log in to the Admin UI\n2. If prompted, change password successfully\n3. Go to the API token creation screen in the Admin UI\n4. Try to create a token\n5. Observe the error: `Error creating token: CSRF validation failed`\n\n## Expected behavior\n\nAPI token creation from the Admin UI should succeed when the user has a valid authenticated session.\n\n## Actual behavior\n\nThe Admin UI shows:\n\n`Error creating token: CSRF validation failed`\n\nand token creation is blocked.\n\n## Root cause analysis\n\nThere appears to be a frontend/backend CSRF cookie name mismatch.\n\n### Frontend\nIn [`admin.html`](mcpgateway/templates/admin.html:69), the Admin UI JavaScript reads the CSRF cookie using:\n\n- `getCookie(\"mcpgateway_csrf_token\")`\n\nand sends it as the `X-CSRF-Token` header in [`admin.html`](mcpgateway/templates/admin.html:71).\n\n### Backend\nIn [`CSRFMiddleware.dispatch()`](mcpgateway/middleware/csrf_middleware.py:160), the backend validates against:\n\n- [`settings.csrf_cookie_name`](mcpgateway/middleware/csrf_middleware.py:160)\n\nThe default configured cookie name in [`.env.example`](.env.example:43) is:\n\n- `CSRF_COOKIE_NAME=csrf_token`\n\nSo the backend expects `csrf_token`, while the admin UI looks for `mcpgateway_csrf_token`.\n\n## Impact\n\n- Admin UI token creation fails consistently\n- Re-login does not help\n- Incognito mode does not help\n- Any Admin UI flow relying on the shared JS CSRF injection may be affected\n\n## Suggested fix\n\nUpdate the Admin UI in [`admin.html`](mcpgateway/templates/admin.html:69) and related fetch/HTMX helpers to use the configured CSRF cookie name instead of hardcoding `mcpgateway_csrf_token`.\n\nPossible approaches:\n- inject [`settings.csrf_cookie_name`](mcpgateway/middleware/csrf_middleware.py:160) into the template and read that dynamically\n- or align the frontend hardcoded cookie name with the backend default `csrf_token`\n\n## Environment\n\n- Browser: Chrome incognito\n- Access URL: `http://localhost:4444`\n- Observed after successful login/password change in Admin UI\n```\n**Short version**\nFrontend in [`admin.html`](mcpgateway/templates/admin.html:69) reads `mcpgateway_csrf_token`, but backend CSRF validation in [`csrf_middleware.py`](mcpgateway/middleware/csrf_middleware.py:160) expects `csrf_token` by default.",
+  "comments": [
+    {
+      "id": "4452560927",
+      "author": "snorlaX-sleeps",
+      "created_at": "2026-05-14T16:26:03+00:00",
+      "body": "When was CSRF added? We re-deployed v1.0.0 of context-forge this morning but have been running into this issue when trying to do any admin related actions?"
+    },
+    {
+      "id": "4457213029",
+      "author": "rakdutta",
+      "created_at": "2026-05-15T05:43:03+00:00",
+      "body": "@snorlaX-sleeps  PR #4754 has been raised for the fix. Until it is merged, please update CSRF_ENABLED=false in the .env file as a temporary workaround."
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:29.220843",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:29.221675",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4712,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4712.json"
+  }
+}

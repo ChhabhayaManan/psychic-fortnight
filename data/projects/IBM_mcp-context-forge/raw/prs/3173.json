@@ -1,0 +1,116 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3173,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3173"
+  },
+  "metadata": {
+    "title": "fix(a2a): cascade agent state changes to associated MCP tools",
+    "state": "closed",
+    "created_at": "2026-02-24T09:30:24+00:00",
+    "updated_at": "2026-03-27T08:57:29+00:00",
+    "closed_at": "2026-03-27T08:57:27+00:00",
+    "merged_at": "2026-03-27T08:57:27+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "a2a",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3073 due to repository maintenance. Your code and branch are intact. @marekdano please verify everything looks good.\n\n# 🐛 Bug-fix PR\r\n\r\n---\r\n\r\n## 📌 Summary\r\n\r\nWhen an A2A agent is deactivated, its associated tool remains active in the database — appearing in virtual server tool listings and still invocable. This is inconsistent with gateway deactivation, which cascades to all child tools, prompts, and resources.\r\n\r\nThis PR cascades A2A agent activation/deactivation to the associated MCP tool, adds the missing \"Enable/Disable A2A Agent\" API documentation, and brings `a2a_service.py` unit test coverage to 100%.\r\n\r\nCloses #2997\r\n\r\n## 🔁 Reproduction Steps\r\n1. Go to http://localhost:8080/admin/?agents_inactive=true&agents_page=1#a2a-agents\r\n2. Set as Inactive an Agent\r\n3. Check Tools and Virtual Server\r\n\r\n## 🐞 Root Cause\r\n\r\nThe root cause was that `set_agent_state()` in `a2a_service.py` only updated the agent's own enabled field and never touched the associated tool record. Unlike `gateway_service.py:set_gateway_state()`, which bulk-updates all child tools/prompts/resources when a gateway is toggled, the A2A code path simply didn't have any cascade logic — the tool's enabled column stayed unchanged regardless of the agent's state.\r\n\r\n## 💡 Fix Description\r\n\r\nhttps://github.com/user-attachments/assets/3559c2ce-25ab-4400-b83e-0033decfb976\r\n\r\n Bug fix\r\n\r\n- `mcpgateway/services/a2a_service.py`: After toggling `agent.enabled` in `set_agent_state()`, cascade the new state to the agent's associated tool via a single `UPDATE` statement. The `WHERE DbTool.enabled != activate` guard avoids redundant commits when the tool already matches the desired state. This mirrors the existing pattern in `gateway_service.py:set_gateway_state()`.\r\n\r\n Test fixes\r\n\r\n- `tests/unit/mcpgateway/services/test_a2a_service.py`: Added `tool_id=None` to two existing `SimpleNamespace` agent mocks (test_set_state_permission_allowed, test_set_state_with_reachable) that broke because the new cascade code accesses agent.tool_id.\r\n\r\n New Unit Tests (12 tests, coverage 94% → 100%)\r\n\r\n- TestSetAgentStateToolCascade (4 tests): Deactivation cascades to tool, activation cascades to tool, no-op when tool_id is None, no commit when tool already matches state.\r\n- TestUpdateAgentQueryParamAuth (7 tests): Switching away from query_param clears params, switching to query_param encrypts key/value, value-only rotation reuses existing key, masked placeholder with same/different key, None value no-op, plain string value path.\r\n- TestListAgentsCacheAttributeError (1 test): AttributeError during cache set is silently skipped.\r\n- Add extra tests to get `100%` coverage on a2a_service.py\r\n\r\n Documentation\r\n\r\n- docs/docs/using/agents/a2a.md: New \"Lifecycle Management > Agent-Tool State Cascade\" section explaining the linked lifecycle between A2A agents and their tools.\r\n- docs/docs/manage/api-usage.md: New \"Enable/Disable A2A Agent\" subsection with API examples and a \"State Cascade\" admonition note.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |     ✅    |\r\n| Unit tests                            | `make test`          |    ✅     |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅     |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3854610620",
+      "author": "Lang-Akshay",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-25T14:26:19+00:00",
+      "body": ""
+    },
+    {
+      "id": "3854617508",
+      "author": "Lang-Akshay",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-25T14:27:30+00:00",
+      "body": ""
+    },
+    {
+      "id": "3992089819",
+      "author": "Lang-Akshay",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T14:16:20+00:00",
+      "body": ""
+    },
+    {
+      "id": "3992356123",
+      "author": "msureshkumar88",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-23T14:51:06+00:00",
+      "body": "# ✅ PR #3173 — Approved\n\n**[BUG][UI]: Inactive A2A agents still visible in Tools and Virtual Servers panels** by @author\n\nThis PR successfully implements state cascade functionality where deactivating an A2A agent automatically deactivates its associated tool, ensuring inactive agents no longer appear in Tools and Virtual Servers panels. The implementation follows the same pattern as MCP server deactivation and includes comprehensive test coverage.\n\n**Security**: 🟢 No issues found  \n**Issue Coverage**: Fully addresses issue #2997  \n**Quality**: Well-tested with proper cache management\n\nThe changes are production-ready and align with the expected behavior described in the issue."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "852097e875f3ba1bd8abdf4049e0c48e4c9a8887",
+      "message": "fix(api): deactive a2a agents tools when a2a agents are inactive\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-19T16:09:42+00:00"
+    },
+    {
+      "sha": "ae8a7236cffcdff7585d26e5effb5c8cd574657a",
+      "message": "fix: add tool_lookup_cache and try catch with handling errors when updating a2a agent tools\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-20T15:52:49+00:00"
+    },
+    {
+      "sha": "6ce729280392111c15bea13f0d00726d25e1cba7",
+      "message": "fix: add gateway_id to 'tool_lookup_cache.invalidate' function in 'set_agent_state' function\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-23T17:13:07+00:00"
+    },
+    {
+      "sha": "9943e852bc65a7fada0eddb6b50193cdc6116f26",
+      "message": "fix: apply black formatting and correct stale docstring path\n\n- Run black on test_a2a_service.py to fix line-length violations in new tests\n- Update docstring Location path in test_a2a_agent.py after rename from\n  test_issue_840_a2a_agent.py\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-26T22:12:09+00:00"
+    },
+    {
+      "sha": "0ea473183d03956bce9f679b9b6fe92e284d892c",
+      "message": "fix: tighten docs and stale docstring per code review feedback\n\n- Update test_a2a_agent.py module docstring to reflect both #840 and\n  #2997 coverage instead of stale issue-840-only wording\n- Clarify a2a.md cascade docs: invocation was already rejected for\n  disabled agents; the fix ensures the tool's enabled flag stays in\n  sync so it no longer appears in listings\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T00:04:14+00:00"
+    },
+    {
+      "sha": "0c132ac3b5e190f268fccaf29270a08fd4319a2c",
+      "message": "fix: let cascade failures propagate instead of swallowing them\n\nRemove try/except around the tool cascade in set_agent_state() so that\nDB failures surface to the caller. This aligns with gateway_service.py's\nset_gateway_state() which also commits the parent first (line 2773) then\ncascades to child tools/prompts/resources without catching exceptions.\n\nThe previous best-effort pattern silently returned success when the tool\nUPDATE failed, leaving agent disabled but tool still enabled — the exact\ninconsistency this PR is meant to fix.\n\nUpdate test_cascade_tool_update_failure to assert the exception\npropagates instead of being swallowed.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T00:10:10+00:00"
+    },
+    {
+      "sha": "b5b4f6a69ba96abe4765d8faf730c100c75f33cc",
+      "message": "Merge branch 'main' into 2997-deactive-a2a-agents-tools",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T08:56:56+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 723,
+  "deletions": 13,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:01.479075",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:01.480626",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3173,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3173.json"
+  }
+}

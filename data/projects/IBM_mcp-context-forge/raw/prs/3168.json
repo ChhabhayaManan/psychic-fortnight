@@ -1,0 +1,136 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3168,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3168"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Preserve edit server selections across infinite scroll pages and searches",
+    "state": "closed",
+    "created_at": "2026-02-24T09:29:39+00:00",
+    "updated_at": "2026-02-26T13:28:44+00:00",
+    "closed_at": "2026-02-25T17:09:45+00:00",
+    "merged_at": "2026-02-25T17:09:45+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "ui",
+      "ica",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3056 due to repository maintenance. Your code and branch are intact. @madhav165 please verify everything looks good.\n\n# 🐛 Bug-fix PR\r\n\r\nFixes #3042 \r\n\r\n---\r\n\r\n## 📌 Summary\r\nFix three interrelated bugs in the \"Edit Virtual Server\" modal when a gateway has many tools, resources, or prompts. All three stem from tracking selection state only through DOM-visible checkboxes rather than a persistent in-memory store. Because the selector uses HTMX infinite scroll (20 items per page), anything not currently rendered in the DOM is invisible to the state-management code.\r\n\r\n**Bugs fixed:**\r\n1. **Performance / data loss on Save**: `FormData` only collects checked checkboxes currently in the DOM. Tools on unloaded scroll pages are silently dropped.\r\n2. **Partial selection on modal open**: Only first-page tools appear selected; tools on pages 2+ show unchecked until scrolled to.\r\n3. **Selections lost across searches**: Searching replaces the container HTML; previously-checked tools not in the original server associations are discarded.\r\n\r\n## 🔁 Reproduction Steps\r\n1. Create a virtual server with 30+ associated tools.\r\n2. Open \"Edit\" for that server - observe only ~20 tools are checked (Bug 2).\r\n3. Search \"foo\", select Tool X (not originally associated), then search \"bar\" - Tool X is now unchecked (Bug 3).\r\n4. Scroll to load more tools, check some, then click \"Save Changes\" - only DOM-visible tools are saved (Bug 1).\r\n\r\n## 🐞 Root Cause\r\nSelection state was tracked exclusively via DOM checkboxes. The HTMX infinite scroll loads 20 items per page and appends them to the container. Tools/resources/prompts on pages not yet scrolled to have no DOM representation, so:\r\n- `FormData(form)` misses them on save\r\n- `setEditServerAssociations()` can only check what's in the DOM\r\n- Search replace destroys checkbox state; restore only reads `data-server-tools` (original associations), ignoring user changes\r\n\r\nAdditionally, `server.associatedTools` returns tool **names** while the form submission needs **UUIDs**. Without the UUIDs upfront, off-screen tools can never be included in the form payload.\r\n\r\n## 💡 Fix Description\r\nIntroduce a persistent in-memory selection store (`window.editServerSelections`) keyed by container ID, holding `Set<UUID>`:\r\n\r\n1. **Backend (additive)**: Add `associated_tool_ids` (UUIDs) to `ServerRead` alongside existing `associated_tools` (names). One new field with default `[]`, one new line in `convert_server_to_read`.\r\n\r\n2. **Store seeding**: On modal open in `editServer()`, reset the store and seed it from `server.associatedToolIds`, `server.associatedResources`, and `server.associatedPrompts`.\r\n\r\n3. **Change listener**: Event delegation on each edit-server container updates the store on every checkbox change (add on check, delete on uncheck).\r\n\r\n4. **afterSwap handlers**: When infinite scroll pages load and auto-check associated items, also add their UUIDs to the store.\r\n\r\n5. **Search functions**: Before replacing container HTML, flush current DOM checked/unchecked state into the store. After loading search results, restore checkboxes from the store.\r\n\r\n6. **Form submission**: In `handleEditServerFormSubmit`, sync DOM state to store, then override `FormData` with the full store contents - ensuring off-screen selections are included.\r\n\r\n7. **Cleanup**: Reset the store when the edit modal closes.\r\n\r\n**Key design decision**: All existing behavior is preserved unchanged - `hx-on::after-swap`, `hx-trigger=\"load\"`, `setEditServerAssociations`, `initToolSelect`, the setTimeout restore block. The store is purely additive overlay, not a replacement.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |   pass     |\r\n| Unit tests                            | `make test`          |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3847915769",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-24T13:29:03+00:00",
+      "body": "Worked fine during my testing after rebase."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0129f5801d454b4eb3c5dc8854a5e036ba676f0c",
+      "message": "fix(ui): persist edit-server selections across scroll pages and searches\n\nIntroduce a persistent in-memory selection store (window.editServerSelections)\nthat tracks selected tool/resource/prompt UUIDs independently of DOM state.\n\n- Add associated_tool_ids to server API response for UUID-based store seeding\n- Seed store from server associations when edit modal opens\n- Sync store on checkbox change via event delegation\n- Flush DOM state to store before search container replacement\n- Restore selections from store after search results load\n- Override FormData with store contents on save to include off-screen items\n- Reset store when edit modal closes\n\nFixes: selections lost across searches, off-screen items dropped on save,\nonly first-page tools shown as selected on modal open.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T02:08:00+00:00"
+    },
+    {
+      "sha": "6a3d3cf601b134994150caa08df9e83ae7ce90c9",
+      "message": "fix server selections\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T04:13:38+00:00"
+    },
+    {
+      "sha": "1d1203a12a1a1c28eb8d130cb2ead67074c31136",
+      "message": "Fix bracket\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T04:23:38+00:00"
+    },
+    {
+      "sha": "05bf9e21c445f2e060f5935ae21b4695552d41ae",
+      "message": "fix(ui): populate resource/prompt mappings on scroll load for correct pill display\n\nCall updateResourceMapping/updatePromptMapping in HTMX afterSettle\nhandlers (same as tools already does with updateToolMapping), so\nwindow.resourceMapping and window.promptMapping are populated as\npages load. Also add mapping fallback in Add Server pill rendering\nfor off-screen resources and prompts.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T06:43:48+00:00"
+    },
+    {
+      "sha": "10a14e9e81c2b58b282fe13d5c31cdbe01b12962",
+      "message": "fix(ui): sync DOM to store in update() and populate mappings in add-server search\n\nTwo fixes:\n\n1. Edit server pills not reflecting new selections: The update()\n   function in initToolSelect/initResourceSelect/initPromptSelect fires\n   before the store listener (registered later). Fix: sync DOM checkbox\n   state into the store at the top of update() for edit mode.\n\n2. Add server resource/prompt pills showing UUIDs: The add-server\n   search functions (serverSideResourceSearch, serverSidePromptSearch)\n   never called updateResourceMapping/updatePromptMapping after\n   replacing container HTML. Fix: call them after innerHTML assignment\n   in both clear-search and active-search paths.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T06:54:08+00:00"
+    },
+    {
+      "sha": "98b5b180d2cdb9f2404498a97534bc793afa7184",
+      "message": "eslint fix\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T07:35:00+00:00"
+    },
+    {
+      "sha": "2cc8309206c5a75051f8fbeb48f021ad4bd69079",
+      "message": "Remove logs and fix reference\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T14:28:55+00:00"
+    },
+    {
+      "sha": "12b38b73ae1a903f25ce3327c3f58deb026aa8aa",
+      "message": "unfiy state store for create and edit\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T14:41:44+00:00"
+    },
+    {
+      "sha": "a43b102f339fb2ea6aa5c3282de4e7c666866c9a",
+      "message": "add tests\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T14:49:40+00:00"
+    },
+    {
+      "sha": "46c0db161d7fa5618ebe10ec0e22f3a8fccea9bb",
+      "message": "eslint fix and performance fix\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T15:31:16+00:00"
+    },
+    {
+      "sha": "f4b9f28ef838f015d6e172d0d610b81b306065f8",
+      "message": "fix clear all\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-19T15:51:06+00:00"
+    },
+    {
+      "sha": "17cb1ed905d48e7238d09e33a9fd5d8fe5328b30",
+      "message": "fix minor bug in clear all\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-24T13:28:37+00:00"
+    },
+    {
+      "sha": "c36026dc368a362996ea6e769216a3d132b8834f",
+      "message": "test: add differential coverage for edit-server selection store\n\nAdd tests for ensureEditStoreListeners, handleEditServerFormSubmit\nstore integration, closeModal reset behavior, and the new\nassociated_tool_ids field on convert_server_to_read.\n\n- JS: 8 new tests covering edit-mode store listeners, edit form\n  submission with off-screen selections, unchecked item removal,\n  and modal close cleanup (32 total, up from 24)\n- Python: 3 new tests for associated_tool_ids population, empty\n  tools, and integer-to-string ID conversion (115 total)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-25T15:45:13+00:00"
+    },
+    {
+      "sha": "fdfb8b3ad311599f5631e7c34738c62496ba0b5d",
+      "message": "fix(ui): remove stale selectAll hidden inputs on edit-modal close\n\nresetEditSelections() only cleared the in-memory Set store but left\nbehind hidden selectAllTools/allToolIds (and resource/prompt equivalents)\nDOM elements from a previous \"Select All\" action. If a user edited\nserver A with Select All, closed the modal, then edited server B, the\nstale hidden fields would be submitted and the backend would override\nthe selection store with server A's tool IDs.\n\n- Extend resetEditSelections() to remove the 6 hidden inputs from the\n  3 edit containers (selectAll* + all*Ids for tools/resources/prompts)\n- Add regression test verifying hidden inputs are removed on modal close\n- Add 3 edit-search regression tests for serverSideEditToolSearch\n  (flush, clear-search restore, keyword-search restore)\n\nPre-existing bug not introduced by this PR, but fixed here since\nresetEditSelections() is in the touched code path.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-25T16:47:59+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 2264,
+  "deletions": 1533,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:58.054453",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:58.055492",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3168,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3168.json"
+  }
+}

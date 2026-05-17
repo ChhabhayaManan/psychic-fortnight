@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3893,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3893"
+  },
+  "metadata": {
+    "title": "[FIX]: Stabilize CI workflow checks",
+    "state": "closed",
+    "created_at": "2026-03-27T15:55:49+00:00",
+    "updated_at": "2026-03-27T16:51:13+00:00",
+    "closed_at": "2026-03-27T16:50:32+00:00",
+    "merged_at": "2026-03-27T16:50:32+00:00",
+    "author": "lucarlig",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\n\nCloses #3894\n\n## 📌 Summary\nThis PR fixes three CI workflow regressions that were blocking GitHub Actions: Rust wheel artifact uploads were colliding across matrix platforms, the Rust plugin pipeline was running benchmarks instead of compile-only validation, and the Go lint workflow was pinned to a vulnerable toolchain patch release.\n\n## 🔁 Reproduction Steps\n- Trigger the Rust plugins workflow on a branch that builds wheels on multiple platforms and observe `upload-artifact@v4` fail with `409 Conflict` because all matrix jobs use the same artifact name.\n- Trigger the Rust plugins workflow and observe the benchmark job execute `make rust-bench` instead of compiling bench targets only.\n- Trigger the `linting-full` workflow and observe `govulncheck` fail on `GO-2026-4601` while using `go1.25.7`; the workflow also warns because `setup-go` cannot find a root-level `go.sum`.\n\n## 🐞 Root Cause\n- `.github/workflows/rust-plugins.yml` uploaded wheel artifacts under a single shared name, `wheels-build`, across all matrix OS jobs.\n- The Rust workflow's benchmark validation job ran full benchmarks instead of a compile-only check.\n- The linting path pinned `LINT_GO_TOOLCHAIN` to `go1.25.7`, which is the vulnerable stdlib version flagged by `govulncheck`, and the workflow did not point `setup-go` at the repo's actual Go module `go.sum` files.\n\n## 💡 Fix Description\n- Changed the Rust wheel artifact name to `wheels-build-${{ matrix.os }}` so matrix uploads are unique.\n- Added `rust-bench-build` / `bench-build` make targets and updated the Rust workflow to compile benchmark targets with `cargo bench --no-run` instead of executing them.\n- Updated the Go lint toolchain pin to `go1.25.8` and configured `linting-full.yml` with explicit Go module cache dependency paths.\n- Added workflow regression tests that parse the Rust and linting workflow YAML plus the Makefile pin.\n\n## 🧪 Verification\n\n| Check                                 | Command                                  | Status |\n|---------------------------------------|------------------------------------------|--------|\n| Lint suite                            | `make linting-go-govulncheck`            | ✅ |\n| Unit tests                            | `uv run pytest tests/unit/test_rust_plugins_workflow.py` | ✅ |\n| Coverage ≥ 80 %                       | Not run                                  | n/a |\n| Manual regression no longer fails     | `make rust-bench-build`                  | ✅ |\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4022410147",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-27T16:49:00+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7f01b257cb6facc36fdaa9661e69c979e73c54df",
+      "message": "fix: stabilize CI workflow checks\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-03-27T15:54:10+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 85,
+  "deletions": 11,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:36.251203",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:36.252086",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3893,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3893.json"
+  }
+}

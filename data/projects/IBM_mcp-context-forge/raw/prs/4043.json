@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4043,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4043"
+  },
+  "metadata": {
+    "title": "Fix/4041 Nav bug & dependency documentation",
+    "state": "closed",
+    "created_at": "2026-04-03T21:59:10+00:00",
+    "updated_at": "2026-04-11T17:20:12+00:00",
+    "closed_at": "2026-04-11T17:20:09+00:00",
+    "merged_at": "2026-04-11T17:20:09+00:00",
+    "author": "a-effort",
+    "labels": [
+      "bug",
+      "frontend",
+      "ui",
+      "regression"
+    ],
+    "milestone": null,
+    "assignees": [
+      "jonpspri"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #4041 \r\n\r\n---\r\n\r\n## 📝 Summary\r\nThe Admin UI has been non-functional on a clean checkout since #3137 introduced the Vite build system. That PR removed the hand-written `admin.js` and replaced it with ES modules bundled by Vite, but never committed the compiled output. With no `bundle-*.js` present, the server logs a startup error, serves a broken script tag, and the entire `window.Admin` namespace is missing, leaving every tab navigation call as an uncaught `ReferenceError` and rendering every URL as the overview panel.\r\n\r\nThis PR commits the initial Vite bundle and manifest so the admin UI works on a clean checkout, and updates the setup documentation (`README.md`, `docs/docs/development/building.md`, `AGENTS.md`) to make the required `npm install && npm run vite:build` step explicit for contributors working from source.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [x] Documentation\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | N/A — no Python changes      |\r\n| Unit tests                | `make test`     | N/A — no Python changes     |\r\n| Coverage ≥ 80%    | `make coverage` | N/A — no Python changes       |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n**Fixes #4041** Admin UI tab navigation broken on clean checkout.\r\n### What broke\r\n\r\n  PR #3137 replaced `mcpgateway/static/admin.js` with a Vite-bundled build under `mcpgateway/admin_ui/`, but the compiled output was never built or committed. On a clean checkout `mcpgateway/static/bundle-*.js` does not exist, so:\r\n\r\n  1. `get_bundle_js_filename()` in `admin.py` returns `\"\"` and logs an error.\r\n  2. The HTML renders `<script src=\"/static/\">` — a 404.\r\n  3. `window.Admin` is never initialised; all `onclick=\"Admin.showTab(...)\"` calls throw `ReferenceError`.\r\n  4. Because `#overview-panel` is the only panel without a `hidden` class in the server-rendered HTML, every tab URL shows the overview panel regardless of the hash.\r\n\r\n  ### What this PR does\r\n\r\n  | Commit | Change |\r\n  |--------|--------|\r\n  | `15617da` | Documents the required `npm install && npm run vite:build` step in `README.md`, `docs/docs/development/building.md`, and `AGENTS.md` |\r\n  | `d3c29e6` | Commits the compiled bundle (`bundle-CB59m_Zy.js`) and Vite manifest so the UI works on a clean checkout without a manual build step |\r\n\r\n  ### Follow-up consideration\r\n\r\n`make install-dev` does not run `npm install && npm run vite:build`. A future chore could add an optional `build-ui` Makefile target (guarded by a `command -v npm` check) and wire it into the dev setup flow so a clean checkout is always runnable with a single `make install-dev`.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4082683865",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-09T13:31:41+00:00",
+      "body": "Summary\n- Implementation is **correct** and follows best practices for treating build artifacts.\n- No bundle files are committed (verified)\n- `.gitignore` properly excludes build artifacts\n- `make build-ui` target added with npm guard\n- Integrated into `make install-dev` for automatic builds\n- Documentation updated in README.md, AGENTS.md, and building.md\n\nLGTM 🚀 \n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "47150d2b5c6fb6312d4822fccb68aa807e588ed3",
+      "message": "build(ui): add build-ui Makefile target and gitignore Vite output\n\nThe Vite bundle (mcpgateway/static/bundle-*.js) is a build artifact\ngenerated from mcpgateway/admin_ui/ source. Treat it the same as\nstatic/vendor/ — built locally, not committed.\n\n- Add `make build-ui` target (uses `npm ci` for reproducible installs)\n  guarded by `command -v npm` check\n- Wire build-ui into install-dev so a fresh checkout is runnable\n- Gitignore bundle-*.js and .vite/ alongside existing vendor/ entry\n- Exclude bundle paths from ESLint (minified, not authored code)\n- Exclude bundle paths from detect-secrets (false-positive prevention)\n\nCloses #4041\n\nSigned-off-by: Anna Effort <anna.effort@datastax.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Anna Effort",
+      "date": "2026-04-05T12:36:39+00:00"
+    },
+    {
+      "sha": "0bad14ec5557e910fc92f1c35ab6b9a254d56706",
+      "message": "docs: document Admin UI build step for contributors\n\nAdd the required `make build-ui` (or `npm ci && npm run vite:build`)\nstep to README.md, AGENTS.md, and docs/docs/development/building.md\nso contributors know to build the Admin UI bundle after cloning.\n\nSigned-off-by: Anna Effort <anna.effort@datastax.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Anna Effort",
+      "date": "2026-04-05T12:36:46+00:00"
+    },
+    {
+      "sha": "f59415020c1dd4f4fd41aa4d376ffd2013e2f27f",
+      "message": "build(ui): fail fast when Admin UI build prerequisites are missing\n\nMake `make build-ui` exit non-zero with an actionable message when npm is\nabsent (with a SKIP_UI_BUILD=1 escape hatch for headless deployments), so\n`make install-dev` surfaces missing prerequisites at install time instead of\nleaving /admin to fail at runtime with \"No bundle-*.js found\".\n\nProvision Node via the official devcontainers feature so Codespaces /\ndevcontainer setup still completes end-to-end under the new fail-fast\nbehavior, and document the prerequisite + bypass in the building guide.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-11T14:17:18+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 90,
+  "deletions": 20,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:20.543134",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:20.544050",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4043,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4043.json"
+  }
+}

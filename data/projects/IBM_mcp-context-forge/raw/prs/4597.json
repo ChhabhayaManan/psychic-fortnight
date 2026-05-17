@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4597,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4597"
+  },
+  "metadata": {
+    "title": "feat(ui-rewrite): add rest of advanced settings in MCP server form",
+    "state": "closed",
+    "created_at": "2026-05-05T10:03:01+00:00",
+    "updated_at": "2026-05-07T13:56:35+00:00",
+    "closed_at": "2026-05-07T13:56:32+00:00",
+    "merged_at": "2026-05-07T13:56:32+00:00",
+    "author": "marekdano",
+    "labels": [
+      "ui",
+      "ui-rewrite"
+    ],
+    "milestone": null,
+    "assignees": [
+      "marekdano",
+      "vishu-bh"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nRelated: #4530 \r\n\r\n---\r\n\r\n## 📝 Summary\r\nAdd the advanced settings for \r\n- Bearer token\r\n- Custom headers\r\n- OAuth 2.0\r\n- Query parameter\r\n\r\n\r\nhttps://github.com/user-attachments/assets/6b631032-489b-4cb3-9664-4091908f6aa4\r\n\r\n\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [ ] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4235301928",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-06T10:32:56+00:00",
+      "body": "Hey @marekdano 👋 — the component split here is clean and the controlled-state\npattern for `CustomHeadersAuth` and `BearerTokenAuth` is the right approach.\nA few things noticed in review\n\n---\n\n### 🔴 Blockers\n\n**OAuth2Auth mixed controlled/uncontrolled state**\n`OAuth2Auth` initializes `grantType`, `issuerUrl`, `redirectUri`, `scopes`,\n`storeTokens`, and `autoRefresh` via `useState(prop)`. Since `MCPServerForm`\ndoesn't pass the optional callbacks for those fields, they are effectively\nuncontrolled — their values never flow back to the parent and will never reach\nthe API call. `useState` only reads its initializer once, so if the parent\nre-renders with different props, the component ignores them.\n\nThe fix is to lift all OAuth fields into `MCPServerForm`'s state and make\n`OAuth2Auth` a fully controlled component (no internal `useState` at all),\nthe same pattern used by `BearerTokenAuth` and `CustomHeadersAuth`.\n\n**`resetForm()` doesn't reset OAuth extended fields**\nThis is a direct consequence of the above — `grantType`, `issuerUrl`,\n`scopes`, etc. live inside `OAuth2Auth` local state, so `resetForm()` can't\nreach them. Close the form with OAuth details filled in, reopen it — those\nvalues persist. Fixing the mixed-state issue resolves this too.\n\n**`key={index}` in `CustomHeadersAuth`**\nDeleting a row from the middle of the headers list will cause React to reuse\nthe wrong DOM nodes, leading to inputs showing the wrong data. Please assign a\nstable `id` to each header on creation (e.g. `crypto.randomUUID()`) and use\nthat as the key instead.\n\n---\n\n### 🟠 Should Fix\n\n**Duplicate `CustomHeader` type**\n`CustomHeader` is defined locally in `CustomHeadersAuth.tsx` AND exported from\n`AdvancedSettings.tsx`. Once a stable `id` field is added (per the `key` fix),\none definition will drift. Please remove the local one and import from\n`AdvancedSettings` (or a shared `types.ts`).\n\n**`// Made with Bob` comment in `AdvancedSettings.tsx`**\nThis was flagged in #4561 and it's still at the bottom of the file. Please\nremove it.\n\n**`customHeaders` initialized with a blank row**\n`MCPServerForm` initializes `customHeaders: [{ key: \"\", value: \"\" }]` even\nwhen the user selects a different auth type. This blank row will be included\nin the form state at submit time and may be serialized into the API request\nas an empty custom header. Initialise to `[]` and handle the empty state\ninside `CustomHeadersAuth` with a placeholder message.\n\n---\n\n### 🟡 Nice to Fix\n\n- **OAuth client secret** should use `type=\"password\"` for consistency with\n  `BearerTokenAuth` — both are sensitive credentials.\n- **Custom header values** are rendered as `type=\"text\"` but frequently\n  carry tokens/API keys. Consider masking or adding a show/hide toggle.\n- **`oneTimeAuth` Figma spec** — per @a-effort's comment, the toggle should\n  update label text color and show an inline alert when activated. A\n  `// TODO` at minimum so it's not forgotten.\n- **Auth field validation** — none of the new components validate their\n  inputs on submit (empty bearer token, malformed header key, invalid token\n  URL). This can result in silent API errors.\n\n---\n\nThe OAuth state lift is the main piece of work here — once that's done\nthe reset issue resolves itself and the overall architecture will be solid."
+    },
+    {
+      "id": "4235308175",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-06T10:33:50+00:00",
+      "body": ""
+    },
+    {
+      "id": "4244518046",
+      "author": "vishu-bh",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-07T13:47:57+00:00",
+      "body": "Thanks @marekdano. \n\nLGTM 🚀 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "229f442f5811e9e3af758e41145d7fdebb352284",
+      "message": "feat: add rest advanced settings in MCP server form\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-05T09:44:21+00:00"
+    },
+    {
+      "sha": "7b01cc81b9bf4d6a29e7937858515bfaf77f3ce8",
+      "message": "fix: state, resetForm, unique keys in OAuth2Auth, update One-time auth section, fix CustomHeader type\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-06T12:44:24+00:00"
+    }
+  ],
+  "files_changed": 14,
+  "additions": 895,
+  "deletions": 23,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:47.927152",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:47.927689",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4597,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4597.json"
+  }
+}

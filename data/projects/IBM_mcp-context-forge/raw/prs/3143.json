@@ -1,0 +1,106 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3143,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3143"
+  },
+  "metadata": {
+    "title": "refactor(plugins): decouple plugin framework data models",
+    "state": "closed",
+    "created_at": "2026-02-24T09:19:12+00:00",
+    "updated_at": "2026-03-09T01:52:04+00:00",
+    "closed_at": "2026-02-26T13:22:19+00:00",
+    "merged_at": "2026-02-26T13:22:19+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "plugins",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #2895 due to repository maintenance. Your code and branch are intact. @araujof please verify everything looks good.\n\n## Summary\r\n\r\nEliminates reverse dependencies from the plugin framework (`mcpgateway/plugins/framework/`) back into the outer gateway package (`mcpgateway.common`, `mcpgateway.utils`), and introduces hook payload policies for controlled modification of plugin payloads. \r\n\r\nAfter this change, the plugin framework has **zero imports** from `mcpgateway.common` or `mcpgateway.utils`, making it viable as a standalone, extractable package.\r\n\r\nThis PR depends on #2829 (`refactor/plugins_settings`).\r\n\r\nCloses: #2859\r\n\r\n## Changes\r\n\r\n### Protocol definitions for boundary types\r\n- New `protocols.py` with `@runtime_checkable` `MessageLike` and `PromptResultLike` protocols\r\n- Replaces concrete imports of `Message` and `PromptResult` from `mcpgateway.common.models`\r\n- The framework never instantiates these types — protocols express the structural contract without creating a dependency\r\n\r\n### Immutable payloads\r\n- Promoted `PluginPayload` from a bare `TypeAlias = BaseModel` to a proper frozen base class (`ConfigDict(frozen=True, arbitrary_types_allowed=True)`)\r\n- Enforces copy-on-write semantics — plugins use `model_copy(update={...})` instead of in-place mutation\r\n- Eliminates the need for defensive deep copies in the executor\r\n\r\n### Internal framework types\r\n- Defined `TransportType` enum internally in `models.py` (was imported from `mcpgateway.common.models`)\r\n- Created self-contained `SecurityValidator` in `validators.py` with only the two methods used by the framework (`validate_url`, path validation)\r\n- Copied `ORJSONResponse` into `utils.py` (was imported from `mcpgateway.utils.orjson_response`)\r\n\r\n### Hook payload policies\r\n- New `hooks/policies.py` with `HookPayloadPolicy`, `DefaultHookPolicy`, and `apply_policy()` — the framework provides the mechanism\r\n- New `mcpgateway/plugins/policy.py` — the gateway defines the concrete policies per hook type (tool, prompt, resource, agent)\r\n- Policies are injected into `PluginManager` via dependency injection, keeping the framework decoupled from gateway-specific decisions\r\n- `default_hook_policy` setting (`PLUGINS_DEFAULT_HOOK_POLICY` env var) controls behavior for hooks without explicit policies: `allow` (default, backwards compatible) or `deny` (strict mode)\r\n\r\n### Policy enforcement in executor\r\n- `PluginExecutor` applies per-plugin policy filtering after each plugin returns\r\n- Only fields listed in `writable_fields` are accepted; all other modifications are silently reverted to the original values\r\n- Hooks without a defined policy fall back to `default_hook_policy`\r\n\r\n### JSON deserialization for `Any`-typed fields\r\n- Added `StructuredData` model and `coerce_nested()` utility for recursive dict-to-object conversion\r\n- Applied as a Pydantic field validator on `PromptPosthookPayload.result` so that external server flows (gRPC, MCP stdio, Unix socket, streamable HTTP) correctly reconstruct nested objects with attribute access\r\n\r\n### Plugin updates for frozen payloads\r\n- Updated vault, search-replace, PII filter, and Cedar plugins to use `model_copy(update={...})` instead of direct attribute assignment\r\n- Updated test fixture `HeadersPlugin` to use the same pattern\r\n\r\n## Files changed\r\n\r\n| Action | File | Description |\r\n|--------|------|-------------|\r\n| New | `framework/protocols.py` | `MessageLike`, `PromptResultLike` protocol classes |\r\n| New | `framework/validators.py` | Self-contained `SecurityValidator` subset |\r\n| New | `framework/hooks/policies.py` | `HookPayloadPolicy`, `DefaultHookPolicy`, `apply_policy` |\r\n| New | `plugins/policy.py` | Gateway-side `HOOK_PAYLOAD_POLICIES` dictionary |\r\n| New | `tests/.../test_policies.py` | 20 tests: policies, protocols, frozen payloads, import isolation |\r\n| Modified | `framework/models.py` | Internal `TransportType` enum, frozen `PluginPayload` base class |\r\n| Modified | `framework/hooks/agents.py` | Use `Any` + protocol docs instead of `Message` import |\r\n| Modified | `framework/hooks/prompts.py` | Use `Any` + field validator instead of `PromptResult` import |\r\n| Modified | `framework/hooks/registry.py` | Minor import cleanup |\r\n| Modified | `framework/manager.py` | Accept `hook_policies` via DI, enforce in executor loop |\r\n| Modified | `framework/settings.py` | Add `default_hook_policy` field |\r\n| Modified | `framework/utils.py` | Add `StructuredData`, `coerce_nested`, `ORJSONResponse` |\r\n| Modified | `framework/__init__.py` | Inject `HOOK_PAYLOAD_POLICIES` when creating manager |\r\n| Modified | `framework/external/mcp/client.py` | Import `TransportType` from framework |\r\n| Modified | `framework/external/mcp/server/runtime.py` | Import `ORJSONResponse` from framework |\r\n| Modified | `plugins/vault/vault_plugin.py` | Use `model_copy` for frozen payload compatibility |\r\n| Modified | `plugins/regex_filter/search_replace.py` | Use `model_copy` for frozen payload compatibility |\r\n| Modified | `plugins/pii_filter/pii_filter.py` | Use `model_copy` for frozen payload compatibility |\r\n| Modified | `plugins/external/cedar/.../plugin.py` | Use `model_copy` for frozen payload compatibility |\r\n| Modified | `tests/.../headers.py` | Use `model_copy` for frozen payload compatibility |\r\n\r\n## Note to maintainer\r\n\r\nPlease merge #2829 first.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3860842204",
+      "author": "jonpspri",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-26T13:12:15+00:00",
+      "body": "Well-structured refactoring that cleanly decouples the plugin framework from gateway internals.\n\n**What works well:**\n\n- **Zero gateway imports in framework**: Protocols for `MessageLike`/`PromptResultLike`, self-contained `SecurityValidator`, internal `TransportType` enum, and `ORJSONResponse` copy all serve the goal of making the framework extractable as a standalone package. The AST-based import isolation test is an excellent regression guardrail.\n\n- **Frozen payloads with copy-on-write**: Promoting `PluginPayload` to a frozen base class enforces discipline. The executor's deep-copy isolation correctly handles edge cases including `RootModel` mutability and dict payloads. All plugin implementations consistently use `model_copy(update={...})`.\n\n- **Hook payload policies**: Clean mechanism/policy separation — the framework provides `HookPayloadPolicy` and `apply_policy()`, while the gateway defines concrete policies per hook type via DI. The `PLUGINS_DEFAULT_HOOK_POLICY` env var with `allow` default preserves backwards compatibility while enabling strict mode.\n\n- **Settings isolation**: The narrowly scoped `BaseSettings` subclasses behind `LazySettingsWrapper` properties solve the real problem of malformed unrelated env vars (e.g., `PLUGINS_SERVER_PORT=abc`) crashing startup. Tests confirm this resilience.\n\n- **Parity tests**: `test_transport_type_enum_parity`, `test_security_validator_url_scheme_parity`, and related tests guard against drift between duplicated framework and gateway code.\n\n- **Test coverage**: Comprehensive — policy enforcement, cross-type handling, multi-plugin dict chains, nested mutation detection, enforce early-return filtering, and settings isolation are all well exercised.\n\n**One note for awareness:**\n\nThe removal of the `PLUGIN_CONFIG_FILE` legacy alias is a breaking change, but it's properly documented in the CHANGELOG.\n\nLGTM."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7861bb7bbf2d5744d42c50cf6e8b9e89576fca6f",
+      "message": "refactor(plugins): decouple plugin framework from gateway settings\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-11T06:22:43+00:00"
+    },
+    {
+      "sha": "7d155952da6b0d5a57bfaebcc1087187c1a94dbe",
+      "message": "feat: expose cache_clear through settings\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-15T01:12:25+00:00"
+    },
+    {
+      "sha": "d2f7c9ef0abef9c048bbfdb1ec86d027802b4aa5",
+      "message": "refactor: decouple plugin framework data models\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-13T02:11:42+00:00"
+    },
+    {
+      "sha": "d9b90d18a5d1369e814e7c1f3d59cb732ecba86c",
+      "message": "tests: increase coverage\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-13T03:42:41+00:00"
+    },
+    {
+      "sha": "a322a30df755aa49c7147f60e53baafc0f2b3be3",
+      "message": "fix: dict mutation in plugin\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-15T03:43:04+00:00"
+    },
+    {
+      "sha": "e029a27fdac623a87f36458d55819ec34601d2a4",
+      "message": "chore: fix lint and docstring coverage issues\n\nAddress flake8, pylint, pycodestyle, and interrogate findings:\n- Add missing Args/Returns docstring sections (DAR101/DAR201)\n- Remove unused imports across test and production files (F401)\n- Fix implicit string concatenation in logger calls (W1404)\n- Add pylint disable comments for intentional re-exports\n- Collapse duplicate test methods in test_tool_service_coverage\n- Break long Field description strings to stay under 200 chars\n- Add F841 ignore for test files in .flake8 config\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-21T22:50:46+00:00"
+    },
+    {
+      "sha": "4b0b988fc8fa3df5fb2aca77febdc1b2c923471b",
+      "message": "fix: harden plugin framework and remove deprecated PLUGIN_CONFIG_FILE\n\nAddress review findings F1-F16 from PR review:\n\nProduction fixes:\n- F1: Add type guard for cross-type payloads in plugin executor\n- F2: Document HttpHeaderPayload.__setitem__ safety contract\n- F3: Add breadth limits to coerce_nested to prevent DoS\n- F5: Warn when hook_policies already set with different dict\n- F6: Use model_dump() for BaseModel equality in apply_policy\n- F7: Remove redundant model_copy in vault plugin\n- F9: Include ENFORCE_IGNORE_ERROR in early-return condition\n- F10: Add plugin_settings.config_file to config path fallback\n\nTest fixes:\n- F11: Narrow pytest.raises(Exception) to ValidationError\n- F12/F13: Consolidate conftest fixtures with proper teardown\n- F14: Add functional XSS pattern detection tests\n- F15: Add match strings to bare pytest.raises calls\n- F16: Improve misleading module import test\n\nRemove deprecated PLUGIN_CONFIG_FILE:\n- Remove AliasChoices backward compatibility from settings\n- Remove PluginsLegacyConfigDeprecationSettings and warning logic\n- Remove legacy fallback from Helm chart template\n- Update docs, changelog, and values.yaml\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-24T22:44:25+00:00"
+    },
+    {
+      "sha": "725cff62b68282a0075db967bc48601c077d09bd",
+      "message": "fix: handle non-BaseModel payloads in multi-plugin hook chains\n\n- Use copy.deepcopy for dict payloads instead of model_copy(deep=True)\n  which crashes on plain dicts from cross-type hooks\n- Guard same-type branch with BaseModel check to prevent dict→dict\n  routing through apply_policy\n- Use `is not None` instead of truthiness to preserve empty dict payloads\n- Restore standalone server default config path (resources/plugins/)\n- Fix vacuous test, restore match= on pytest.raises, use monkeypatch\n\nfix: use lightweight settings to avoid full PluginsSettings validation\n\n- config.py settings.plugins property now returns LazySettingsWrapper\n  instead of get_settings(), matching its docstring and avoiding full\n  Pydantic validation of all plugin env vars on startup\n- ExternalPluginServer.__init__ uses get_config_path_settings() instead\n  of get_settings() so malformed unrelated env vars are ignored\n- runtime.py uses get_transport_settings() instead of get_settings()\n- Fix test_tool_service_plugin_env_override to patch get_plugin_manager\n  singleton instead of unused PluginManager import\n- Fix test_module_level_uses_settings_backed_plugin_enablement to mock\n  get_startup_settings instead of get_settings\n\nchore: refactor Makefile coverage targets\n\n- Extract coverage-pytest target for running unit/integration tests\n  with coverage collection (no doctests)\n- Move doctest invocation into coverage target, run after coverage-pytest\n- Extract coverage-annotated target for generating .py,cover files\n- Add .PHONY and help entries for new targets\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-25T07:06:47+00:00"
+    },
+    {
+      "sha": "e0504bcfcb23c5093a7f0a97106d5f91b72498c6",
+      "message": "tests: achieve 100% diff coverage and remove coverage-badge\n\n- Add tests covering all 27 previously uncovered diff lines across\n  policies.py, manager.py, utils.py, and validators.py\n- Fix C0413 wrong-import-position lint in utils.py\n- Remove unmaintained coverage-badge dependency and all references\n  (pyproject.toml, Makefile, GitHub workflow, README badge, stale SVG)\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-26T12:59:32+00:00"
+    }
+  ],
+  "files_changed": 66,
+  "additions": 4010,
+  "deletions": 673,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:42.336497",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:42.337380",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3143,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3143.json"
+  }
+}

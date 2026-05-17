@@ -1,0 +1,84 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2345,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2345"
+  },
+  "metadata": {
+    "title": "Fix proxy authentication in RBAC middleware for all protected endpoints",
+    "state": "closed",
+    "created_at": "2026-01-23T10:10:43+00:00",
+    "updated_at": "2026-01-24T23:41:26+00:00",
+    "closed_at": "2026-01-24T23:41:24+00:00",
+    "merged_at": "2026-01-24T23:41:24+00:00",
+    "author": "MohanLaksh",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "MohanLaksh"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR:  Fix proxy authentication in RBAC middleware for all protected endpoints\r\n\r\n## Title\r\nfix: Support proxy authentication in RBAC middleware for all protected endpoints\r\n\r\n## Description\r\n\r\n### Problem\r\nWhen proxy-based authentication was configured (`MCP_CLIENT_AUTH_ENABLED=false`, `TRUST_PROXY_AUTH=true`), all endpoints protected by the `@require_permission` decorator (including `/tools/`, `/resources/`, `/prompts/`, etc.) were still requiring JWT tokens and rejecting requests with only proxy headers.\r\n\r\nThe bug was in `get_current_user_with_permissions()` which only checked for proxy authentication after determining no JWT token was present, and only fell back to `AUTH_REQUIRED` setting rather than properly handling proxy authentication.\r\n\r\n### Solution\r\nModified [`mcpgateway/middleware/rbac.py`](mcpgateway/middleware/rbac.py:89-152) to check for proxy authentication **before** requiring JWT tokens:\r\n\r\n1. When `MCP_CLIENT_AUTH_ENABLED=false`, check proxy headers first\r\n2. Extract user from `PROXY_USER_HEADER` when `TRUST_PROXY_AUTH=true`\r\n3. Return anonymous user when proxy auth enabled but no header present\r\n4. Fall back to standard JWT flow when `MCP_CLIENT_AUTH_ENABLED=true`\r\n\r\n### Changes\r\n- **Modified:** `mcpgateway/middleware/rbac.py` - Updated `get_current_user_with_permissions()` function\r\n- **Added:** 4 new unit tests in `tests/unit/mcpgateway/utils/test_proxy_auth.py`\r\n\r\n### Testing\r\n- ✅ All 17 proxy authentication tests pass (13 existing + 4 new)\r\n- ✅ All RBAC middleware tests pass\r\n- ✅ Backward compatibility verified with JWT authentication\r\n- ✅ Tested with multiple endpoints: `/tools/`, `/resources/`, `/prompts/`, `/servers/`, `/gateways/`\r\n\r\n```bash\r\ncurl -X GET \\\r\n  'http://localhost:4444/tools/?include_inactive=false' \\\r\n  -H 'X-Authenticated-User: admin@example.com' \\\r\n  -H 'accept: application/json'\r\n```\r\n\r\n\r\n### Impact\r\nThis fix enables proxy-based authentication for **all 100+ protected endpoints** that use the `@require_permission` decorator, including:\r\n- Tools, Resources, Prompts, Servers, Gateways management\r\n- A2A agents, Tags, Metrics\r\n- Export/Import functionality\r\n- And all other RBAC-protected endpoints\r\n\r\n### Configuration\r\nWorks with the following environment variables:\r\n```bash\r\nMCP_CLIENT_AUTH_ENABLED=false\r\nTRUST_PROXY_AUTH=true\r\nPROXY_USER_HEADER=X-Authenticated-User\r\nAUTH_REQUIRED=false\r\n```\r\n\r\nCloses #1528 ",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3703008095",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-24T23:25:15+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f09feb10bcb95ff1741c9e83d3369832c3f6628c",
+      "message": "Fix proxy authentication\n\nSigned-off-by: Mohan Lakshmaiah <mohalaks@in.ibm.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-01-23T07:15:14+00:00"
+    },
+    {
+      "sha": "ce6ffb93c1158503d83580ac88b3df624cb5f2ca",
+      "message": "Fix pylint errors\n\nSigned-off-by: Mohan Lakshmaiah <mohalaks@in.ibm.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-01-23T09:48:53+00:00"
+    },
+    {
+      "sha": "edc1704c4194fe0c18600be4ca8fba152e60c51e",
+      "message": "fix: Correct lint issues in proxy auth tests\n\n- Add missing blank line between test classes\n- Remove unused jwt import\n- Fix excess blank lines\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T22:15:07+00:00"
+    },
+    {
+      "sha": "8b816638722e2e6f316321f813d894949b4966fe",
+      "message": "fix: Include plugin context in proxy auth for cross-hook sharing\n\nAdd plugin_context_table and plugin_global_context to proxy\nauthentication paths, matching the JWT authentication path.\nThis ensures HTTP_AUTH_CHECK_PERMISSION hooks can access context\nset by HTTP_PRE_REQUEST hooks when using proxy authentication.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T22:56:22+00:00"
+    },
+    {
+      "sha": "768a4d7daec7bab07159577e37e1ddee0e1e45ef",
+      "message": "fix: Address security concerns in proxy authentication\n\n1. RBAC now checks auth_required when proxy header missing\n   - Returns 401 for API requests, 302 redirect for browsers\n   - Aligns HTTP behavior with WebSocket auth\n\n2. Block anonymous users from token management\n   - Add auth_method==\"anonymous\" to _require_interactive_session\n   - Prevents token access when proxy header missing\n\n3. Lookup proxy user admin status from database\n   - Check platform_admin_email for admin match\n   - Query EmailUser table for is_admin status\n   - Enables plugin permission hooks to work correctly\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T23:22:00+00:00"
+    },
+    {
+      "sha": "92e3d3636bd2a872158ff2631b159b44ba9b0fdd",
+      "message": "fix: Align require_auth with RBAC proxy enforcement\n\nUpdate require_auth to check auth_required when proxy header is\nmissing, matching the RBAC/WebSocket behavior. Previously returned\n\"anonymous\" even when auth_required=true.\n\n- Raise 401 when mcp_client_auth_enabled=false and no proxy header\n  if auth_required=true\n- Update tests to cover both auth_required=true and false cases\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T23:29:37+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 334,
+  "deletions": 7,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:17.075775",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:17.078699",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2345,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2345.json"
+  }
+}

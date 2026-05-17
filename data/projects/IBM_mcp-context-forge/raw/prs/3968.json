@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3968,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3968"
+  },
+  "metadata": {
+    "title": "fix(ui): Admin UI \"Select All\" now respects search filters for tools/resources/prompts",
+    "state": "closed",
+    "created_at": "2026-04-01T08:18:16+00:00",
+    "updated_at": "2026-04-05T09:32:17+00:00",
+    "closed_at": "2026-04-05T09:32:15+00:00",
+    "merged_at": "2026-04-05T09:32:15+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "ui",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3950\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixed a bug in the Admin UI where the \"Select All\" button for tools, resources, and prompts was selecting ALL items in the system instead of respecting the active search filter.\r\n\r\n**Problem:** When users searched for specific tools/resources/prompts and clicked \"Select All\", it would select every item in the database rather than just the filtered search results.\r\n\r\n**Solution:**\r\n- Added search query parameter `q` to three backend endpoints: `/admin/tools/ids`, `/admin/resources/ids` and `/admin/prompts/ids`\r\n- Updated frontend JavaScript selectors to detect and pass the active search term to the backend\r\n- Implemented case-insensitive search across multiple fields (ID, name, description, gateway name)\r\n- Works in both \"Add Server\" and \"Edit Server\" modes\r\n\r\n**Impact:** Users can now search for specific items and use \"Select All\" to select only the filtered results, providing the expected UX behavior.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    ✅ Pass    |\r\n| Unit tests                | `make test`     |   ✅ Pass     |\r\n| Coverage ≥ 80%            | `make coverage` |    ✅ Pass    |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Backend Changes (`mcpgateway/admin.py`):\r\n\r\n- `/admin/tools/ids` endpoint (lines 8714-8761)\r\n- `/admin/resources/ids` endpoint (lines 10058-10107)\r\n- `/admin/prompts/ids` endpoint (lines 9973-10019)\r\n\r\n### Frontend Changes (`mcpgateway/static/admin.js`):\r\n\r\n- `initToolSelect()` function (lines 9976-9980)\r\n- `initResourceSelect()` function (lines 10420-10423)\r\n- `initPromptSelect()` function (lines 10851-10854)\r\n\r\n### Tests Added (`tests/unit/mcpgateway/test_admin_ids_search.py`):\r\n\r\n11 comprehensive unit tests covering:\r\n- Search with query parameter\r\n- Empty search query handling\r\n- Search with gateway filter\r\n- Search with team filter\r\n- Search with no results\r\n- Case-insensitive search\r\n- Combined filters (search + gateway + team)\r\n\r\n### Technical Details\r\n\r\nThe fix detects the appropriate search input element based on the context:\r\n\r\n**Add Server mode:** Uses `#searchTools`, `#searchResources`, `#searchPrompts`\r\n**Edit Server mode:** Uses `#searchEditTools`, `#searchEditResources`, `#searchEditPrompts`\r\n\r\nSearch is case-insensitive and uses the existing `_normalize_search_query()` and `_like_contains()` helper functions for consistency with other search implementations in the codebase.\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4059293843",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-05T09:10:39+00:00",
+      "body": "Nice work on this fix, @bogdanmariusc10 — the core idea of wiring search queries into the Select All endpoints is solid.\n\nDuring rebase I resolved a couple of conflicts and made some additional fixes worth calling out:\n\n## Rebase changes\n\nThe monolithic `admin.js` was split into modules under `admin_ui/` in #3137, so I ported your frontend changes to `tools.js`, `resources.js`, and `prompts.js` using the correct search input element IDs from the modular codebase (`searchTools`/`searchEditTools`, etc.).\n\n## Bugs fixed\n\n1. **Duplicate `include_inactive` filter** — the prompts/ids and resources/ids endpoints each applied the `enabled.is_(True)` WHERE clause twice. Removed the duplicates.\n\n2. **Prompt search field mismatch** — the prompt IDs endpoint was searching `DbPrompt.name`, but the HTML partial searches `original_name` and `display_name`. This would cause Select All to return different items than the visible filtered list. Updated to match.\n\n3. **Team-scope divergence** — the IDs endpoints unconditionally included all platform-public items via a hardcoded `visibility == \"public\"` OR condition, but the visible list only includes them when the \"View Public\" checkbox is checked. Added an `include_public` query parameter (default `false`) to all three IDs endpoints, mirroring the partial endpoints. The frontend now reads the view-public checkbox and passes `include_public=true` when appropriate.\n\n## Tests added\n\n- 3 new Python tests for the `include_public` parameter\n- 7 JS tests covering search param passing for add/edit modes across all three entity types\n- Updated 3 existing regression tests (#3446) to pass `include_public=True`\n\n## Verified\n\n- All 14 Python unit tests pass\n- All 166 JS unit tests pass\n- E2E tested against a live deployment: search filtering, case insensitivity, team scoping, `include_public` toggle, backward compatibility, auth enforcement, and SQL injection resistance all confirmed working correctly."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "cf7a66b63fafde5f34237d35d5a8949f455bc661",
+      "message": "fix(ui): Admin UI Select All now respects search filters for tools/resources/prompts\n\nAdd search query parameter 'q' to /admin/tools/ids, /admin/resources/ids,\nand /admin/prompts/ids endpoints. Update frontend selectors to pass active\nsearch term to backend APIs.\n\nSupport both Add Server and Edit Server modes by detecting appropriate\nsearch input IDs. Add comprehensive unit tests covering search\nfunctionality with various filter combinations.\n\nCloses #3950\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-04T23:49:11+00:00"
+    },
+    {
+      "sha": "d2e64bfe99da7829ee98208b8c47a1c29ef83330",
+      "message": "fix(ui): port Select All search filter to modular JS, fix team-scope and search field bugs\n\n- Port search query parameter passing from deleted monolithic admin.js to\n  modular files: tools.js, resources.js, prompts.js in admin_ui/\n- Remove duplicate include_inactive filter in prompt and resource IDs endpoints\n- Fix prompt IDs endpoint search fields to match HTML partial (original_name,\n  display_name instead of name) for consistent search results\n- Add include_public parameter to all 3 IDs endpoints so Select All respects\n  the \"View Public\" checkbox state, matching the visible filtered list in\n  team-scoped mode\n- Pass include_public from frontend Select All handlers by reading the\n  view-public checkbox for both add and edit server modes\n- Add JS unit tests for Select All search parameter passing in all 3 modules\n- Add Python tests for include_public parameter\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T23:49:31+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 913,
+  "deletions": 44,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:56.272178",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:56.273683",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3968,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3968.json"
+  }
+}

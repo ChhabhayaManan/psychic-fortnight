@@ -1,0 +1,88 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2574,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2574"
+  },
+  "metadata": {
+    "title": "toon token savings",
+    "state": "closed",
+    "created_at": "2026-01-29T19:05:07+00:00",
+    "updated_at": "2026-01-31T15:47:38+00:00",
+    "closed_at": "2026-01-30T22:43:53+00:00",
+    "merged_at": "2026-01-30T22:43:53+00:00",
+    "author": "joestein-ssc",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": []
+  },
+  "description": "## 📝 Summary\r\n\r\n**TOON Encoder Plugin** - Converts JSON tool results to TOON (Token-Oriented Object Notation) format for reduced token consumption when sending responses to LLM agents/GPUs.\r\n\r\n### Problem\r\nWhen using MCP Gateway as a proxy for multiple MCP servers (e.g., 10+ servers), the JSON responses from tool invocations consume significant tokens. For users running local inference or paying per-token for API calls, this represents both a performance bottleneck and cost concern.\r\n\r\n### Solution\r\nA `tool_post_invoke` plugin that converts JSON tool results to TOON format before returning to the agent, achieving **30-70% token reduction**.\r\n\r\n### Expected Token Savings\r\n\r\n| Data Type | JSON Size | TOON Size | Savings |\r\n|-----------|-----------|-----------|---------|\r\n| Simple object | 150 bytes | 80 bytes | **~47%** |\r\n| Array of 10 objects | 2 KB | 600 bytes | **~70%** |\r\n| Nested data | 5 KB | 2 KB | **~60%** |\r\n\r\n### Verified Example\r\n\r\n```\r\nJSON (231 chars):\r\n{\"users\": [{\"id\": 0, \"name\": \"user0\", \"active\": true}, ...]}\r\n\r\nTOON (109 chars):\r\nusers:\r\n  [5]{active,id,name}:\r\n   true,0,user0\r\n   true,1,user1\r\n   ...\r\n\r\nActual Savings: 52.8% (122 bytes saved)\r\n```\r\n\r\n### Files Added\r\n\r\n```\r\nplugins/toon_encoder/\r\n├── __init__.py              # Package exports\r\n├── toon.py                  # Pure Python TOON encoder/decoder (~400 LOC)\r\n├── toon_encoder.py          # Plugin implementation (~250 LOC)\r\n├── README.md                # User documentation\r\n└── review.md                # PR review notes\r\n\r\ntests/unit/plugins/toon_encoder/\r\n├── __init__.py\r\n├── test_toon.py             # TOON encoder/decoder tests (~300 LOC)\r\n└── test_toon_encoder.py     # Plugin integration tests (~350 LOC)\r\n\r\nspecs/toon-encoder/          # Design specification\r\n├── README.md\r\n├── design.md\r\n├── implementation.md\r\n├── testing.md\r\n└── pr-template.md\r\n```\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅     |\r\n| Coverage ≥ 90%            | `make coverage` | ✅     |\r\n\r\n**Plugin-specific tests:**\r\n```bash\r\npytest tests/unit/plugins/toon_encoder/ -v\r\n```\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Design Decisions\r\n\r\n**Why a Plugin (vs. Core Gateway Change)?**\r\n1. Non-breaking - Existing deployments unaffected; opt-in behavior\r\n2. Configurable - Per-tool filtering, size thresholds, format markers\r\n3. Reversible - Can disable without code changes\r\n4. Follows patterns - Uses established `tool_post_invoke` hook like `json_repair`, `output_length_guard`\r\n\r\n**Why Pure Python (vs. Rust FFI)?**\r\n1. No external dependencies - Works in any deployment environment\r\n2. Maintainable - Team can debug/extend without Rust toolchain\r\n3. Sufficient performance - Encoding is O(n) string manipulation; benchmarked at <1ms\r\n\r\n**Safety Features:**\r\n- Only converts if TOON is actually smaller than JSON\r\n- Graceful error handling with `skip_on_error: true` fallback\r\n- Format marker (`annotations.format: \"toon\"`) for downstream parsing\r\n- Configurable size thresholds to prevent edge cases\r\n\r\n### Usage\r\n\r\nAdd to `plugins/config.yaml`:\r\n```yaml\r\nplugins:\r\n  - name: \"ToonEncoder\"\r\n    kind: \"plugins.toon_encoder.toon_encoder.ToonEncoderPlugin\"\r\n    hooks: [\"tool_post_invoke\"]\r\n    mode: \"enforce\"\r\n    priority: 900\r\n    config:\r\n      min_size_bytes: 100\r\n```\r\n\r\n### Agent Integration Required\r\n\r\nWhen enabling TOON encoding, agents must update their system prompts to understand TOON format. See `plugins/toon_encoder/README.md` for complete system prompt examples.\r\n\r\n### TOON Format Reference\r\n\r\n| JSON | TOON |\r\n|------|------|\r\n| `{\"name\": \"alice\", \"age\": 30}` | `name: alice`<br>`age: 30` |\r\n| `[{\"id\":1},{\"id\":2}]` | `[2]{id}:`<br>` 1`<br>` 2` |\r\n| `[\"a\",\"b\",\"c\"]` | `[3]: a,b,c` |\r\n\r\n### Design Specification\r\n\r\nFull design documentation available at: `specs/toon-encoder/`\r\n\r\n### Test Coverage\r\n\r\n- 60+ unit tests for TOON encoder/decoder\r\n- 30+ plugin integration tests\r\n- Round-trip verification (encode→decode = original)\r\n- Edge case coverage (unicode, large numbers, special characters)\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3728941041",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-30T15:25:17+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "9089e62c0126ee70386422704b42dd89338b6b73",
+      "message": "feat(plugins): add TOON encoder plugin for token-efficient responses\n\nAdd a tool_post_invoke plugin that converts JSON tool results to TOON\n(Token-Oriented Object Notation) format, achieving 30-70% token reduction.\n\nFeatures:\n- Pure Python TOON encoder/decoder per spec v3.0\n- Configurable size thresholds and tool filtering\n- Format markers for downstream parsing\n- Graceful error handling with skip_on_error fallback\n- Columnar format for homogeneous object arrays\n\nCloses #2574\n\nSigned-off-by: Joe Stein <joe.stein@sscinc.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-30T11:21:20+00:00"
+    },
+    {
+      "sha": "260abcf222a59fa0775c751214cfe7ee1e59347d",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-30T15:24:36+00:00"
+    },
+    {
+      "sha": "b88774711414ffab22f04c47259a6623e7715fae",
+      "message": "docs(toon): document alternative delimiter limitation\n\nAdd documentation about tab/pipe delimiter limitation in columnar\narray headers. The TOON spec v3.0 allows alternative delimiters,\nwhich our regex matches but decoder doesn't parse correctly (always\nsplits on commas). Document this as a known decoder limitation.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-30T15:28:51+00:00"
+    },
+    {
+      "sha": "ebeedbb0b55a75a99f8fb455fab7687dc2ed1a27",
+      "message": "feat(toon): support tab/pipe delimiters in columnar arrays\n\nAdd support for alternative delimiters (tab, pipe) in columnar array\nheaders per TOON spec v3.0. The decoder now detects the delimiter from\nthe header and uses it consistently for parsing row values.\n\n- Add _detect_delimiter() function to identify delimiter from header\n- Update _decode_columnar_array() to accept and use delimiter parameter\n- Update _split_row_values() to split on configurable delimiter\n- Add tests for pipe and tab delimiter decoding\n- Remove limitation from README (now fully supported)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-30T16:25:16+00:00"
+    },
+    {
+      "sha": "732acf8d2f0577edec6d13855aa1329d4b28587e",
+      "message": "fix(toon): remove unused import and variable\n\n- Remove unused Union import (F401)\n- Remove unused ind variable in _encode_array (F841)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-30T19:05:53+00:00"
+    },
+    {
+      "sha": "d09914f0454a8322692206fd7474b99d332fcffd",
+      "message": "fix(toon): prefix unused parameters with underscore\n\nSilence vulture warnings by prefixing intentionally unused parameters:\n- _as_root in _encode_array and _encode_object (for API consistency)\n- _expected_count in _split_row_values (for potential validation)\n- _context in tool_post_invoke (required by plugin interface)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-30T20:07:26+00:00"
+    },
+    {
+      "sha": "be875707fcc4a25344dc22ffb3399523a67dcf93",
+      "message": "fix(admin): return disabled plugin details in View Details\n\nget_plugin_by_name() only checked the registry for enabled plugins,\ncausing \"Not Found\" errors when clicking View Details on disabled\nplugins. Now falls back to checking config.plugins for disabled\nplugins, matching the behavior of get_all_plugins().\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-30T21:59:11+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 3591,
+  "deletions": 26,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:26.086012",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:26.087476",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2574,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2574.json"
+  }
+}

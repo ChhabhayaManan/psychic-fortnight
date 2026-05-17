@@ -1,0 +1,81 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4446,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4446"
+  },
+  "metadata": {
+    "title": "fix(mcp): prevent 307 redirects for Streamable HTTP /mcp probes",
+    "state": "open",
+    "created_at": "2026-04-26T09:33:42+00:00",
+    "updated_at": "2026-05-13T10:52:32+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "cooleryu",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88",
+      "ja8zyjits"
+    ]
+  },
+  "description": "## Summary\n\nNormalize MCP mount rewrites before Starlette can emit a trailing-slash `307` redirect, and keep ASGI `raw_path` aligned when the middleware rewrites MCP transport paths.\n\nThis prevents exact `GET /mcp` probes from being converted into a framework-level redirect before they reach the MCP transport.\n\n## Motivation\n\nFixes #4441.\n\nThe MCP Streamable HTTP transport allows `GET /mcp` to either:\n\n- return `200` with `Content-Type: text/event-stream`, or\n- return `405 Method Not Allowed` when the server does not offer an SSE stream at that endpoint.\n\nA `307` redirect is not a valid transport response for that probe. The issue points to the Python/Starlette gateway layer as the source of the redirect, not the Rust MCP runtime.\n\nThe root cause is Starlette mount behavior: an exact `/mcp` request against `app.mount(\"/mcp\", ...)` is redirected to `/mcp/`. ContextForge already has `MCPPathRewriteMiddleware` in front of the mounted transport, so this patch normalizes the exact `/mcp` path there after authentication.\n\nI also noticed #4282, which addresses the same redirect class. This PR follows the same fix direction and adds extra coverage for the actual Starlette mount behavior, `APP_ROOT_PATH`, canonical `/mcp/` pass-through, RFC 9728 well-known path exclusion, and `raw_path` alignment.\n\n## Changes\n\n- Normalize exact `/mcp` to `/mcp/` in `MCPPathRewriteMiddleware`.\n- Preserve reverse-proxy prefixes when `root_path` or `APP_ROOT_PATH` is set.\n- Keep ASGI `raw_path` aligned with rewritten `/mcp/` paths when present.\n- Leave already-canonical `/mcp/` unchanged.\n- Keep RFC 9728 well-known URLs ending in `/mcp` out of the MCP transport rewrite path.\n- Add a regression test that wires the middleware in front of a real Starlette `Mount(\"/mcp\", ...)` and verifies `/mcp` no longer returns a `Location` redirect.\n- Add unit coverage for exact `/mcp`, `root_path`, `APP_ROOT_PATH`, canonical `/mcp/`, well-known URI boundaries, and `raw_path` synchronization.\n\n## Test Plan\n\n- `uv run --group dev pytest tests/unit/mcpgateway/test_main_extended.py::TestMCPPathRewriteMiddleware -q`\n  - Result: `22 passed`\n- `uv run --group dev pytest tests/unit/mcpgateway/transports/test_streamablehttp_transport.py::test_streamable_http_auth_requires_auth_for_trailing_slash_variants tests/unit/mcpgateway/transports/test_streamablehttp_transport.py::test_streamable_http_auth_skips_well_known_rfc9728_even_when_strict -q`\n  - Result: `5 passed`\n- `uv run --group dev pytest tests/unit/mcpgateway/test_main_extended.py -q`\n  - Result: passed\n- `uv run python -m py_compile mcpgateway/main.py tests/unit/mcpgateway/test_main_extended.py`\n  - Result: passed\n- `uv run ruff check mcpgateway/main.py`\n  - Result: passed\n- `git diff --check`\n  - Result: passed\n- ASGI smoke test with Edge-mode environment variables and no Rust sidecar:\n  - Before this patch: `/mcp -> 307 Location: /mcp/`\n  - After this patch: `/mcp -> 502` and `/mcp/ -> 502`, both without `Location`\n  - The `502` is expected in this local smoke test because the Rust MCP sidecar is not running; the relevant regression check is that `/mcp` no longer returns `307`.\n\nI also ran:\n\n- `uv run --group dev pytest tests/protocol_compliance/test_transport_semantics.py::test_get_mcp_returns_sse_stream_or_405 -q`\n  - Result: skipped because no live gateway is running at `http://127.0.0.1:8080`.\n\nRunning Ruff on the full `tests/unit/mcpgateway/test_main_extended.py` file still reports existing findings outside this diff, so this patch avoids mixing unrelated cleanup into the bug fix.\n\n## Risk\n\nLow. The change is scoped to MCP transport paths after MCP authentication has already succeeded.\n\nIt does not broaden arbitrary path rewrites. Non-server paths such as `/foo/mcp` still pass through unchanged, and well-known OAuth metadata paths remain excluded from MCP transport rewriting.\n\nThe `raw_path` update mirrors the rewritten `path` value so downstream ASGI consumers do not see inconsistent path metadata after middleware normalization.\n\n## Related Issue\n\nFixes #4441.\n\nRelated: #4282.\n\n## Maintainer Context\n\nThis keeps the fix in the existing MCP path normalization layer instead of changing the MCP transport, Rust runtime proxy, or Nginx configuration.\n\nThe patch is intentionally small and includes boundary tests for reverse-proxy prefixes, ASGI raw path metadata, already-canonical MCP paths, and non-MCP metadata paths so the redirect fix does not expand the public route surface.\n\nIf maintainers prefer the implementation in #4282, the additional regression and boundary tests in this PR can be reused directly.\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4227329142",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-05T10:55:42+00:00",
+      "body": "Good direction — the fix is minimal, correctly scoped, and the test suite shows real thought was put into edge cases (root_path, APP_ROOT_PATH, well-known exclusion, raw_path alignment). A few things need attention before this merges.\n\n## Blocking\n\n### 1. Unguarded `UnicodeEncodeError` on `raw_path` encoding\n\n`new_path.encode(\"latin-1\")` is used in both the new `/mcp` branch and the existing `/servers/{id}/mcp` branch with no exception handler. If a reverse proxy injects a non-latin-1 character into `root_path` (malformed `X-Forwarded-Prefix`), this raises an unhandled exception that crashes the worker and may leak a stack frame to the caller. Worth guarding:\n\n```python\ntry:\n    scope[\"raw_path\"] = new_path.encode(\"latin-1\")\nexcept (UnicodeEncodeError, ValueError):\n    logger.warning(\"MCPPathRewriteMiddleware: non-latin-1 raw_path skipped for %s\", new_path)\n```\n\nAlso worth a short inline comment explaining *why* latin-1 and not utf-8 — the ASGI spec reason is non-obvious and a future contributor is likely to \"fix\" it:\n```python\n# ASGI spec §2.3: raw_path is raw octets; latin-1 is the correct 1:1 byte mapping\n```\n\n### 2. CI: pre-commit hooks failure\n\nOne check is failing (`Run pre-commit hooks`). Everything else passes (pytest, pylint, ruff, security scan, Playwright). Looks like a formatting issue in the test additions — needs a `make autoflake isort black pre-commit` pass before merge.\n\n### 3. Missing test: auth failure on exact `/mcp`\n\n`test_rewrite_auth_failure` only covers `/servers/123/mcp`. Would be good to anchor the same invariant for the new exact `/mcp` branch explicitly — confirms the early-return auth check fires before the rewrite regardless of path:\n\n```python\nasync def test_exact_mcp_auth_failure_blocks_rewrite():\n    scope = {\"type\": \"http\", \"path\": \"/mcp\", \"headers\": []}\n    with patch(\"mcpgateway.main.streamable_http_auth\", new=AsyncMock(return_value=False)):\n        await middleware._call_streamable_http(scope, receive, send)\n    assert scope.get(\"path\") == \"/mcp\"  # not rewritten\n    app_mock.assert_not_called()\n```\n\n### 4. Missing test: `POST /mcp`\n\nMCP Streamable HTTP uses POST for JSON-RPC. A load balancer probing with `POST /mcp` would also have triggered the 307 that this PR fixes. The integration test (`test_rewrite_exact_mcp_path_avoids_starlette_mount_redirect`) only exercises GET. Worth adding a `TestClient(middleware).post(\"/mcp\", ...)` variant to lock in that POST is normalized identically.\n\n---\n\n## Suggestions (non-blocking)\n\n**Duplicate rewrite block** — the same 5-line rewrite block appears verbatim in two branches. A private helper `_apply_mcp_rewrite(scope, root_path)` would reduce drift risk when someone touches this next:\n\n```python\ndef _apply_mcp_rewrite(self, scope: dict, root_path: str) -> str:\n    new_path = f\"{root_path}/mcp/\" if root_path else \"/mcp/\"\n    scope[\"path\"] = new_path\n    if \"raw_path\" in scope:\n        scope[\"raw_path\"] = new_path.encode(\"latin-1\")  # ASGI spec: raw octets, latin-1\n    return new_path\n```\n\n**Redundant guard in the existing condition** — after the new early-return for `app_path == \"/mcp\"`, the `app_path != \"/mcp\"` sub-clause in the line below is always true. Not a bug, but confusing to read:\n```python\nif (app_path.endswith(\"/mcp\") and app_path != \"/mcp\") or ...\n#                                  ^^^^^^^^^^^^^^^^^ now unreachable\n```\nEither drop the clause or add `# exact /mcp handled above`.\n\n**Missing test: `/.well-known/` + `root_path` set** — the well-known guard test (`test_well_known_mcp_suffix_is_not_rewritten`) doesn't exercise the `root_path`-strip + well-known path combination. A proxy prefix like `scope[\"path\"] = \"/gateway/.well-known/oauth-protected-resource/servers/123/mcp\"` with `root_path=\"/gateway\"` should not be rewritten — currently untested.\n\n**Debug logging** — neither the new `/mcp` normalization nor the existing `/servers/{id}/mcp` rewrite logs anything. A `logger.debug(\"MCPPathRewriteMiddleware: %s -> %s\", original_path, new_path)` in the shared helper above would make operator debugging significantly easier when the Rust sidecar isn't running and someone is tracing a 502.\n\n**`_call_streamable_http` docstring** — the example still only shows `/servers/123/mcp`. A second example for exact `/mcp` normalization would keep the docstring in sync with the new branch.\n\n---\n\nOverall the approach is right and the scope is appropriately tight. Once the pre-commit failure is cleared, the `UnicodeEncodeError` guard is added, and the two test gaps are filled, this looks mergeable."
+    },
+    {
+      "id": "4262406297",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-11T09:50:13+00:00",
+      "body": "All four blocking items from the previous review are done — the `UnicodeEncodeError` guard, the ASGI spec comment, the auth-failure test for exact `/mcp`, and the `POST /mcp` test. The suggestions are addressed too: shared `_apply_mcp_rewrite` helper, redundant guard removed, debug logging, docstring updated, and the `/.well-known/` + `root_path` combination test added. Good work getting through that list.\n\nOne new issue crept in while fixing the pre-commit failure.\n\n## Blocking\n\n### `pylint (mcpgateway)` CI is now failing — W1404 implicit string concatenation\n\nWhen the `make autoflake isort black pre-commit` pass ran to fix the previous pre-commit failure, black collapsed the multiline `logger.warning(...)` at `main.py:1926` onto a single line. The two adjacent string literals now sit on the same line, and pylint flags it as `W1404: Implicit string concatenation found in call`. Pylint exits with code 4 (warning bitmask), which the CI treats as a failure — even though the overall score is still 10.00/10.\n\n```python\n# current — pylint W1404\nlogger.warning(\"SECURITY AUDIT: REQUIRE_STRONG_SECRETS is explicitly disabled in a production environment. \" \"This override is being logged for audit purposes as per US-1 requirements.\")\n```\n\nFix — merge the two literals into one string:\n\n```python\nlogger.warning(\"SECURITY AUDIT: REQUIRE_STRONG_SECRETS is explicitly disabled in a production environment. This override is being logged for audit purposes as per US-1 requirements.\")\n```\n\nThis is the only remaining blocker. Once that one-line change lands and CI goes green, this looks ready to merge."
+    },
+    {
+      "id": "4280794465",
+      "author": "msureshkumar88",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-13T10:52:32+00:00",
+      "body": "LGMT"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6fd945635bd9a222b317f60f8307c8a14496b0f2",
+      "message": "fix: normalize mcp mount path before redirect\n\nSigned-off-by: rich <cooleryu@outlook.com>",
+      "author": "rich",
+      "date": "2026-04-26T09:22:07+00:00"
+    },
+    {
+      "sha": "44a9a1eb5ff59f3b9506976a8ad096b5be81f31c",
+      "message": "test: cover mcp rewrite raw path handling\n\nSigned-off-by: rich <cooleryu@outlook.com>",
+      "author": "rich",
+      "date": "2026-04-26T09:46:29+00:00"
+    },
+    {
+      "sha": "e33ff94fc0115a147da219632b4b6f95169ac450",
+      "message": "fix: address mcp path rewrite review feedback\n\nSigned-off-by: rich <cooleryu@outlook.com>",
+      "author": "rich",
+      "date": "2026-05-10T10:58:13+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 248,
+  "deletions": 18,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:05:11.317895",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:11.318782",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4446,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4446.json"
+  }
+}

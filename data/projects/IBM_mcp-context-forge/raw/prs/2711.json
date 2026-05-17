@@ -1,0 +1,210 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2711,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2711"
+  },
+  "metadata": {
+    "title": "fix: update API token last_used and log usage stats",
+    "state": "closed",
+    "created_at": "2026-02-05T13:10:59+00:00",
+    "updated_at": "2026-02-17T00:59:42+00:00",
+    "closed_at": "2026-02-17T00:59:40+00:00",
+    "merged_at": "2026-02-17T00:59:40+00:00",
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## :pushpin: Summary\r\n\r\nAPI tokens \"Last Used\" timestamp was always showing \"Never\" and \"Usage Stats\" showed no data, even after tokens were actively used. This PR fixes both issues by updating the last_used timestamp during JWT validation and implementing middleware to log all API token usage.\r\n\r\n## :link: Related Issue\r\n\r\nCloses #2572\r\n\r\n## 🐞 Root Cause\r\n\r\nTwo root causes identified:\r\n\r\n1. **last_used not updating**: API tokens created via `/tokens` are JWT tokens. When used, they pass JWT validation directly (`auth.py:612`) and the auth flow never reaches `_lookup_api_token_sync()` (`auth.py:836`) where `last_used` was updated. The database lookup was designed as a fallback for non-JWT tokens, but all API tokens are JWTs.\r\n\r\n2. **Usage Stats empty**: The `log_token_usage()` method in `TokenCatalogService` was defined but never called from production code.\r\n\r\n## :bulb: Fix Description\r\n\r\n### 1. Last Used Timestamp Tracking\r\n- Added `_update_api_token_last_used_sync(jti: str)` helper function in `auth.py` (line 325)\r\n- Calls this function during JWT validation in `_set_auth_method_from_payload()`:\r\n  - For standard API tokens with `auth_provider == \"api_token\"` (line 548)\r\n  - For legacy API tokens via DB lookup fallback (line 564)\r\n- Uses `asyncio.to_thread()` for non-blocking database updates\r\n- Thread-safe implementation with `fresh_db_session()`\r\n\r\n### 2. Usage Statistics Logging\r\n- Implemented `TokenUsageMiddleware` in `mcpgateway/middleware/token_usage_middleware.py`\r\n- Middleware logs all API token requests after completion\r\n- Captures: endpoint, method, status code, response time, IP address, user agent\r\n- Only activates when `request.state.auth_method == \"api_token\"`\r\n- Registered in `main.py` after `AuthContextMiddleware` to ensure auth context is available\r\n- Falls back to JWT decoding if JTI not in request.state\r\n\r\n<img width=\"1653\" height=\"868\" alt=\"image\" src=\"https://github.com/user-attachments/assets/3c4582b8-665d-463b-a303-b1226f476251\" />\r\n\r\n### 3. Test Coverage\r\n- Added unit tests for `_update_api_token_last_used_sync()` function\r\n- Added integration tests for API token auth flow with last_used updates\r\n- Added comprehensive middleware tests (8+ test cases)\r\n- Tests cover: standard tokens, legacy tokens, error handling, fallback paths\r\n\r\n## :test_tube: Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          | :white_check_mark:      |\r\n| Unit tests                            | `make test`          | :white_check_mark:      |\r\n| Coverage ≥ 90 %                       | `make coverage`      | :white_check_mark:      |\r\n| Manual regression no longer fails     | See steps below      | :white_check_mark:      |\r\n\r\n## :triangular_ruler: MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## :white_check_mark: Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [
+    {
+      "id": "2814494373",
+      "author": "crivetimihai",
+      "created_at": "2026-02-17T00:36:01+00:00",
+      "body": "**Fix 1 (High priority):** Changed `request: Optional[object] = None` → `request: Request = None`.\n\nFastAPI's dependency injection matches parameters by type using `lenient_issubclass`. With `Optional[object]`, the type check `Request` ≠ `object` fails, so FastAPI never auto-injects the request — it was always `None`. This caused `_set_auth_method_from_payload` to bail out immediately at line 813, skipping `last_used` updates, `auth_method`/`jti` state propagation, and usage logging for all 9 routes using `Depends(get_current_user)`.\n\nWith `Request` type, FastAPI recognizes and auto-injects it. Manual callers (RBAC middleware, AuthContextMiddleware) already pass `request=request` explicitly, so they're unaffected."
+    },
+    {
+      "id": "2814494552",
+      "author": "crivetimihai",
+      "created_at": "2026-02-17T00:36:08+00:00",
+      "body": "**Fix 2 (Medium priority):** Added 30-second backoff after Redis connection failures.\n\nPreviously, when Redis was down, every call to `_get_sync_redis_client()` would retry `redis.from_url()` + `ping()` with a 2-second socket timeout. Under load this creates a retry storm. Now, after a failure we record `_SYNC_REDIS_FAILURE_TIME` and skip retries for 30 seconds. On successful connection, the failure timestamp is cleared."
+    },
+    {
+      "id": "2814494832",
+      "author": "crivetimihai",
+      "created_at": "2026-02-17T00:36:17+00:00",
+      "body": "**Fix 3 (Low priority):** Moved in-memory cache from `hasattr`-based lazy function attributes to module-level `_LAST_USED_CACHE` / `_LAST_USED_CACHE_LOCK`.\n\nThe previous pattern used `hasattr(_update_api_token_last_used_sync, \"_cache\")` for lazy init. Two threads could both see `hasattr` return `False` — if thread A creates `_cache` but hasn't created `_cache_lock` yet, thread B could skip init (hasattr on `_cache` returns True) and try to acquire the non-existent lock. Module-level initialization eliminates this race entirely."
+    },
+    {
+      "id": "2814495048",
+      "author": "crivetimihai",
+      "created_at": "2026-02-17T00:36:26+00:00",
+      "body": "**Fix 4 (Low priority):** Added `user_email` fallback from request state for DB-fallback opaque tokens.\n\nThe DB-fallback API token path (auth.py ~line 1310) sets `request.state.auth_method` and `request.state.jti` but not `request.state.user`. Without a user object, the middleware couldn't extract `user_email` and the JWT decode fallback fails for opaque tokens — silently dropping usage logs.\n\nNow auth.py stores `request.state.user_email` directly for the DB-fallback path, and the middleware checks it as a fallback when the user object is absent."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3796023979",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T09:20:17+00:00",
+      "body": "Thanks for this PR, @shoummu1! The separation of `last_used` update from usage logging and the rate-limiting approach are good ideas. A few issues:\n\n**1. Unbounded in-memory cache (auth.py:143-168)**\n`_update_api_token_last_used_sync._cache` is a plain dict that grows with every unique JTI. In deployments with many API tokens, this leaks memory indefinitely. Consider using `functools.lru_cache` or a bounded dict.\n\n**2. `await` on synchronous DB inside ASGI middleware (token_usage_middleware.py)**\n`log_token_usage` is `async def` but performs synchronous SQLAlchemy `db.add()`/`db.commit()` — this blocks the event loop. In `auth.py` you correctly used `asyncio.to_thread()` for the sync path; the middleware should do the same.\n\n**3. Triple commit per request**\n`token_service.log_token_usage()` calls `self.db.commit()`, then the middleware explicitly calls `db.commit()`, and then `fresh_db_session.__exit__` auto-commits. Since the context manager auto-commits on success, the explicit commits are redundant.\n\n**4. Redis client never retries after failure (auth.py:75)**\nIf `_get_sync_redis_client` fails, `_SYNC_REDIS_CLIENT` stays `None` permanently for the process lifetime. Redis becoming temporarily unavailable means the in-memory fallback is permanent — consider a retry mechanism or TTL on the failure state."
+    },
+    {
+      "id": "3811074080",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-17T00:35:51+00:00",
+      "body": "Addressing review findings with 4 targeted fixes. See inline comments for details on each change."
+    },
+    {
+      "id": "3811074352",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-17T00:36:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "3811074518",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-17T00:36:08+00:00",
+      "body": ""
+    },
+    {
+      "id": "3811074784",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-17T00:36:17+00:00",
+      "body": ""
+    },
+    {
+      "id": "3811075003",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-17T00:36:26+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "9d13f62821f7f8e8f1860b1bcb1b2efc29cd403f",
+      "message": "fix: update API token last_used and log usage stats\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-05T08:51:31+00:00"
+    },
+    {
+      "sha": "c8b55d6403e972817cb9f0e099a09f18777964fe",
+      "message": "test fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-05T13:48:14+00:00"
+    },
+    {
+      "sha": "a9ba3ad99d85e24bce2083b64a32b36cf0479644",
+      "message": "flake8 fix\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-05T14:02:58+00:00"
+    },
+    {
+      "sha": "dbc7ef2d7a697ea2954ec194cd4baca0b439528b",
+      "message": "additional changes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-05T14:58:23+00:00"
+    },
+    {
+      "sha": "a76b344b37b41668fd12ad3aab9614e74849851d",
+      "message": "remove duplicate last_used update in token usage logging\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-05T15:07:26+00:00"
+    },
+    {
+      "sha": "326ba3d56b97dc16842eb76996a917b0b478f01c",
+      "message": "test fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-05T15:16:15+00:00"
+    },
+    {
+      "sha": "528cadbb4a0f312c374f5fc275dbe1921e1bbb73",
+      "message": "test fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-10T08:59:12+00:00"
+    },
+    {
+      "sha": "0ceb99ce2882f95a9ac09fe7ef791e84bd175c73",
+      "message": "additional test fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-10T09:12:43+00:00"
+    },
+    {
+      "sha": "651a8db26ebf58aa878bc4aa1c189e5e5393fd40",
+      "message": "added exception handling\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-10T09:43:21+00:00"
+    },
+    {
+      "sha": "8a4e5c678f9967250b5827ee8669f74a35d419ef",
+      "message": "fix coverage\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-10T10:17:51+00:00"
+    },
+    {
+      "sha": "a785f82243a36b7f59f7727ea2206a8fdab81fed",
+      "message": "fix: optimize token tracking with rate-limiting and raw ASGI middleware\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-11T10:40:25+00:00"
+    },
+    {
+      "sha": "9f52600b8d54f0ccf452527ab75da72cf713cab9",
+      "message": "test fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-11T11:52:47+00:00"
+    },
+    {
+      "sha": "801cd99d5345865f756bd7862ed96e01dca8cc44",
+      "message": "test fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-11T13:00:57+00:00"
+    },
+    {
+      "sha": "47e4396674df04e376ce6b10beb3a56c0dfbe393",
+      "message": "additional test fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-12T08:06:36+00:00"
+    },
+    {
+      "sha": "80a80835e677a605f33785eecb1ba03a93e99f7d",
+      "message": "fix: address review findings in token usage tracking\n\n- Store JTI in request.state.jti for standard API tokens in\n  _set_auth_method_from_payload, ensuring middleware can access\n  it without re-decoding the JWT on cached/batched auth paths\n- Remove redundant db.commit() in TokenUsageMiddleware since\n  log_token_usage() already commits the transaction\n- Add bounded eviction (max 1024 entries) to in-memory rate-limit\n  cache in _update_api_token_last_used_sync to prevent unbounded growth\n- Add test coverage for cache eviction and JTI propagation\n- Fix formatting (missing space, unused import, black/isort)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T22:55:26+00:00"
+    },
+    {
+      "sha": "6a8aa8c8df24057e6995ef4a1e1eccc0cb0e965e",
+      "message": "fix: patch hidden sections env leakage in admin UI tests\n\nTwo admin tests failed because .env sets MCPGATEWAY_UI_HIDE_SECTIONS\nwhich leaks into test execution, causing section-dependent code paths\n(resource loading, gRPC services) to be skipped. Patch settings to\nensure no sections are hidden during these tests.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T23:28:11+00:00"
+    },
+    {
+      "sha": "3ef454596c5effcea6778bae7aa04ea4dd1e1715",
+      "message": "fix: resolve DI, retry storm, race, and opaque token tracking issues\n\n- Fix get_current_user request param type (Optional[object] → Request)\n  so FastAPI auto-injects it, enabling last_used and usage logging\n- Add 30s backoff in _get_sync_redis_client after connection failures\n  to prevent retry storms when Redis is down\n- Move in-memory cache from hasattr-based function attributes to\n  module-level globals, eliminating initialization race condition\n- Store user_email in request state for DB-fallback opaque tokens\n  so usage middleware can log them without JWT decode\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-17T00:35:32+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 1648,
+  "deletions": 13,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:13.252386",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:13.254275",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2711,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2711.json"
+  }
+}

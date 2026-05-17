@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4776,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4776"
+  },
+  "metadata": {
+    "title": "fix(tools): Add CSP nonce support to OAuth callback page",
+    "state": "open",
+    "created_at": "2026-05-15T09:57:20+00:00",
+    "updated_at": "2026-05-15T16:29:41+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "bug",
+      "ica",
+      "MUST",
+      "api",
+      "regression"
+    ],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4774\r\nComplements #4424 and #4673 that introduced CSP security headers but caused a regression for OAuth MCP server tool fetching\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes a critical regression where OAuth-configured MCP servers (ClickUp, Gamma, Granola, Notion) could not fetch tools after successful authorization. The root cause was a Content Security Policy (CSP) violation in the OAuth callback success page.\r\n\r\n**Problem**: The OAuth callback page at `mcpgateway/routers/oauth_router.py` contained inline JavaScript without a CSP nonce, causing browsers to block script execution. This prevented the \"Fetch Tools from MCP Server\" button from working.\r\n\r\n**Solution**: \r\n- Added CSP nonce support to the inline script tag using `get_csp_nonce_from_request(request)`\r\n- Removed inline `onclick` handler and replaced with proper `addEventListener` pattern\r\n- Wrapped script in IIFE (Immediately-Invoked Function Expression) for proper scoping\r\n- Created comprehensive integration tests to prevent future CSP regressions\r\n\r\n**Impact**: OAuth authorization flow now works correctly with CSP enabled, allowing users to fetch tools from officially hosted MCP servers after successful OAuth authorization.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Technical Details\r\n\r\n**Files Changed**:\r\n1. `mcpgateway/routers/oauth_router.py` (lines 657-759)\r\n   - Added `get_csp_nonce_from_request(request)` import and usage\r\n   - Applied nonce to script tag: `<script nonce=\"{csp_nonce}\">`\r\n   - Removed inline onclick: `<button id=\"fetch-tools-btn\" class=\"button\">`\r\n   - Added event listener: `button.addEventListener('click', async function() {...})`\r\n\r\n2. `tests/security/test_oauth_callback_csp_compliance.py` (new file)\r\n   - 7 comprehensive integration tests covering:\r\n     - CSP nonce presence and format validation\r\n     - Nonce uniqueness per request\r\n     - Security headers verification\r\n     - CSP header structure validation\r\n     - Regression guard for PR #4424\r\n     - Sensitive header removal verification\r\n\r\n### Security Considerations\r\n\r\nThis fix maintains the security improvements from PRs #4424 and #4673 while ensuring OAuth functionality works correctly:\r\n- CSP headers remain enabled and enforced\r\n- Nonce-based script execution prevents XSS attacks\r\n- No inline event handlers (CSP-compliant pattern)\r\n- Proper script scoping with IIFE\r\n\r\n### Testing Strategy\r\n\r\nThe test suite uses a simplified approach that focuses on CSP compliance verification at the infrastructure level rather than attempting to mock the complex OAuth flow. This makes tests more maintainable and less prone to mocking issues while still providing comprehensive coverage.\r\n\r\n### Regression Prevention\r\n\r\nThe integration tests specifically guard against future CSP regressions by:\r\n1. Verifying nonce presence in responses\r\n2. Validating nonce format (base64url, 16+ chars)\r\n3. Ensuring nonce uniqueness across requests\r\n4. Checking CSP header structure and directives\r\n5. Confirming security headers are properly set",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4299401722",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-15T15:37:09+00:00",
+      "body": "Changes requested in previous comment on PR."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e12ccf1ad68bcb01c8a5237a816435d69ae17c62",
+      "message": "fix: Add CSP nonce support to OAuth callback page\n\nThe OAuth callback success page contained inline JavaScript without CSP\nnonce, causing browsers to block script execution and preventing the\n'Fetch Tools from MCP Server' button from working.\n\nChanges:\n- Add CSP nonce to inline script tag in OAuth callback page\n- Remove inline onclick handler, replace with addEventListener\n- Wrap script in IIFE for proper scoping\n- Add comprehensive integration tests for CSP compliance\n\nThis fixes the issue where OAuth-configured MCP servers (ClickUp, Gamma,\nGranola, Notion) could not fetch tools after successful authorization.\n\nCloses #4424 regression\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-15T09:52:44+00:00"
+    },
+    {
+      "sha": "2bbbcdfe25917220ccbe3c3b69a832816aee9109",
+      "message": "test: Move CSP compliance tests to OAuth router test suite\n\nAddress PR review feedback by moving CSP nonce tests to the correct\nlocation alongside existing OAuth router tests. The new tests properly\nexercise the actual /oauth/callback endpoint (not /health) and verify:\n\n- CSP nonce is present in the OAuth callback success page script tag\n- No inline onclick handlers (CSP violation)\n- addEventListener pattern is used for CSP compliance\n- IIFE wrapper for proper scoping\n- Graceful handling of missing CSP nonce\n- Error pages don't include inline scripts\n- Nonce uniqueness per request\n\nThis addresses the merge blocker identified in PR review where the\noriginal tests in tests/security/ did not exercise the changed endpoint.\n\nChanges:\n- Delete tests/security/test_oauth_callback_csp_compliance.py (wrong location)\n- Add TestOAuthCallbackCSPCompliance class to test_oauth_router.py\n- 4 comprehensive tests that directly call oauth_callback() endpoint\n- All 107 OAuth router tests pass including new CSP tests\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-15T16:27:59+00:00"
+    },
+    {
+      "sha": "8155baded744afc75a4c5a7126846b1671532fe7",
+      "message": "Merge branch 'main' into 4774-bug-oauth-callback-fetch-tools-button-broken-due-to-csp-regression",
+      "author": "Bogdan-Marius Cătănuș",
+      "date": "2026-05-15T16:28:42+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 312,
+  "deletions": 41,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:04:47.460647",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:47.461255",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4776,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4776.json"
+  }
+}

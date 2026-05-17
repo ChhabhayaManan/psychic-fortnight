@@ -1,0 +1,168 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4141,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4141"
+  },
+  "metadata": {
+    "title": "feat: forward `_meta` in upstream MCP requests for `resources/read` and `prompts/get`",
+    "state": "closed",
+    "created_at": "2026-04-13T13:11:40+00:00",
+    "updated_at": "2026-04-14T13:00:54+00:00",
+    "closed_at": "2026-04-14T13:00:52+00:00",
+    "merged_at": "2026-04-14T13:00:52+00:00",
+    "author": "Lang-Akshay",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "\r\nCloses #2332\r\n\r\n## Problem\r\n\r\nIssue #2332 was partially resolved by #2094, which added `_meta` forwarding for `tools/call` via the streamablehttp transport. However, two gaps remained in the **non-direct-proxy (cache) code path**:\r\n\r\n1. **`resources/read`** — `meta_data` was accepted by `invoke_resource()` and `read_resource()` but never forwarded to the upstream MCP server. The MCP SDK's `session.read_resource()` does not accept a `meta` kwarg, so the parameter was silently dropped and commented as \"reserved for future SDK support.\"\r\n\r\n2. **`prompts/get`** — `_meta_data` was accepted by `get_prompt()` but the parameter was documented as \"not used currently\" and never passed through to the upstream `session.get_prompt()` call.\r\n\r\nAdditionally, `read_resource` in the `direct_proxy` branch was re-extracting `ctx.meta` a second time (Pattern B — raw Pydantic object) even though Pattern A (dict) had already been extracted earlier in the same handler, creating an inconsistency.\r\n\r\n## Solution\r\n\r\nThe MCP SDK does not expose `meta` on `session.read_resource()` or `session.get_prompt()`, but both methods are thin wrappers around `session.send_request()`. When `meta_data` is present, the fix constructs the typed request params, injects `_meta` into the serialized dict, re-validates via `model_validate`, and calls `send_request()` directly — the same pattern already used in the `direct_proxy` helper `_proxy_read_resource_to_gateway()`.\r\n\r\n### Changes\r\n\r\n**`mcpgateway/services/resource_service.py`**\r\n- Added `types`, `ReadResourceRequest`, `ReadResourceRequestParams` to MCP imports.\r\n- `invoke_resource()` — all four call sites that previously called `session.read_resource(uri=uri)` unconditionally now branch: if `meta_data` is set, `send_request()` is used with `_meta` injected; otherwise the SDK helper is used unchanged.\r\n- `read_resource()` direct_proxy block — same pattern applied.\r\n- Removed stale \"MCP SDK 1.25.0 does not support meta parameter\" comments and updated docstrings.\r\n\r\n**`mcpgateway/services/prompt_service.py`**\r\n- Added `types`, `GetPromptRequest`, `GetPromptRequestParams` to MCP imports.\r\n- `_fetch_gateway_prompt_result()` — added `meta_data: Optional[Dict[str, Any]] = None` parameter; all three `session.get_prompt()` call sites (session-pool, per-call SSE, per-call streamablehttp) now forward `_meta` via `send_request()` when present.\r\n- `get_prompt()` — passes `_meta_data` down to `_fetch_gateway_prompt_result()`.\r\n- Updated docstring: `_meta_data` is now documented as forwarded upstream, not \"not used currently\".\r\n\r\n**`mcpgateway/transports/streamablehttp_transport.py`**\r\n- `read_resource` handler — removed the redundant Pattern B re-extraction of `ctx.meta` inside the direct_proxy branch. The already-extracted `meta_data` dict (Pattern A) is now passed directly to `_proxy_read_resource_to_gateway()`, making the extraction consistent across all branches.\r\n\r\n## Behaviour\r\n\r\n| Method | Before | After |\r\n|---|---|---|\r\n| `resources/read` (cache path, SSE) | `_meta` dropped | `_meta` forwarded via `send_request` |\r\n| `resources/read` (cache path, streamablehttp) | `_meta` dropped | `_meta` forwarded via `send_request` |\r\n| `resources/read` (direct_proxy) | `_meta` forwarded (duplicate extraction) | `_meta` forwarded (single extraction) |\r\n| `prompts/get` (cache path) | `_meta` accepted but dropped | `_meta` forwarded via `send_request` |\r\n| `tools/call` | unchanged — already working | unchanged |\r\n| `tools/list`, `resources/list`, `prompts/list` | DB queries, no upstream call | unchanged — N/A |\r\n",
+  "comments": [
+    {
+      "id": "3073541977",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T14:08:32+00:00",
+      "body": "This logic is duplicated here, in transport == \"sse\" block and it's else block.\nCan we refactor this code out to a separate testable function and then use that in each location please?"
+    },
+    {
+      "id": "3073548936",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T14:09:41+00:00",
+      "body": "Similarly this code is duplicated in several locations here, it should be refactored into a testable function and then used in the multiple places."
+    },
+    {
+      "id": "3078270019",
+      "author": "Lang-Akshay",
+      "created_at": "2026-04-14T08:58:16+00:00",
+      "body": "Thanks @brian-hussey , fixed it. "
+    },
+    {
+      "id": "3078271745",
+      "author": "Lang-Akshay",
+      "created_at": "2026-04-14T08:58:34+00:00",
+      "body": "Fixed ✅"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4099291364",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-13T14:11:03+00:00",
+      "body": "Hey Akshay, \nStructurally it's fine, a couple of changes for maintainability (2 batches of duplicated code) and we've got failing unit tests and we need new ones to cover the new functionality.\nThanks,\nBrian"
+    },
+    {
+      "id": "4104620515",
+      "author": "Lang-Akshay",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-14T08:58:16+00:00",
+      "body": ""
+    },
+    {
+      "id": "4104622356",
+      "author": "Lang-Akshay",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-14T08:58:34+00:00",
+      "body": ""
+    },
+    {
+      "id": "4105440033",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-14T11:15:13+00:00",
+      "body": "# Change Request Summary — PR #4141\n\n**PR**: feat: forward `_meta` in upstream MCP requests for `resources/read` and `prompts/get`  \n**Author**: @Lang-Akshay  \n**Status**: ❌ Changes Required (Security Hardening)  \n**Generated**: 2026-04-14T11:00:23Z\n\n---\n\n## Executive Summary\n\nStrong implementation with comprehensive CWE-400/20/284/532 protections and 219 test lines. **Mandatory security hardening required** before merge to prevent documentation drift and information exposure risks.\n\n**Verdict**: ❌ **Request Changes** — 2 critical + 4 high-priority security items MUST be addressed\n\n**Issue Coverage**: 2 of 6 methods from #2332 (33% complete)\n- ✅ `resources/read` implemented\n- ✅ `prompts/get` implemented\n- ❌ `tools/list`, `resources/list`, `prompts/list`, `completion/complete` remain\n\n---\n\n## Critical Security Hardening (BLOCKING)\n\n### 1. Remove Duplicate Docstring (CWE-1116)\n\n**File**: `mcpgateway/common/validators.py`  \n**Lines**: 1817-1876  \n**Action**: Delete duplicate module-level docstring\n\n**Security Risk**: Documentation drift creates maintenance hazard where security-critical validation changes may be documented inconsistently, masking vulnerabilities during code review.\n\n**Remediation**:\n```bash\n# Remove lines 1817-1876 in mcpgateway/common/validators.py\n# Keep only the original docstring at the top of the file\n```\n\n**Effort**: Trivial (delete 60 lines)  \n**Standard**: PEP 257\n\n---\n\n### 2. Add CWE-532 Security Annotation (Information Exposure)\n\n**File**: `mcpgateway/transports/streamablehttp_transport.py`  \n**Line**: 2358 (above existing log statement)  \n**Action**: Add explicit security annotation\n\n**Security Risk**: Without explicit annotation, future maintainers may inadvertently log metadata values, creating information exposure vulnerability that leaks PII/tokens into log aggregation systems.\n\n**Remediation**:\n```python\n# Add this comment immediately above line 2358:\n\n# SECURITY: CWE-532 protection - Log only meta_data key names, NEVER values\n# Metadata may contain PII, authentication tokens, or sensitive context that\n# MUST NOT be written to logs. This is a critical security control.\nlogger.debug(\n    \"Using direct_proxy mode for resources/read %s, server %s, gateway %s (from %s header), forwarding _meta keys: %s\",\n    resource_uri,\n    server_id,\n    gateway.id,\n    GATEWAY_ID_HEADER,\n    sorted(meta_data.keys()) if meta_data else None,\n)\n```\n\n**Effort**: Trivial (add 3-line comment)  \n**Standard**: OWASP Logging Cheat Sheet\n\n---\n\n## High-Priority Security Validation (BLOCKING)\n\n### 3. Add E2E Test for `_meta` Propagation\n\n**Location**: `tests/e2e/test_meta_propagation.py` (new file)  \n**Action**: Create end-to-end test verifying metadata reaches upstream unchanged\n\n**Security Risk**: Without E2E validation, metadata injection or stripping vulnerabilities could exist in the transport layer.\n\n**Test Requirements**:\n- Start mock MCP server that echoes received `_meta`\n- Send `resources/read` and `prompts/get` requests with `_meta` via gateway\n- Assert upstream server received exact `_meta` payload (no modification, no stripping)\n- Verify CWE-20 (input validation) and CWE-284 (access control) not bypassed\n\n**Effort**: Medium (1-2 hours)\n\n---\n\n### 4. Add CWE-532 Logging Test\n\n**Location**: `tests/unit/mcpgateway/services/test_meta_logging.py` (new file)  \n**Action**: Verify sensitive metadata values never appear in logs\n\n**Security Risk**: Future code changes could inadvertently log sensitive metadata values.\n\n**Test Requirements**:\n- Capture log output during `resources/read` and `prompts/get`\n- Use sensitive `meta_data`: `{\"token\": \"secret123\", \"pii\": \"ssn-123-45-6789\"}`\n- Assert sensitive values do NOT appear in logs\n- Assert only key names appear in logs\n\n**Effort**: Low (30 minutes)\n\n---\n\n### 5. Add Error Logging with Security Context\n\n**Files**: \n- `mcpgateway/services/resource_service.py` (`_read_resource_with_meta()`)\n- `mcpgateway/services/prompt_service.py` (`_get_prompt_with_meta()`)\n\n**Action**: Add try/except with structured security logging\n\n**Security Risk**: Silent failures mask attack attempts (e.g., malformed metadata injection).\n\n**Remediation**:\n```python\n# In _read_resource_with_meta() and _get_prompt_with_meta():\n\ntry:\n    return await session.send_request(...)\nexcept Exception as e:\n    logger.error(\n        \"SECURITY: MCP request with _meta failed - potential attack or misconfiguration\",\n        exc_info=True,\n        extra={\n            \"method\": \"read_resource\",  # or \"get_prompt\"\n            \"uri\": uri,  # or \"name\": name\n            \"meta_keys\": sorted(meta_data.keys()) if meta_data else None,\n            \"security_event\": \"mcp_meta_request_failure\"\n        }\n    )\n    raise\n```\n\n**Effort**: Low (15 minutes per function)\n\n---\n\n### 6. Add Audit Logging for Validation Failures\n\n**Files**:\n- `mcpgateway/services/resource_service.py` (`read_resource()`)\n- `mcpgateway/services/prompt_service.py` (`_fetch_gateway_prompt_result()`)\n\n**Action**: Log validation failures to audit trail\n\n**Security Risk**: Attack attempts not tracked for security monitoring and incident response.\n\n**Remediation**:\n```python\n# Wrap validate_meta_data() calls:\n\ntry:\n    validate_meta_data(meta_data)\nexcept ValueError as e:\n    logger.warning(\n        \"SECURITY: meta_data validation failed - potential DoS attempt\",\n        extra={\n            \"resource_uri\": resource_uri,  # or prompt name\n            \"user\": user,\n            \"validation_error\": str(e),\n            \"security_event\": \"meta_validation_failure\"\n        }\n    )\n    audit_trail.log_action(\n        db,\n        \"meta_validation_failed\",\n        user,\n        {\n            \"error\": str(e),\n            \"resource_uri\": resource_uri,\n            \"security_event\": \"potential_dos_attempt\",\n            \"meta_size\": len(str(meta_data)) if meta_data else 0\n        }\n    )\n    raise ValueError(f\"Invalid meta_data for resource {resource_uri}: {e}\") from e\n```\n\n**Effort**: Medium (30 minutes per service)\n\n---\n\n## Performance Opportunities\n\n### 1. Redundant JSON Serialization in Validation\n\n**Location**: `mcpgateway/common/validators.py` (`validate_meta_data()`)  \n**Issue**: Calls `json.dumps(meta_data, default=str)` to measure size, serializing entire dict  \n**Impact**: ~1-2ms overhead per request for large metadata (approaching 4KB limit)\n\n**Recommendation**: Consider caching serialized size if `meta_data` is reused across multiple validation calls, or accept overhead as acceptable security trade-off.\n\n**Priority**: Low (acceptable for security benefit)\n\n---\n\n### 2. Double Serialization in Request Builders\n\n**Location**: `_build_read_resource_request()` and `_build_get_prompt_request()`  \n**Issue**: Both call `model_dump(by_alias=True)` followed by `model_validate()`  \n**Impact**: ~0.5ms overhead per request from double-serialization\n\n**Recommendation**: Profile in production; if bottleneck, consider custom Pydantic validator that injects `_meta` directly without round-tripping through dict.\n\n**Priority**: Low (profile before optimizing)\n\n---\n\n## Code Refactoring Opportunities\n\n### 1. Consolidate Duplicate Helper Functions\n\n**Issue**: `_read_resource_with_meta()` and `_get_prompt_with_meta()` follow identical pattern:\n```python\nif meta_data: send_request(build_request(...)) else: sdk_helper(...)\n```\n\n**Recommendation**: Extract generic `_dispatch_with_meta()` helper:\n```python\nasync def _dispatch_with_meta(\n    session: ClientSession,\n    meta_data: dict | None,\n    request_builder: Callable,\n    sdk_method: Callable,\n    result_type: Type[T],\n    **kwargs\n) -> T:\n    if meta_data:\n        request = request_builder(meta_data=meta_data, **kwargs)\n        response = await session.send_request(request, result_type)\n        return response\n    return await sdk_method(**kwargs)\n```\n\n**Benefit**: Reduces duplication, makes future MCP method additions easier\n\n**Priority**: Medium (improves maintainability)\n\n---\n\n### 2. Extract `_prepare_meta_params()` to Shared Utility\n\n**Location**: `mcpgateway/transports/streamablehttp_transport.py:1160`  \n**Issue**: Function is specific to `PaginatedRequestParams` but pattern is reusable\n\n**Recommendation**: Move to `mcpgateway/common/mcp_helpers.py` and generalize for other param types:\n```python\ndef prepare_meta_params(params: BaseModel | None, meta_data: dict | None) -> BaseModel | None:\n    \"\"\"Wrap _meta in params if present.\"\"\"\n    if not meta_data or not params:\n        return params\n    params_dict = params.model_dump(by_alias=True)\n    params_dict[\"_meta\"] = meta_data\n    return type(params).model_validate(params_dict)\n```\n\n**Priority**: Low (nice-to-have)\n\n---\n\n### 3. Move Validation Constants to Config\n\n**Issue**: `META_MAX_KEYS`, `META_MAX_DEPTH`, `META_MAX_BYTES` defined in `validators.py` but imported separately\n\n**Recommendation**: Move to `mcpgateway/config.py` as environment-configurable settings:\n```python\nMCP_META_MAX_KEYS: int = int(os.getenv(\"MCP_META_MAX_KEYS\", \"16\"))\nMCP_META_MAX_DEPTH: int = int(os.getenv(\"MCP_META_MAX_DEPTH\", \"2\"))\nMCP_META_MAX_BYTES: int = int(os.getenv(\"MCP_META_MAX_BYTES\", \"4096\"))\n```\n\n**Benefit**: Allows operators to adjust limits without code changes\n\n**Priority**: Medium (operational flexibility)\n\n---\n\n## Testing Gaps and Improvements\n\n### Unit Test Coverage: ✅ Excellent\n\n**Strengths**:\n- 219 new test lines\n- Comprehensive validation edge cases (exact limits, off-by-one, serialization errors)\n- Request builder correctness (alias injection, type validation)\n- Integration paths (validation called by service methods)\n\n### Missing Test Scenarios\n\n#### 1. Session Pool Interaction with `_meta` (HIGH PRIORITY)\n\n**Gap**: Tests mock session pool but don't verify `_meta` passes through pooled sessions  \n**Security Risk**: Session pool may strip/cache metadata, creating cross-user information leakage\n\n**Recommendation**: Add integration test in `tests/integration/` that:\n- Enables session pooling\n- Sends concurrent requests from multiple users with different `_meta`\n- Verifies no cross-contamination\n\n**Effort**: Medium (1 hour)\n\n---\n\n#### 2. Transport-Specific `_meta` Tests (MEDIUM PRIORITY)\n\n**Gap**: Tests cover SSE and streamablehttp via mocking, but not WebSocket or stdio transports  \n**Security Risk**: Transport-specific serialization bugs could strip/corrupt metadata\n\n**Recommendation**: Add transport-specific tests in `tests/integration/transports/` for:\n- WebSocket transport\n- stdio transport\n- Each transport type's `_meta` handling\n\n**Effort**: Medium (2 hours)\n\n---\n\n#### 3. Performance Test for Validation Overhead (MEDIUM PRIORITY)\n\n**Gap**: No test measures performance impact of `validate_meta_data()` on high-throughput scenarios  \n**Security Risk**: Validation overhead could create DoS vulnerability under load\n\n**Recommendation**: Add performance test in `tests/performance/` that:\n- Measures request latency with and without `meta_data` validation\n- Target: <1ms overhead at p99\n- Tests with various metadata sizes (1KB, 2KB, 4KB)\n\n**Effort**: Low (1 hour)\n\n---\n\n## Implementation Verification\n\n### PR Claims vs. Actual Implementation: ✅ All Verified\n\n| Claim | Status | Verification |\n|-------|--------|--------------|\n| `resources/read` (cache path, SSE) | ✅ | `_meta` forwarded via `send_request` |\n| `resources/read` (cache path, streamablehttp) | ✅ | `_meta` forwarded via `send_request` |\n| `resources/read` (direct_proxy) | ✅ | Single extraction, no duplication |\n| `prompts/get` (cache path) | ✅ | `_meta` forwarded via `send_request` |\n| Validation added | ✅ | `validate_meta_data()` enforces CWE-400 limits |\n| Tests added | ✅ | 219 lines of security regression tests |\n\n**No implementation gaps relative to PR scope.**\n\n---\n\n## Dead Code Analysis: ✅ No Dead Code\n\nAll new functions are actively called:\n\n| Function | Called By | Call Sites |\n|----------|-----------|------------|\n| `validate_meta_data()` | `read_resource()`, `_fetch_gateway_prompt_result()` | 2 |\n| `_build_read_resource_request()` | `_read_resource_with_meta()` | 1 |\n| `_build_get_prompt_request()` | `_get_prompt_with_meta()` | 1 |\n| `_read_resource_with_meta()` | `resource_service.py` | 4 |\n| `_get_prompt_with_meta()` | `prompt_service.py` | 3 |\n| `_prepare_meta_params()` | `streamablehttp_transport.py` | 2 |\n\n**Total**: 13 call sites across 3 files\n\n---\n\n## Security Invariant Compliance: ✅ All Satisfied\n\n| Invariant | Status | Implementation |\n|-----------|--------|----------------|\n| CWE-400 Protection | ✅ | Validates size/depth/key-count before forwarding |\n| Centralized Validation | ✅ | `validate_meta_data()` used consistently |\n| CWE-532 Protection | ✅ | Logs only key names, never values |\n| CWE-284 Compliance | ✅ | Doesn't trust client metadata for authz |\n| Data Integrity | ✅ | Forwards metadata unchanged |\n\n**Deny-Path Test Coverage**: ✅ All attack vectors covered\n\n| Attack Vector | Test | Status |\n|---------------|------|--------|\n| Resource exhaustion (oversized dict) | `test_too_many_keys_raises` | ✅ |\n| Stack exhaustion (deep nesting) | `test_excessive_nesting_depth_raises` | ✅ |\n| Memory exhaustion (large payload) | `test_oversized_bytes_raises` | ✅ |\n| Metadata injection bypass | `test_meta_is_injected_under_alias_key` | ✅ |\n| Validation bypass (direct call) | `test_read_resource_rejects_oversized_meta_data` | ✅ |\n| Validation bypass (gateway-backed) | `test_fetch_gateway_prompt_rejects_oversized_meta_data` | ✅ |\n\n---\n\n## Logging and Exception Handling Gaps\n\n### Current State: ⚠️ Gaps Identified\n\n**Missing Security Context in Error Paths**:\n\n1. **No error logging in `_read_resource_with_meta()` and `_get_prompt_with_meta()`**\n   - Silent failures mask attack attempts\n   - No correlation ID for incident response\n   - Missing security event classification\n\n2. **`validate_meta_data()` exceptions lack context**\n   - Error messages don't include resource/prompt URI\n   - Incomplete audit trail prevents attack correlation\n   - No user/session context in validation failures\n\n3. **No audit trail for validation failures**\n   - Attack attempts not tracked for security monitoring\n   - Missing metrics for DoS detection\n   - No alerting on repeated validation failures\n\n**Impact**: Reduced visibility into security events, delayed incident response\n\n---\n\n## Recommended Improvements (Non-blocking)\n\n### 1. Add Context to Validation Errors\n\n**Current**:\n```python\nraise ValueError(\"meta_data exceeds maximum size\")\n```\n\n**Improved**:\n```python\nraise ValueError(\n    f\"Invalid meta_data for resource {resource_uri}: \"\n    f\"exceeds maximum size of {META_MAX_BYTES} bytes \"\n    f\"(actual: {len(json.dumps(meta_data))} bytes)\"\n)\n```\n\n**Benefit**: Better debugging, clearer audit trail\n\n---\n\n### 2. Add Metrics for Validation Performance\n\n**Recommendation**: Add Prometheus metrics:\n```python\nvalidation_duration = Histogram(\n    \"meta_validation_duration_seconds\",\n    \"Time spent validating meta_data\",\n    buckets=[0.001, 0.005, 0.01, 0.05, 0.1]\n)\n\nwith validation_duration.time():\n    validate_meta_data(meta_data)\n```\n\n**Benefit**: Monitor validation overhead, detect DoS attempts\n\n---\n\n### 3. Add Rate Limiting for Validation Failures\n\n**Recommendation**: Track validation failures per user/IP:\n```python\nif validation_failure_count(user) > 10:\n    logger.warning(\"SECURITY: Repeated validation failures - potential attack\")\n    raise HTTPException(429, \"Too many validation failures\")\n```\n\n**Benefit**: Prevent brute-force attacks on validation limits\n\n---\n\n## Checklist for Merge Approval\n\n### Critical (BLOCKING)\n- [ ] Duplicate docstring removed (`validators.py:1817-1876`)\n- [ ] CWE-532 annotation added (`streamablehttp_transport.py:2358`)\n\n### High Priority (BLOCKING)\n- [ ] E2E test for `_meta` propagation created\n- [ ] CWE-532 logging test created\n- [ ] Error logging added to `_read_resource_with_meta()`\n- [ ] Error logging added to `_get_prompt_with_meta()`\n- [ ] Audit logging added to `read_resource()`\n- [ ] Audit logging added to `_fetch_gateway_prompt_result()`\n\n### Quality Checks\n- [ ] All tests passing\n- [ ] Code review approved\n- [ ] No new linter warnings\n- [ ] Documentation updated\n\n---\n\n## Estimated Effort\n\n| Item | Priority | Effort | Owner |\n|------|----------|--------|-------|\n| Remove duplicate docstring | Critical | 5 min | @Lang-Akshay |\n| Add CWE-532 annotation | Critical | 5 min | @Lang-Akshay |\n| E2E test | High | 1-2 hrs | @Lang-Akshay |\n| CWE-532 logging test | High | 30 min | @Lang-Akshay |\n| Error logging (2 functions) | High | 30 min | @Lang-Akshay |\n| Audit logging (2 services) | High | 1 hr | @Lang-Akshay |\n| **TOTAL BLOCKING** | | **3-4 hrs** | |\n| Session pool test | Medium | 1 hr | Future PR |\n| Transport-specific tests | Medium | 2 hrs | Future PR |\n| Performance test | Medium | 1 hr | Future PR |\n| Refactoring | Low | 2 hrs | Future PR |\n\n---\n\n## Security Posture\n\n**Current**: 🟡 Medium Risk (strong controls, hardening required)  \n**After Blocking Items**: 🟢 Low Risk (production-ready)  \n**After All Improvements**: 🟢 Low Risk (hardened)\n\n### Risk Summary\n\n| Risk Category | Current | After Fixes | After All |\n|---------------|---------|-------------|-----------|\n| Documentation Drift | 🟡 Medium | 🟢 Low | 🟢 Low |\n| Information Exposure | 🟡 Medium | 🟢 Low | 🟢 Low |\n| Attack Detection | 🔴 High | 🟢 Low | 🟢 Low |\n| Incident Response | 🔴 High | 🟢 Low | 🟢 Low |\n| Transport Security | 🟡 Medium | 🟡 Medium | 🟢 Low |\n| Performance DoS | 🟡 Medium | 🟡 Medium | 🟢 Low |\n\n---\n\n## Final Recommendation\n\n**DO NOT MERGE** until all 6 blocking items (2 critical + 4 high-priority) are completed.\n\nThe PR implements strong security controls but requires mandatory hardening to prevent:\n1. Documentation drift masking security changes\n2. Future information exposure vulnerabilities\n3. Silent attack attempts\n4. Incomplete audit trails\n\n**Estimated time to merge-ready**: 3-4 hours of focused work."
+    },
+    {
+      "id": "4106042774",
+      "author": "msureshkumar88",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-14T12:55:50+00:00",
+      "body": "# PR #4141 Review Status: ✅ APPROVED (with Future Improvements)\n\n## Summary\nThe PR has successfully implemented `_meta` forwarding for `resources/read` and `prompts/get` with strong security controls. **1 of 6 originally-requested items completed**, with remaining items reclassified as **future improvements** rather than blockers.\n\n## Completion Status\n\n### ✅ COMPLETED\n- **CWE-532 Security Annotation** - Added at `streamablehttp_transport.py:2358` with proper security context\n- **Core Implementation** - `_meta` forwarding works correctly for both methods\n- **Security Controls** - CWE-400/20/284/532 protections implemented\n- **Test Coverage** - 219 new test lines with comprehensive validation\n\n### 📋 FUTURE IMPROVEMENTS (Non-blocking)\n\n#### Documentation Quality\n1. **Duplicate Docstring** (`validators.py:1811-1874`) - Can be cleaned up in future maintenance PR\n\n#### Enhanced Testing\n2. **E2E Test for `_meta` Propagation** - Would strengthen validation but unit tests provide adequate coverage\n3. **CWE-532 Logging Test** - Nice-to-have for regression prevention\n4. **Error Logging Enhancement** - Current error handling is functional; security context would improve observability\n5. **Audit Logging** - Would enhance security monitoring capabilities\n\n## Verdict: ✅ APPROVED\n\n**Rationale:**\n- Core functionality is complete and well-tested\n- Security controls are properly implemented\n- No critical security vulnerabilities present\n- Future improvements can be addressed in follow-up PRs\n- PR scope (2/6 methods from #2332) is clearly defined\n\n## Recommendation for Merge\n\n**APPROVE AND MERGE** - The PR delivers its stated scope with strong security controls. The originally-identified \"blocking\" items are better suited as incremental improvements in future PRs rather than merge blockers.\n\n**Post-merge tracking:** Create follow-up issues for the 5 future improvements to ensure they're not forgotten.\n"
+    },
+    {
+      "id": "4106055542",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-14T12:57:53+00:00",
+      "body": "Thank you for the clean up on this, overall change looks good."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "03d4ad19902c26fa6278b2658eb130403912f6bb",
+      "message": "feat: forward metadata in MCP requests for prompt and resource retrieval\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-13T13:10:53+00:00"
+    },
+    {
+      "sha": "ed13a77e00e3c2fa0610051fdd760f7175505cab",
+      "message": "feat: implement metadata validation and logging limits for MCP requests\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-13T14:43:09+00:00"
+    },
+    {
+      "sha": "4dd1df9b0ad28d9ed10cf9ce2f2c4dc423bdb8be",
+      "message": "feat: streamline resource and prompt retrieval with optional metadata injection\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-13T14:44:20+00:00"
+    },
+    {
+      "sha": "e3c38e7a47107d245d618f6af760eeeb0b79da14",
+      "message": "feat(tests): add security regression tests for meta_data validation in prompt and resource services\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-13T14:44:42+00:00"
+    },
+    {
+      "sha": "76bdac13dc2d217cac0b86c88e40525a9bc0520c",
+      "message": "feat(tests): update tests to forward meta_data in resource service requests\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-13T22:22:34+00:00"
+    },
+    {
+      "sha": "c09af2d257b6d9d7fe433ec8d706037a5f7144c2",
+      "message": "fixup: ruff\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-14T08:24:05+00:00"
+    },
+    {
+      "sha": "949e43383b1f2de11f1366c18e08cac6f2810b83",
+      "message": "feat: implement metadata validation limits to prevent excessive load on MCP servers\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-14T11:06:42+00:00"
+    },
+    {
+      "sha": "0eaaf73f9e28730dc1724382f3a386e52e2f6936",
+      "message": "feat: enhance meta_data validation with depth and size checks across services and tests\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-14T12:10:44+00:00"
+    },
+    {
+      "sha": "c2f15b754c749c9908d5ec17e54c129fa2802159",
+      "message": "feat: add configurable limits for user-supplied meta_data to prevent excessive load on MCP servers\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-14T12:25:38+00:00"
+    },
+    {
+      "sha": "cdd95e1cbbde1a81cf8f7123353583630704bf58",
+      "message": "fix: enhance logging security by ensuring only meta_data key names are logged, protecting sensitive information\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-14T12:31:06+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 612,
+  "deletions": 85,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:55.981793",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:55.985109",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4141,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4141.json"
+  }
+}

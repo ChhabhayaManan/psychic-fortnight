@@ -1,0 +1,100 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3728,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3728"
+  },
+  "metadata": {
+    "title": "feat(plugins): add Rust url_reputation plugin",
+    "state": "closed",
+    "created_at": "2026-03-18T16:55:52+00:00",
+    "updated_at": "2026-03-23T09:29:39+00:00",
+    "closed_at": "2026-03-22T15:16:43+00:00",
+    "merged_at": "2026-03-22T15:16:43+00:00",
+    "author": "cafalchio",
+    "labels": [
+      "enhancement",
+      "rust",
+      "plugins",
+      "COULD"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "- Implement URL reputation engine in Rust (engine.rs) with heuristic, IANA TLD, and pattern-based filters\r\n- Expose plugin via PyO3 as `url_reputation_rust` Python extension\r\n- Update Python fallback in plugins/url_reputation/url_reputation.py\r\n- Add benchmarks, performance comparison script, and stub typings\r\n- Expand unit tests to cover Rust-backed and Python implementations\r\n\r\nThe plugin takes less than 7 microseconds to execute.\r\n\r\n<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #2907 \r\n\r\n---\r\n\r\n## 📝 Summary\r\n_What does this PR do and why?_\r\n\r\nImplements a Rust-accelerated `url_reputation` plugin using PyO3, replacing the\r\nperformance-limited Python-only path for URL validation.\r\n\r\n- **Rust engine** (`plugins_rust/url_reputation/`): heuristic checks (Shannon entropy,\r\n  IANA TLD validation, Unicode/homoglyph detection), domain whitelist/blocklist, and\r\n  regex pattern filtering\r\n- **PyO3 binding**: exposes `URLReputationPlugin.validate_url_py()` returning a plain\r\n  Python dict; the Python wrapper imports it at runtime with a graceful fallback\r\n- **Python fallback** (`plugins/url_reputation/url_reputation.py`): retained for\r\n  environments where the Rust extension is unavailable; heuristic and regex features\r\n  are Rust-only\r\n- **Benchmarks**: Criterion bench suite and `compare_performance.py` script for\r\n  Python vs Rust comparison\r\n- **Tests**: expanded unit tests cover both the Rust engine (via `#[cfg(test)]`) and\r\n  the Python wrapper (with and without Rust available)\r\n- **Stub typings** (`url_reputation_rust.pyi`): minimal stub exposing only the\r\n  Python-facing API\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [X] Feature / Enhancement\r\n- [ ] Documentation\r\n- [X] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   Ok   |\r\n| Unit tests                | `make test`     |   Ok   |\r\n| Coverage ≥ 80%            | `make coverage` |   Ok   |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] Tests added/updated for changes\r\n- [X] Documentation updated (if applicable)\r\n- No secrets or credentials committed [X]\r\n\r\n> \r\n\r\n> ---\r\n\r\n## 📓 Notes (optional)\r\n\r\n_Screenshots, design decisions, or additional context._\r\n<img width=\"1144\" height=\"367\" alt=\"image\" src=\"https://github.com/user-attachments/assets/714f108b-fcc3-4530-8409-9786eca18e44\" />\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3988201233",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-22T14:42:22+00:00",
+      "body": "## Review: Approved with fixes applied\n\nSolid implementation of the Rust-accelerated `url_reputation` plugin. The Rust engine is well-structured with proper separation of concerns (engine, filters, types), and the PyO3 integration correctly follows established patterns from `pii_filter` and `secrets_detection`.\n\n### What works well\n- **Security-first design**: fail-closed on Rust errors, homograph/IDN detection, Shannon entropy checks, IANA TLD validation\n- **Graceful degradation**: Python fallback works when Rust module is unavailable\n- **Good test coverage**: 24 Rust unit tests + comprehensive Python integration tests\n- **Performance**: compiled regex patterns, IP address detection to skip heuristic checks\n\n### Fixes applied (committed)\n1. **Cargo.toml** — added `authors`, `repository`, `description`, `abi3-py311` feature, `[profile.release]` (opt-level 3, LTO, strip), `[profile.bench]`\n2. **pyproject.toml** — fixed `name` to `mcpgateway-url-reputation`, `requires-python` to `>=3.11`, added `[tool.maturin]` section\n3. **deny.toml** — added cargo-deny license policy config (all other Rust plugins have this)\n4. **`.gitignore`** — removed plugin-level .gitignore (parent `plugins_rust/.gitignore` covers it)\n5. **Logger calls** — replaced f-string interpolation with lazy `%s` formatting\n6. **Tests** — added 8 new tests: Rust error fallback path, Python fallback with HTTP allowed, clean URL happy path, blocked pattern substring, allowed_patterns not honored in Python, config validator edge cases (empty, None, mixed case)\n\n### Notes for follow-up (not blocking)\n- `allowed_patterns` is not implemented in Python fallback (documented, tested, Rust-only feature)\n- `blocked_patterns` semantics differ: Python uses substring, Rust uses regex. Simple patterns work in both.\n- `URL_REPUTATION_BLOCK` violation code could be added to `PLUGIN_VIOLATION_CODE_MAPPING` in a future PR"
+    },
+    {
+      "id": "3988233773",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-22T15:14:01+00:00",
+      "body": "## Follow-up review: additional fixes applied\n\nAfter cross-checking with a Codex review, three additional issues were found and fixed:\n\n### Fixes applied\n\n1. **Python whitelist subdomain matching bug** — The Python fallback used `host in set` (exact match only), so `sub.example.com` would NOT match a whitelisted `example.com`. The Rust path and the Python blocked_domains check both do subdomain matching. Fixed to align: `host.endswith(\".\" + d)`.\n\n2. **Misleading code comment in engine.rs** — Comment claimed \"a separate lowercased copy is used for pattern matching\" but no such copy existed. Pattern matching runs against the trimmed original URL (correct per RFC 3986 — paths are case-sensitive). Fixed the comment to accurately describe the behavior.\n\n3. **README inaccuracy** — \"Trim and lowercase the input URL\" was misleading. Only scheme and host are lowercased (by the URL parser per RFC). Fixed to describe actual behavior.\n\n### Not changed (design decisions)\n- Invalid regex patterns silently dropped with warning (fail-open) — deliberate contributor choice, failing the whole plugin would remove all URL protection\n- PyO3 result model omits optional fields (`mcp_error_code`, `http_headers`) — Pydantic defaults handle this correctly\n\nAll 24 tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a8fe5d3e132b012cec2c665fa1d22f4696d679fc",
+      "message": "feat(plugins): add Rust url_reputation plugin\n\n- Implement URL reputation engine in Rust (engine.rs) with heuristic,\n  IANA TLD, and pattern-based filters\n- Expose plugin via PyO3 as `url_reputation_rust` Python extension\n- Update Python fallback in plugins/url_reputation/url_reputation.py\n- Add benchmarks, performance comparison script, and stub typings\n- Expand unit tests to cover Rust-backed and Python implementations\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-03-18T15:59:32+00:00"
+    },
+    {
+      "sha": "417ad4779978dc54339a21c9cf2c3945079a7c94",
+      "message": "Fixed lint and missing docstring\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-03-18T17:21:53+00:00"
+    },
+    {
+      "sha": "e1e31b8916aafb3eeea7ba3717832a0500a425a4",
+      "message": "Added 'make check-all' to Makefile\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-03-18T17:32:52+00:00"
+    },
+    {
+      "sha": "8a075e2cb3f58a0b521ea87ee58607b923f6f80d",
+      "message": "added stub gen command to makefile\n\nSigned-off-by: cafalchio <mcafalchio@gmail.com>",
+      "author": "cafalchio",
+      "date": "2026-03-18T18:22:25+00:00"
+    },
+    {
+      "sha": "84b62b612264f8f1b6310dd61201a1b4df5fd189",
+      "message": "fix(plugins): review fixes for Rust url_reputation plugin\n\n- Align Cargo.toml with project conventions: add authors, repository,\n  description, abi3-py311 feature, release/bench profiles\n- Fix pyproject.toml: correct package name, requires-python >=3.11,\n  add maturin config section\n- Add deny.toml for cargo-deny license policy checks\n- Remove plugin-level .gitignore (parent plugins_rust/.gitignore covers)\n- Use lazy logger formatting instead of f-strings\n- Add 8 new tests covering Rust error fallback, Python fallback paths,\n  config validator edge cases, and allowed_patterns behavior\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T14:42:05+00:00"
+    },
+    {
+      "sha": "0adf091d02d3a5e916ead8ee2a783fa15c423804",
+      "message": "fix(plugins): remove python-source from url_reputation pyproject.toml\n\nThe plugin does not have a python/ directory for stubs, so maturin\nfails when python-source is set. Remove the setting.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T14:51:14+00:00"
+    },
+    {
+      "sha": "32ae2d57049fa2a922d7e9ee9d3d02f7e21a7b5c",
+      "message": "fix(plugins): address Codex review findings for url_reputation\n\n- Fix Python fallback whitelist to support subdomain matching, aligning\n  with Rust behavior and the existing blocked_domains check\n- Fix misleading code comment in engine.rs about a non-existent\n  lowercased URL copy used for pattern matching\n- Fix README wording: URL is trimmed then parsed (scheme/host lowered\n  by URL parser per RFC 3986), not fully lowercased\n- Add test for Python fallback subdomain whitelist matching\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T15:07:46+00:00"
+    }
+  ],
+  "files_changed": 20,
+  "additions": 4208,
+  "deletions": 22,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:54.944454",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:54.945437",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3728,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3728.json"
+  }
+}

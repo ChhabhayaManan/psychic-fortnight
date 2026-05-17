@@ -1,0 +1,111 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1975,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1975"
+  },
+  "metadata": {
+    "title": "fix(#1962): resolve N+1 query fixes breaking tests",
+    "state": "closed",
+    "created_at": "2026-01-08T12:28:01+00:00",
+    "updated_at": "2026-01-09T10:01:50+00:00",
+    "closed_at": "2026-01-09T10:01:49+00:00",
+    "merged_at": "2026-01-09T10:01:49+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n- Fix `convert_server_to_read` to explicitly build server dict from attributes instead of using `__dict__.copy()`, which can return empty dict with SQLAlchemy's `scalars().all()` eager loading pattern\n- Add missing `joinedload(DbServer.email_team)` to `get_server` and `update_server` methods for consistent team name loading\n- Update test mocks to accept new `options` parameter for `db.get()` calls\n- Update `mock_server` fixture with explicit `None` values for optional tracking fields to prevent MagicMock auto-creation\n\nCloses #1962",
+  "comments": [
+    {
+      "id": "2672180675",
+      "author": "Copilot",
+      "created_at": "2026-01-08T12:34:12+00:00",
+      "body": "The comment on line 818-819 correctly notes that team name is loaded via the email_team relationship property, but the assertion on line 817 still expects `test_db.get.assert_called_once_with(DbServer, 1)` without an `options` parameter. Since `toggle_server_status` accesses `server.team` property (which uses the `email_team` relationship), the service method should use eager loading with `joinedload(DbServer.email_team)` to avoid N+1 queries. The test should either be updated to expect the `options` parameter (like line 560) or the service method needs to be updated to include eager loading."
+    },
+    {
+      "id": "2672180691",
+      "author": "Copilot",
+      "created_at": "2026-01-08T12:34:12+00:00",
+      "body": "The docstring states \"Return the team name from the eagerly-loaded email_team relationship,\" but the relationship uses default lazy loading according to the comment on lines 4243-4245. The docstring should clarify that the relationship may be lazily loaded unless explicitly eager-loaded with `joinedload(DbServer.email_team)`. Consider updating to: \"Return the team name from the email_team relationship. The relationship uses lazy loading by default and should be eagerly loaded with joinedload for optimal performance.\"\n```suggestion\n        \"\"\"Return the team name from the email_team relationship.\n\n        The email_team relationship uses lazy loading by default and may trigger\n        an additional query when accessed. For list or admin views, it should be\n        eagerly loaded with joinedload(Server.email_team) for optimal performance.\n```"
+    },
+    {
+      "id": "2672653539",
+      "author": "jonpspri",
+      "created_at": "2026-01-08T14:48:13+00:00",
+      "body": "Addressed."
+    },
+    {
+      "id": "2672660458",
+      "author": "jonpspri",
+      "created_at": "2026-01-08T14:49:56+00:00",
+      "body": "Noted."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3639199189",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-08T12:34:12+00:00",
+      "body": "## Pull request overview\n\nThis pull request fixes N+1 query issues introduced by previous optimizations to the server service. The changes address the problem where `__dict__.copy()` returns an empty dictionary when using SQLAlchemy's `scalars().all()` eager loading pattern, and ensures consistent team name loading across all server operations.\n\n### Key Changes\n\n- Refactored `convert_server_to_read` to explicitly build server dictionaries from attributes instead of using `__dict__.copy()`\n- Added new `email_team` relationship and `team` property to the `Server` model for efficient team name loading\n- Added `joinedload(DbServer.email_team)` to query methods (`list_servers`, `list_servers_for_user`, `get_server`, `update_server`)\n- Removed the `_get_team_name` helper method that was causing N+1 queries\n\n### Reviewed changes\n\nCopilot reviewed 3 out of 3 changed files in this pull request and generated 2 comments.\n\n| File | Description |\n| ---- | ----------- |\n| mcpgateway/db.py | Added `email_team` relationship and `team` property to Server model for efficient team name loading via joinedload |\n| mcpgateway/services/server_service.py | Refactored `convert_server_to_read` to build dict explicitly; added `joinedload(DbServer.email_team)` to list/get/update operations; removed `_get_team_name` method |\n| tests/unit/mcpgateway/services/test_server_service.py | Updated mock_server fixture with explicit None values; updated test mocks to accept `options` parameter; added regression test for team name loading |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3639766004",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-08T14:48:13+00:00",
+      "body": ""
+    },
+    {
+      "id": "3639774144",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-08T14:49:56+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d7305ff981239ea8cec709226cbb4f386ba4146b",
+      "message": "perf: eager load EmailTeam relationship in Server model to eliminate N+1 queries (#1957)\n\nAdd email_team relationship and team property to Server model, replacing\nthe _get_team_name helper method. Use joinedload for list operations to\nfetch team names in a single query instead of per-server lookups.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-08T11:03:30+00:00"
+    },
+    {
+      "sha": "e34c9aba2ac2f0fa35ed72e6565c1c8c5f5f0c63",
+      "message": "fix(#1962): resolve N+1 query fixes breaking tests\n\n- Fix convert_server_to_read to explicitly build server dict from\n  attributes instead of using __dict__.copy(), which can return empty\n  dict with SQLAlchemy's scalars().all() eager loading pattern\n\n- Add missing joinedload(DbServer.email_team) to get_server and\n  update_server methods for consistent team name loading\n\n- Update test mocks to accept new options parameter for db.get() calls\n\n- Update mock_server fixture with explicit None values for optional\n  tracking fields to prevent MagicMock auto-creation\n\nCloses #1962\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-08T12:13:18+00:00"
+    },
+    {
+      "sha": "cf95ec61e9d6a087426e31d9a96fc5a7b008b938",
+      "message": "perf(#1962): add eager loading to toggle_server_status\n\nAdd selectinload/joinedload options to db.get() call in\ntoggle_server_status to prevent N+1 queries when accessing\nserver relationships (tools, resources, prompts, a2a_agents,\nemail_team).\n\nThis completes the N+1 fix for issue #1962 which listed\ntoggle_server_status as an affected function with medium impact.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-09T09:32:34+00:00"
+    },
+    {
+      "sha": "33c97b8ee82fcb9f3a060807d5cf8dbe94b0712d",
+      "message": "fix(#1962): fix team property assignment and export N+1 query\n\n- admin.py: Remove manual team assignment loop that would fail since\n  Server.team is now a read-only @property. Add joinedload for\n  email_team relationship instead.\n\n- export_service.py: Add selectinload for tools relationship in\n  _export_selected_servers to prevent N+1 queries when accessing\n  db_server.tools in a loop.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-09T09:47:58+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 179,
+  "deletions": 82,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:01.940532",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:01.944757",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1975,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1975.json"
+  }
+}

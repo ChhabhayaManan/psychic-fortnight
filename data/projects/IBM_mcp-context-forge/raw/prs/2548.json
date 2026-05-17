@@ -1,0 +1,99 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2548,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2548"
+  },
+  "metadata": {
+    "title": "feat(auth): add token revocation and proxy auth to middleware",
+    "state": "closed",
+    "created_at": "2026-01-28T17:06:52+00:00",
+    "updated_at": "2026-01-29T00:05:59+00:00",
+    "closed_at": "2026-01-29T00:05:56+00:00",
+    "merged_at": "2026-01-29T00:05:56+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "security",
+      "revisit"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\nComprehensive authentication and authorization improvements across the gateway. Closes #2555\r\n\r\n## Changes\r\n\r\n### Admin Middleware & Token Handling\r\n- Add token revocation checks in `AdminAuthMiddleware`\r\n- Add proxy authentication support for admin routes (`TRUST_PROXY_AUTH`, `PROXY_USER_HEADER`)\r\n- Add account status validation (reject disabled accounts)\r\n- Add admin privilege verification for protected routes\r\n\r\n### Session Management\r\n- Server-side session ID generation (client-supplied IDs ignored)\r\n- Session listings filtered by user ownership (admins see all, users see own)\r\n- Session ownership tracking and validation\r\n\r\n### SSO & OAuth\r\n- Add redirect URL validation for SSO flows\r\n- Add team membership validation for OAuth operations\r\n- Add configurable public registration setting (`ALLOW_PUBLIC_REGISTRATION`)\r\n- Validate redirect URIs against allowed patterns\r\n\r\n### API Authentication\r\n- Add `API_ALLOW_BASIC_AUTH` setting (default: `false`) for granular control\r\n- Basic auth disabled by default for API endpoints\r\n- Admin UI uses session-based email/password authentication\r\n\r\n### Token Validation Defaults\r\n- `REQUIRE_TOKEN_EXPIRATION` default changed to `true`\r\n- `REQUIRE_JTI` default changed to `true`\r\n- Tokens must include expiration and JWT ID claims by default\r\n\r\n### Gateway Credentials\r\n- Gateway service credentials scoped to local authentication\r\n- Credentials not forwarded to remote MCP servers\r\n\r\n### Documentation (25+ files)\r\n- Expand securing guide with token lifecycle and access controls\r\n- Update ADR-004 with API_ALLOW_BASIC_AUTH rationale\r\n- Clarify Admin UI vs API authentication model\r\n- Fix default values in configuration tables\r\n- Remove unused `BASIC_AUTH_*` from Docker examples\r\n- Update all tutorials and deployment guides\r\n\r\n### Configuration\r\n- Add settings to `.env.example` and config schemas\r\n- Update Helm chart values and schema\r\n- Update `docker-compose.yml` with current defaults\r\n\r\n### Tests\r\n- Add reverse proxy session management tests\r\n- Add OAuth router team validation tests\r\n- Add `require_admin_auth()` tests for Basic auth gating\r\n- Add CLI `get_auth_token()` tests\r\n- Fix timing in cache TTL test\r\n\r\n## Files Changed\r\n- 51 files changed, 1356 insertions(+), 261 deletions(-)\r\n\r\n## Test Plan\r\n- [ ] Admin UI login with email/password works\r\n- [ ] API rejects Basic auth by default\r\n- [ ] API accepts Basic auth when `API_ALLOW_BASIC_AUTH=true`\r\n- [ ] Token revocation blocks access\r\n- [ ] Session filtering works (admin vs user)\r\n- [ ] SSO redirect validation works\r\n- [ ] Full test suite passes",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3718265687",
+      "author": "brian-hussey",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-28T18:16:39+00:00",
+      "body": "I'm seeing issues with functionality.\r\nToken is not getting revoked after given time - maybe my time limit was too aggressive?\r\n```\r\nTOKEN_EXPIRY=3\r\nREQUIRE_TOKEN_EXPIRATION=true\r\nREQUIRE_JTI=true\r\n```\r\nI'm not getting access denied after timeout period is reached.\r\nBut I am getting logged out of my browser session.\r\n\r\nFor registration, the message coming back with `PUBLIC_REGISTRATION_ENABLED=false` set is always:\r\n```\r\n{\r\n  \"detail\": \"User with email fake@email.com already exists\"\r\n}\r\n```\r\n(I'm passing in fake email) - should it default to that message or just give a generic access_denied/403 response?\r\n\r\n\r\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d21cf13b69b837e5097ad8fd1da985e7412a87cd",
+      "message": "feat(auth): add token revocation and proxy auth to admin middleware\n\n- Support token revocation checks in AdminAuthMiddleware\n- Enable proxy authentication for admin routes\n- Filter session listings by user ownership\n- Validate team membership for OAuth operations\n- Add configurable public registration setting\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-28T16:43:21+00:00"
+    },
+    {
+      "sha": "e255beb8d35bd15ba8dd6426cde05ee7e7852467",
+      "message": "fix(config): change token validation defaults to secure-by-default\n\n- Set require_token_expiration default to true (was false)\n- Set require_jti default to true (was false)\n- Update .env.example to reflect new secure defaults\n\nTokens without expiration or JTI claims will now be rejected by default.\nSet REQUIRE_TOKEN_EXPIRATION=false or REQUIRE_JTI=false to restore\nprevious behavior if needed for backward compatibility.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-28T17:52:30+00:00"
+    },
+    {
+      "sha": "180d80df2c29effd747580209016509eaab41228",
+      "message": "docs(security): expand securing guide with token lifecycle and access controls\n\nAdd documentation for:\n- Token lifecycle management (revocation, validation settings)\n- Admin route authentication requirements\n- Session management access controls\n- User registration configuration\n- Updated production checklist with new settings\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-28T18:00:05+00:00"
+    },
+    {
+      "sha": "51edf968d05c08b6263f912d839e4b8a81321319",
+      "message": "fix(auth): address SSO redirect validation and admin middleware gaps\n\n- SSO redirect_uri validation now uses server-side allowlist only\n  (allowed_origins, app_domain) instead of trusting Host header\n- Full origin comparison including scheme and port to prevent\n  cross-port or HTTP downgrade redirects\n- AdminAuthMiddleware now supports API token authentication\n- AdminAuthMiddleware now honors platform admin bootstrap when\n  REQUIRE_USER_IN_DB=false for fresh deployments\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-28T18:05:56+00:00"
+    },
+    {
+      "sha": "a12e7bf2763bbad27c7f058b306c50035726bc6c",
+      "message": "fix(auth): add basic auth support to AdminAuthMiddleware\n\nAlign AdminAuthMiddleware with require_admin_auth by supporting:\n- HTTP Basic authentication for legacy deployments\n- Basic auth users are treated as admin (consistent with existing behavior)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-28T18:34:34+00:00"
+    },
+    {
+      "sha": "18eb89990c2b0927af6f219c2bf921160b8524a8",
+      "message": "fix(auth): finalize secure defaults and update changelog for RC1\n\n- Move hashlib/base64 imports to top-level in main.py (pylint C0415)\n- Add CHANGELOG entry for 1.0.0-RC1 secure defaults release\n- Add Security Defaults section to .env.example\n- Update test helpers to include JTI by default for REQUIRE_JTI=true\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-28T19:44:13+00:00"
+    },
+    {
+      "sha": "6e3018d8f786b600d595ca39ad9b9e3b0bcc716a",
+      "message": "refactor(auth): streamline authentication model and update documentation\n\n- Simplify Admin UI to use session-based email/password authentication\n- Add API_ALLOW_BASIC_AUTH setting for granular API auth control\n- Scope gateway credentials to prevent unintended forwarding\n- Update 25+ documentation files for auth model clarity\n- Add comprehensive test coverage for auth settings\n- Fix REQUIRE_TOKEN_EXPIRATION and REQUIRE_JTI defaults in docs\n- Remove BASIC_AUTH_* from Docker examples (not needed by default)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-28T23:32:19+00:00"
+    },
+    {
+      "sha": "b2c950d0b0f74360066c587716665582f6e879f4",
+      "message": "docs: update changelog with neutral language and ignore coverage.svg\n\n- Reword RC1 changelog entries to use neutral language\n- Add coverage.svg to .gitignore (generated by make coverage)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-28T23:38:03+00:00"
+    }
+  ],
+  "files_changed": 53,
+  "additions": 1364,
+  "deletions": 262,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:36.048158",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:36.049412",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2548,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2548.json"
+  }
+}

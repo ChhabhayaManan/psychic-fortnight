@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4124,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4124"
+  },
+  "metadata": {
+    "title": "fix: restore runtime metric writeback and cover mcp_runtime in CI",
+    "state": "closed",
+    "created_at": "2026-04-10T11:58:30+00:00",
+    "updated_at": "2026-04-11T08:26:09+00:00",
+    "closed_at": "2026-04-11T08:26:08+00:00",
+    "merged_at": "2026-04-11T08:26:07+00:00",
+    "author": "lucarlig",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "jonpspri"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nThis fixes a Rust MCP runtime regression where direct `tools/call` requests could return before metric writeback completed, which made runtime metric accounting nondeterministic and caused the existing regression test to fail. It also closes the CI gap that let `main` stay green by adding `tools_rust/mcp_runtime` fmt/check/clippy/test/build steps to the Rust tools workflow and by including the runtime in the root Rust validation targets.\r\n\r\n## 🔁 Reproduction Steps\r\nIssue: direct runtime test failure not caught by CI.\r\n\r\nMinimal repro:\r\n1. Run `cargo test --manifest-path tools_rust/mcp_runtime/Cargo.toml`\r\n2. Observe `tools_call_uses_rust_direct_execution_and_reuses_upstream_session` fail in `tools_rust/mcp_runtime/tests/runtime.rs`\r\n3. Observe GitHub `Rust Tools CI/CD` remain green because it only exercised `tools_rust/wrapper`\r\n\r\n## 🐞 Root Cause\r\n`record_tools_call_metric()` in `tools_rust/mcp_runtime/src/lib.rs` was changed to fire-and-forget via `tokio::spawn`. That made metric delivery race with the request lifecycle, so the direct execution path could finish before the second metric was recorded. Separately, `.github/workflows/rust-tools.yml` did not run the `tools_rust/mcp_runtime` test suite at all.\r\n\r\n## 💡 Fix Description\r\nThe runtime now awaits metric writeback again in the direct `tools/call` path, restoring deterministic behavior for the existing regression test and for request-scoped metric recording. CI was expanded to run `mcp_runtime` fmt/check/clippy/test/build steps directly, and the root `rust-test` and `rust-check` targets now include `tools_rust/mcp_runtime` so local validation matches the GitHub path more closely.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command                                                                                              | Status |\r\n|---------------------------------------|------------------------------------------------------------------------------------------------------|--------|\r\n| Runtime regression                    | `cargo test --manifest-path tools_rust/mcp_runtime/Cargo.toml --test runtime tools_call_uses_rust_direct_execution_and_reuses_upstream_session -- --exact` | Passed |\r\n| Runtime format check                  | `make -C tools_rust/mcp_runtime fmt-check`                                                           | Passed |\r\n| Runtime unit/integration tests        | `make -C tools_rust/mcp_runtime test`                                                                | Passed |\r\n| Runtime clippy                        | `make -C tools_rust/mcp_runtime clippy`                                                              | Passed |\r\n| Full repo lint suite                  | `make lint`                                                                                          | Not run |\r\n| Full repo test suite                  | `make test`                                                                                          | Not run |\r\n| Coverage ≥ 80 %                       | `make coverage`                                                                                      | Not run |\r\n| Manual regression no longer fails     | Rust runtime regression test above                                                                   | Passed |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4089759472",
+      "author": "sco3",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-10T12:58:40+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "9079d1cfa3fbae49552516ff243f263b4713d7b5",
+      "message": "fix: restore runtime metric writeback and cover mcp_runtime in CI\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-10T11:57:50+00:00"
+    },
+    {
+      "sha": "7379f5a221448baf64c2a6ec81ceb83949ca29c6",
+      "message": ".secrets.baseline\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-11T08:07:30+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 151,
+  "deletions": 15,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:48.833574",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:48.836623",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4124,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4124.json"
+  }
+}

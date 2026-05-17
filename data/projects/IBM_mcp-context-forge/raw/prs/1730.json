@@ -1,0 +1,73 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1730,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1730"
+  },
+  "metadata": {
+    "title": "Optimize Gateway Health Check Timeout",
+    "state": "closed",
+    "created_at": "2025-12-24T14:46:08+00:00",
+    "updated_at": "2025-12-26T10:54:41+00:00",
+    "closed_at": "2025-12-26T10:54:40+00:00",
+    "merged_at": "2025-12-26T10:54:40+00:00",
+    "author": "Nayana-R-Gowda",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "Signed-off-by: NAYANAR <nayana.r5@ibm.com> - closes #1691\r\n\r\n\r\n## 💡 Fix Description\r\nThis change adds a per-gateway timeout to the gateway health check process to prevent slow or unreachable gateways from blocking overall health checks.\r\n\r\nEach individual gateway health check is now wrapped with asyncio.wait_for, using a configurable timeout (GATEWAY_HEALTH_CHECK_TIMEOUT, default: 5 seconds).\r\nIf a gateway exceeds the configured timeout, the check is cancelled, a warning is logged, and the gateway is marked as failed, while allowing other gateway checks to continue normally.\r\n\r\nThis improves startup reliability, predictable execution time, and system resilience in environments with slow or unreachable gateways.\r\n\r\nfor testing\r\npython - <<'PY'\r\nimport asyncio, os\r\nos.environ['GATEWAY_HEALTH_CHECK_TIMEOUT'] = '0.05'  # make timeouts obvious\r\nfrom mcpgateway.services.gateway_service import GatewayService\r\nfrom types import SimpleNamespace\r\n\r\nsvc = GatewayService()\r\n\r\n# Minimal gateway-like object the service expects\r\ngw = SimpleNamespace(\r\n    id='gw1', name='slow-gw', url='http://example', transport='SSE',\r\n    enabled=True, reachable=True, ca_certificate=None, ca_certificate_sig=None,\r\n    auth_type=None, oauth_config=None, auth_value={}\r\n)\r\n\r\n# Stub the actual check to be slow so it exceeds timeout\r\nasync def slow_check(gateway, user_email=None):\r\n    await asyncio.sleep(1.0)\r\n\r\nsvc._check_single_gateway_health = slow_check  # monkey-patch\r\n\r\nasync def run():\r\n    await svc.check_health_of_gateways([gw])\r\n\r\nasyncio.run(run())\r\nprint(\"done\")\r\nPY\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3612992645",
+      "author": "madhav165",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-26T08:01:23+00:00",
+      "body": "Working as expected. Rebased onto main."
+    },
+    {
+      "id": "3613269942",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-26T10:54:27+00:00",
+      "body": "Checked, rebased and tested + load tested - closes #1691"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "52ba3b8822e3fca6e8916d786f29e6ec5a2daabf",
+      "message": "Optimize Gateway Health Check Timeout\n\nSigned-off-by: NAYANAR <nayana.r5@ibm.com>",
+      "author": "NAYANAR",
+      "date": "2025-12-24T14:12:19+00:00"
+    },
+    {
+      "sha": "9e4457f39fa3bba8366f49d43db2211b7cac1b18",
+      "message": "Update new env var in charts and .env.example\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-26T07:41:27+00:00"
+    },
+    {
+      "sha": "a8ab5f51a640f3ff148e0b3a4a965e7ddef85aff",
+      "message": "Rebase and test\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-26T10:44:56+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 22,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:03.934330",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:03.935115",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1730,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1730.json"
+  }
+}

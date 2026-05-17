@@ -1,0 +1,35 @@
+{
+  "id": "a08f9fd4-a6aa-4b6a-9d9d-0dcdf1baeb40",
+  "title": "Migrate OAuth/DCR services to shared singleton http client to leverage full potential of session connection pooling",
+  "summary": "# PR Summary: - Migrate OAuth/DCR Services to Singleton HTTP Client\r\n\r\n## Problem\r\nIssue #1987 identified that `dcr_service.py` and `oauth_manager.py` were creating new HTTP client instances for every request, causing:\r\n- Unnecessary TCP + TLS handshake overhead (10-50ms per request)\r\n- No connection reuse across requests\r\n- Potential socket leaks from unclosed clients\r\n- Services instantiated per-request instead of using singleton pattern\r\n\r\n## Solution\r\nMigrated both services to use the existing `http_client_service.py` singleton pattern with `get_http_client()`, enabling true cross-request connection pooling.\r\n\r\n## Changes\r\n\r\n### Modified Files\r\n\r\n**1. `mcpgateway/services/dcr_service.py`**\r\n- Added import: `from mcpgateway.services.http_client_service import get_http_client`\r\n- Removed `self._client` instance variable\r\n- Simplified `_get_client()` method to return singleton client\r\n- Removed `close()` method (no longer needed)\r\n\r\n**2. `mcpgateway/services/oauth_manager.py`**\r\n- Added import: `from mcpgateway.services.http_client_service import get_http_client`\r\n- Removed `self._client` instance variable from `__init__()`\r\n- Simplified `_get_client()` method to return singleton client\r\n- Removed `close()` method (no longer needed)\r\n\r\n### Key Code Changes\r\n\r\n**Before:**\r\n```python\r\ndef __init__(self, ...):\r\n    self._client: httpx.AsyncClient | None = None\r\n\r\nasync def _get_client(self) -> httpx.AsyncClient:\r\n    if self._client is None or self._client.is_closed:\r\n        self._client = httpx.AsyncClient(...)\r\n    return self._client\r\n\r\nasync def close(self):\r\n    if self._client is not None:\r\n        await self._client.aclose()\r\n```\r\n\r\n**After:**\r\n```python\r\nasync def _get_client(self) -> httpx.AsyncClient:\r\n    \"\"\"Get the shared singleton HTTP client.\"\"\"\r\n    return await get_http_client()\r\n```\r\n\r\n## Benefits\r\n\r\n✅ **Performance**: Eliminates 10-50ms TCP/TLS handshake overhead per request  \r\n✅ **Connection Reuse**: True cross-request connection pooling (200 max connections, 100 keepalive)  \r\n✅ **Resource Management**: No socket leaks, proper lifecycle management via FastAPI lifespan  \r\n✅ **Consistency**: Aligns with existing `http_client_service.py` singleton pattern  \r\n✅ **HTTP/2 Support**: Leverages shared client's HTTP/2 capabilities  \r\n\r\n## Testing\r\n\r\nAll existing tests pass without modification:\r\n- ✅ `tests/unit/mcpgateway/services/test_dcr_service.py` (5 tests)\r\n- ✅ `tests/unit/mcpgateway/test_oauth_manager.py` (42+ tests)\r\n- ✅ `tests/unit/mcpgateway/services/test_oauth_manager_pkce.py` (2 tests)\r\n\r\nTests continue to work because they mock `_get_client()` method, which still exists but now returns the singleton.\r\n\r\n## Technical Details\r\n\r\nThe shared HTTP client (`http_client_service.py`) provides:\r\n- Connection pooling with configurable limits\r\n- HTTP/2 support with fallback to HTTP/1.1\r\n- Automatic connection lifecycle management\r\n- Thread-safe singleton pattern\r\n- Proper cleanup via FastAPI lifespan events\r\n\r\n## Closes\r\n\r\nCloses #1929\r\nCloses #1987",
+  "reasoning": "# PR Summary: - Migrate OAuth/DCR Services to Singleton HTTP Client\r\n\r\n## Problem\r\nIssue #1987 identified that `dcr_service.py` and `oauth_manager.py` were creating new HTTP client instances for every request, causing:\r\n- Unnecessary TCP + TLS handshake overhead (10-50ms per request)\r\n- No connection reuse across requests\r\n- Potential socket leaks from unclosed clients\r\n- Services instantiated per-request instead of using singleton pattern\r\n\r\n## Solution\r\nMigrated both services to use the existing `http_client_service.py` singleton pattern with `get_http_client()`, enabling true cross-request connection pooling.\r\n\r\n## Changes\r\n\r\n### Modified Files\r\n\r\n**1. `mcpgateway/services/dcr_service.py`**\r\n- Added import: `from mcpgateway.services.http_client_service import get_http_client`\r\n- Removed `self._client` instance variable\r\n- Simplified `_get_client()` method to return singleton client\r\n- Removed `close()` method (no longer needed)\r\n\r\n**2. `mcpgateway/services/oauth_manager.py`**\r\n- Add",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "MohanLaksh",
+    "crivetimihai"
+  ],
+  "tags": [
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "315f6bbe-5972-48e0-86aa-4117fcfbd538",
+      "source_type": "pr",
+      "source_id": "1991",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/1991",
+      "contributor": "MohanLaksh",
+      "timestamp": "2026-01-09T07:08:57Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1991.json"
+    }
+  ],
+  "timestamp": "2026-01-09T07:08:57Z",
+  "created_at": "2026-05-17T17:24:38.369822",
+  "updated_at": "2026-05-17T17:24:38.369823",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:24:38.370516",
+    "artifact_type": "decisions",
+    "artifact_id": "a08f9fd4-a6aa-4b6a-9d9d-0dcdf1baeb40"
+  }
+}

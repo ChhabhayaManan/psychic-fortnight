@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1776,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1776"
+  },
+  "metadata": {
+    "title": "Fix: Add missing is_admin field to EmailRegistrationRequest schema",
+    "state": "closed",
+    "created_at": "2025-12-29T14:06:22+00:00",
+    "updated_at": "2025-12-30T01:13:58+00:00",
+    "closed_at": "2025-12-30T01:13:56+00:00",
+    "merged_at": "2025-12-30T01:13:56+00:00",
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# :bug: Bug-fix PR\r\n\r\n## :pushpin: Summary\r\n\r\n- Fixes POST /admin/users endpoint ignoring `is_admin` flag in request body\r\n- Adds missing `is_admin` field to `EmailRegistrationRequest` schema with default value `False`\r\n- Changes `create_user` router to use direct field access (`user_request.is_admin`) instead of `getattr()` fallback\r\n- Ensures users can be created with admin privileges when explicitly requested\r\n- Maintains backward compatibility - defaults to non-admin when field omitted\r\n\r\n## :link: Related Issue\r\n\r\nCloses: #1643\r\n\r\n## 🐞  Root Cause\r\n\r\n- `EmailRegistrationRequest` schema was missing the `is_admin` field definition\r\n- Router used `getattr(user_request, \"is_admin\", False)` which always returned `False` since field didn't exist\r\n- Request body `is_admin: true` was silently ignored - field never reached the service layer\r\n- Service correctly supported `is_admin` parameter but never received the value from router\r\n\r\n## :test_tube: Verification\r\n\r\n| Check | Command | Status |\r\n|-------|---------|--------|\r\n| Schema validation | `python -c \"from mcpgateway.schemas import EmailRegistrationRequest; r = EmailRegistrationRequest(email='test@test.com', password='test12345', is_admin=True); print(r.is_admin)\"` | :white_check_mark: pass |\r\n| Default value | Schema without `is_admin` defaults to False | :white_check_mark: pass |\r\n| User creation tests | `pytest test_email_auth_basic.py -k \"create_user\" -v` | :white_check_mark: pass (5 passed, 2 skipped) |\r\n| No syntax errors | Code validation | :white_check_mark: pass |\r\n| Backward compatibility | Existing tests without `is_admin` field | :white_check_mark: pass |\r\n\r\n### Before the fix (BROKEN):\r\n- :x: `POST /admin/users` with `{\"email\": \"admin@test.com\", \"password\": \"pass\", \"is_admin\": true}` → Always created **non-admin user** (bug!)\r\n- The `is_admin` flag was completely ignored because the schema field didn't exist\r\n\r\n### After the fix:\r\n- :white_check_mark: `POST /admin/users` with `{\"email\": \"admin@test.com\", \"password\": \"pass\", \"is_admin\": true}` → Creates **admin user**\r\n- :white_check_mark: `POST /admin/users` with `{\"email\": \"user@test.com\", \"password\": \"pass\", \"is_admin\": false}` → Creates **non-admin user**\r\n- :white_check_mark: `POST /admin/users` with `{\"email\": \"user@test.com\", \"password\": \"pass\"}` → Creates **non-admin user** (default)\r\n\r\n## :file_folder: Files Changed\r\n\r\n**mcpgateway/schemas.py**\r\n- Added `is_admin: bool = Field(False, description=\"Grant admin privileges to user\")` to `EmailRegistrationRequest` class\r\n\r\n**mcpgateway/routers/email_auth.py**\r\n- Line 530: Changed `is_admin=getattr(user_request, \"is_admin\", False)` → `is_admin=user_request.is_admin`\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3617053506",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-30T01:06:33+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "712a759401d0df3eb6a3500428e23a9bc8c6b5bc",
+      "message": "honor is_admin flag when creating users via POST /admin/users\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2025-12-29T13:26:32+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 5,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:16.251239",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:16.253340",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1776,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1776.json"
+  }
+}

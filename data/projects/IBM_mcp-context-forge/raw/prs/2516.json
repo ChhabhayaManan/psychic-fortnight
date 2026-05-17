@@ -1,0 +1,70 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2516,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2516"
+  },
+  "metadata": {
+    "title": "Prevent ReDoS in SSTI validation patterns",
+    "state": "closed",
+    "created_at": "2026-01-27T09:25:55+00:00",
+    "updated_at": "2026-02-01T00:14:27+00:00",
+    "closed_at": "2026-02-01T00:14:25+00:00",
+    "merged_at": "2026-02-01T00:14:25+00:00",
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## :pushpin: Summary\r\nFixes ReDoS (Regular Expression Denial of Service) vulnerability in Server-Side Template Injection (SSTI) validation patterns that could allow attackers to cause CPU exhaustion and service timeouts through crafted input.\r\n\r\n## 🔗 Related Issue\r\nCloses #2366\r\n\r\n## 🔁 Reproduction Steps\r\nThe vulnerability could be triggered by:\r\n1. Submitting malformed template input like `{{aaaa...aaaa` (unclosed brackets) to any validation endpoint\r\n2. Input length up to 64KB (MAX_TEMPLATE_LENGTH = 65536) would cause catastrophic backtracking\r\n3. Results in O(n²) or worse time complexity, causing high CPU usage and request timeouts\r\n\r\n## 🐞  Root Cause\r\nThe `_SSTI_PATTERNS` list in `mcpgateway/common/validators.py` (lines 95-103) used greedy quantifiers `.*` in regex patterns like:\r\n```python\r\nre.compile(r\"\\{\\{.*(__|\\.|config).*\\}\\}\", re.IGNORECASE)\r\n```\r\n\r\nWhen given input without closing delimiters (e.g., `{{aaaa...aaaa`), the regex engine would:\r\n1. Match `.*` greedily to the end\r\n2. Fail to find closing `}}`\r\n3. Backtrack one character at a time\r\n4. Retry at each position, causing exponential time complexity\r\n\r\n## :bulb: Fix Description\r\nReplaced all vulnerable `.*` patterns with negated character classes that cannot backtrack:\r\n\r\n**Before:**\r\n```python\r\nre.compile(r\"\\{\\{.*(__|\\.|config|...).*\\}\\}\", re.IGNORECASE)\r\n```\r\n\r\n**After:**\r\n```python\r\nre.compile(r\"\\{\\{[^}]*(__|\\.|config|...)[^}]*\\}\\}\", re.IGNORECASE)\r\n```\r\n\r\nKey changes:\r\n- `[^}]*` - matches any character except `}`, bounded by delimiter\r\n- `[^%]*` - matches any character except `%`, bounded by delimiter  \r\n- Eliminates backtracking while maintaining identical detection behavior\r\n- All 9 SSTI patterns updated for consistency\r\n\r\nThe negated character classes provide linear time complexity O(n) instead of exponential, preventing the ReDoS attack vector.\r\n\r\n## :test_tube: Verification\r\n\r\n| Check                                 | Command                                          | Status |\r\n|---------------------------------------|--------------------------------------------------|--------|\r\n| Lint suite                            | `make lint`                                      | :white_check_mark:      |\r\n| Unit tests                            | `make test`                                      | :white_check_mark:      |\r\n| Coverage ≥ 90 %                       | `make coverage`                                  | :white_check_mark:      |\r\n| Security validation tests             | `pytest tests/security/test_input_validation.py` | :white_check_mark: 58 passed |\r\n| SSTI pattern detection                | All dangerous payloads still detected            | :white_check_mark:      |\r\n\r\n**Test Results:**\r\n- `test_server_side_template_injection`: :white_check_mark: All 8 dangerous SSTI payloads correctly rejected\r\n- `test_regex_dos_prevention`: :white_check_mark: Passes with ReDoS timing checks\r\n- All 58 security validation tests: :white_check_mark: Pass\r\n- All 72 validator unit tests: :white_check_mark: Pass\r\n\r\n## :triangular_ruler: MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n- [x] Internal security hardening only - no API changes\r\n\r\n## :white_check_mark: Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] All existing tests pass\r\n- [x] Security vulnerability mitigated",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3734002797",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-01T00:05:04+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d69cea0963b3f2b2c8db8b6fc55d8bb732271239",
+      "message": "fix: prevent ReDoS in SSTI validation patterns\n\nReplace regex-based SSTI detection with a linear-time manual parser\nto eliminate ReDoS vulnerability while improving bypass resistance.\n\nChanges:\n- Add _iter_template_expressions() parser that correctly handles:\n  - Quoted strings (single and double quotes)\n  - Escaped characters within strings\n  - Nested delimiters inside quotes (e.g., \"}}\" in strings)\n  - Continues scanning after unterminated expressions (fail-closed)\n- Replace _SSTI_PATTERNS regex list with:\n  - _SSTI_DANGEROUS_SUBSTRINGS tuple for keyword detection\n  - _SSTI_DANGEROUS_OPERATORS tuple for arithmetic in {{ }} and {% %}\n  - _SSTI_SIMPLE_TEMPLATE_PREFIXES for ${, #{, %{ expressions\n- Add _has_simple_template_expression() with O(n) linear scan using rfind\n- Fix type annotation for validate_parameter_length()\n- Block dynamic attribute access bypasses:\n  - |attr filter for dynamic attribute access (with whitespace normalization)\n  - |selectattr, |sort, |map filters (can take attribute names)\n  - getattr function\n  - ~ operator for string concatenation (dunder name construction)\n  - [ bracket notation for dynamic access\n  - % operator for string formatting (e.g., '%c' % 95)\n  - attribute= parameter (blocks map/selectattr/sort attribute access)\n  - All escape sequences: \\x, \\u, \\N{, \\0-\\7 (octal)\n- Apply operator checks to both {{ }} and {% %} blocks\n- Normalize whitespace around | and = before checking\n\nPerformance:\n- O(n) linear scanning eliminates catastrophic backtracking\n- _has_simple_template_expression uses rfind for O(n) instead of O(n²)\n\nSecurity:\n- Proper quote handling blocks bypasses like {{ \"}}\" ~ self.__class__ }}\n- Escaped quote handling blocks {{ \"a\\\"}}b\" ~ self }} bypasses\n- Blocks dynamic construction bypasses via string concatenation\n- Blocks all escape sequence bypasses (hex, unicode, octal)\n- Blocks whitespace-based bypasses around | and =\n- Blocks % formatting bypasses (e.g., '%c%c' % (95,95))\n- Fail-closed: continues scanning after unterminated expressions\n\nTests:\n- Add comprehensive SSTI bypass test cases\n- Add pytest.mark.timeout(30) for deterministic ReDoS detection\n- Add pathological input tests for ReDoS prevention verification\n\nCloses #2366\n\nCo-authored-by: Shoumi <shoumimukherjee@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-31T22:16:35+00:00"
+    },
+    {
+      "sha": "08f8bdbece4f930f1ee84124271dcfcde0c1e0a1",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-31T23:38:44+00:00"
+    },
+    {
+      "sha": "cb5dadb5be47ab991647d118abef620125823c95",
+      "message": "fix: enforce true fail-closed on unterminated template expressions\n\n- Raise ValueError immediately on unterminated {{ or {% expressions\n- Eliminates O(n²) rescan path, restoring O(n) worst-case performance\n- Use consistent error message with other validation failures\n- Add regression test for unterminated expression rejection\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-31T23:50:16+00:00"
+    },
+    {
+      "sha": "63a62173d3d22252916c614a1090b4647c00ce26",
+      "message": "fix: add proper Raises section to docstring for darglint\n\nMove ValueError documentation to proper Raises: section format.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-01T00:02:07+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 196,
+  "deletions": 30,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:28.519536",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:28.520391",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2516,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2516.json"
+  }
+}

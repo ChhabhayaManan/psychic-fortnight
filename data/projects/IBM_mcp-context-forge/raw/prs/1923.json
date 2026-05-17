@@ -1,0 +1,73 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1923,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1923"
+  },
+  "metadata": {
+    "title": "perf: eager load EmailTeam relationship in Tool model",
+    "state": "closed",
+    "created_at": "2026-01-05T20:49:34+00:00",
+    "updated_at": "2026-01-07T18:08:54+00:00",
+    "closed_at": "2026-01-07T18:08:53+00:00",
+    "merged_at": null,
+    "author": "jonpspri",
+    "labels": [
+      "performance"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Add `email_team` relationship with `lazy=\"joined\"` to `Tool` model for eager loading team names via JOIN\n- Add `team` property to `Tool` class that returns team name from the relationship\n- Remove manual `_get_team_name` helper and batch loading patterns in `tool_service.py`\n- Eliminates N+1 query patterns when fetching tools with team information\n\n## Changes\n\n**mcpgateway/db.py:**\n- Added `email_team` relationship with `lazy=\"joined\"` to `Tool` class\n- Added `team` property that returns `self.email_team.name if self.email_team else None`\n\n**mcpgateway/services/tool_service.py:**\n- Removed `_get_team_name` method\n- Removed manual `team_map` batch loading in `list_tools`\n- Removed manual `outerjoin`/`add_columns` for team names in `list_server_tools` and `list_tools_for_user`\n- Removed unused `EmailTeam` import\n\n**tests/unit/mcpgateway/services/test_tool_service.py:**\n- Added `tool.team = None` to mock fixture\n- Updated tests to use `.scalars().all()` pattern\n- Fixed flake8 issues (unused imports/variables, inline comments)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+  "comments": [
+    {
+      "id": "2662779398",
+      "author": "Copilot",
+      "created_at": "2026-01-05T20:54:46+00:00",
+      "body": "The eager-loaded `email_team` relationship doesn't filter for active teams. Throughout the codebase, team lookups consistently filter for `EmailTeam.is_active.is_(True)`. The relationship should include a condition to only load active teams to maintain consistency with the previous behavior and other parts of the codebase.\n\nConsider adding a `primaryjoin` condition that includes the `is_active` filter, or document if inactive teams should intentionally be shown."
+    },
+    {
+      "id": "2662779411",
+      "author": "Copilot",
+      "created_at": "2026-01-05T20:54:46+00:00",
+      "body": "Using `lazy=\"joined\"` on the relationship causes the EmailTeam table to be joined on every Tool query, even when the team information is not needed. This could impact performance for operations like delete, update, or activate where only the Tool data is required.\n\nConsider using `lazy=\"selectin\"` or leaving the default lazy loading and using `joinedload(DbTool.email_team)` explicitly in queries where team data is needed. This approach provides better control and only loads related data when necessary.\n```suggestion\n    # Relationship for loading team names; use selectin to avoid unconditional JOINs\n    email_team: Mapped[Optional[\"EmailTeam\"]] = relationship(\"EmailTeam\", foreign_keys=[team_id], lazy=\"selectin\")\n```"
+    },
+    {
+      "id": "2662779424",
+      "author": "Copilot",
+      "created_at": "2026-01-05T20:54:46+00:00",
+      "body": "The Tool class docstring should document the new `team` property that returns the team name from the eagerly-loaded `email_team` relationship. This helps developers understand the available computed properties on the model."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3628393118",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-05T20:54:47+00:00",
+      "body": "## Pull request overview\n\nThis PR optimizes database queries by adding eager loading for the EmailTeam relationship in the Tool model, eliminating N+1 query patterns when fetching tools with team information. The changes introduce a `lazy=\"joined\"` relationship and a computed `team` property, while removing manual batch loading and join operations from the service layer.\n\n### Key Changes\n- Added `email_team` relationship with `lazy=\"joined\"` to the Tool model for automatic eager loading\n- Introduced `team` property that returns the team name from the loaded relationship\n- Removed manual team name fetching logic including `_get_team_name` method and explicit JOIN operations\n\n### Reviewed changes\n\nCopilot reviewed 3 out of 3 changed files in this pull request and generated 3 comments.\n\n| File | Description |\n| ---- | ----------- |\n| mcpgateway/db.py | Added eager-loaded `email_team` relationship and `team` property to Tool class |\n| mcpgateway/services/tool_service.py | Removed manual team loading patterns and batch queries, simplified query logic using the new relationship |\n| tests/unit/mcpgateway/services/test_tool_service.py | Updated mock fixtures to include `team` attribute, refactored tests to use `.scalars().all()` pattern, fixed flake8 issues |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c2723ba8a24304f95e6771b92f64403984f33f4a",
+      "message": "perf: eager load EmailTeam relationship in Tool model to eliminate N+1 queries\n\nAdd email_team relationship with lazy=\"joined\" to Tool model, replacing\nmanual team name lookups with a single JOIN query. This eliminates N+1\nquery patterns when fetching tools with their team names.\n\nChanges:\n- Add email_team relationship to Tool class with lazy=\"joined\"\n- Add primaryjoin condition to filter only active teams (is_active == True)\n- Add team property to Tool class for convenient team name access\n- Document the team property in Tool class docstring\n- Remove _get_team_name helper method from tool_service.py\n- Remove manual team_map batch loading in list_tools\n- Remove manual outerjoin/add_columns in list_server_tools and list_tools_for_user\n- Update tests to use new query pattern (.scalars().all())\n- Fix flake8 issues in test file\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jonpspri@gmail.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-05T20:48:38+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 48,
+  "deletions": 79,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:18:43.876804",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:43.878714",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1923,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1923.json"
+  }
+}

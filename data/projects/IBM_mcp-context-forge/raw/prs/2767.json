@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2767,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2767"
+  },
+  "metadata": {
+    "title": "Hardening: safer CORS config + localhost bind defaults",
+    "state": "closed",
+    "created_at": "2026-02-08T13:14:57+00:00",
+    "updated_at": "2026-02-21T11:44:50+00:00",
+    "closed_at": "2026-02-21T11:44:50+00:00",
+    "merged_at": "2026-02-21T11:44:50+00:00",
+    "author": "TheodorNEngoy",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "jonpspri",
+      "crivetimihai"
+    ]
+  },
+  "description": "This hardens the LangChain agent runtime defaults to avoid two common security footguns for network-exposed MCP-adjacent servers:\n\n- **CORS**: stop combining `CORS_ORIGINS=*` with credentials. The app now reads `CORS_ORIGINS`/`CORS_CREDENTIALS` and **forces credentials off** when `CORS_ORIGINS=*` (with a warning), since wildcard+credentials is unsafe.\n- **Bind host**: default local dev runs to `127.0.0.1` instead of `0.0.0.0` in `Makefile` and `start_agent.py` (still configurable via `HOST`/`PORT`). The container `Dockerfile` remains `--host 0.0.0.0`.\n\nAlso updates `.env.example` to reflect safer defaults (CORS disabled by default; loopback bind by default).\n\nRationale: reduces accidental remote exposure + credentialed cross-origin access while keeping intentional remote deployments opt-in.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3827192886",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-19T17:04:57+00:00",
+      "body": "Thanks @TheodorNEngoy — this is well-executed. Both suggestions from the previous review have been properly addressed:\n\n- **DRY the port parsing** — extracted `_env_bool`, `_env_int`, `_parse_csv` into `env_utils.py`. Clean.\n- **Makefile host override** — `run`/`dev` targets now use `$${HOST:-127.0.0.1}`. Works correctly.\n\nThe CORS hardening is sound (empty default = disabled, wildcard+credentials guard with warning, defense-in-depth), and the localhost bind default is a good security improvement.\n\n**One edge case to consider:** the wildcard-with-credentials guard only fires when `CORS_ORIGINS` is exactly `\"*\"`, not when `\"*\"` appears among a comma-separated list like `\"*,http://example.com\"`. While unlikely, checking the parsed list instead of the raw string would make the guard more robust:\n\n```python\ncors_allow_origins = _parse_csv(cors_origins_raw)\nif \"*\" in cors_allow_origins:\n    cors_allow_origins = [\"*\"]\n    if cors_allow_credentials:\n        logger.warning(\"...\")\n        cors_allow_credentials = False\n```\n\nThis is a minor suggestion — the PR is solid as-is. LGTM."
+    },
+    {
+      "id": "3835496680",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-21T11:30:59+00:00",
+      "body": "Thanks @TheodorNEngoy — this is a solid security hardening contribution!\n\n## What was done\n\n**Rebased** onto `main` (clean, no conflicts) and applied three fixes during review:\n\n1. **CORS wildcard bypass fix** (High): The original guard (`cors_origins_raw == \"*\"`) only caught the exact `*` string. Mixed inputs like `*,https://example.com` bypassed the safety check while Starlette still treated the list as allow-all. Fixed by checking `\"*\" in cors_allow_origins` on the *parsed* list, and normalizing any wildcard-containing list to `[\"*\"]`.\n\n2. **LOG_LEVEL validation** (Medium): `LOG_LEVEL` was passed to uvicorn without validation — invalid values like `warn` or `\" info \"` would crash at startup. Added strip/lowercase/validation against allowed uvicorn levels with a warning fallback.\n\n3. **Unused import** (Low): Removed unused `pytest` import in test file.\n\n## Tests added\n\n44 differential tests covering all new code:\n- `test_env_utils.py` (32 tests): `_env_bool`, `_env_int`, `_parse_csv` — truthy/falsy/default/whitespace/edge cases\n- `test_cors_config.py` (12 tests): CORS disabled by default, explicit origins, wildcard safety, **mixed wildcard bypass** (the new regression tests), edge cases\n\n## Verification\n\nAll pass:\n- `make doctest` — 1193 passed\n- `make test` — 12447 passed\n- `make pylint` — 10.00/10\n- `make flake8` — clean"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "cc0d7d6c0d94cad48ac57acf1afc5195403c3619",
+      "message": "Hardening: safer CORS + localhost bind defaults\n\nSigned-off-by: Theodor N. Engøy <theodornengoy@Mac.home>",
+      "author": "Theodor N. Engøy",
+      "date": "2026-02-08T13:14:33+00:00"
+    },
+    {
+      "sha": "d29c24c1901669032d2bb089bb1beb4b8d292726",
+      "message": "langchain agent: DRY env parsing + Makefile HOST override\n\nSigned-off-by: Theodor N. Engøy <theodornengoy@eduroam-193-157-246-146.wlan.uio.no>",
+      "author": "Theodor N. Engøy",
+      "date": "2026-02-10T11:27:20+00:00"
+    },
+    {
+      "sha": "6874ec022590d9b98c6b7ae6982be1a7eba66b05",
+      "message": "fix(security): harden CORS wildcard guard, validate LOG_LEVEL, add tests\n\n- Fix CORS wildcard bypass: check parsed origin list instead of raw\n  string so '*,https://example.com' is caught\n- Validate LOG_LEVEL against allowed uvicorn levels with fallback\n- Add 44 differential tests for env_utils and CORS configuration\n- Remove unused pytest import (Ruff F401)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-21T10:26:18+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 337,
+  "deletions": 16,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:10.905451",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:10.907120",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2767,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2767.json"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3597,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3597"
+  },
+  "metadata": {
+    "title": "fix: extract groups from id_token for generic OIDC providers",
+    "state": "closed",
+    "created_at": "2026-03-10T23:24:01+00:00",
+    "updated_at": "2026-03-23T05:01:18+00:00",
+    "closed_at": "2026-03-23T05:01:18+00:00",
+    "merged_at": "2026-03-23T05:01:18+00:00",
+    "author": "SharonDiskin",
+    "labels": [
+      "bug",
+      "security",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "   ## Summary\r\n\r\n   Generic OIDC providers like Okta include group/role claims in the id_token but\r\n   **not** in the /userinfo response. The existing code handles this for Entra ID and\r\n   Keycloak with provider-specific extraction, but the generic OIDC code path drops\r\n   groups entirely.\r\n\r\n   This PR adds two fixes:\r\n\r\n   1. **_get_user_info**: Extract groups and roles claims from the verified id_token\r\n   for generic OIDC providers (any provider not explicitly handled: Entra, Keycloak,\r\n   GitHub, Google). Only copies claims missing from the userinfo response to avoid\r\n   overwriting.\r\n\r\n   2. **_normalize_user_info**: Include groups in the normalized return dict for the\r\n   generic OIDC path. Supports a configurable groups_claim key via provider_metadata,\r\n   defaulting to groups. Also merges roles into the groups list, matching the Entra ID\r\n    behavior.\r\n\r\n   Without this fix, _apply_team_mapping always receives an empty groups list for\r\n   generic OIDC providers, so SSO-based team assignment never works.\r\n\r\n   ---\r\n\r\n   ## Type of Change\r\n   - [x] Bug fix\r\n\r\n   ---\r\n\r\n   ## Verification\r\n\r\n   Tested with Okta SSO on a live deployment:\r\n   - Configured Okta authorization server with groups scope and claim\r\n   - Verified the authorize URL includes scope=openid+profile+email+groups\r\n   - Confirmed team mapping config in sso_providers table is read correctly\r\n   - User login creates user and triggers _apply_team_mapping flow\r\n\r\n   **Okta requirement**: The groups claim must be configured on the ID Token (and\r\n   optionally Access Token) in the Okta Authorization Server Claims settings, with a\r\n   groups filter (e.g. Matches regex .\\*).\r\n\r\n   ---\r\n\r\n   ## Checklist\r\n   - [x] No secrets or credentials committed\r\n   - [x] Code follows existing patterns (mirrors Entra ID and Keycloak handling)\r\n   - [x] No breaking changes — only adds behavior for previously unhandled providers\r\n\r\n   ---\r\n\r\n   ## Notes\r\n   - The groups_claim key is configurable via provider_metadata to support providers\r\n   that use a non-standard claim name\r\n   - The roles claim is merged into groups to support providers that use roles instead\r\n    of groups for RBAC\r\n   - The not in user_data guard ensures we never overwrite groups already returned by\r\n   the userinfo endpoint\" --jq '.html_url'",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3928941476",
+      "author": "shayro21",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-11T11:30:20+00:00",
+      "body": ""
+    },
+    {
+      "id": "3988966952",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-23T02:03:59+00:00",
+      "body": "Rebased, expanded, reviewed, and hardened. All 265 SSO tests pass. LGTM."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8906cdeafc145e23bb3047d75b9d4f1535b8aa75",
+      "message": "fix(sso): extract groups from id_token for Okta and generic OIDC providers\n\nOkta and IBM Verify providers had no groups extraction in their\n_normalize_user_info handlers, and were excluded from the generic OIDC\nid_token groups merge in _get_user_info. This meant _apply_team_mapping\nalways received an empty groups list for these providers, making SSO-based\nteam assignment non-functional.\n\nChanges:\n- Add groups/roles extraction to Okta and IBM Verify _normalize_user_info\n  handlers (configurable groups_claim via provider_metadata, roles merged\n  into groups, non-string elements filtered — same pattern as Entra ID)\n- Include Okta and IBM Verify in the generic OIDC id_token groups merge\n  path (previously excluded), with support for both configurable\n  groups_claim and roles claims\n- Add roles claim merging to the generic OIDC _normalize_user_info path\n  (previously only Entra ID merged roles)\n- Add sso_okta_scope and okta_group_mapping config settings for\n  configurable Okta OIDC scopes and team mapping via environment\n- Update bootstrap to use configurable Okta scope, parse team mapping\n  from JSON env var, and preserve DB scope/team_mapping on restart\n- Deduplicate groups across all generic/Okta/IBM Verify normalization\n\nBased on PR #3597 by SharonDiskin.\nCloses #3597\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T01:14:42+00:00"
+    },
+    {
+      "sha": "7d8a261c8b06ac42ec07179f173195bf53185df7",
+      "message": "fix(sso): address review feedback on groups extraction\n\n- Fix bootstrap scope preservation: only preserve DB scope when env\n  provides the default value; a non-default env scope now correctly\n  overrides a custom DB scope on restart\n- Handle single-string roles claims in Okta, IBM Verify, and generic\n  OIDC normalization (previously only list values were merged)\n- Validate OKTA_GROUP_MAPPING is a JSON object after parsing; non-dict\n  values (arrays, strings, numbers) now warn and fall back to empty\n- Add SSO_OKTA_SCOPE and OKTA_GROUP_MAPPING to .env.example\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T01:46:39+00:00"
+    },
+    {
+      "sha": "0a902f8a4d780266ccb0fda7b408eb2c24eef585",
+      "message": "docs: add sso_okta_scope and okta_group_mapping to config docs and schema\n\nUpdate configuration.md table, docs/config.schema.json, and\ndocs/docs/config.schema.json with the two new Okta settings.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-23T02:01:08+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 793,
+  "deletions": 17,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:05.561818",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:05.563994",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3597,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3597.json"
+  }
+}

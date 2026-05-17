@@ -1,0 +1,143 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3863,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3863"
+  },
+  "metadata": {
+    "title": "fix: infinite /partial request loop triggered by search input",
+    "state": "closed",
+    "created_at": "2026-03-25T17:20:02+00:00",
+    "updated_at": "2026-03-28T20:02:05+00:00",
+    "closed_at": "2026-03-28T20:02:03+00:00",
+    "merged_at": "2026-03-28T20:02:03+00:00",
+    "author": "marekdano",
+    "labels": [
+      "bug",
+      "ui",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "jonpspri"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3861 \r\n\r\n## 📌 Summary\r\n\r\nFix infinite loop of `/partial` endpoint requests triggered when typing in admin UI search bars (servers, tools, resources, gateways, prompts, agents).\r\nRemove unnecessary search input re-initialization from `htmx:afterSwap` and `htmx:afterSettle` handlers, since search inputs live outside the swapped table DOM and persist across partial refreshes.\r\n\r\nFix npm high vulnerabilities\r\n\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Go to http://localhost:8080/\r\n2. Select one the pages e.g. MCP servers\r\n3. Open the browser console and search for server\r\n4. Observe that calling /partial endpoint is called infinitely until the search is cleared\r\n\r\n## Root Cause\r\n\r\n`initializeSearchInputs()` attached the input event listener before setting `.value` from URL state, so the value assignment immediately fired the listener, queuing a `/partial` reload whose swap re-initialized inputs — creating an infinite cycle\r\n\r\n## 💡 Fix Description\r\n\r\n#### Changes\r\n\r\n  1. Reorder value assignment and listener attachment in `initializeSearchInputs()` — set `.value` before adding the input listener so initialization doesn't trigger a reload\r\n  2. Remove search input re-initialization from `htmx:afterSwap` — search inputs are not part of the swapped table content; only update filter status\r\n  3. Remove search input re-initialization from `htmx:afterSettle` — same reasoning; only update filter status\r\n  4. Remove eager reload on init — the visible-panel check was queueing an immediate `loadSearchablePanel` call, but the server already returns correctly filtered data in the initial page load\r\n  5. Add regression tests (`tests/js/admin-search-init-loop.test.js`, 7 tests) covering:\r\n    - Value restoration from URL state does not fire the input listener\r\n    - No `htmx.ajax` call is made during initialization\r\n    - User typing still triggers a debounced `/partial` reload (positive test)\r\n    - `htmx:afterSwap` / `htmx:afterSettle` on table targets do not re-trigger search initialization\r\n    - Search input value and listener survive table content swaps\r\n 6. run `npm audit fix` to fix high vulnerabilities\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |     ✅    |\r\n| Unit tests                            | `make test`          |    ✅     |\r\n| Coverage ≥ 80 %                       | `make coverage`      |     ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [
+    {
+      "id": "2993312970",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-26T08:46:09+00:00",
+      "body": "Why are we installing this lib?"
+    },
+    {
+      "id": "2993374038",
+      "author": "marekdano",
+      "created_at": "2026-03-26T08:59:26+00:00",
+      "body": "Because of 4 high severity vulnerabilities\r\n\r\n<img width=\"780\" height=\"334\" alt=\"Screenshot 2026-03-26 at 08 58 40\" src=\"https://github.com/user-attachments/assets/6b88b0e1-02ac-49c8-8de0-5f085e14914c\" />\r\n"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4012346390",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-26T08:46:17+00:00",
+      "body": ""
+    },
+    {
+      "id": "4012414289",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-26T08:59:26+00:00",
+      "body": ""
+    },
+    {
+      "id": "4012430110",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-26T09:02:29+00:00",
+      "body": "Tested and working fine! :)"
+    },
+    {
+      "id": "4013392701",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-26T11:37:49+00:00",
+      "body": "LGTM 🚀  \n\nThe fix looks correct, the regression coverage is targeted"
+    },
+    {
+      "id": "4021858875",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-27T15:12:59+00:00",
+      "body": "Tested and works fine. The code is correct and the proper tests were added."
+    },
+    {
+      "id": "4021868965",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-27T15:14:45+00:00",
+      "body": "Have you considered using the `createMemoizedInit` function? I created it for a similar init loop, and the goal back then was to apply it to all inits, to prevent exactly this loop issue."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c941a16db608f83a848285a4d31862e135c27387",
+      "message": "fix: infinite /partial request loop triggered by search input\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-25T17:10:10+00:00"
+    },
+    {
+      "sha": "0cf724eafd7fb09154aa654af006e6e99fde68d0",
+      "message": "fix: merging conflicts\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-25T17:42:41+00:00"
+    },
+    {
+      "sha": "ea785636767feba93b8fcd922ad8e5c56fe2aa35",
+      "message": "fix: npm deps for high vulnerabilities\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-25T18:24:48+00:00"
+    },
+    {
+      "sha": "789159ca95321fce5b95ba0dcaa309cce5616580",
+      "message": "fix: package-lock.json file\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-27T10:30:11+00:00"
+    },
+    {
+      "sha": "6726a4150f60f5cd18e83815a51132e7fda269d5",
+      "message": "fix: E401 authentication error on npm install and pointing to the public registry\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-27T10:43:47+00:00"
+    },
+    {
+      "sha": "cae0ef43e9b22962f6eee9acf373fe5b24aaa0b4",
+      "message": "fix: package-lock.json file\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-27T10:47:32+00:00"
+    },
+    {
+      "sha": "6c8263df1bd09bbbef489b23edf31b9c3bbfc0fb",
+      "message": "fix: improve search init comments, lint, and test robustness\n\nUpdate stale doc comment on initializeSearchInputs() to reflect that\nHTMX handlers no longer re-invoke it. Prefix unused entityType parameter\nwith underscore to satisfy linter. Add URL cleanup in beforeEach to\nprevent test contamination on mid-test failures.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-28T19:22:00+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 663,
+  "deletions": 416,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:25.168680",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:25.169708",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3863,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3863.json"
+  }
+}

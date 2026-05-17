@@ -1,0 +1,95 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4301,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4301"
+  },
+  "metadata": {
+    "title": "test(compliance): MCP 2025-11-25 protocol compliance harness",
+    "state": "closed",
+    "created_at": "2026-04-19T08:54:29+00:00",
+    "updated_at": "2026-04-19T19:53:45+00:00",
+    "closed_at": "2026-04-19T09:18:10+00:00",
+    "merged_at": "2026-04-19T09:18:10+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nAdds a pytest-based MCP 2025-11-25 protocol-compliance harness, a FastMCP reference server to act as the known-good witness, and a matrix orchestrator that runs the harness across every runnable engine mode of the runtime-mutable MCP gateway (#4273, #4296).\n\n- **`tests/protocol_compliance/`** — parametrized probe suite covering lifecycle, transport, tools, resources, prompts, logging, utilities (ping/progress/cancellation), roots, sampling, elicitation, notifications (list_changed, subscription updates), pagination, OAuth 2.1 via Keycloak, security best practices, runtime-mutable MCP mode, and JSON-RPC envelope invariants.\n- **`mcp-servers/python/compliance_reference_server/`** — FastMCP-based reference server with explicit witnesses for every capability the harness probes, including new `get_cancellation_count` and `_mutation_counter` plumbing so end-to-end notification delivery is observable from tests.\n- **`scripts/compliance_matrix.py`** — orchestrator that flips runtime-mode, waits for data-plane convergence, invokes the harness per engine (reference / python / rust_edge / rust_full), and renders a console / markdown / JSON summary with XPASS-sidecar capture for detecting silently-closed gaps.\n- **`tests/protocol_compliance/COMPLIANCE_GAPS.md`** — tracked backlog of documented divergences (GAP-001 … GAP-012) with workflow for filing, narrowing on partial closure, and the canonical stream-attribution note for MCP 2025-11-25 § Listening for Messages.\n- **Makefile** — `test-protocol-compliance*` targets; `testing-up` now folds in the `sso` compose profile so Keycloak comes up with the stack.\n- **`infra/keycloak/realm-export.json`** — service-accounts enabled on the dev client so the client_credentials OAuth tests work out of the box.\n\n## Scope of changes\n\n5 commits, all linear on top of the latest `origin/main` (post-#4296, post-#4299):\n\n1. `test(compliance)` — the harness, reference server, matrix script, rewritten `test-mcp-protocol-e2e` target.\n2. `refactor(tests)` — group test helpers under `tests/*/helpers/` + verbose-regex precommit excludes.\n3. `fix(keycloak)` — enable service-accounts on the dev realm client.\n4. `test(compliance)` follow-ups — silent-failure fixes, type-design tightening, behavioral coverage, corrected stream attribution, 6 new tests.\n5. `fix(e2e)` — align `test_oauth_jwks_e2e` JWT secret with the gateway's 32-char minimum.\n\n## Current matrix status\n\nAfter `make testing-up-rust-full`:\n\n| Engine | Passed | Failed | XFailed | XPassed | Skipped |\n|---|---:|---:|---:|---:|---:|\n| reference (stdio) | 30 | 0 | 0 | 0 | 0 |\n| python (shadow flip) | 53 | 0 | 34 | 0 | 11 |\n| rust_edge | 53 | 0 | 34 | 0 | 11 |\n| rust_full | 58 | 0 | 40 | 0 | 11 |\n\nZero unexpected failures, zero XPASS. Each xfail points at a documented GAP; 11 gaps currently open. Python and `rust_edge` ingress paths behave identically under the probe set (same pass/xfail/skip counts), which is the drift parity we want to pin.\n\n## Test plan\n\n- [x] `make test-protocol-compliance-reference` — reference-only, green.\n- [x] `make test-protocol-compliance-gateway` — gateway-only, green with expected xfails.\n- [x] `make test-protocol-compliance-matrix` — full matrix under boot=edge and boot=full.\n- [x] Reference-server suite: 20/20 passing.\n- [x] Precommit hooks pass on both commits.\n- [ ] CI run on the PR (pending).\n\n## Follow-ups (filed / tracked)\n\n- **#4293** — Phase M: parametrize matrix across further engine configurations.\n- **#4294** — Phase 6: multi-upstream federation drift.\n- **#4295** — Phase 8: `tasks/*` capability coverage (blocked on FastMCP `tasks` extra).\n- **GAP-001 … GAP-012** — open backlog in `COMPLIANCE_GAPS.md`, each with an xfail anchor.",
+  "comments": [
+    {
+      "id": "3107414156",
+      "author": "dawid-nowak",
+      "created_at": "2026-04-19T19:53:45+00:00",
+      "body": "Out of interest, how is this related to MCP compliance ?"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4136470380",
+      "author": "dawid-nowak",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-19T19:53:45+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f7a96966083e33fda0b712f322a18942fa24bb21",
+      "message": "test(compliance): add MCP 2025-11-25 protocol compliance harness\n\nBuild a FastMCP-based test harness that probes ContextForge against the\nMCP 2025-11-25 specification across three targets: reference stdio,\ngateway proxy (federated), and gateway virtual server. Includes a new\nreference server (mcp-servers/python/compliance_reference_server) with\ntools/resources/prompts covering lifecycle, transport, pagination,\nnotifications, subscriptions, roots, sampling, elicitation, and logging.\n\nKey additions:\n- tests/protocol_compliance/: parametrized test suite with XPASS-capture,\n  drift detection across targets, and gap-tracking workflow\n- scripts/compliance_matrix.py: orchestrator that runs the suite across\n  engine modes (python/shadow/edge/full) and aggregates results\n- Runtime-mutable MCP mode tests covering shadow<->edge flip, boot-mode\n  rails, publish/audit response contract, and data-plane runtime header\n- OAuth 2.1 / Authorization tests against Keycloak (tier-gated skip)\n- Security Best Practices probes (origin validation, bind address,\n  confused-deputy)\n- Rewrite tests/e2e/test_mcp_cli_protocol.py as test_mcp_protocol_e2e.py\n  using FastMCP Client directly (no external CLI deps)\n- Makefile: test-protocol-compliance* targets; testing-up folds in sso\n  profile so Keycloak comes up with the gateway stack\n- pre-commit: scope name-tests-test hook to tests/unit/ (integration,\n  e2e, and compliance suites legitimately host non-test Python modules)\n\nCloses #4273 (runtime-mutable MCP mode observability coverage).\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-18T16:20:09+00:00"
+    },
+    {
+      "sha": "66be225a35306954709f0ed160eec9cd703ac537",
+      "message": "refactor(tests): group test helpers under tests/*/helpers/ subdirs\n\nMove loose non-test Python modules into conventional helpers/ subdirs\nso the test-naming hook can exclude a single pattern instead of\nenumerating each file.\n\nMoves:\n- tests/e2e/mcp_test_helpers.py -> tests/e2e/helpers/mcp_test_helpers.py\n- tests/protocol_compliance/_helpers.py ->\n  tests/protocol_compliance/helpers/compliance.py\n- tests/protocol_compliance/_drift.py ->\n  tests/protocol_compliance/helpers/drift.py\n\nUpdates all import sites across tests/e2e, tests/e2e_rust, and\ntests/protocol_compliance.\n\nConfig cleanup:\n- name-tests-test now excludes tests/*/(helpers|fixtures|targets|pages)/\n  as a single verbose-regex alternative instead of file-by-file.\n- Top-level pre-commit exclude and detect-secrets excludes converted\n  to verbose-regex with inline comments.\n- Dropped non-existent excludes (scripts/sign_image.sh, scripts/zap,\n  sonar-project.properties) and the redundant .secrets.baseline\n  entry (detect-secrets skips its own baseline automatically).\n- detect-secrets hook in pre-commit now carries its own exclude list,\n  kept in sync with the Makefile invocation.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-18T16:39:24+00:00"
+    },
+    {
+      "sha": "b829745eff95ce59f086b5da1ef39df229e42a80",
+      "message": "fix(keycloak): enable service-accounts on the mcp-gateway dev realm client\n\nThe local Keycloak dev realm disables the client_credentials grant, so\ncompliance tests that exercise OAuth 2.1 token issuance against the\npreconfigured `mcp-gateway` client fail with\n`unauthorized_client: Client not enabled to retrieve service account`.\n\nFlip `serviceAccountsEnabled` to `true` so fresh `docker compose` volume\nimports come up with the grant available. Existing stacks can apply the\nsame change via the Keycloak Admin API against the running realm; the\nstored volume overrides the import file once the realm exists, which is\nwhy the change has to land here to stick across rebuilds.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-19T07:25:58+00:00"
+    },
+    {
+      "sha": "d6c6b162e09098ad19f85e0a4ee0af7c460217cc",
+      "message": "test(compliance): PR-review follow-ups — silent-failure fixes, behavioral coverage, type design, stream attribution\n\nBundles the fixes surfaced by running the pr-review-toolkit agents\n(code-reviewer, pr-test-analyzer, comment-analyzer,\nsilent-failure-hunter, type-design-analyzer) plus two iterations of\nCodex stop-review feedback.\n\nSilent-failure fixes:\n  - _parse_junit / _run_slice / stale-junit unlink /\n    _wait_data_plane_converges return-value check close the\n    \"0/0/0/0 row\" silent path in the matrix orchestrator.\n  - Reference server stdout+stderr captured to a session tmp log; tail\n    dumped on readiness timeout instead of swallowed.\n  - flip_runtime_mode / _delete_if_exists / _wait_for_federation_sync\n    / _probe_state / Keycloak token fetch surface last-status\n    diagnostics instead of collapsing to None.\n  - conftest fixture-resolution narrows catch-all so ImportError /\n    NameError / SyntaxError from a broken fixture definition\n    propagate; only runtime unreachability skips.\n  - pytest_runtest_logreport wraps sidecar write in try/except so an\n    unwriteable log doesn't poison the run.\n\nType design:\n  - ComplianceTarget: __init_subclass__ enforces name and\n    supported_transports on every concrete subclass; base client()\n    validates transport support and dispatches to abstract\n    _open_client(); per-subclass boilerplate deleted.\n  - SliceResult: stored `ran` field removed (derive from\n    skip_reason); __post_init__ rejects negative counts and the\n    inconsistent \"skipped slice with non-zero counts\" state.\n  - ReferenceUpstream: frozen, no raw Popen field — process handle\n    stays in fixture closure so tests can't race teardown.\n  - KeycloakConfig: token_endpoint is now a property; __repr__\n    redacts client_secret.\n\nStream attribution:\n  - MCP 2025-11-25 § Listening for Messages is explicit:\n    server→client *requests* (roots/list, sampling/createMessage,\n    elicitation/create) MUST NOT ride the standalone GET /mcp/\n    stream; they travel on the POST-correlated stream. GAP-002..005\n    and seven xfail reasons wrongly blamed #4205 (standalone-stream\n    closure). Rewrote the Why sections and reasons to point at\n    POST-correlated-stream relay instead.\n  - GAP-011 (resource-subscription updates) is the only gap that\n    legitimately points at #4205.\n  - Added a canonical \"Stream-attribution note\" to COMPLIANCE_GAPS.md.\n  - Filed GAP-011 (resource subscriptions) and GAP-012 (gateway\n    returns -32000 where spec requires -32601).\n\nBehavioral coverage (6 new tests + 4 reference-server witnesses):\n  - notifications/cancelled end-to-end delivery.\n  - logging/setLevel filter-threshold round-trip.\n  - JSON-RPC reserved codes -32700 / -32601 / -32602.\n  - tools/call argument-type validation (narrowed to McpError).\n  - initialize-twice lifecycle rejection.\n  - MCP-Protocol-Version mismatch handling.\n  - Reference-server side-effect witnesses for mutate_resource_list /\n    mutate_prompt_list / bump_subscribable notifications and the\n    subscribe/unsubscribe handler round-trip.\n\n  Each raw-httpx test fails on 5xx and accepts 4xx as HTTP-level\n  rejection; no false-green paths where a server crash would read as\n  compliance.\n\nBug fixes:\n  - Reference server: mutator tools now use a dedicated\n    _mutation_counter to prevent ephemeral_0 name-collisions.\n  - test_drift._collect narrows to pytest.skip.Exception; other probe\n    errors are recorded so drift diffs show the root cause.\n  - Makefile PYTEST_IGNORE excludes tests/protocol_compliance.\n\nMatrix rust_full slice: 58 passed / 0 failed / 40 xfailed / 0 xpassed\n/ 11 skipped (was 53/0/34/0/11). Zero unexpected failures.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-19T08:53:25+00:00"
+    },
+    {
+      "sha": "22165a14c28159c740df34e43c9fcc2f15d944a7",
+      "message": "fix(e2e): align test_oauth_jwks_e2e JWT secret with gateway minimum\n\nTest defaulted its JWT secret to \"my-test-key\" (11 chars) when\nJWT_SECRET_KEY was unset; the gateway's validator requires ≥32 chars\nso every admin-API call the fixtures make would fail with\n401 \"Invalid authentication credentials\" on default deployments.\n\nImport JWT_SECRET from helpers.mcp_test_helpers — the 40-char default\nthe rest of the e2e suite already shares — so this test self-configures\nwithout requiring the operator to export JWT_SECRET_KEY. Overriding\nvia the env var still works.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-19T08:53:37+00:00"
+    },
+    {
+      "sha": "f93fa6f9f2f9025dfcf89807efaf40dc1f805b33",
+      "message": "ci(pre-commit): exclude tests/**/targets/ from name-tests-test in the lite config\n\nThe main pre-commit config already excludes these POM-style support\ndirectories, but CI runs the lite config (Makefile:4175 —\n`pre-commit run --config .pre-commit-lite.yaml`) which was a\nnear-duplicate that hadn't been kept in sync. Add `targets` to its\nexcluded-dir alternation so the four compliance-harness target modules\nstop tripping the hook in CI.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-19T08:59:50+00:00"
+    },
+    {
+      "sha": "7de00e8ebd576a5496584315856fac3011f712d5",
+      "message": "chore(deps): pin authlib>=1.7.0 in the dev group via exclude-newer-package override\n\nauthlib is a transitive dep of fastmcp, which the compliance harness\nuses as a test client — both live in the dev dependency group.\nmcpgateway itself imports nothing from authlib, so the constraint goes\nin `[dependency-groups] dev` rather than main project deps.\n\nRelease 1.7.0 (2026-04-18) ships security fixes but was blocked by the\nrepo-wide `exclude-newer = \"10 days\"` newness filter, leaving the\nlockfile on 1.6.9. Adds an `exclude-newer-package` entry for authlib\n(2026-04-19) so the filter allows the new release.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-19T09:04:45+00:00"
+    }
+  ],
+  "files_changed": 78,
+  "additions": 5947,
+  "deletions": 804,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:32.164350",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:32.164893",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4301,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4301.json"
+  }
+}

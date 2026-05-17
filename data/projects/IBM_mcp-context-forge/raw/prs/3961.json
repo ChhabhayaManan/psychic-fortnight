@@ -1,0 +1,59 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3961,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3961"
+  },
+  "metadata": {
+    "title": "fix(rbac): unblock self-service public team join for non-admin users",
+    "state": "open",
+    "created_at": "2026-03-31T23:53:16+00:00",
+    "updated_at": "2026-04-03T03:36:13+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Add `check_globally` parameter to `require_permission()` decorator to evaluate permissions against global/personal roles without binding to the request's `team_id`\n- Apply to team-entry endpoints (`join`, `leave`, `join-request`, `cancel-join-request`) where users need `teams.join` but aren't yet members of the target team\n- Add team_id validation to admin cancel-join-request to prevent cross-team cancellation\n- Fix two Playwright test bugs (wrong token type, wrong assertion)\n\nCloses #3960\n\n## Test plan\n\n- [ ] Unit tests: `pytest tests/unit/mcpgateway/middleware/test_rbac.py tests/unit/mcpgateway/services/test_permission_service_token_narrowing.py tests/unit/mcpgateway/services/test_rbac_cross_team_isolation.py -v` (335 pass)\n- [ ] Full unit suite: 15,274 pass, 0 fail\n- [ ] Pylint parallel: `make pylint` → 10.00/10\n- [ ] Playwright: `test_request_to_join_public_team`, `test_member_leaves_team`, `test_cross_team_tool_not_visible`\n- [ ] Manual: non-admin session token → `POST /teams/{public_team}/join` → 200",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4043012240",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-01T09:50:17+00:00",
+      "body": "## Review Notes\n\n### Findings\n\n**1. Medium: `check_globally` drops the route `team_id` before the plugin permission hook runs, which regresses team-aware `HTTP_AUTH_CHECK_PERMISSION` plugins on these endpoints.**\n\nFile: `mcpgateway/middleware/rbac.py:627`, `mcpgateway/middleware/rbac.py:657`\n\nWhy it matters: the new behavior is correct for built-in RBAC evaluation, but the original target-team context is also the input to plugin authorization. With the current change, plugins receive `team_id=None` for `join`, `leave`, and join-request endpoints, even when the route clearly targets a specific team.\n\nEvidence: `HttpAuthCheckPermissionPayload` explicitly models `team_id` as hook context (`mcpgateway/plugins/framework/hooks/http.py:143`), and the docs describe it as \"Team context (if applicable)\" (`docs/docs/using/plugins/http-auth-hooks.md:251`).\n\nSuggested fix: preserve the original route `team_id` for plugin hook/audit payloads, and only null it for the internal `PermissionService.check_permission(...)` call.\n\n**2. Medium: the new cross-team cancel guard is missing the deny-path regression test that this security-sensitive fix needs.**\n\nFile: `mcpgateway/admin.py:6894`\n\nWhy it matters: this PR adds an important check that prevents canceling a join request with a mismatched `team_id`/`request_id` pair, but there is no unit test asserting the new wrong-team path returns `404`.\n\nEvidence: existing cancel tests cover success/failure/exception cases, but not \"valid request id, wrong team id\" (`tests/unit/mcpgateway/test_admin.py:16798`, `tests/unit/mcpgateway/test_admin_module.py:1179`).\n\nSuggested fix: add a unit test that submits a real `request_id` under the wrong `team_id` and asserts `404`.\n\n**3. Low: the new Playwright JWT helper uses `token_use: str = None`, which should be typed as `Optional[str] = None`.**\n\nFile: `tests/playwright/teams/conftest.py:29`\n\nWhy it matters: this is only a typing correctness issue, not a runtime bug.\n\n---\n\n### Notes from verification\n\n- The core RBAC intent looks correct. For built-in RBAC, `check_globally=True` does unblock public-team entry flows by avoiding token-team binding on the permission check.\n- Verified the default-role path: non-admin users are expected to have global `platform_viewer`, which includes `teams.join`.\n- The updated Playwright expectation for cross-team tool access returning `403` matches the current behavior.\n\n### Validation\n\nReviewed against the PR head in an isolated checkout. Ran targeted unit suites around the changed areas successfully:\n- `tests/unit/mcpgateway/middleware/test_rbac.py -k check_globally`\n- `tests/unit/mcpgateway/test_admin.py -k 'cancel_join_request or create_join_request or leave_team'`\n- `tests/unit/mcpgateway/routers/test_teams.py -k 'request_to_join_team or leave_team'`\n- `tests/unit/mcpgateway/services/test_permission_service_token_narrowing.py`\n- `tests/unit/mcpgateway/services/test_rbac_cross_team_isolation.py`\n- `tests/unit/mcpgateway/routers/test_teams_coverage.py`\n- `tests/unit/mcpgateway/routers/test_teams_v2.py`"
+    },
+    {
+      "id": "4050168740",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-02T11:55:13+00:00",
+      "body": "Building on gandhipratik203's Finding 1 — I think the plugin context regression points to a deeper issue worth discussing.\r\n\r\nThe `check_globally` parameter is working around a permission check that may not need to exist on `join`, `join-request`, and `cancel-join-request` in the first place. `teams.join` is present in every built-in role including `platform_viewer`, which every authenticated user receives globally — so this check can never meaningfully fail for a legitimately authenticated user.\r\n\r\nThe real authorization on these endpoints is already in the endpoint body and service: `join` and `join-request` validate team visibility and existing membership directly, and `cancel_join_request` in `TeamManagementService` filters by user_email, enforcing ownership.\r\n\r\nThe suggested change:\r\n- Remove `@require_permission` from `join`, `join-request`, and `cancel-join-request` (three endpoints across two files).\r\n- Keep the decorator on `leave` but revert `check_globally=True` from it — the user is already a member when leaving, so the original team scoping works correctly there and the flag was unnecessary.\r\n- This lets us revert `check_globally` from the decorator entirely, the `**kwargs` additions to the mock decorators, and the three new unit tests.\r\n\r\nFinding 1 is resolved at the root rather than by threading route context separately through the plugin payload.\r\n\r\nThe cross-team cancellation fix in `admin_cancel_join_request` is a genuine improvement and worth keeping regardless."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6a797d6f02a4f5537b99a4e16d98bed64341193d",
+      "message": "fix(rbac): unblock self-service public team join for non-admin users\n\nAdd `check_globally` parameter to `require_permission()` decorator that\nevaluates the permission against global/personal roles only, bypassing\nthe token-scoping guard in `_get_user_roles()` that discards all roles\nwhen team_id is not in token_teams.\n\nApplied to team-entry endpoints where the user needs `teams.join` but\nis not yet a member of the target team:\n- POST /teams/{team_id}/join\n- POST /admin/teams/{team_id}/leave\n- POST /admin/teams/{team_id}/join-request\n- DELETE /admin/teams/{team_id}/join-request/{request_id}\n\nAlso fixes admin cancel-join-request to validate that the join request\nbelongs to the team_id in the URL, preventing cross-team cancellation.\n\nTest fixes:\n- test_member_leaves_team: use session token instead of public-only JWT\n- test_cross_team_tool_not_visible: expect 403 (matches unit test contract)\n- Mock decorators accept **kwargs for new parameter\n\nCloses #3960\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-31T23:52:55+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 99,
+  "deletions": 24,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:00.078393",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:00.079194",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3961,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3961.json"
+  }
+}

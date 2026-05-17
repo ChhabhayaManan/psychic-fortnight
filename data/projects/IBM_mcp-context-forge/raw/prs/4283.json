@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4283,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4283"
+  },
+  "metadata": {
+    "title": "fix: enable MCP session pool and set max sessions per key to resolve stateful MCP server session isolation",
+    "state": "open",
+    "created_at": "2026-04-17T14:57:45+00:00",
+    "updated_at": "2026-04-17T15:56:50+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "Lang-Akshay",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Closes #4205\n\n---\n\n## 📝 Summary\n\nContextForge was creating a **single shared MCP session** at startup and reusing it for all downstream clients. This caused stateful MCP servers (e.g. a counter server over Streamable HTTP transport) to leak state across clients — every client saw the same counter, regardless of their individual session lifecycle.\n\n### Root Cause\n\nThe session pool (`MCP_SESSION_POOL_ENABLED`) defaulted to `false` in `.env.example`, which meant each request created a fresh session (poor for performance) or, worse, a single shared session was reused across all clients with no per-client isolation.\n\n### Fix\n\nEnable the MCP session pool in `.env.example` with sensible defaults:\n\n```env\nMCP_SESSION_POOL_ENABLED=true\nMCP_SESSION_POOL_MAX_PER_KEY=10\n```\n\n- **`MCP_SESSION_POOL_ENABLED=true`** — activates the session pool so the gateway manages a pool of upstream MCP sessions keyed by `(URL, identity, transport)`.\n- **`MCP_SESSION_POOL_MAX_PER_KEY=10`** — caps the number of pooled sessions per upstream server at 10, providing per-client session isolation while bounding resource usage.\n\nWith the pool enabled, each downstream client is assigned its own upstream session from the pool. Stateful servers (counters, carts, workflows) now correctly track per-client state throughout the MCP session lifecycle (Initialize → tool calls → teardown).",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "cb0a7c6b247bbee75ca331d58a5d95a93483b586",
+      "message": "fix: enable MCP session pool and set max sessions per key\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-17T14:57:08+00:00"
+    },
+    {
+      "sha": "df7f071ff8aa0af09044193b2d85c760149ec916",
+      "message": "format: fixup\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-17T15:08:46+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 16,
+  "deletions": 43,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:06:26.903907",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:26.904893",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4283,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4283.json"
+  }
+}

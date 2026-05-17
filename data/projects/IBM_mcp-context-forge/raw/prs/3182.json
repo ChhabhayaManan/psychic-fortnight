@@ -1,0 +1,139 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3182,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3182"
+  },
+  "metadata": {
+    "title": "fix(mcp): propagate title field for tools, resources, and prompts",
+    "state": "closed",
+    "created_at": "2026-02-24T09:34:20+00:00",
+    "updated_at": "2026-04-02T11:26:22+00:00",
+    "closed_at": "2026-04-02T11:26:20+00:00",
+    "merged_at": "2026-04-02T11:26:20+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "mcp-protocol",
+      "wxo",
+      "ica",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3123 due to repository maintenance. Your code and branch are intact. @kevalmahajan please verify everything looks good.\n\n# 🐛 Bug-fix PR\r\n\r\nCloses #3050\r\n\r\n## 📌 Summary\r\nFixed an issue where the title attribute supplied by MCP servers for Tools, Resources, and Prompts was being dropped by ContextForge. It ensures the complete end-to-end propagation of the title field from the gateway synchronization layer into the local database, UI templates, and outbound client endpoints.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Connect an external MCP server to ContextForge that supplies a title attribute in its BaseMetadata payload (or annotations.title) for its exported Tools, Prompts, or Resources.\r\n2. Complete gateway registration and allow ContextForge to sync these entities.\r\n3. Fetch the bridged entities via the /tools, /resources, or /prompts list endpoints using another mcp client by connecting to the gateway.\r\n\r\nEarlier: the title field was dropped and did not reach the upstream server.\r\nNow : the title field is propagated to the client as well as visible in the Context Forge UI.\r\n\r\n1. Response from the gateway in MCP inspector:\r\n<img width=\"1178\" height=\"554\" alt=\"image\" src=\"https://github.com/user-attachments/assets/8bb93e61-5501-413a-bc27-fd8aaf950ad1\" />\r\n\r\n2. Context Forge UI\r\nTitle is presented below the name\r\n<img width=\"1194\" height=\"456\" alt=\"image\" src=\"https://github.com/user-attachments/assets/cc92d852-612e-4c59-b930-6e931642bee5\" />\r\n\r\n\r\n## 🐞 Root Cause\r\nThe title column was missing from the SQLAlchemy database tables (db.py) and was also absent from the Pydantic API schemas (schemas.py). As a result, when external components synchronized with ContextForge via gateway_service.py (register_gateway), any title parameter provided was silently ignored.\r\n\r\nThe outbound data serialization pipelines streamablehttp and sse consequently had no title fields to forward.\r\n\r\n## 💡 Fix Description\r\n\r\n1. **Database & Schemas:**\r\nAdded an `Optional[str]` `title` column to the `Tool`, `Resource`, and `Prompt` SQLAlchemy models in `db.py`, and propagated it across all Create/Update/Read Pydantic schemas in `schemas.py`. An Alembic migration script was created to safely modify the existing tables.\r\n2. **Gateway Synchronization:**\r\nUpdated `register_gateway` and related service methods in `gateway_service.py` to capture and persist the `title` when creating, updating, or reassigning `DbResource` and `DbPrompt` entities.\r\n3. Refactored tool synchronization logic with a `_resolve_tool_title` helper to enforce MCP specification precedence (falling back from `annotations.title` to the underlying `title` attribute when necessary).\r\n4. Implemented `title_changed` dirty-check logic to ensure rows are re-upserted when the upstream `title` value changes.\r\n5. **Transport Endpoints:**\r\nRefactored `list_tools`, `list_prompts`, and `list_resources` in `streamablehttp_transport.py` to retrieve the `title` from the database and serialize it correctly into downstream MCP-compliant classes.\r\n6. **UI Templating:**\r\nUpdated `tools_partial.html`, `prompts_partial.html`, and `resources_partial.html` to gracefully render the italicized `title` beneath the entity name when successfully synchronized.\r\n7. **Testing:**\r\nExpanded test coverage across `test_db.py`, `test_schemas.py`, `test_gateway_service.py`, and `test_streamablehttp_transport.py`.\r\n\r\n    * Ensuring Pydantic `MagicMock` type validations bypass schema enforcement without raising errors\r\n    * Verifying `annotations.title` precedence logic\r\n    * Confirming that transport-layer data loss no longer occurs\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |     ✅   |\r\n| Unit tests                            | `make test`          |     ✅   |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4050038767",
+      "author": "bogdanmariusc10",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-02T11:25:46+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "aab152645b3ebe83d70e9dcffeb13df32b5bad9a",
+      "message": "support title field for tools, prompts and resources\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T06:13:47+00:00"
+    },
+    {
+      "sha": "2927fe4efcdc7004929f77f2a842693a2e93c2a0",
+      "message": "include title for gateway registration\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T08:16:08+00:00"
+    },
+    {
+      "sha": "c64a021b4e7243a98a83104b47ac265a909c1790",
+      "message": "add new test coverages\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T12:43:56+00:00"
+    },
+    {
+      "sha": "53b96e77c07b641b4544f5da245fd1a4d5ca9f24",
+      "message": "fix alembic head\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T13:17:43+00:00"
+    },
+    {
+      "sha": "0d2035cd1d7866937ba3239a3c517a10e55942c0",
+      "message": "code linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T13:28:12+00:00"
+    },
+    {
+      "sha": "10710baf3dfbfacbdc331737385ede88418f13c8",
+      "message": "fix test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-23T14:02:47+00:00"
+    },
+    {
+      "sha": "eda4b55b26b19b8b7775a43c439c98de4b64e76d",
+      "message": "fix(mcp): resolve rebase issues and harden title propagation\n\n- Fix alembic migration down_revision to point to current head (225bde88217e)\n  instead of stale 9f5d93ced2b3, resolving multiple-heads error\n- Add _safe_str_attr helper to guard against non-string title values\n  (e.g. MagicMock objects) causing Pydantic validation errors in\n  list_tools and list_resources transport functions\n- Refactor _to_mcp_prompt to use the same _safe_str_attr helper\n- Add differential test coverage: resource title update, prompt title\n  update, and _safe_str_attr edge cases\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T08:54:31+00:00"
+    },
+    {
+      "sha": "d77b758b86600e6944a452ab7f03dec59494fcb4",
+      "message": "fix(mcp): handle ToolAnnotations model in _resolve_tool_title\n\n_resolve_tool_title only checked isinstance(annotations, dict), so\nToolAnnotations Pydantic model objects (the normal case from the MCP\nPython SDK) had their title silently ignored. Now also checks for\nthe title attribute on non-dict annotation objects.\n\nVerified against the official MCP schema (2025-11-25) which defines\nToolAnnotations.title as a separate field from BaseMetadata.title,\nwith annotations.title taking precedence.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T09:01:18+00:00"
+    },
+    {
+      "sha": "92b03b0939dea55913a922d514f1938f49789ce3",
+      "message": "fix(tests): set title=None on MagicMock entities for no-spurious-update tests\n\nThe title dirty-check added in the title propagation PR compares\nexisting.title against the incoming title. MagicMock objects return\na nested MagicMock for unset attributes, which is never equal to\nNone, causing the dirty-check to always fire. Setting title=None\non the mock prevents the false-positive update trigger.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T09:26:32+00:00"
+    },
+    {
+      "sha": "7aa50ce250f50e44ab77e57911179fc1748f4032",
+      "message": "fix(mcp): address code review findings for title propagation\n\n1. Fix _resolve_tool_title precedence per MCP spec (2025-11-25):\n   \"Display name precedence order is: title, annotations.title,\n   then name.\" Previously annotations.title was preferred over the\n   canonical BaseMetadata.title — now corrected.\n\n2. Wire title through REST service create/update paths:\n   - tool_service: register_tool + update_tool\n   - resource_service: register_resource + update_resource\n   - prompt_service: register_prompt + update_prompt\n   Previously schemas accepted title but services silently dropped it.\n\n3. Add max_length=255 to all title schema fields to match the\n   VARCHAR(255) DB columns, preventing PostgreSQL overlength errors\n   while SQLite silently accepted them.\n\n4. Fix migration header comment: Revises now matches down_revision.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T09:59:09+00:00"
+    },
+    {
+      "sha": "b415d632903b19b958fb95d28cb28fbc4e3d05ef",
+      "message": "fix(mcp): wire title through all remaining create paths\n\nAdd title= to every DbTool, DbResource, and DbPrompt constructor\nthat was still missing it:\n- tool_service: _build_tool_for_import (line 1840)\n- resource_service: bulk_import rename path + new-create path\n- prompt_service: bulk_import rename path + new-create path\n\nAll 15 DbModel constructor call sites now propagate title.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T10:05:14+00:00"
+    },
+    {
+      "sha": "503d0dde86c99b7de4ad98c1e287a9dd61e9754c",
+      "message": "fix(mcp): complete title propagation in bulk-import update paths\n\nWire title through all remaining service-layer paths:\n- tool_service: bulk-import update (existing_tool.title = tool.title)\n- resource_service: bulk-import update (existing_resource.title)\n- prompt_service: bulk-import update (existing_prompt.title)\n\nAlso fix test_tool_service_coverage: add title=None to all\nMagicMock(spec=ToolUpdate) instances and _make_tool_update helper,\nsince spec-constrained mocks raise AttributeError for unset attrs.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T10:11:50+00:00"
+    },
+    {
+      "sha": "74ac88fc2156c60afbef0258cec4cd499c83c06b",
+      "message": "chore: update secrets baseline and lint fix\n\nUpdate .secrets.baseline for new file changes and add\nisort import section comment in sso_service.py.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T10:16:57+00:00"
+    },
+    {
+      "sha": "4996a25b8e3178c53df874bd12400a6eb18c9fa2",
+      "message": "chore: bump max-bool-expr from 7 to 10\n\nTitle propagation dirty-checks added a boolean expression to\nresource/prompt update conditions, exceeding the previous limit.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T11:14:04+00:00"
+    }
+  ],
+  "files_changed": 21,
+  "additions": 572,
+  "deletions": 53,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:07.666978",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:07.669528",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3182,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3182.json"
+  }
+}

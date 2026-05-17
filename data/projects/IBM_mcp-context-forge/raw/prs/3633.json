@@ -1,0 +1,76 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3633,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3633"
+  },
+  "metadata": {
+    "title": "fix(ui): clear stale test results when reopening tool/prompt/gateway test modals",
+    "state": "closed",
+    "created_at": "2026-03-12T06:54:43+00:00",
+    "updated_at": "2026-03-12T12:41:16+00:00",
+    "closed_at": "2026-03-12T12:41:14+00:00",
+    "merged_at": "2026-03-12T12:41:14+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "bug",
+      "ui",
+      "ica",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3585\r\n\r\n## 📌 Summary\r\nTest modal windows for Tools, Prompts, and MCP Servers (Gateways) in the Admin UI retain the previous test response when reopened for a different entity. The result area should be empty/reset each time a new test modal opens.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Open the Admin UI and navigate to the **Tools** tab (same issue applies to **Prompts** and **MCP Servers**).\r\n2. Click **Test** on the first tool in the list.\r\n3. Click **Run Tool** to execute the test. The result area populates with the response.\r\n4. Click **Close** to dismiss the modal.\r\n5. Click **Test** on a *different* tool.\r\n6. **Observe:** The modal opens with the previous tool's test response still displayed in the result area.\r\n7. **Expected:** The result area should be empty, and should only populate after clicking **Run Tool** for the new tool.\r\n\r\n## 🐞 Root Cause\r\n\r\nTwo competing definitions of `openModal()` and `closeModal()` existed in the codebase:\r\n\r\n| Location | Loaded when | Behavior |\r\n|---|---|---|\r\n| `mcpgateway/static/admin.js` (line 1520, 1559) | `<head>` tag, line 342 of `admin.html` | Full cleanup: calls `cleanupToolTestModal()`, `cleanupPromptTestModal()`, `cleanupGatewayTestModal()`, etc. to clear result containers, reset forms, and manage `AppState` |\r\n| Inline `<script>` in `mcpgateway/templates/admin.html` (former line 8418-8425) | `<body>`, runs **after** `admin.js` | Simple hide/show only: `classList.add(\"hidden\")` / `classList.remove(\"hidden\")` |\r\n\r\nSince JavaScript's last-definition-wins rule applies to global functions, the inline `<body>` script **silently overrode** the `admin.js` versions. The inline `closeModal()` only toggled the `hidden` CSS class and **never called any cleanup functions**, so result containers (`#tool-test-result`, `#prompt-test-result`, `#gateway-test-result`, `#gateway-test-response-json`) were never cleared.\r\n\r\n**Before (broken flow):**\r\n```\r\nUser clicks \"Test\" on Tool A\r\n  -> testTool() fetches tool data, builds form, calls openModal()  [inline version: just removes \"hidden\"]\r\n  -> User clicks \"Run Tool\" -> result populates #tool-test-result\r\n  -> User clicks \"Close\"    -> closeModal()                        [inline version: just adds \"hidden\"]\r\n                                                                    #tool-test-result STILL CONTAINS Tool A's response\r\n\r\nUser clicks \"Test\" on Tool B\r\n  -> testTool() fetches tool data, builds form fields (cleared), calls openModal()\r\n  -> Modal opens with #tool-test-result STILL SHOWING Tool A's response  <-- BUG\r\n```\r\n\r\n**After (fixed flow):**\r\n```\r\nUser clicks \"Test\" on Tool A\r\n  -> testTool() fetches tool data, builds form, calls openModal()  [admin.js version: tracks AppState]\r\n  -> User clicks \"Run Tool\" -> result populates #tool-test-result\r\n  -> User clicks \"Close\"    -> closeModal()                        [admin.js version: calls cleanupToolTestModal()]\r\n                                                                    #tool-test-result cleared, form reset, state cleaned\r\n\r\nUser clicks \"Test\" on Tool B\r\n  -> testTool() clears #tool-test-result (defense-in-depth), builds form, calls openModal()\r\n  -> Modal opens with empty result area  <-- FIXED\r\n```\r\n\r\n## 💡Fix Description\r\n\r\n### 1. Remove the inline override (`admin.html`)\r\n\r\nDeleted the inline `<script>` block (former lines 8418-8425) that was shadowing the `admin.js` `openModal`/`closeModal` functions. This restores the proper cleanup-aware versions that already existed in `admin.js`.\r\n\r\n```diff\r\n- <script>\r\n-   function openModal(id) {\r\n-     document.getElementById(id)?.classList.remove(\"hidden\");\r\n-   }\r\n-   function closeModal(id) {\r\n-     document.getElementById(id)?.classList.add(\"hidden\");\r\n-   }\r\n- </script>\r\n```\r\n\r\nAll `openModal`/`closeModal` calls in the codebase are in `onclick` handlers that execute at user-interaction time (long after both `<head>` and `<body>` scripts have loaded), so removing the inline definitions has no ordering risk.\r\n\r\n### 2. Defense-in-depth: clear result on open (`admin.js`)\r\n\r\nAdded result-area clearing in each `test*()` function right before `openModal()`, so stale content is removed even if `closeModal` cleanup ever fails (e.g., exception in cleanup path, user refreshes mid-modal, etc.):\r\n\r\n- **`testTool()`**: Clears `#tool-test-result` via `textContent = \"\"` and hides `#tool-test-loading`\r\n- **`testPrompt()`**: Resets `#prompt-test-result` to placeholder text (\"Click Render Prompt to see the rendered output\") and hides `#prompt-test-loading`\r\n- **`testGateway()`**: Clears `#gateway-test-response-json` and hides `#gateway-test-result` container\r\n\r\nThis matches the existing pattern already used by `openResourceTestModal()` and `testA2AAgent()`, which were not affected by the bug because they already cleared result content on open.\r\n\r\n### 3. Playwright regression tests (10 new tests across 3 files)\r\n\r\nAdded tests to the existing `TestToolsTestModal`, `TestPromptsTestModal`, and `TestGatewayTestModal` classes in the `tests/playwright/entities/` extended test files:\r\n\r\n**Core regression test pattern** (`test_test_modal_result_cleared_on_reopen`):\r\n1. Open test modal for entity A\r\n2. Inject a marker string (`STALE_RESULT_MARKER`) into the result area via `page.evaluate()`\r\n3. Close the modal\r\n4. Open test modal for entity B\r\n5. Assert the marker string is **not** present in the result area\r\n\r\n**Additional coverage:**\r\n- `test_test_modal_result_empty_on_open` / `test_test_modal_result_hidden_on_open` / `test_test_modal_result_shows_placeholder_on_open` - verifies initial state is clean\r\n- `test_test_modal_loading_hidden_on_open` - verifies loading spinner is not visible on fresh open\r\n\r\n### Files changed\r\n\r\n| File | Change |\r\n|---|---|\r\n| `mcpgateway/templates/admin.html` | Removed 8-line inline `<script>` that overrode `openModal`/`closeModal` |\r\n| `mcpgateway/static/admin.js` | Added result clearing in `testTool()`, `testPrompt()`, `testGateway()` before `openModal()` |\r\n| `tests/playwright/pages/tools_page.py` | Added `tool_test_result` locator property |\r\n| `tests/playwright/pages/gateways_page.py` | Added `test_modal_result` and `test_modal_response_json` locator properties |\r\n| `tests/playwright/entities/test_tools_extended.py` | Added 4 regression tests to `TestToolsTestModal` |\r\n| `tests/playwright/entities/test_prompts_extended.py` | Added 3 regression tests to `TestPromptsTestModal` |\r\n| `tests/playwright/entities/test_gateways_extended.py` | Added 2 regression tests + 1 initial-state test to `TestGatewayTestModal` |\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |   ✅     |\r\n| Unit tests                            | `make test`          |   ✅     |\r\n| Coverage ≥ 80 %                       | `make coverage`      |   ✅     |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3935719310",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T11:09:13+00:00",
+      "body": "This is a well-executed bug fix with excellent defensive programming and comprehensive test coverage.\n\n🎯 Key Strengths\n\n1. Root Cause Analysis: Correctly identified the \"last-definition-wins\" JavaScript issue where inline `openModal()/closeModal()` in `admin.html` (line 8418-8425) was silently overriding the proper cleanup-aware versions in admin.js.\n\n2. Two-Layer Fix Strategy:\n- Primary fix: Removed the problematic inline script override\n- Defense-in-depth: Added explicit result clearing in testTool(), testPrompt(), and testGateway() before opening modals\n\n3. Comprehensive Test Coverage: Added 10 new Playwright regression tests across 3 entity types:\n- Tools: 4 tests (empty on open, cleared on reopen, loading hidden, existing)\n- Prompts: 3 tests (placeholder on open, cleared on reopen, loading hidden)\n- Gateways: 3 tests (hidden on open, cleared on reopen, existing)\n\n4. Code Quality:\n- Clean, minimal changes (242 additions, 8 deletions)\n- Follows existing patterns (matches openResourceTestModal() and testA2AAgent())\n- Proper use of safeGetElement() helper\n- Good test isolation with marker injection pattern\n\n📋 Technical Review\n\n`admin.html` (8 lines removed):\n - ✅ Correctly removes the shadowing inline script\n - ✅ No ordering risk since onclick handlers execute after both scripts load\n\n`admin.js` (36 lines added):\n- ✅ testTool() (line 12214-12221): Clears #tool-test-result and hides loading spinner\n- ✅ testPrompt() (line 14510-14523): Clears result, adds placeholder text, hides loading\n- ✅ testGateway() (line 14858-14865): Clears #gateway-test-response-json and hides result container\n- ✅ All changes use defensive null checks\n\nCleanup Functions (verified existing code):\n- ✅ closeModal() (line 1560) properly calls type-specific cleanup with error isolation\n- ✅ cleanupToolTestModal() (line 14361) clears result and resets form\n- ✅ cleanupPromptTestModal() (line 14796) restores placeholder text\n- ✅ cleanupGatewayTestModal() (line 15130) removes event listeners\n\nTest Files:\n- ✅ Tests use proper marker injection pattern (STALE_RESULT_MARKER)\n- ✅ Verify both initial state and cross-entity clearing\n- ✅ Include loading spinner visibility checks\n- ✅ Proper use of pytest.skip() for insufficient test data\n\n✅ Verification Checklist\n\n - ✅ Lint suite passes\n - ✅ Unit tests pass\n - ✅ Coverage ≥ 80%\n - ✅ Manual regression verified\n - ✅ Code formatted (black, isort, pre-commit)\n - ✅ No secrets committed\n - ✅ Follows existing patterns\n - ✅ Comprehensive test coverage\n\n LGTM 🚀 "
+    },
+    {
+      "id": "3936231437",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T12:32:36+00:00",
+      "body": "Rebased on main (clean, no conflicts). Code review passed.\n\n**Root cause is correct**: the inline `<script>` in `admin.html` silently overrode the cleanup-aware `openModal()`/`closeModal()` from `admin.js` due to JavaScript's last-definition-wins rule. Removing the inline block is the right fix.\n\n**Defense-in-depth clearing is well-implemented and consistent:**\n- `testTool()`: clears `#tool-test-result` with `textContent = \"\"`, hides loading via `style.display = \"none\"` — matches `cleanupToolTestModal()` pattern.\n- `testPrompt()`: resets `#prompt-test-result` with matching placeholder text/classes, hides loading via `classList.add(\"hidden\")` — matches `cleanupPromptTestModal()`. Uses safe `createElement` + `textContent` instead of `innerHTML`.\n- `testGateway()`: clears `#gateway-test-response-json` and hides `#gateway-test-result` — fills a real gap since `cleanupGatewayTestModal()` only removed event listeners, not result content.\n\nThis brings tool/prompt/gateway modals in line with `openResourceTestModal()` and `testA2AAgent()` which already cleared results on open.\n\n**Test coverage is comprehensive**: 10 new Playwright regression tests across tools, prompts, and gateways covering initial-state, stale-result-on-reopen, and loading-spinner assertions. Page object additions are consistent with existing locator naming patterns.\n\nNo security or performance concerns — pure DOM manipulation."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "01d53dffdb482572022e669f42a742d3bebc1571",
+      "message": "fix persisting responses in test modal for unique items - tools, mcp servers, prompts\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-12T06:10:52+00:00"
+    },
+    {
+      "sha": "b5d932d9c1ee8a6f5047a8d5dd7f89ae54c1d25b",
+      "message": "add test coverage (playwright+regression)\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-12T06:40:31+00:00"
+    },
+    {
+      "sha": "46dad0b86b9fd746419dedb836350089c83149e7",
+      "message": "web linting\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-12T06:59:56+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 242,
+  "deletions": 8,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:11.796860",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:11.798593",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3633,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3633.json"
+  }
+}

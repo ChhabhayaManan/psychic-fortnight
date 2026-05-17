@@ -1,0 +1,202 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3413,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3413"
+  },
+  "metadata": {
+    "title": "fix(rbac) admin user visibility issue for personal teams",
+    "state": "closed",
+    "created_at": "2026-03-03T06:54:16+00:00",
+    "updated_at": "2026-03-07T13:16:52+00:00",
+    "closed_at": "2026-03-07T13:16:50+00:00",
+    "merged_at": "2026-03-07T13:16:50+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "bug",
+      "security",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3376\r\n\r\n## 📌 Summary\r\nFixed a security issue in the admin UI where platform administrators could see and manage personal teams belonging to other users. The issue violated the fundamental security principle that personal teams should only be visible to their owner, even for admins.\r\n\r\n**Why this matters:**\r\n- Personal teams are private workspaces that should never be exposed to other users\r\n- The vulnerability allowed admins to view, edit, and potentially delete other users' personal teams\r\n- This violated user privacy expectations and the platform's security model\r\n- The fix maintains admin capabilities while respecting personal team privacy boundaries\r\n\r\nAnother minor fix: All other private teams are still listed for the admin user for governance (managing members, editing, deleting) but when the admin user tries to see the content for that private team which he is not a member of, in that case, error banner will be displayed and will be defaulted to All Teams.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n**Original Bug:**\r\n\r\n1. Create two users: `admin@example.com` (platform admin) and `user@example.com` (regular user)\r\n2. Each user automatically gets a personal team (e.g., `personal-admin`, `personal-user`)\r\n3. Log in as `admin@example.com` to the admin UI at `/admin`\r\n4. Navigate to any team management endpoint:\r\n   - GET `/admin/teams` - List all teams\r\n   - GET `/admin/teams/{team_id}` - View team details\r\n   - PUT `/admin/teams/{team_id}` - Edit team\r\n   - DELETE `/admin/teams/{team_id}` - Delete team\r\n\r\n**Expected behavior:** Admin should only see:\r\n- Their own personal team (`personal-admin`)\r\n- All non-personal (shared) teams\r\n\r\n**Actual behavior (bug):** Admin could see:\r\n- Their own personal team (`personal-admin`)\r\n- Other users' personal teams (`personal-user`, `personal-alice`, etc.)\r\n- All non-personal teams\r\n\r\n## 🐞 Root Cause\r\nThe issue existed in `mcpgateway/admin.py` across four endpoints that used `TeamManagementService.list_teams()`:\r\n\r\n```python\r\n# BEFORE (vulnerable code)\r\nteams = team_service.list_teams(\r\n    db=db,\r\n    include_personal=True,  # Included ALL personal teams\r\n    include_public=True\r\n)\r\n```\r\n\r\n**The problem:**\r\n- `include_personal=True` returned ALL personal teams in the database\r\n- No filtering was applied to restrict personal teams to the current admin's own team\r\n- The service layer correctly implemented the logic, but the admin layer misused it\r\n\r\n**Affected endpoints:**\r\n1. `GET /admin/teams` - Team listing page\r\n2. `GET /admin/teams/{team_id}` - Team details page\r\n3. `PUT /admin/teams/{team_id}` - Team edit endpoint\r\n4. `DELETE /admin/teams/{team_id}` - Team deletion endpoint\r\n\r\n## 💡 Fix Description\r\n\r\n**Access model updated:**\r\n\r\n- Exclude all personal teams from admin queries.\r\n- Explicitly fetch and include only the current admin’s personal team.\r\n- Return 404 for attempts to access other users’ personal teams.\r\n\r\n**Implementation changes:**\r\n\r\n- Updated all four admin endpoints to:\r\n    - Call list_teams(include_personal=False)\r\n    - Fetch admin’s personal team via new helper method\r\n- Added TeamManagementService.get_user_personal_team() to retrieve owner-scoped personal team\r\n- Added UI banner clarifying visibility rules\r\n\r\n**Security Guarantees:**\r\n\r\nAfter this change:\r\nAdmins cannot:\r\n1. View other users’ personal teams\r\n2. Edit other users’ personal teams\r\n3. Delete other users’ personal teams\r\n\r\nAdmins can:\r\n1. Manage all shared (non-personal) teams\r\n2. Access their own personal team\r\n3. This enforces strict personal team isolation while preserving administrative control over shared resources.\r\n\r\n**Tests:**\r\n11 new test cases (security + UX)\r\nValidates:\r\n\r\n- Personal team isolation\r\n- 404 enforcement on unauthorized access\r\n- Admin self-access\r\n- Shared team visibility\r\n- All tests passing\r\n\r\n**Design Decision:**\r\n\r\n- The fix is applied in the admin layer, not the service layer, to preserve service flexibility and avoid impacting other valid use cases of list_teams().\r\n\r\n| Scenario | Before (Vulnerable) | After (Secure) |\r\n|----------|---------------------|----------------|\r\n| Admin views team list | Sees ALL personal teams | Sees only their own personal team |\r\n| Admin views other user's personal team | ✅ Allowed (bug) | ❌ Blocked (404 error) |\r\n| Admin views their own personal team | ✅ Allowed | ✅ Allowed |\r\n| Admin manages shared teams | ✅ Allowed | ✅ Allowed |\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |     ✅   |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |   ✅     |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3881693792",
+      "author": "madhav165",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-03T10:30:11+00:00",
+      "body": "PR #3413 Review: Admin User Visibility Issue for Personal Teams                                                       \n\nOverview                                                                                                              \n                            \nThis PR fixes a security vulnerability where platform admins could see, edit, and delete personal teams belonging to\nother users. The fix changes admin endpoints to call list_teams(include_personal=False) and then separately fetches\nonly the admin's own personal team via a new get_user_personal_team() service method. It also adds a UI banner when\nadmins view non-member teams.\n\nCorrectness\n\nThe core fix is sound - switching from include_personal=True to include_personal=False at the admin layer is the right\n  approach, and the decision to keep the service layer unchanged preserves flexibility.\n\nIssues found:\n\n- Duplicated filter logic across 4 endpoints (admin_get_all_team_ids, admin_search_teams, admin_teams_partial_html,\nadmin_list_teams). Each has a near-identical block checking is_active, visibility, and search query match for the\npersonal team. This is a maintenance risk - if the filtering logic changes, all 4 places need updating. Consider\nextracting a helper like _should_include_personal_team(team, include_inactive, visibility, search_query) -> bool.\n- Inconsistent search matching logic between endpoints:\n  - admin_get_all_team_ids (line ~65): checks name and slug only\n  - admin_search_teams (line ~93): checks name, slug, and description\n  - admin_teams_partial_html (line ~124): checks name, slug, and description\n  - admin_list_teams (line ~148): checks name, slug, and description\n\nThe admin_get_all_team_ids endpoint is missing the description check, which is inconsistent.\n- is_admin_user computed twice in admin_ui: once at line 15 of the diff, and again inline at lines 40-41. The second\noccurrence should use the is_admin_user variable already computed.\n\nSecurity\n\n- The fix correctly blocks access to other users' personal teams across all 4 admin team endpoints.\n- The get_user_personal_team service method correctly filters by created_by, is_personal, and is_active.\n- Minor concern: The PR description mentions returning 404 for attempts to access other users' personal teams via\nview/edit/delete endpoints, but I don't see those checks in the diff. The diff only covers listing endpoints. Are the\nview/edit/delete guards in a separate commit or missing?\n\nCode Quality\n\n- f-string in logger: team_management_service.py line 183 uses f\"Failed to get personal team for user {user_email}:\n{e}\" - should use lazy logging: logger.error(\"Failed to get personal team for user %s: %s\", user_email, e) per project\n  conventions.\n- Template variable redundancy: The admin_viewing_non_member_team computation in the template context (lines 39-44)\nre-derives admin status instead of using is_admin_user.\n\nTest Coverage\n\n- Strong coverage: 4 service-level tests + 4 banner tests + 7 security regression tests + 12 filter edge case tests =\ncomprehensive.\n- Tests cover the happy path, edge cases (inactive, wrong visibility, search mismatch, limit reached), and both\nadmin/non-admin paths.\n- The existing tests were properly updated with get_user_personal_team = AsyncMock(return_value=None) to avoid\nbreakage.\n- Trailing whitespace in several test lines (visible in diff) - should be cleaned with make black.\n\nRecommendations\n\n1. Extract the personal team filter logic into a shared helper to eliminate the 4x duplication\n2. Fix the inconsistent search matching in admin_get_all_team_ids (add description check)\n3. Use the is_admin_user variable in the template context instead of re-computing it\n4. Fix the f-string logger to use lazy %s formatting\n5. Clarify: Are view/edit/delete endpoint guards included in this PR or in a follow-up?\n\nVerdict\n\nThe security fix itself is correct and well-tested. The main concerns are code duplication and a minor inconsistency\nin search logic. These should be addressed before merging to prevent divergence bugs in the future.\n"
+    },
+    {
+      "id": "3890135741",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-04T15:25:13+00:00",
+      "body": "## Review Feedback\n\nThe fix correctly identifies the security issue and the admin-layer approach is reasonable, but the current implementation has a structural problem worth addressing before merge.\n\n### Core Issue: Two queries + manual append breaks pagination\n\nAll four admin endpoints (`admin_get_all_team_ids`, `admin_search_teams`, `admin_teams_partial_html`, `admin_list_teams`) follow this pattern:\n\n```python\nresult = await team_service.list_teams(include_personal=False, ...)\ndata = result[\"data\"]\nadmin_personal_team = await team_service.get_user_personal_team(user_email)\nif admin_personal_team and not any(t.id == admin_personal_team.id for t in data):\n    if team_service.should_include_personal_team(...) and len(data) < per_page:\n        data.append(admin_personal_team)\n```\n\n**Problems:**\n1. **Pagination metadata is wrong.** `total_items`, `total_pages`, and `has_next` from the first query don't account for the appended personal team. The UI count will be off by one.\n2. **Personal team can silently disappear.** If `len(data) == per_page`, the guard blocks it from being added — it won't appear on *any* page.\n3. **Code duplication.** The same block is copy-pasted 4 times, and the `admin_list_teams` variant already has slightly different hardcoded args (`True, None` vs request params).\n4. **Two queries instead of one** for every admin team listing request.\n\n### Suggested approach: single query in the service layer\n\nIn `list_teams` (and `get_all_team_ids`), add a `personal_owner_email` parameter:\n\n```python\nasync def list_teams(self, ..., include_personal=False, personal_owner_email=None, ...):\n    ...\n    if not include_personal:\n        if personal_owner_email:\n            query = query.where(\n                or_(EmailTeam.is_personal.is_(False), EmailTeam.created_by == personal_owner_email)\n            )\n        else:\n            query = query.where(EmailTeam.is_personal.is_(False))\n```\n\nThen admin.py call sites become:\n```python\nresult = await team_service.list_teams(include_personal=False, personal_owner_email=user_email, ...)\n```\n\nThis fixes all four problems: pagination is correct, no silent disappearance, no duplication, one query. The new `get_user_personal_team` and `should_include_personal_team` methods can be removed. The `admin_viewing_non_member_team` banner logic and UI changes are fine as-is."
+    },
+    {
+      "id": "3890143389",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-04T15:26:28+00:00",
+      "body": "## Review Feedback\n\nThe fix correctly identifies the security issue and the admin-layer approach is reasonable, but the current implementation has a structural problem worth addressing before merge.\n\n### Core Issue: Two queries + manual append breaks pagination\n\nAll four admin endpoints (`admin_get_all_team_ids`, `admin_search_teams`, `admin_teams_partial_html`, `admin_list_teams`) follow this pattern:\n\n```python\nresult = await team_service.list_teams(include_personal=False, ...)\ndata = result[\"data\"]\nadmin_personal_team = await team_service.get_user_personal_team(user_email)\nif admin_personal_team and not any(t.id == admin_personal_team.id for t in data):\n    if team_service.should_include_personal_team(...) and len(data) < per_page:\n        data.append(admin_personal_team)\n```\n\n**Problems:**\n1. **Pagination metadata is wrong.** `total_items`, `total_pages`, and `has_next` from the first query don't account for the appended personal team. The UI count will be off by one.\n2. **Personal team can silently disappear.** If `len(data) == per_page`, the guard blocks it from being added — it won't appear on *any* page.\n3. **Code duplication.** The same block is copy-pasted 4 times, and the `admin_list_teams` variant already has slightly different hardcoded args (`True, None` vs request params).\n4. **Two queries instead of one** for every admin team listing request.\n\n### Suggested approach: single query in the service layer\n\nIn `list_teams` (and `get_all_team_ids`), add a `personal_owner_email` parameter:\n\n```python\nasync def list_teams(self, ..., include_personal=False, personal_owner_email=None, ...):\n    ...\n    if not include_personal:\n        if personal_owner_email:\n            query = query.where(\n                or_(EmailTeam.is_personal.is_(False), EmailTeam.created_by == personal_owner_email)\n            )\n        else:\n            query = query.where(EmailTeam.is_personal.is_(False))\n```\n\nThen admin.py call sites become:\n```python\nresult = await team_service.list_teams(include_personal=False, personal_owner_email=user_email, ...)\n```\n\nThis fixes all four problems: pagination is correct, no silent disappearance, no duplication, one query. The new `get_user_personal_team` and `should_include_personal_team` methods can be removed. The `admin_viewing_non_member_team` banner logic and UI changes are fine as-is."
+    },
+    {
+      "id": "3903908769",
+      "author": "madhav165",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-06T14:06:47+00:00",
+      "body": "Good fix overall. The core security change is correct — switching from `include_personal=True` to `include_personal=False, personal_owner_email=user_email` across all four admin endpoints cleanly isolates personal teams at the query level without breaking the service layer for other callers.\n\nA few things were addressed during review:\n\n**Admin banner behavior fixed**: The banner message said \"Defaulting to All Teams\" but `selected_team_id` was not actually being reset — the page would filter by the selected team and return empty content. Fixed by resetting `selected_team_id = None` when an admin selects a non-member team, so the content genuinely defaults to All Teams as stated.\n\n**Service layer tests replaced**: `test_list_teams_personal_owner_email` and `test_get_all_team_ids_personal_owner_email` were checking compiled SQL strings for column name presence (`\"is_personal\" in compiled`, `\"created_by\" in compiled`), which is fragile and does not verify filtering behavior. Replaced with real in-memory SQLite tests that insert teams with different `is_personal`/`created_by` values and assert which ones are returned.\n\nOne note on the asymmetry between admin and non-admin paths: non-admins with an invalid `team_id` silently default to All Teams (same as before this PR), while admins now get the banner. This is intentional — admins may legitimately attempt to select a non-member team for governance, so the explanation is warranted."
+    },
+    {
+      "id": "3903910033",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T14:07:02+00:00",
+      "body": ""
+    },
+    {
+      "id": "3908632397",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-07T11:37:35+00:00",
+      "body": "Reviewed and approved. Changes look correct and well-tested.\n\n**What was fixed during review:**\n- Rebased onto main, resolved 2 merge conflicts in admin.py\n- Fixed broken banner test (needed team-scoped admin token, not unrestricted)\n- Updated 3 pre-existing tests expecting 403 to match new silent-reset behavior\n- Removed redundant _is_admin variable (reused is_admin_user)\n- Added personal team guard to admin_get_team_edit() (returns 404 for non-owners)\n- Fixed admin_update_team() to check update_team() return value (was showing false success for personal teams)\n- Added 4 deny-path tests for direct personal team access\n- Renamed misleading test name\n- Fixed existing tests mocking update_team with None instead of True\n\n**Security:** No SQL injection, XSS, or authorization bypass risks. Service layer correctly blocks personal team mutations. Direct-access endpoints now also guard against personal team disclosure.\n\n**All 1171 admin/team tests pass.**"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "1cd4914a9fa5a99adc9d64b60ba233d426c692dd",
+      "message": "fix personal teams visibility for admin users\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-02T17:51:16+00:00"
+    },
+    {
+      "sha": "87b355a00e351b974d052d0b0e7d67e4c6271012",
+      "message": "Fix ux for admin users for team access\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-03T05:45:36+00:00"
+    },
+    {
+      "sha": "c95b88837a59b9cbc1afa7d9cc923ca3de7e2ff5",
+      "message": "linting fixes\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-03T06:20:33+00:00"
+    },
+    {
+      "sha": "30d4374b79b1c92877f6456e7bf411164966e60b",
+      "message": "add regression tests for admin visibility\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-03T06:31:14+00:00"
+    },
+    {
+      "sha": "6aa634a3b62bed1e134e3cb0f9e35ba038ed73c4",
+      "message": "added regression tests\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-03T07:20:38+00:00"
+    },
+    {
+      "sha": "10fcaff99808c9359120abf653b16a653f78f71a",
+      "message": "fix test cases\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-03T08:34:44+00:00"
+    },
+    {
+      "sha": "8d68bfddb3ce64c508afaabbf1f729494aec2065",
+      "message": "resolve duplications and other minor issues\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-03T14:10:32+00:00"
+    },
+    {
+      "sha": "55bc8a1566d406ef12983f310dce362e225e2ea0",
+      "message": "fix test case\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-03T14:41:50+00:00"
+    },
+    {
+      "sha": "688e028ee1a55f8fde6ac4ed426e6104b7943296",
+      "message": "add missing test coverage\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-04T04:43:20+00:00"
+    },
+    {
+      "sha": "8a2e20eac5f07682a53934ec2d90f110dc56f641",
+      "message": "fix: Ensure admin team views correctly include the admin's own personal team while excluding other users' personal teams.\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-04T18:21:41+00:00"
+    },
+    {
+      "sha": "90b78d401c277d08709c950506809d2a84d9a3af",
+      "message": "add regression tests\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-04T18:40:16+00:00"
+    },
+    {
+      "sha": "4ec067ba6f4fb98aa212432f9605ac984aa26fca",
+      "message": "remove dead code\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-04T18:57:22+00:00"
+    },
+    {
+      "sha": "d91e64f04da244667c773b95468b3d1288262305",
+      "message": "unused code cleanup\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-03-04T19:08:48+00:00"
+    },
+    {
+      "sha": "fabf30357610cce360f49ecdfd7f30682721aa9b",
+      "message": "fix: reset selected_team_id for admin non-member team and replace fragile SQL tests with behavioral tests\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-06T14:12:18+00:00"
+    },
+    {
+      "sha": "b638c9344ce24576c3db067a95e1e5540ddabf1d",
+      "message": "fix(rbac): fix tests for new non-member team behavior and remove redundant variable\n\n- Update tests that expected 403 for non-member team access to match new\n  behavior: non-admins get selected_team_id silently reset, team-scoped\n  admins see banner with content defaulting to All Teams\n- Fix banner test to use team-scoped admin token (token_teams set) so the\n  unrestricted-admin bypass doesn't skip the membership check\n- Remove redundant _is_admin variable, reuse is_admin_user instead\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T10:52:29+00:00"
+    },
+    {
+      "sha": "07f981730d376d2059569d0fe902706132245b73",
+      "message": "fix(rbac): block direct access to other users' personal teams and surface update failures\n\n- admin_get_team_edit: return 404 when team is personal and caller is\n  not the owner (defense-in-depth for personal team isolation)\n- admin_update_team: check return value from update_team(); surface error\n  instead of false success when service refuses the operation (e.g.\n  personal team protection)\n- Fix existing tests that mocked update_team with return_value=None\n  (now correctly use True for success path)\n- Add deny-path tests for personal team edit/update rejection\n- Rename misleading test_admin_cannot_see_private_teams_not_member_of\n  to test_admin_teams_partial_excludes_other_personal_teams\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T11:33:33+00:00"
+    },
+    {
+      "sha": "492dd52da38ea43550e2068974872ee25afc4cca",
+      "message": "fix(rbac): block personal team edit/delete and surface errors correctly\n\n- admin_get_team_edit: block ALL personal teams (not just non-owner),\n  since update_team() rejects all personal team updates anyway. Showing\n  an edit form that can never succeed is misleading.\n- admin_delete_team: check return value from delete_team(). The service\n  catches its own ValueError internally and returns False — the error\n  never propagated to the admin endpoint, causing false success messages.\n- Fix test_admin_delete_team_success to mock return_value=True\n- Add test_admin_delete_team_rejected_personal_team deny-path test\n- Update edit tests to expect 403 for all personal teams\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T11:47:57+00:00"
+    },
+    {
+      "sha": "cc31707aebcd3e36061c74e252b2a07f9882e6c1",
+      "message": "fix(tests): update playwright column indices after entity ID column addition\n\nCommit 3e3bccc98 added ID columns to admin UI tables (agents, gateways,\ntools), shifting all subsequent column indices by +1. Update all\nhardcoded .nth() selectors in playwright tests to match the new layout.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T12:42:38+00:00"
+    },
+    {
+      "sha": "10a9a5724c217e1552c16adfdee3ab0dc0748c34",
+      "message": "fix(tests): use AsyncMock for subprocess stdout in StdIOEndpoint test\n\ntest_mock_subprocess_creation used a regular Mock for process.stdout,\ncausing _pump_stdout() background task to fail with \"object Mock can't\nbe used in 'await' expression\". Use AsyncMock with readline returning\nEOF (b\"\") so the pump task completes cleanly.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T13:00:38+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 1323,
+  "deletions": 85,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:11.159794",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:11.160690",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3413,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3413.json"
+  }
+}

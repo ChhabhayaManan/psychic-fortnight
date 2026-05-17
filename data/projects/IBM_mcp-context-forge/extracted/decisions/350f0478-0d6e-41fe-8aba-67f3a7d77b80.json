@@ -1,0 +1,35 @@
+{
+  "id": "350f0478-0d6e-41fe-8aba-67f3a7d77b80",
+  "title": "perf: Fix N+1 queries in service layer (73% query reduction) #1609",
+  "summary": "<html>\r\n<body>\r\n<!--StartFragment--><html><head></head><body><h3>🚀 Summary</h3>\r\n<p>This PR resolves critical performance bottlenecks (N+1 query issues) across the service layer by refactoring <code>resource_service</code>, <code>prompt_service</code>, <code>system_stats_service</code>, <code>team_management_service</code>, and <code>tool_service</code>.</p>\r\n<p>Following the architectural decision to use <strong>Synchronous SQLAlchemy patterns</strong>, all optimizations replace loop-based fetching with optimized SQL strategies (Aggregation, Subqueries, Joins, and Bulk Updates).</p>\r\n<h3>📊 Performance Impact</h3>\r\n<p><strong>Total Query Reduction: 73% (56 → 15 queries)</strong></p>\r\n\r\nService | Before | After | Reduction | Status\r\n-- | -- | -- | -- | --\r\nresource_service + prompt_service | 14 | 2 | 86% | ✅\r\nsystem_stats_service | 31 | 8 | 74% | ✅\r\nteam_management_service | 5 | 2 | 60% | ✅\r\ntool_service | 6 | 3 | 50% | ✅\r\nTOTAL | 56 | 15 | 73% | PASSED\r\n\r\n\r\n<h3>🛠️ Key Implementation Details</h3>\r\n<ul>\r\n<li>\r\n<p><strong>Aggregated Queries:</strong> Replaced multiple <code>count</code>/<code>sum</code> calls with single <code>select(func.count, func.sum)</code> queries (e.g., in <code>resource_service</code>).</p>\r\n</li>\r\n<li>\r\n<p><strong>UNION ALL:</strong> Optimized <code>system_stats</code> to fetch counts for 6 different tables in a single DB round-trip.</p>\r\n</li>\r\n<li>\r\n<p><strong>Scalar Subqueries:</strong> Replaced Python-list filtering (loading thousands of IDs into memory) with SQL <code>scalar_subquery()</code> in <code>team_management_service</code>.</p>\r\n</li>\r\n<li>\r\n<p><strong>Bulk Updates (<code>delete_team</code>):</strong> Converted row-by-row membership deletion loop to a single bulk <code>UPDATE</code> statement.</p>\r\n<ul>\r\n<li><em>Impact:</em> Reduces operation from <strong>N queries to 1 query</strong> (99% reduction for large teams).</li>\r\n</ul>\r\n</li>\r\n<li>\r\n<p><strong>Redundant Query Removal (<code>verify_team_for_user</code>):</strong> Eliminated duplicate data fetching where the same query was executed twice sequentially.</p>\r\n<ul>\r\n<li><em>Impact:</em> Reduces method overhead by <strong>50% (2 queries → 1 query)</strong>.</li>\r\n</ul>\r\n</li>\r\n<li>\r\n<p><strong>LEFT JOINs:</strong> Removed N+1 fetches for \"Team Name\" in <code>tool_service</code> by joining <code>EmailTeam</code> directly in the initial query.</p>\r\n</li>\r\n</ul>\r\n<h3>🧪 Testing &amp; Validation</h3>\r\n<ul>\r\n<li>\r\n<p><strong>Unit Tests:</strong> 155+ tests passed across all modified services and routers (including <code>test_tool_service.py</code>, <code>test_system_stats_service.py</code>, <code>test_teams.py</code>).</p>\r\n</li>\r\n<li>\r\n<p><strong>Style &amp; Linting:</strong> Passed all style checks (<code>black</code>, <code>isort</code>) and linters (<code>ruff</code>, <code>pylint</code>) per <code>CONTRIBUTING.md</code>.</p>\r\n</li>\r\n<li>\r\n<p><strong>Manual Verification:</strong> Verified <code>UNION ALL</code> logic and bulk update behavior locally.</p>\r\n</li>\r\n</ul>\r\n<blockquote>\r\n<p><strong>Note:</strong> The full project test suite fails on <code>test_gateway_service.py</code> due to a missing <code>url_normalize</code> dependency in the test environment configuration. This is an existing environment issue and is unrelated to the changes in this PR. All tests relevant to these changes pass successfully.</p>\r\n</blockquote>\r\n<h3>✅ Compliance Checklist</h3>\r\n<ul>\r\n<li>[x] All commits include <code>Signed-off-by</code> (DCO compliant).</li>\r\n<li>[x] Python file headers maintained (Copyright 2025, SPDX-License-Identifier).</li>\r\n<li>[x] Code formatted with <code>black</code> and <code>isort</code>.</li>\r\n<li>[x] No regressions in existing functionality.</li>\r\n</ul></body></html><!--EndFragment-->\r\n</body>\r\n</html>",
+  "reasoning": "<html>\r\n<body>\r\n<!--StartFragment--><html><head></head><body><h3>🚀 Summary</h3>\r\n<p>This PR resolves critical performance bottlenecks (N+1 query issues) across the service layer by refactoring <code>resource_service</code>, <code>prompt_service</code>, <code>system_stats_service</code>, <code>team_management_service</code>, and <code>tool_service</code>.</p>\r\n<p>Following the architectural decision to use <strong>Synchronous SQLAlchemy patterns</strong>, all optimizations replace loop-based fetching with optimized SQL strategies (Aggregation, Subqueries, Joins, and Bulk Updates).</p>\r\n<h3>📊 Performance Impact</h3>\r\n<p><strong>Total Query Reduction: 73% (56 → 15 queries)</strong></p>\r\n\r\nService | Before | After | Reduction | Status\r\n-- | -- | -- | -- | --\r\nresource_service + prompt_service | 14 | 2 | 86% | ✅\r\nsystem_stats_service | 31 | 8 | 74% | ✅\r\nteam_management_service | 5 | 2 | 60% | ✅\r\ntool_service | 6 | 3 | 50% | ✅\r\nTOTAL | 56 | 15 | 73% | PASSED\r\n\r\n\r\n<h3>🛠️ Key Implementation De",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "KhanTabish01",
+    "crivetimihai"
+  ],
+  "tags": [
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "ad410b69-87b0-4cc7-b3c9-9648e8b0be3b",
+      "source_type": "pr",
+      "source_id": "1655",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/1655",
+      "contributor": "KhanTabish01",
+      "timestamp": "2025-12-18T15:05:26Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1655.json"
+    }
+  ],
+  "timestamp": "2025-12-18T15:05:26Z",
+  "created_at": "2026-05-17T17:24:27.490406",
+  "updated_at": "2026-05-17T17:24:27.490408",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:24:27.490995",
+    "artifact_type": "decisions",
+    "artifact_id": "350f0478-0d6e-41fe-8aba-67f3a7d77b80"
+  }
+}

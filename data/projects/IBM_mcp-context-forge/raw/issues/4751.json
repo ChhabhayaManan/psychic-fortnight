@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4751,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4751"
+  },
+  "metadata": {
+    "title": "[FEATURE]: Separate Redis URL for Rate Limiter Plugin",
+    "state": "open",
+    "created_at": "2026-05-13T16:06:11+00:00",
+    "updated_at": "2026-05-14T21:12:55+00:00",
+    "closed_at": null,
+    "author": "ja8zyjits",
+    "labels": [
+      "enhancement",
+      "triage",
+      "python",
+      "plugins",
+      "wxo"
+    ],
+    "milestone": null,
+    "assignees": [
+      "ja8zyjits"
+    ]
+  },
+  "description": "### 🧭 Type of Feature\n\n- [x] Enhancement to existing functionality\n- [ ] New feature or capability\n- [ ] New MCP-compliant server\n- [ ] New component or integration\n- [ ] Developer tooling or test improvement\n- [ ] Packaging, automation and deployment (ex: pypi, docker, quay.io, kubernetes, terraform)\n- [ ] Other (please describe below)\n\n### 🧭 Epic\n\n**Title:** Isolated Redis Instance for Rate Limiter Plugin\n**Goal:** Separate rate limiter Redis from main Redis. Independent scaling, isolation, failure containment.\n**Why now:** Rate limiter high-traffic. Shared Redis = contention. Separate = better performance, ops flexibility.\n\n---\n\n### 🧑🏻‍💻 User Story 1\n\n**As a:** Platform operator\n**I want:** Separate Redis URL for rate limiter plugin\n**So that:** Rate limiting doesn't impact main Redis (cache, sessions, federation)\n\n#### ✅ Acceptance Criteria\n```gherkin\nScenario: Configure separate rate limiter Redis\n  Given RATELIMITER_REDIS_URL env var set\n  When rate limiter plugin initializes\n  Then connects to separate Redis instance\n  And main Redis URL unchanged\n\nScenario: Fallback to main Redis\n  Given RATELIMITER_REDIS_URL not set\n  When rate limiter plugin initializes\n  Then uses REDIS_URL (backward compatible)\n```\n\n---\n\n### 🧑🏻‍💻 User Story 2\n\n**As a:** Kubernetes operator\n**I want:** RATELIMITER_REDIS_URL from K8s Secret\n**So that:** Credentials secure, rotatable\n\n#### ✅ Acceptance Criteria\n```gherkin\nScenario: Load from K8s Secret\n  Given RATELIMITER_REDIS_URL in Secret\n  When Helm chart deployed\n  Then env var populated from Secret\n  And rate limiter connects successfully\n```\n\n---\n\n### 📐 Design Sketch (optional)\n\n```mermaid\nflowchart LR\n    A[MCPGateway] -->|Cache/Sessions| B[Main Redis]\n    A -->|Rate Limits| C[Rate Limiter Redis]\n    D[K8s Secret] -.->|RATELIMITER_REDIS_URL| A\n```\n\n**Config**:\n```python\n# mcpgateway/config.py\nRATELIMITER_REDIS_URL: str = Field(\n    default=\"\",  # Empty = use REDIS_URL\n    description=\"Redis URL for rate limiter plugin (optional)\"\n)\n```\n\n**Plugin**:\n```python\n# plugins/rate_limiter/rate_limiter.py\nredis_url = settings.RATELIMITER_REDIS_URL or settings.REDIS_URL\nself.redis = Redis.from_url(redis_url)\n```\n\n---\n\n### 🔗 MCP Standards Check\n\n- [x] Change adheres to current MCP specifications\n- [x] No breaking changes to existing MCP-compliant integrations\n- [x] If deviations exist, please describe them below:\n\nN/A - Internal infrastructure change. No MCP protocol impact.\n\n---\n\n### 🔄 Alternatives Considered\n\n1. **Redis DB number separation**: Same instance, different DB. Rejected - still shares connection pool, memory.\n2. **Redis Cluster**: Over-engineered for this use case. Separate instance simpler.\n3. **In-memory rate limiter**: No persistence. Rejected - multi-instance deployments need shared state.\n\n---\n\n### 📓 Additional Context\n\n**Related**:\n- Rate limiter plugin: `plugins/rate_limiter/`\n- Main Redis config: `mcpgateway/config.py:REDIS_URL`\n- Helm chart: `charts/mcp-stack/values.yaml`\n\n**Implementation checklist**:\n- [ ] Add `RATELIMITER_REDIS_URL` to `mcpgateway/config.py`\n- [ ] Update rate limiter plugin to use new URL (fallback to `REDIS_URL`)\n- [ ] Add to `.env.example` with comment\n- [ ] Update Helm chart `values.yaml` + templates\n- [ ] Add K8s Secret example to `charts/mcp-stack/README.md`\n- [ ] Update `docs/docs/manage/configuration.md`\n- [ ] Add migration guide for existing deployments\n",
+  "comments": [
+    {
+      "id": "4454786097",
+      "author": "gandhipratik203",
+      "created_at": "2026-05-14T21:12:55+00:00",
+      "body": "Issue looks like a good place to start. A few things worth considering before implementation:\n\n- The URL is the visible change, but there are likely other Redis-related configuration parameters that need attention alongside it.\n- Most of these can be reused as-is from the existing gateway Redis config — better to default to parity unless there's a specific reason to diverge (e.g. eviction policy or persistence, where the rate-limiter's data profile differs from the main Redis)."
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:33.288144",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:33.288719",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4751,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4751.json"
+  }
+}

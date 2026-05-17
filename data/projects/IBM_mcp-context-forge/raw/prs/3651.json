@@ -1,0 +1,131 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3651,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3651"
+  },
+  "metadata": {
+    "title": "fix(prompts): prioritize name-based lookup per MCP spec (#1704)",
+    "state": "closed",
+    "created_at": "2026-03-12T12:08:49+00:00",
+    "updated_at": "2026-03-21T11:49:50+00:00",
+    "closed_at": "2026-03-21T11:49:49+00:00",
+    "merged_at": "2026-03-21T11:49:49+00:00",
+    "author": "ja8zyjits",
+    "labels": [
+      "bug",
+      "mcp-protocol",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #1704\r\n\r\n## 📌 Summary\r\n\r\nFixes MCP spec violation where `prompts/get` RPC method incorrectly looked up prompts by database ID instead of by name. The MCP specification requires name-based lookup as the primary identifier, with name being a human-readable string (e.g., \"compare_timezones\"), not a UUID.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\nSee issue #1704 for full reproduction steps. In summary:\r\n\r\n```bash\r\n# This should work per MCP spec but was failing:\r\ncurl -X POST \"http://localhost:8080/rpc\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -d '{\"jsonrpc\":\"2.0\",\"method\":\"prompts/get\",\"params\":{\"name\":\"compare_timezones\"},\"id\":1}'\r\n\r\n# Error: \"Prompt not found: compare_timezones\"\r\n```\r\n\r\n## 🐞 Root Cause\r\n\r\nIn `mcpgateway/services/prompt_service.py` (lines 1643-1647), the `get_prompt()` method performed database lookups in the wrong order:\r\n\r\n1. **First** tried to match `DbPrompt.id == prompt_id` (treating the name string as an ID)\r\n2. **Then** fell back to `DbPrompt.name == prompt_id` (correct lookup)\r\n\r\nSince the first query always executed when `prompt_id` was not None (which it always was when a name was provided), it attempted to match the name string against the UUID `id` column, which always failed.\r\n\r\n## 💡 Fix Description\r\n\r\n**Swapped the lookup order** to prioritize name-based lookup per MCP spec:\r\n\r\n1. **First** try `DbPrompt.name == prompt_id` (MCP spec compliant)\r\n2. **Then** fall back to `DbPrompt.id == prompt_id` (backward compatibility)\r\n\r\n**Changes:**\r\n- `mcpgateway/services/prompt_service.py`: Reversed query order in active and inactive prompt lookups\r\n- Updated docstring to clarify: \"Name or ID of the prompt to retrieve. Name-based lookup is prioritized per MCP spec, with ID fallback for backward compatibility.\"\r\n- Updated inline comments to reflect new behavior\r\n\r\n**Test Coverage:**\r\n- Added `test_get_prompt_name_lookup_priority`: Verifies name lookup succeeds with single query\r\n- Added `test_get_prompt_id_fallback_backward_compat`: Verifies ID fallback still works\r\n- Updated existing `test_get_prompt_by_name` to reflect new query order\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          | ✅     |\r\n| Unit tests                            | `make test`          | ✅     |\r\n| Coverage ≥ 80 %                       | `make coverage`      | ✅     |\r\n| Manual regression no longer fails     | Tested with curl     | ✅     |\r\n\r\n**Manual Testing:**\r\n```bash\r\n# Now works correctly with prompt name:\r\ncurl -X POST \"http://localhost:8080/rpc\" \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -d '{\"jsonrpc\":\"2.0\",\"method\":\"prompts/get\",\"params\":{\"name\":\"compare_timezones\"},\"id\":1}'\r\n# Returns: {\"result\": {\"messages\": [...], \"description\": \"...\"}}\r\n\r\n# Backward compatibility: ID-based lookup still works:\r\ncurl -X POST \"http://localhost:8080/rpc\" \\\r\n  -H \"Authorization: Bearer $TOKEN\" \\\r\n  -d '{\"jsonrpc\":\"2.0\",\"method\":\"prompts/get\",\"params\":{\"name\":\"a08617df5bfc4021a01037f5f4ccac8b\"},\"id\":1}'\r\n# Returns: {\"result\": {\"messages\": [...], \"description\": \"...\"}}\r\n```\r\n\r\n## 📐 MCP Compliance\r\n\r\n- [x] Matches current MCP spec (name-based lookup per [MCP Prompts specification](https://modelcontextprotocol.io/specification/2025-06-18/server/prompts))\r\n- [x] No breaking change to MCP clients (maintains backward compatibility with ID-based lookup)\r\n\r\n## ✅ Checklist\r\n\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] Comprehensive test coverage added\r\n- [x] Documentation updated (docstrings and inline comments)\r\n- [x] Backward compatibility maintained\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3941730633",
+      "author": "kevalmahajan",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-13T05:26:29+00:00",
+      "body": "## Changes Reviewed:\r\n\r\nThanks for fixing this and aligning with the MCP Spec. The core fix is correct and properly prioritizes name-based lookup for active prompts. However, there's an inconsistency that should be addressed before merging.\r\n\r\n### Required Changes: \r\n\r\n### 1. Inconsistent Inactive Prompt Lookup Order:\r\n\r\nLocation: mcpgateway/services/prompt_service.py lines 1651-1653\r\nThe inactive prompt fallback section still uses the old ID-first lookup order, which contradicts the fix you made for active prompts:\r\n\r\n```python\r\n# Current code (inconsistent with active prompt behavior)\r\nif not prompt:\r\n    inactive_prompt = db.execute(select(DbPrompt).where(DbPrompt.id == prompt_id).where(not_(DbPrompt.enabled))).scalar_one_or_none()\r\n    if not inactive_prompt:\r\n        inactive_prompt = db.execute(select(DbPrompt).where(DbPrompt.name == prompt_id).where(not_(DbPrompt.enabled))).scalar_one_or_none()\r\n```\r\n\r\nIssue: When a user requests an inactive prompt by name (e.g., \"code_review\"), the system performs 4 queries instead of 2:\r\n1. Active by name (miss)\r\n2. Active by ID (miss)\r\n3. Inactive by ID (miss) <-this should be fallback\r\n4. Inactive by name (hit) <- should happen at step 3\r\nRecommended fix: Swap the lookup order to match the active prompt behavior:\r\n\r\n```python\r\nif not prompt:\r\n    # Check if an inactive prompt exists (name first per MCP spec)\r\n    inactive_prompt = db.execute(select(DbPrompt).where(DbPrompt.name == prompt_id).where(not_(DbPrompt.enabled))).scalar_one_or_none()\r\n    if not inactive_prompt:\r\n        inactive_prompt = db.execute(select(DbPrompt).where(DbPrompt.id == prompt_id).where(not_(DbPrompt.enabled))).scalar_one_or_none()\r\n```\r\n---\r\n### 2. Minor: Test Docstring Clarity\r\n\r\n`Location: tests/test_prompt_get.py line 400`\r\nThe docstring for test_get_prompt_by_name still describes the old behavior:\r\n```\r\n\"\"\"Prompt lookup falls back to name when ID lookup misses.\"\"\"\r\n```\r\nShould be updated to:\r\n```\r\n\"\"\"Prompt lookup prioritizes name first (MCP spec), then falls back to ID.\"\"\"\r\n```\r\n\r\n### 3. Critical Team scoping Issue:\r\n\r\nMentioned in detail in the next comment. (https://github.com/IBM/mcp-context-forge/pull/3651#issuecomment-4052946099)\r\n\r\n---\r\n✅ What's Working Well\r\n- Core active prompt fix correctly implements MCP spec compliance\r\n- Test coverage validates the change with proper query count assertions\r\n- Backward compatibility maintained via ID fallback\r\n- Documentation accurately reflects new behavior\r\nVerdict: Requesting changes to fix the inactive prompt lookup inconsistency for code consistency and optimal query performance."
+    },
+    {
+      "id": "3942916644",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-13T10:06:42+00:00",
+      "body": "##  PR #3651 — Changes Requested\n**fix(prompts): prioritize name-based lookup per MCP spec (#1704)** by @ja8zyjits\n\nCritical MCP compliance fix that correctly prioritizes name-based lookup. Functionally correct with comprehensive tests, but Python Coding Specialist review identified code quality issues that should be addressed before merging.\n\n### Required Changes\n\n**🔴 Must Fix Before Merge** (3 issues):\n\n- [ ] **Optimize database queries** at [`prompt_service.py:1645-1653`](mcpgateway/services/prompt_service.py:1645-1653) - Currently executes 4 queries when prompt not found. Use single query with OR conditions: `select(DbPrompt).where(or_(DbPrompt.name == prompt_id, DbPrompt.id == prompt_id))` then check enabled status in Python.\n\n- [ ] **Extract duplicated query logic** at [`prompt_service.py:1645-1653`](mcpgateway/services/prompt_service.py:1645-1653) - Create helper method `_find_prompt_by_name_or_id(db, prompt_id, enabled: bool) -> Optional[DbPrompt]` to eliminate code duplication and ensure consistency.\n\n- [ ] **Document UUID-like name edge case** at [`prompt_service.py:1645-1647`](mcpgateway/services/prompt_service.py:1645-1647) - Add docstring note explaining behavior when prompt name looks like a UUID, or add validation during prompt creation.\n\n**🟡 Should Fix** (4 issues - can defer to follow-up):\n\n- [ ] Move string conversion to error blocks (trivial fix)\n- [ ] Update docstring Args section for consistency (trivial fix)\n- [ ] Swap inactive lookup order or add comment (trivial fix)\n- [ ] Consider renaming `prompt_id` parameter (47 call sites, defer to follow-up)\n\n### Findings Summary\n\n| Area | Rating | Key Issue |\n| ---- | ------ | --------- |\n| Security | 🟢 | None |\n| Issue Coverage | 🟢 | All 3 requirements met |\n| Correctness | 🟢 | Functionally correct |\n| Performance | 🔴 | 4 DB queries on miss (violates standards) |\n| Maintainability | 🔴 | Query logic duplicated (violates DRY) |\n| Documentation | 🟡 | Edge case not documented |\n\n**Rationale**: While functionally correct, the PR introduces technical debt that violates Python coding standards. The required fixes are straightforward and won't significantly delay this critical MCP compliance fix."
+    },
+    {
+      "id": "3985865716",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-21T09:55:07+00:00",
+      "body": "LGTM — MCP spec compliance fix is correct, security posture improved (pre-lookup scoping), edge cases handled. Pushed 3 fix commits on top for MultipleResultsFound handling, ambiguous name error, and server_id early scoping."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "fdf03a43ba6b0465ea22a99364b3e35acde5b519",
+      "message": "rebased with main\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-03-18T12:17:59+00:00"
+    },
+    {
+      "sha": "1b8155e5e6d24d517064c61fa293756aa8b4a90d",
+      "message": "fixed the logic after rebase\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-03-18T12:53:31+00:00"
+    },
+    {
+      "sha": "73cc28441953ce82052ec5dbe898d273b0cb7ce8",
+      "message": "fix(prompts): apply team scoping before lookup to fix multi-tenancy issue\n- Apply  before database queries and not after\n- Fix inactive prompt lookup order -> name-first, ID-fallback\n- Add multi-team scenario test for duplicate prompt names\n- Update tests to mock scoped query behavior\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-03-18T11:52:46+00:00"
+    },
+    {
+      "sha": "817daa05200983b50d9a3c3e716fb1cadda18830",
+      "message": "refactor(prompt_service): optimize database queries and improve documentation\n- Add _find_prompt_by_name_or_id() helper method to reduce queries from 4 to 2\n- Use single OR condition for name/ID lookup instead of sequential queries\n- Document UUID-like name edge case in method and docstrings\n- Clarify MCP spec compliance and security requirements in documentation\n  Addresses code quality improvements from PR review by msureshkumar88.\n  Reduces database load while maintaining MCP spec compliance and security.\n\nSigned-off-by: Jitesh Nair <jiteshnair@ibm.com>",
+      "author": "Jitesh Nair",
+      "date": "2026-03-18T19:16:37+00:00"
+    },
+    {
+      "sha": "5f40611dcbe2f2dbbbe90b69ecc7a87baf3fb279",
+      "message": "fix(prompts): handle MultipleResultsFound in name-or-id lookup\n\nThe _find_prompt_by_name_or_id helper uses an OR(name, id) query with\nscalar_one_or_none(), which can raise MultipleResultsFound if a prompt's\nname collides with another prompt's ID. Add a try/except to fall back to\nname-only lookup per MCP spec priority, matching the pattern already used\nin resource_service.py.\n\nAlso trims verbose docstrings and removes duplicate mock setup in tests.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T02:35:32+00:00"
+    },
+    {
+      "sha": "1e3bad5da3ad527a8754800f50dcfbef0a24cf7f",
+      "message": "fix(prompts): handle ambiguous duplicate prompt names across scopes\n\nWhen multiple accessible prompts share the same name (e.g. a public\nprompt and a team prompt both named \"code_review\"), the OR query and\nname-only fallback both raise MultipleResultsFound. This was unhandled,\nresulting in a 500.\n\nRaise an explicit PromptError with disambiguation guidance, consistent\nwith resource_service's ambiguity handling pattern.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T09:26:02+00:00"
+    },
+    {
+      "sha": "de34a718ce9746f7884f699423e0baf4e58f472f",
+      "message": "fix(prompts): scope lookup by server_id and catch PromptError in GET endpoint\n\nWhen server_id is provided, include the server_prompt_association join\nin the base query before _find_prompt_by_name_or_id(), matching the\npattern used by list_server_prompts(). This prevents false ambiguity\nerrors when duplicate prompt names exist across different virtual servers.\n\nAlso add except PromptError handler to GET /prompts/{prompt_id} so the\nnew ambiguity error returns 422 instead of leaking as 500.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T09:37:26+00:00"
+    },
+    {
+      "sha": "c24af9d96dda57fe583daa53ee4ae405d6482fe1",
+      "message": "fix(prompts): add missing Raises docstring for flake8 DAR401\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T10:13:40+00:00"
+    },
+    {
+      "sha": "73e4b3025edc76ec60030e42bc24be24232285ff",
+      "message": "fix(tests): replace fixed timeouts with proper HTMX wait patterns in playwright tests\n\n- toggle_show_inactive: wait for HTMX table swap to complete instead of\n  fixed 1000ms timeout, matching the pattern in clear_search()\n- test_edit_modal_displays_existing_custom_headers: wait for POST\n  response and panel navigation instead of fixed timeout; skip on save\n  failure (RBAC may block)\n- Remove redundant wait_for_timeout calls after toggle_show_inactive\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T10:48:24+00:00"
+    },
+    {
+      "sha": "21324e2c0c142f5fca258369b8a002728875cb84",
+      "message": "fix(tests): use exact text matching for Activate/Deactivate button locators\n\nbutton:has-text(\"Activate\") is a substring match that also matches\n\"Deactivate\", causing the test to click Deactivate when it intended to\nclick Activate. Switch to button:text-is() for exact matching.\n\nAlso fix gateway name extraction: td.nth(2) reads the ID column, not\nthe name column. The table layout is Actions(0), Row#(1), ID(2),\nName(3) — use nth(3).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T11:23:51+00:00"
+    },
+    {
+      "sha": "86d7209e9e981a1b0c12edbd84b0b4e9f0f181bb",
+      "message": "chore: linting fixes in admin.py\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T11:29:04+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 317,
+  "deletions": 78,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:17.773226",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:17.774364",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3651,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3651.json"
+  }
+}

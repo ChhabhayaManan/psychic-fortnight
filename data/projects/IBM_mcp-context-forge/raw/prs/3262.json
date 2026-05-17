@@ -1,0 +1,65 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3262,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3262"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Fix Alpine x-data parse error when query params contain double quotes                                        ",
+    "state": "closed",
+    "created_at": "2026-02-25T18:28:12+00:00",
+    "updated_at": "2026-02-25T21:29:30+00:00",
+    "closed_at": "2026-02-25T21:29:28+00:00",
+    "merged_at": "2026-02-25T21:29:28+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "ui",
+      "ica",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3261\r\n\r\n---\r\n\r\n## 📌 Summary\r\nFixes Alpine.js pagination components breaking whenever a server-side query parameter containing a double-quote character is embedded into an `x-data` attribute via Jinja's `tojson` filter. The most visible trigger is `team_id` when the gateway is used inside an iframe, but the same failure affects any user performing a free-text search (`q=foo\"bar`) or any filter value that contains `\"`.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n**Scenario A – iframe with team_id**\r\n1. Embed the admin UI in an iframe: `<iframe src=\"http://localhost:4444/admin?team_id=<uuid>\">`.\r\n2. Open any paginated section — pagination controls fail to initialise.\r\n\r\n**Scenario B – search with double quote (no iframe needed)**\r\n1. Open the gateway admin UI directly.\r\n2. In any paginated table, search for a term containing `\"` (e.g. `foo\"bar`).\r\n3. Observe pagination controls stop working after the HTMX partial update.\r\n\r\n## 🐞 Root Cause\r\n`pagination_controls.html` embedded server-side query params directly into the Alpine `x-data` attribute using Jinja's `tojson` filter:\r\n\r\n```jinja\r\nurl.searchParams.set({{ key | tojson | forceescape }}, {{ value | tojson | forceescape }});\r\n```\r\n\r\n`tojson` produces double-quoted JSON strings (`\"team_id\"`). Although `forceescape` converts `\"` → `&quot;` in the Jinja-rendered HTML, HTMX parses the partial response into DOM nodes during an OOB swap and re-serialises with `outerHTML`, converting `&quot;` back to literal `\"` before writing the updated `x-data` attribute into the page. The HTML parser then terminates the double-quoted `x-data` attribute at the first inner `\"`, leaving Alpine with a truncated, unparseable expression.\r\n\r\nAll 10+ partial templates (`tools_partial.html`, `servers_partial.html`, `users_partial.html`, `tokens`, `prompts`, `resources`, `gateways`, `agents`, `teams`, `metrics`, `tools_with_pagination`) share `pagination_controls.html`, so all were affected. Vulnerable params by endpoint:\r\n\r\n| Endpoint | Vulnerable params |\r\n|---|---|\r\n| `/admin/tools/partial` | `team_id`, `gateway_id`, `q`, `tags` |\r\n| `/admin/servers/partial` | `q`, `relationship`, `visibility` |\r\n| `/admin/tokens/partial` | `team_id`, `q` |\r\n| All other paginated partials | `include_inactive` only (boolean — not vulnerable) |\r\n\r\n## 💡 Fix Description\r\nMove `query_params` out of the `x-data` JavaScript and into a dedicated `data-extra-params` HTML attribute, then read the values at runtime via `$el.dataset.extraParams`. Because the value sits in its own attribute it is never adjacent to the `x-data` attribute delimiter, completely eliminating the escaping hazard across all rendering paths (initial page load, HTMX full swap, HTMX OOB swap).\r\n\r\n**`pagination_controls.html`** — two changes:\r\n\r\n1. Add `data-extra-params` attribute to the container `<div>`:\r\n```jinja\r\ndata-extra-params=\"{{ query_params | default({}) | tojson | forceescape }}\"\r\n```\r\n\r\n2. Replace the Jinja `{% for key, value in query_params.items() %}` block inside `x-data` with pure JavaScript:\r\n```javascript\r\nconst extraParams = JSON.parse(this.$el.dataset.extraParams || '{}');\r\nObject.entries(extraParams).forEach(([k, v]) => {\r\n  if (k !== 'include_inactive' && v !== null && v !== undefined) {\r\n    url.searchParams.set(k, String(v));\r\n  }\r\n});\r\n\r\n// Also pick up team_id if the parent app injects it into the browser URL\r\n// (e.g. when the gateway is embedded in an iframe).\r\nconst currentUrlParams = new URLSearchParams(window.location.search);\r\nconst teamIdFromUrl = currentUrlParams.get('team_id');\r\nif (teamIdFromUrl && !extraParams.team_id) {\r\n  url.searchParams.set('team_id', teamIdFromUrl);\r\n}\r\n```\r\n\r\nThe `x-data` expression now contains no dynamic string values that can conflict with the HTML attribute delimiter, making it safe for all param values and all rendering paths.\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite | `make lint` | pass |\r\n| Unit tests | `make test` | pass |\r\n| Coverage ≥ 80 % | `make coverage` | pass |\r\n| Manual: search with `\"` | Search `foo\"bar` in any table, confirm pagination still works after HTMX swap | pass |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3857087394",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-25T21:25:33+00:00",
+      "body": "Reviewed, rebased (2 conflicts resolved), and E2E validated. The data-attribute approach eliminates the escaping hazard across all rendering paths. Clean fix."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ccf6f9fc24522f165db765af29eebf0d5fe6bfc6",
+      "message": "-s\n\nfix(ui): move query_params out of x-data to data attribute to fix Alpine parse error in iframe\n\nWhen the gateway is embedded in an iframe and a parent app injects\n?team_id=... into the URL, the server embeds the team_id value into the\nAlpine x-data attribute via Jinja tojson. Double-quoted JSON strings\ninside a double-quoted HTML attribute cause the HTML parser to terminate\nthe attribute early when the content is re-serialised during an HTMX\nOOB swap, breaking the Alpine component with 'Unexpected token }'.\n\nFix: encode query_params as JSON in a data-extra-params attribute and\nread them at runtime via $el.dataset.extraParams. The x-data expression\nnow contains no dynamic string values that can conflict with the HTML\nattribute delimiter.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-25T18:20:03+00:00"
+    },
+    {
+      "sha": "48a1041c9f732e51894ca59fcaec6d8dd4a4c453",
+      "message": "test(js): add data-extra-params safety tests for pagination_controls\n\nVerify that the Alpine x-data fix (storing extra query params in a\ndata-extra-params attribute instead of inline JS) correctly:\n- forwards all extra params (q, team_id, gateway_id, tags, etc.) to URL\n- filters out include_inactive and null values\n- falls back to team_id from the browser URL when absent from params\n- percent-encodes values with double-quotes, single-quotes, and script\n  tags via URLSearchParams so they never appear raw in the URL string\n\nAlso update test_servers_pagination_query_params_are_js_escaped to\nassert against the new data-extra-params attribute pattern.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-25T18:55:04+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 329,
+  "deletions": 103,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:31.123897",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:31.125314",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3262,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3262.json"
+  }
+}

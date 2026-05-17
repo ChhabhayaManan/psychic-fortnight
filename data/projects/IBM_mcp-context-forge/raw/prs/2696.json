@@ -1,0 +1,46 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2696,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2696"
+  },
+  "metadata": {
+    "title": "Remove redundant db calls in PermissionService",
+    "state": "closed",
+    "created_at": "2026-02-04T10:03:42+00:00",
+    "updated_at": "2026-02-07T16:38:44+00:00",
+    "closed_at": "2026-02-07T16:38:42+00:00",
+    "merged_at": "2026-02-07T16:38:42+00:00",
+    "author": "madhav165",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# Bug-fix PR\r\n\r\nCloses #2695\r\n\r\n---\r\n\r\n## Summary\r\nFixes redundant database queries in `PermissionService.check_permission()` that caused unnecessary performance overhead on every permission check.\r\n\r\nTwo separate redundancies were identified and fixed:\r\n1. **UserRole table queried twice**: Once for permissions, again for audit logging\r\n2. **EmailTeamMember table queried twice**: Once for membership check, again for role lookup\r\n\r\n## Reproduction Steps\r\n\r\nIssue: Redundant DB calls in permission checks\r\n\r\nTo observe the issue:\r\n1. Enable query logging in SQLAlchemy\r\n2. Call any endpoint that triggers `check_permission()` with `audit_enabled=True`\r\n3. Observe duplicate `SELECT` statements for `user_roles` and `email_team_members` tables\r\n\r\n## Root Cause\r\n\r\n**Redundancy #1 (UserRole):**\r\n- `check_permission()` called `get_user_permissions()` which internally called `_get_user_roles()` to fetch UserRole objects\r\n- `get_user_permissions()` extracted only the permission strings and discarded the role objects\r\n- Later, `_get_roles_for_audit()` called `_get_user_roles()` again to get role names for audit logging\r\n- Same query executed twice per permission check when auditing enabled\r\n\r\n**Redundancy #2 (EmailTeamMember):**\r\n- `_check_team_fallback_permissions()` called `_is_team_member()` to check if user was a team member\r\n- Then immediately called `_get_user_team_role()` to get the user's role\r\n- Both methods queried the same `email_team_members` table with identical filters\r\n\r\n## Fix Description\r\n\r\n**Fix #1**: Modified `check_permission()` to:\r\n- Call `_get_user_roles()` directly once\r\n- Extract permissions inline from the fetched role objects\r\n- Reuse the same role objects to build audit data (no second query)\r\n\r\n**Fix #2**: Modified `_check_team_fallback_permissions()` to:\r\n- Call only `_get_user_team_role()` which returns `None` if not a member\r\n- Check for `None` instead of separate membership query\r\n- Refactored `_is_team_member()` to delegate to `_get_user_team_role()` for backward compatibility\r\n\r\n**DB Call Reduction:**\r\n\r\n| User Type | Before | After | Saved |\r\n|-----------|--------|-------|-------|\r\n| Non-admin with audit | 5 | 3 | 2 |\r\n| Non-admin (teams.* fallback) | 7 | 5 | 2 |\r\n| Non-admin without audit | 3 | 2 | 1 |\r\n\r\n## Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          | Pass   |\r\n| Unit tests                            | `make test`          | Pass (50/50) |\r\n| Coverage >= 80 %                      | `make coverage`      |        |\r\n| Manual regression no longer fails     | Query logging shows single queries |        |\r\n\r\n## MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] Updated tests to mock `_get_user_roles` instead of `get_user_permissions`\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "b678a59859f722e52819425871b119cb9c54db8e",
+      "message": "fix: remove redundant db calls in PermissionService\n\nCloses #2695\n\n- check_permission() now calls _get_user_roles() once and reuses results\n  for both permission extraction and audit logging (was calling\n  get_user_permissions then _get_roles_for_audit separately)\n- _check_team_fallback_permissions() uses _get_user_team_role() directly\n  instead of calling _is_team_member() then _get_user_team_role()\n- _is_team_member() delegates to _get_user_team_role() for backward compat\n- Remove now-unused _get_roles_for_audit() method\n- Update tests to mock _get_user_roles instead of get_user_permissions\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-07T16:10:09+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 16,
+  "deletions": 19,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:07.456144",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:07.457483",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2696,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2696.json"
+  }
+}

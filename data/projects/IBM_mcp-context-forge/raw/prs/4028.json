@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4028,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4028"
+  },
+  "metadata": {
+    "title": "fix(auth): update API token last_used for MCP Streamable HTTP requests",
+    "state": "open",
+    "created_at": "2026-04-03T11:06:10+00:00",
+    "updated_at": "2026-04-09T19:21:38+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "kimsehwan96",
+    "labels": [
+      "SHOULD"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4027\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nAPI token last_used timestamps are not updated when accessing Virtual Servers via MCP Streamable HTTP transport (/servers/{id}/mcp). The MCP-specific auth handler (_StreamableHttpAuthHandler._auth_jwt) performs its own JWT verification but omits _update_api_token_last_used_sync() and hardcodes auth_method to \"jwt\", preventing both timestamp tracking and TokenUsageMiddleware logging for API token requests on MCP paths.\r\n\r\nThis PR:\r\n- Detects API tokens (via auth_provider claim and legacy DB fallback) in the MCP auth path\r\n- Calls _update_api_token_last_used_sync() for API tokens (reuses existing rate-limited implementation)\r\n- Sets auth_method dynamically (\"api_token\" vs \"jwt\") instead of hardcoding\r\n- Propagates auth_method, jti, and user_email to ASGI scope state for TokenUsageMiddleware\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    pass    |\r\n| Unit tests                | `make test`     |    pass    |\r\n| Coverage ≥ 80%            | `make coverage` |   pass     |\r\n\r\nAlso I've done E2E test and manual test with docker compose\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\nThe codebase has two independent auth paths:\r\n  1. AuthContextMiddleware (BaseHTTPMiddleware) — handles regular API routes, calls get_current_user() which updates last_used\r\n  2. _StreamableHttpAuthHandler (raw ASGI) — handles MCP transport paths, calls verify_credentials() only\r\n\r\nPath 2 was implemented separately because BaseHTTPMiddleware has known issues with SSE streaming responses. It duplicates most auth functionality (JWT verification, revocation, team membership, auth cache) but omitted last_used tracking and API token classification. This PR completes the missing functionality in Path 2.\r\n\r\nTest coverage:\r\n- 7 unit tests covering: API token detection, last_used call, session token non-update, failure resilience, legacy token fallback, scope state propagation\r\n- 2 E2E tests (playwright): last_used update verification and usage log recording via live MCP transport",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "f84be2552ad3f295fa60ffdcf0105c7169c8c5d5",
+      "message": "fix(auth): update API token last_used for MCP Streamable HTTP requests\n\nThe MCP-specific auth handler (_StreamableHttpAuthHandler._auth_jwt)\nperforms its own JWT verification via verify_credentials() but did not\ncall _update_api_token_last_used_sync(), causing API token last_used\ntimestamps to remain stale when accessing virtual servers via\n/servers/{id}/mcp.\n\nAdditionally, auth_method was hardcoded to \"jwt\" regardless of token\ntype, preventing TokenUsageMiddleware from recognising and logging\nAPI token requests on MCP transport paths.\n\nChanges:\n- Detect API tokens (auth_provider == \"api_token\") and legacy tokens\n  (DB JTI lookup) in _auth_jwt()\n- Call _update_api_token_last_used_sync() for API tokens (rate-limited)\n- Set auth_method dynamically (\"api_token\" vs \"jwt\")\n- Propagate auth_method, jti, and user_email to ASGI scope state for\n  TokenUsageMiddleware\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-04-03T11:03:55+00:00"
+    },
+    {
+      "sha": "f63c88736739c0212a36133fb4e576c9ef0deb23",
+      "message": "test(auth): add E2E tests for API token last_used and usage stats via MCP transport\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-04-06T00:28:59+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 414,
+  "deletions": 2,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:14.820564",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:14.823244",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4028,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4028.json"
+  }
+}

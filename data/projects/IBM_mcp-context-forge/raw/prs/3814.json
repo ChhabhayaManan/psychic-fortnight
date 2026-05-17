@@ -1,0 +1,132 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3814,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3814"
+  },
+  "metadata": {
+    "title": "fix/3811-pipe-validation-issue",
+    "state": "closed",
+    "created_at": "2026-03-24T06:44:58+00:00",
+    "updated_at": "2026-03-27T16:22:50+00:00",
+    "closed_at": "2026-03-27T16:22:05+00:00",
+    "merged_at": "2026-03-27T16:22:05+00:00",
+    "author": "Nayana-R-Gowda",
+    "labels": [
+      "bug"
+    ],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "Signed-off-by: NAYANA.R <nayana.r7813@gmail.com>\r\n\r\ncloses #3811 \r\n\r\n## 💡 Fix Description\r\nFixes false-positive validation that rejected tool descriptions containing the pipe (`|`) character.\r\n\r\n## Problem\r\nThe validation logic blocked \"|\" as an unsafe character, causing legitimate tool descriptions (e.g., LogQL queries like `{app=\"foo\"} |= \"error\"`) to fail.\r\n\r\nThis prevented critical tools such as `query_loki_logs` from being registered.\r\n\r\n## Solution\r\nRemoved \"|\" from the forbidden patterns list, while keeping \"||\" to block shell OR injection.\r\n\r\n## Changes\r\n- Updated forbidden_patterns in ToolCreate.validate_description()\r\n- Added comments explaining why \"|\" is allowed\r\n\r\n## Testing\r\n- :white_check_mark: Tool creation with LogQL (`|=`) succeeds\r\n- :x: Unsafe patterns like `&&` are still blocked\r\n- Verified via API using curl\r\n\r\n## Impact\r\n- Fixes Grafana Loki MCP backend registration\r\n- Prevents false positives for LogQL, PromQL, regex, and Markdown tables\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |Pass    |\r\n| Unit tests                            | `make test`          |pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [X] Matches current MCP spec\r\n- [X] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4020586780",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-27T11:38:42+00:00",
+      "body": "Reviewed, rebased, reworked, and verified. LGTM."
+    },
+    {
+      "id": "4020631247",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-27T11:47:59+00:00",
+      "body": ""
+    },
+    {
+      "id": "4021138905",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-27T13:23:38+00:00",
+      "body": "Thanks for tackling this. I found three issues:\r\n\r\n- Default-secret detection is now inconsistent with the new published JWT secret. This PR changes examples/defaults to `my-test-key-but-now-longer-than-32-bytes`, but the runtime still only treats `my-test-key` as the insecure default, so users can follow the new docs and bypass the existing warning/guard paths. See `.env.example:22`, `mcpgateway/config.py:1087`, and `mcpgateway/main.py:1955`.\r\n\r\n- The helper/doc defaults now disagree with the actual app default, which can break standalone local flows. The application still defaults `JWT_SECRET_KEY` to `my-test-key`, but updated helpers/docs mint tokens with the new long secret, so no-env `make dev` style setups can generate invalid tokens. See `mcpgateway/config.py:285` and `smoketest.py:236`.\r\n\r\n- The `|` fix may not cover the full request path. The schema validators now allow single pipe characters in tool descriptions, but the broader dangerous-pattern middleware still appears to reject `|` in JSON bodies, so LogQL-style descriptions may still fail when validation middleware is enabled. See `mcpgateway/config.py:360`, `mcpgateway/config.py:368`, and `mcpgateway/middleware/validation_middleware.py:143`.\r\n"
+    },
+    {
+      "id": "4021903848",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-27T15:20:58+00:00",
+      "body": "The default key optimization is possible (extract key from .env) but should work as is as well."
+    },
+    {
+      "id": "4022215971",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-27T16:15:10+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "11c0dab8b05997b21123c66af5ed382e9154ebd1",
+      "message": "fix(validation): remove single pipe from forbidden description patterns\n\nRemove single pipe character (\"|\") from the default\nTOOL_DESCRIPTION_FORBIDDEN_PATTERNS list. The pipe is a valid character in\nLogQL (|=, |~), PromQL, regex patterns, and Markdown tables. The dangerous\nshell OR operator \"||\" remains blocked.\n\nAlso aligns ToolUpdate.validate_description with ToolCreate by using the\nconfigurable settings.tool_description_forbidden_patterns instead of a\nhardcoded list, ensuring consistent behavior when the pattern list is\ncustomized via environment variables.\n\nCloses #3811\n\nSigned-off-by: NAYANA.R <nayana.r7813@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "NAYANA.R",
+      "date": "2026-03-27T09:20:34+00:00"
+    },
+    {
+      "sha": "d0501bc8e3e46c1e4ba00faa30400d92b768d497",
+      "message": "fix(env): align .env.example JWT secret with docker-compose default\n\n.env.example still used the old short `my-test-key` while\ndocker-compose.yml and the E2E test helpers were updated to\n`my-test-key-but-now-longer-than-32-bytes` in #3716. Users who\ncopied .env.example to .env got a secret mismatch that caused\n`make test-mcp-cli` to hang.\n\nSee #3889 for the remaining files that need the same update.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T11:37:48+00:00"
+    },
+    {
+      "sha": "aab6f259dc6d494f738cd6542d5842b6758f8ab3",
+      "message": "chore: apply linter and formatter fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T12:49:28+00:00"
+    },
+    {
+      "sha": "7d14c99b926cfb7659e9abac178941402a8f2951",
+      "message": "fix(env): align all JWT secret defaults with docker-compose (#3889)\n\nPR #3716 updated docker-compose.yml and mcp_test_helpers.py to use\n`my-test-key-but-now-longer-than-32-bytes` (meeting the 32-byte minimum\nfor HS256 per RFC 7518 §3.2) but missed ~70 other files that still\nhardcoded the old `my-test-key`.\n\nThis caused test failures (make test-mcp-cli hangs, load tests fail auth)\nwhen .env is derived from .env.example.\n\nUpdated:\n- All docker-compose variant files (debug, embedded, performance, verbose)\n- All E2E and load test defaults\n- All scripts and smoketests\n- Helm chart values, schema, and docs\n- Makefile targets\n- All documentation examples\n- Added long key to validate_env.py weak_jwt list\n\nNot changed (intentionally):\n- mcpgateway/config.py:286 — Python config default (source of truth for\n  standalone `make dev`)\n- mcpgateway/config.py:888 — already lists both keys in weak_secrets\n- mcpgateway/config.py:1088, main.py:1955,2040 — guards checking for\n  the default value\n- tests/unit/test_main_helpers_extra.py:55 — test that mocks the default\n\nCloses #3889\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T13:02:53+00:00"
+    },
+    {
+      "sha": "d5582d24d3b572dd2e9c16390f41605a4712d2da",
+      "message": "fix(security): detect both JWT default secrets in guard paths\n\nThe secure_secrets flag and critical-issues check only matched the\nshort `my-test-key` default. Users running with the docker-compose\ndefault `my-test-key-but-now-longer-than-32-bytes` would bypass the\nsecurity warning and the `secure_secrets: false` status flag.\n\n- config.py get_security_status(): `!=` → `not in (short, long)`\n- main.py validate_security_configuration(): same\n- main.py security recommendations log: same\n- validate_env.py already had both (updated in prior commit)\n- config.py:888 weak_secrets already had both\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T14:07:24+00:00"
+    },
+    {
+      "sha": "3cf41d12ba92d1a5f647ee3768ad556504be5ea4",
+      "message": "chore: update .secrets.baseline line numbers after reformatting\n\nPre-commit detect-secrets hook requires line numbers to match. The\nlinter/formatter commit shifted lines in db_util.py. All entries\nremain is_secret=false (confirmed false positives).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T14:58:14+00:00"
+    },
+    {
+      "sha": "d7b783c5734813c7df765c986816b711c2be8e8b",
+      "message": "chore: allowlist test JWT secrets for detect-secrets hook\n\nThe longer JWT default triggers IBM detect-secrets \"Secret Keyword\"\ndetection on 7 lines that are all test/dev defaults. Added\n`pragma: allowlist secret` inline comments.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T15:12:44+00:00"
+    },
+    {
+      "sha": "d9ab152f3843c2057111f87b8d93d82deb77feb5",
+      "message": "chore: update .secrets.baseline after allowlist pragmas\n\nPre-commit detect-secrets hook removed entries that are now\ncovered by inline `pragma: allowlist secret` comments, and\nadjusted line numbers.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T15:28:07+00:00"
+    },
+    {
+      "sha": "afc0d2d45656f165698c553133fa8b6534d6c6e9",
+      "message": "baseline\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-27T15:58:36+00:00"
+    }
+  ],
+  "files_changed": 115,
+  "additions": 400,
+  "deletions": 623,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:15.281360",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:15.283960",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3814,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3814.json"
+  }
+}

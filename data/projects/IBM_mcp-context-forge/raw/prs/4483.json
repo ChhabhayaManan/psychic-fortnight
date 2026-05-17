@@ -1,0 +1,132 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4483,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4483"
+  },
+  "metadata": {
+    "title": "feat(plugin): add prompt injection / jailbreak filter plugin",
+    "state": "open",
+    "created_at": "2026-04-27T21:17:33+00:00",
+    "updated_at": "2026-05-12T13:59:05+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "Lang-Akshay",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Closes [#4219](https://github.com/IBM/mcp-context-forge/issues/4219)\r\n\r\n## Summary\r\n\r\nThis PR adds a first-party PromptInjectionGuardPlugin to detect and respond to prompt injection and jailbreak attempts before sensitive tool execution. The implementation focuses on deterministic runtime behavior, structured violation output, and opt-in activation so operators can roll it out safely.\r\n\r\n## Problem This Solves\r\n\r\nIssue [#4219](https://github.com/IBM/mcp-context-forge/issues/4219) requested a dedicated prompt injection and jailbreak filter with predictable latency, no required outbound runtime calls, and configurable actions. Existing security plugins did not specifically target this attack class.\r\n\r\nThis PR addresses that gap by introducing a dedicated plugin with:\r\n\r\n- Category-aware detection for injection, jailbreak, and system prompt leakage patterns.\r\n- Configurable thresholds and actions per category.\r\n- A deterministic Tier-1 path based on precompiled regex rules.\r\n- An optional Tier-2 local classifier path via llm-guard when explicitly enabled.\r\n\r\n## What Changed In This Branch\r\n\r\n### 1. New plugin package\r\n\r\nAdded a new plugin under plugins/prompt_injection_guard:\r\n\r\n- prompt_injection_guard.py: core plugin implementation.\r\n- plugin-manifest.yaml: metadata, hooks, and default config schema.\r\n- README.md: usage, configuration, behavior, and benchmark notes.\r\n- __init__.py: package export for PromptInjectionGuardPlugin.\r\n\r\n### 2. Plugin registration\r\n\r\nUpdated plugins/config.yaml to register PromptInjectionGuardPlugin:\r\n\r\n- Priority 45.\r\n- Disabled by default.\r\n- Default behavior mode block.\r\n- Category-level thresholds and actions.\r\n\r\n### 3. Dependency and packaging updates\r\n\r\nUpdated pyproject.toml with a commented placeholder for future cpex-prompt-injection-guard packaging under plugins extras.\r\n\r\n### 4. Test coverage for new plugin\r\n\r\nAdded tests/unit/plugins/test_prompt_injection_guard.py with broad behavior coverage:\r\n\r\n- Clean input pass-through.\r\n- Blocking flows for injection, jailbreak, and prompt leak patterns.\r\n- Redact and flag-only modes.\r\n- Tool pre-invoke and optional post-invoke behavior.\r\n- Structured violation payload assertions.\r\n- Internal helper validation.\r\n\r\nLocal test collection confirms 32 tests discovered in this new test module.\r\n\r\n### 5. Stability fixes for plugin test environments\r\n\r\nAdjusted several existing plugin tests to skip when optional packaged plugin modules are unavailable in the local environment, reducing false negatives in mixed dependency setups.\r\n\r\n### 6. Minor import/style touch-ups\r\n\r\nIncluded small import-order and comment-only cleanups in touched files.\r\n\r\n## Runtime Behavior\r\n\r\n### Detection strategy\r\n\r\n- Tier 1 (always active): regex signatures for deterministic, low-overhead checks.\r\n- Tier 2 (optional): llm-guard PromptInjection scanner, lazy-loaded only when enabled.\r\n\r\n### Response modes\r\n\r\n- block: stop processing and return PluginViolation.\r\n- redact: replace matched content with configured placeholder and continue.\r\n- flag-only: continue processing and attach metadata.\r\n\r\n### Hooks\r\n\r\n- Implemented: prompt_pre_fetch, tool_pre_invoke, tool_post_invoke.\r\n- Registered by default in plugins/config.yaml: prompt_pre_fetch, tool_pre_invoke.\r\n- Output scanning is additionally gated by check_tool_output.\r\n\r\n## Security Impact\r\n\r\nThis PR improves protection for OWASP LLM Top 10 categories:\r\n\r\n- LLM01 Prompt Injection.\r\n- LLM07 System Prompt Leakage.\r\n\r\nThe plugin is shipped disabled by default, preserving current behavior until operators explicitly enable it.",
+  "comments": [
+    {
+      "id": "3154346104",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-28T13:09:48+00:00",
+      "body": "why first matching string alone is redacted? should we not redact all if payload has multiple string arguments?"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4189049320",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-28T13:13:09+00:00",
+      "body": ""
+    },
+    {
+      "id": "4253396327",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-08T15:35:38+00:00",
+      "body": "**`llm-guard` should not be a required core dependency if the feature is optional**\n   - This PR adds `llm-guard` to base `dependencies`:\n   ```toml name=pyproject.toml url=https://github.com/IBM/mcp-context-forge/blob/f35a010e79a984d36a54ae90e508e156010ec655/pyproject.toml#L72-L112\n   dependencies = [\n       ...\n       \"llm-guard>=0.3.15\",\n   ]\n   ```\n   - But the plugin only uses it when explicitly enabled:\n   ```python name=plugins/prompt_injection_guard/prompt_injection_guard.py url=https://github.com/IBM/mcp-context-forge/blob/f35a010e79a984d36a54ae90e508e156010ec655/plugins/prompt_injection_guard/prompt_injection_guard.py#L329-L338\n   def __init__(self, config: PluginConfig) -> None:\n       super().__init__(config)\n       self._cfg = PromptInjectionGuardConfig(**(config.config or {}))\n       if self._cfg.use_llm_guard:\n           _try_load_llm_guard()\n   ```\n   ```yaml name=plugins/config.yaml url=https://github.com/IBM/mcp-context-forge/blob/f35a010e79a984d36a54ae90e508e156010ec655/plugins/config.yaml#L682-L696\n   config:\n     check_tool_output: false\n     use_llm_guard: false\n   ```\n   - If optional, it should not be mandatory for all installs."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "1391949c86b57ed3b4a724658f828e58001d51ed",
+      "message": "feat(plugin): add prompt injection / jailbreak filter plugin\n\nAdds a first-party `PromptInjectionGuardPlugin` that screens prompts and tool arguments for prompt injection and jailbreak attempts, addressing OWASP LLM Top 10 risks LLM01 (Prompt Injection) and LLM07 (System Prompt Leakage).\n\nCloses #4219\n\n---\n\n| File                          | Purpose                                                                  |\n| ----------------------------- | ------------------------------------------------------------------------ |\n| `prompt_injection_guard.py` | Plugin implementation — two-tier detection (regex + optional LLM Guard) |\n| `__init__.py`               | Package init, exports `PromptInjectionGuardPlugin`                     |\n| `plugin-manifest.yaml`      | Hook declarations and default config                                     |\n| `README.md`                 | User-facing configuration and usage reference                            |\n\nRegistered `PromptInjectionGuardPlugin` at priority 45 (runs before HarmfulContentDetector). Shipped **disabled** by default — operators opt-in.\n\nAdded a commented-out placeholder for a future `cpex-prompt-injection-guard` PyPI release under the `[plugins]` extra.\n\n23 unit tests covering all hooks, all action modes (`block`, `redact`, `flag-only`), clean-input pass-through, structured violation fields, and internal helpers.\n\n---\n\n**Tier 1 — regex (zero-dependency, deterministic):**\n\n- `injection` — \"ignore previous instructions\", base64-encoded directives, control-character smuggling, etc.\n- `jailbreak` — DAN variants, \"developer mode\", roleplay overrides, token manipulation attempts.\n- `system_prompt_leak` — \"reveal your prompt\", \"print your instructions\", etc.\n\nEach match scores `1.0`. Scores are compared against per-category thresholds before any action is taken.\n\n**Tier 2 — LLM Guard (optional, opt-in):**\nSet `use_llm_guard: true` in config to activate the `llm-guard` `PromptInjection` scanner. The library is lazy-loaded so there is no import cost when disabled.\n\n| Mode          | Behaviour                                                                       |\n| ------------- | ------------------------------------------------------------------------------- |\n| `block`     | Returns `continue_processing=False` with a structured `PluginViolation`     |\n| `redact`    | Replaces matched substrings with `[INJECTION_REDACTED]`, continues processing |\n| `flag-only` | Passes through unchanged, records findings in `result.metadata`               |\n\n- `prompt_pre_fetch` — screens `prompt_id` args before template rendering\n- `tool_pre_invoke` — screens tool arguments before execution\n- `tool_post_invoke` — optionally screens tool output (`check_tool_output: true`)\n\n---\n\n```yaml\n- name: \"PromptInjectionGuardPlugin\"\n  kind: \"plugins.prompt_injection_guard.prompt_injection_guard.PromptInjectionGuardPlugin\"\n  hooks: [\"prompt_pre_fetch\", \"tool_pre_invoke\", \"tool_post_invoke\"]\n  mode: \"disabled\"          # change to \"enforce\" to activate\n  priority: 45\n  config:\n    mode: \"block\"\n    check_tool_output: false\n    use_llm_guard: false\n    redaction_placeholder: \"[INJECTION_REDACTED]\"\n    categories:\n      injection:        {threshold: 0.75, action: \"block\"}\n      jailbreak:        {threshold: 0.80, action: \"block\"}\n      system_prompt_leak: {threshold: 0.70, action: \"block\"}\n```\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-27T21:17:29+00:00"
+    },
+    {
+      "sha": "315442b69f3b4032b8ce16422b9eeea893d917bb",
+      "message": "fix(tests): skip missing plugin dependencies in integration and unit tests\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-27T21:18:09+00:00"
+    },
+    {
+      "sha": "b1c25c029c20ddae0ddff7ac73ed27ff286be4e3",
+      "message": "fix(plugin): update redaction logic to use per-key scan results\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-28T13:33:36+00:00"
+    },
+    {
+      "sha": "3904b7dfea6fac94c72f7002a970b81b90df72c2",
+      "message": "feat(plugin): enhance PromptInjectionGuard with priority-based scanning and redaction\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-28T14:16:04+00:00"
+    },
+    {
+      "sha": "a5f2e984193a4837901b07976fc23ce3334a38ac",
+      "message": "Refactor code structure for improved readability and maintainability\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-08T12:23:54+00:00"
+    },
+    {
+      "sha": "ff0c57d8780a69e59ebb1adbeed581f2383f0e49",
+      "message": "fixup: formatting\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-08T14:10:04+00:00"
+    },
+    {
+      "sha": "f35a010e79a984d36a54ae90e508e156010ec655",
+      "message": "Refactor code structure for improved readability and maintainability\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-08T14:41:51+00:00"
+    },
+    {
+      "sha": "e74a35d2c00b95f6978221418dfa3026b176c508",
+      "message": "feat(tests): add unit tests for OAuthManager's flag handling and token audience extraction\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-08T15:08:18+00:00"
+    },
+    {
+      "sha": "fa0c0bf0bf76f73d81ab7b34268032631b8e6df2",
+      "message": "redundant code\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-08T15:15:24+00:00"
+    },
+    {
+      "sha": "ed690c4cd727155e8ed3b339981db836170fb691",
+      "message": "add optional llm-guard dependency in pyproject.tomlredundant code\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-08T16:29:19+00:00"
+    },
+    {
+      "sha": "79c02c25ee7cd18e5b073422e0e6afd0082f551a",
+      "message": "fixup: pylint\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-08T16:42:35+00:00"
+    },
+    {
+      "sha": "d8f6ff012d0fb7ff676c1a57081fd48d2f0f4242",
+      "message": "feat: update action modes to include 'disable' for prompt injection guard\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-05-12T13:58:57+00:00"
+    }
+  ],
+  "files_changed": 24,
+  "additions": 3068,
+  "deletions": 352,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:05:23.563990",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:23.565064",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4483,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4483.json"
+  }
+}

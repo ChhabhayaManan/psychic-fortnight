@@ -1,0 +1,35 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4618,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4618"
+  },
+  "metadata": {
+    "title": "[TESTING][GRPC]: Expand integration test depth (chunked deletes, metadata, exception wrap)",
+    "state": "open",
+    "created_at": "2026-05-06T09:19:56+00:00",
+    "updated_at": "2026-05-07T09:46:07+00:00",
+    "closed_at": null,
+    "author": "jonpspri",
+    "labels": [
+      "testing",
+      "mcp-protocol",
+      "COULD"
+    ],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88"
+    ]
+  },
+  "description": "### 🧪 Testing Summary\n\nPR #3202's deep review test-coverage analyzer flagged six paths in `mcpgateway/services/grpc_service.py` and `mcpgateway/services/tool_service.py` that are unit-tested at the helper level but not exercised end-to-end. Bundling them into a single follow-up issue rather than scattering 6 micro-issues.\n\n### 📋 Test gaps\n\nProduction code in scope:\n- `mcpgateway/services/grpc_service.py::invoke_method()`\n- `mcpgateway/services/grpc_service.py::delete_service()`\n- `mcpgateway/services/grpc_service.py::_sync_tools_from_reflection()`\n- `mcpgateway/services/tool_service.py::invoke_tool()` (gRPC dispatch branch)\n\nSpecific paths needing coverage:\n\n1. **`delete_service` chunked deletion (>500 tools)** — the `range(0, len(tool_ids), 500)` loop is correct by inspection but never exercised by a test. Fixture: 1200 stale tools, assert 9 execute calls (3 chunks × 3 deletes).\n\n2. **`invoke_method` gRPC metadata propagation** — `service.grpc_metadata` is forwarded to `GrpcEndpoint(metadata=...)` but no test verifies the kwarg actually arrives. Spy on the `GrpcEndpoint` constructor.\n\n3. **`invoke_method` exception wrapping** — when `endpoint.invoke()` raises an arbitrary `RuntimeError`, the catch site re-raises as `GrpcServiceError(\"Method invocation failed: …\")`. Verify the wrap and the `from e` chain.\n\n4. **`invoke_method` finally-block close** — when `endpoint.invoke()` raises, `endpoint.close()` must still be called. Today only happy-path tests exercise the close.\n\n5. **`_sync_tools_from_reflection` schema-only-changed update** — existing test changes `url`; need a test that ONLY changes `input_schema` (e.g., a method's input proto type changes between reflections) and verifies the tool is updated and the `tools_updated` counter increments.\n\n6. **`_sync_tools_from_reflection` custom-description preserved counter** — existing test verifies the description is preserved; need to assert `tools_updated` is NOT incremented in that branch (the `changed=False` path).\n\n### 📋 Acceptance Criteria\n\nEach gap above lands as a named test in `tests/unit/mcpgateway/services/test_grpc_service.py` and `tests/unit/mcpgateway/services/test_tool_service.py`. All 6 tests pass. No production code changes.\n\n### 🔗 Context\n\n- Source: deep-review of PR #3202, item #19 in [PR comment](https://github.com/IBM/mcp-context-forge/pull/3202#issuecomment-4386420357).\n- The PR already added 18 new tests (`TestSecurityHardening`, `TestVisibilityPropagation`, `TestInvokeMethodGuards`); these 6 fill remaining gaps the PR review flagged.\n",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:43.742238",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:43.742685",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4618,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4618.json"
+  }
+}

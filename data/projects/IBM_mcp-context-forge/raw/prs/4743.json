@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4743,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4743"
+  },
+  "metadata": {
+    "title": "feat(client): edit mode for MCP server form with OAuth validation and auth refactoring",
+    "state": "closed",
+    "created_at": "2026-05-13T12:26:31+00:00",
+    "updated_at": "2026-05-13T12:32:58+00:00",
+    "closed_at": "2026-05-13T12:32:54+00:00",
+    "merged_at": null,
+    "author": "marekdano",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Implements edit mode for the MCP server form — opening an existing server pre-populates all fields from the API, submitting sends a PUT, and the servers table refreshes on success\n- Adds validation for OAuth password grant type (username and password are required before submit is enabled)\n- Refactors auth type mapping and OAuth config schema for correctness and maintainability\n- 115 unit/integration tests covering all new paths; removes two unused components\n\n## Changes\n\n### Edit mode (`Servers.tsx`, `MCPServerForm.tsx`, `useMCPServerForm.ts`)\n\n- `MCPServerForm` gains `serverId` and `onSuccess` props; the hook accepts `gatewayId` and fetches `/gateways/:id` when set\n- All form fields are populated from the API response on load — basic fields, auth credentials, custom headers, OAuth config, passthrough headers, advanced settings\n- `handleEdit` in `Servers.tsx` was a throwing stub; it now sets `updateServerId`, opens the form, and passes `onSuccess` to refetch the table and close\n- If the server fetch fails in edit mode, a red error banner is shown above the form instead of silently presenting an empty form\n\n### OAuth password grant validation (`useMCPServerForm.ts`, `OAuth2Auth.tsx`, `AdvancedSettings.tsx`)\n\n- `superRefine` on the Zod schema makes `oauthUsername` and `oauthPassword` required when `grant_type === \"password\"`\n- `isValid` memo also guards the submit button against missing credentials before parse\n- `OAuth2Auth` renders inline error messages under the username and password fields with correct `aria-invalid` and `aria-describedby` wiring; `AdvancedSettings` and `MCPServerForm` thread the error props through\n\n### Auth type mapping (`useMCPServerForm.ts`)\n\n- `AUTH_TYPE_TO_API` and `AUTH_TYPE_FROM_API` module-level constants replace two separate inline expressions. The `to` map is `Record<AuthType, string>` so TypeScript will catch a missing variant if a new auth type is added\n\n### OAuth config type safety (`useMCPServerForm.ts`)\n\n- `oauthConfigSchema` (typed Zod object with `grant_type` enum, boolean flags, string fields) replaces `z.record(z.unknown())`, giving `superRefine` access to typed fields without casting\n\n### Masked value sentinel (`useMCPServerForm.ts`)\n\n- `=== \"*****\"` replaces `/^\\*+$/` — matches the exact backend contract rather than any run of asterisks\n\n### Removed\n\n- `ServersEmptyState.tsx` and `GatewayIcon.tsx` — neither was imported anywhere\n\n### Tests (`MCPServerForm.test.tsx`, `useMCPServerForm.test.ts`, `setup.ts`)\n\n- `setup.ts`: four jsdom stubs required by Radix UI Select (`hasPointerCapture`, `setPointerCapture`, `releasePointerCapture`, `scrollIntoView`)\n- `MCPServerForm.test.tsx`: 20 custom-headers integration tests using an `addHeaders(user, count)` helper; 9 OAuth password grant validation tests using a `renderWithOAuthPassword` helper that drives the Radix UI Select to switch grant types\n- `useMCPServerForm.test.ts`: edit mode population tests via MSW, auth type round-trip mapping, masked sentinel handling, OAuth config serialisation per grant type, cross-field validation\n\n## Test plan\n\n- [ ] Create a new MCP server — form submits and appears in the table\n- [ ] Edit an existing server — form opens pre-populated, submit sends PUT, table refreshes\n- [ ] Edit a server with OAuth password grant — username and password fields are required; submit is disabled until both are filled\n- [ ] Simulate a failed server fetch in edit mode — error banner appears above the form\n- [ ] `npx vitest run` passes (115 tests)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "965c9d9d5e5c67b85d5bcdc545e8dab7185b5e03",
+      "message": "feat(client): edit mode for MCP server form with OAuth validation and auth refactoring\n\nImplements edit mode for the MCP server form, adds OAuth password grant\nvalidation, and refactors auth type mapping and schema definitions.\n\nEdit mode\n- MCPServerForm accepts serverId and onSuccess props; useMCPServerForm\n  fetches /gateways/:id when gatewayId is provided and populates all\n  form fields (basic fields, auth credentials, custom headers, OAuth\n  config, passthrough headers, advanced settings)\n- handleEdit in Servers.tsx was a throwing stub; now sets updateServerId,\n  opens the pre-populated form, and refetches the table on success\n- fetchError exposed from the hook and rendered as a banner above the\n  form when the server data fetch fails in edit mode\n- Form submission sends POST for create and PUT for edit; form resets\n  and triggers onSuccess/onToggle after a successful submit\n\nOAuth password grant validation\n- superRefine on the Zod schema requires oauthUsername and oauthPassword\n  when grant_type === \"password\"\n- isValid memo guards the submit button before parse\n- OAuth2Auth renders inline errors under username/password with\n  aria-invalid and aria-describedby; AdvancedSettings and MCPServerForm\n  thread the error props through\n\nAuth type mapping\n- AUTH_TYPE_TO_API and AUTH_TYPE_FROM_API module-level constants replace\n  two inline expressions; Record<AuthType, string> type ensures\n  exhaustiveness at compile time\n\nOAuth config type safety\n- oauthConfigSchema (typed Zod object with grant_type enum, boolean\n  flags, string fields) replaces z.record(z.unknown())\n\nMasked value sentinel\n- authPassword and bearerToken checks changed from /^\\*+$/ to === \"*****\"\n  to match the exact backend contract\n\nRemoved dead code\n- ServersEmptyState.tsx and GatewayIcon.tsx (neither imported anywhere)\n\nTests\n- setup.ts: four jsdom stubs required by Radix UI Select\n  (hasPointerCapture, setPointerCapture, releasePointerCapture,\n  scrollIntoView)\n- MCPServerForm.test.tsx: 20 custom-headers integration tests with an\n  addHeaders(user, count) helper; 9 OAuth password grant tests using a\n  renderWithOAuthPassword helper that drives the Radix UI Select\n- useMCPServerForm.test.ts: edit mode population via MSW, auth type\n  round-trip mapping, masked sentinel handling, OAuth config\n  serialisation per grant type, cross-field validation (115 tests total)\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-13T12:26:07+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 1246,
+  "deletions": 187,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:04:37.973363",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:37.974114",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4743,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4743.json"
+  }
+}

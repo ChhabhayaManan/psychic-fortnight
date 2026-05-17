@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3635,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3635"
+  },
+  "metadata": {
+    "title": "fix(auth): SSO login blocked for providers that omit email_verified claim",
+    "state": "closed",
+    "created_at": "2026-03-12T07:19:32+00:00",
+    "updated_at": "2026-03-19T20:00:20+00:00",
+    "closed_at": "2026-03-19T20:00:17+00:00",
+    "merged_at": "2026-03-19T20:00:17+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "security",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "# Bug-fix PR\r\n## :pushpin: Summary\r\nFirst-time SSO login via Microsoft Entra ID (and any OIDC provider that omits the `email_verified` claim) was silently rejected with `user_creation_failed`. The fix changes `_is_email_verified_claim` to treat an **absent** claim as \"no restriction\" (pass-through), and ensures all provider normalization paths never inject `None` for a missing claim — which would have bypassed the absence check entirely.\r\n\r\n## :link: Related Issue\r\nCloses: #3253\r\n\r\n## :repeat: Reproduction Steps\r\n1. Configure an Entra ID SSO provider and navigate to `/admin/login`.\r\n2. Complete a valid Microsoft login for a first-time user.\r\n3. Observe redirect to `/admin/login?error=user_creation_failed` — login never succeeds.\r\n\r\n## 🐞 Root Cause\r\nTwo compounding bugs in `mcpgateway/services/sso_service.py`:\r\n\r\n1. **`_is_email_verified_claim()` (line 885)** — returned `False` when `email_verified` was absent from `user_info`, treating missing = unverified. Microsoft Entra ID, GitHub work accounts, and many other OIDC providers do not include this claim at all.\r\n\r\n2. **All provider normalization paths** (Google, IBM Verify, Okta, Keycloak, generic OIDC) used `\"email_verified\": user_data.get(\"email_verified\")` unconditionally. When the key is absent, `.get()` returns `None`, so the key **was present** in the normalized dict with value `None`. This caused `_is_email_verified_claim` to see the key present, skip the absence-check, fall through all type branches (`bool`/`int`/`str`), and `return False` — blocking the login even after the core fix.\r\n\r\n## :bulb: Fix Description\r\n**Two-part fix, both parts required:**\r\n\r\n1. `_is_email_verified_claim`: changed the absent-key branch to `return True` — absent means the IdP imposes no email-verification restriction. An explicitly `False`/`0`/`\"false\"` value still rejects the user.\r\n\r\n2. All normalization paths (Entra, Google, IBM Verify, Okta, Keycloak, generic OIDC) now use conditional propagation — `email_verified` is only added to the normalized dict when the IdP explicitly includes it, matching the pre-existing GitHub pattern. This ensures the absence-check in `_is_email_verified_claim` fires correctly for every provider.\r\n\r\n## :test_tube: Verification\r\n\r\n| Check | Command | Status |\r\n|---|---|---|\r\n| Lint suite | `make lint` | :white_check_mark: |\r\n| Unit tests (203 tests across SSO files) | `.venv/bin/pytest tests/unit/mcpgateway/services/test_sso_service.py tests/unit/mcpgateway/services/test_sso_user_normalization.py` | :white_check_mark: 203 passed |\r\n| Coverage ≥ 90 % | `make coverage` | :white_check_mark: |\r\n| Entra missing claim no longer blocks login | `_is_email_verified_claim({})` returns `True`; `_normalize_user_info(entra_provider, user_data_without_claim)` does not contain `email_verified` key | :white_check_mark: |\r\n| Explicit `email_verified: false` still blocks | `_is_email_verified_claim({\"email_verified\": False})` returns `False` | :white_check_mark: |\r\n\r\nNew regression tests added for every provider (missing claim omitted + explicit false preserved):\r\n- `TestEntraIDNormalization`: `test_entra_missing_email_verified_claim_is_omitted`, `test_entra_explicit_false_email_verified_is_preserved`, `test_entra_explicit_true_email_verified_is_preserved`\r\n- `TestGitHubNormalization`, `TestGoogleNormalization`, `TestOktaNormalization`, `TestIBMVerifyNormalization`, `TestKeycloakNormalization`, `TestGenericOIDCNormalization`: equivalent missing + explicit-false tests\r\n\r\n## :triangular_ruler: MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## :white_check_mark: Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3977519676",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-19T19:37:09+00:00",
+      "body": "## Review: Approve\n\nRebased onto main (clean, no conflicts), reviewed the code and added two test commits.\n\n### Code Review Summary\n\n**Correctness**: The two-part fix is correct and directly addresses #3253:\n1. `_is_email_verified_claim()` now returns `True` for absent claims (OIDC spec marks `email_verified` as optional — absent ≠ unverified).\n2. All normalization paths use conditional propagation so absent claims aren't injected as `None`.\n\n**Security**: No regressions. Explicitly unverified addresses (`False`/`0`/`\"false\"`) are still rejected at line 1478 before user creation or login. The \"absent = pass-through\" semantic is correct for OIDC — the response still comes from the trusted IdP.\n\n**Consistency**: All non-GitHub providers now use the same `\"email_verified\" in user_data` pattern. The GitHub provider retains its `is not None` pattern with `verified` fallback, which is pre-existing and intentional.\n\n**Test Coverage**: 205 tests pass, 99% coverage on `sso_service.py`, 100% differential coverage on all new/changed code.\n\n### Commits Added During Review\n\n- `fix(tests): add None-value edge case test and apply formatting` — added test for `_is_email_verified_claim({\"email_verified\": None})` to document that explicit `None` (JSON null) is rejected (distinct from absent key). Applied black/isort to test files.\n- `fix(tests): add existing-user absent email_verified regression test` — covers the returning-user login path when the provider omits `email_verified` (e.g. Entra ID returning users).\n\n### Pre-existing Note (not introduced by this PR)\n\nLine 1546 sets `user.email_verified` but the ORM model uses `email_verified_at` (datetime). This is a pre-existing no-op — not a regression from this PR."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "650d65d5d32e427746038330abdb20dd0733849d",
+      "message": "allow SSO login when provider omits email_verified claim\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-05T06:35:01+00:00"
+    },
+    {
+      "sha": "4e4a0050877f6853d4a11b51ccb0b8507b97d88a",
+      "message": "treat absent email_verified claim as pass-through for all providers\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-12T04:17:05+00:00"
+    },
+    {
+      "sha": "7e033cf0d7001477844b1346b0709db58d3ec1b3",
+      "message": "fix(tests): add None-value edge case test and apply formatting\n\nAdd test for _is_email_verified_claim with explicit None (JSON null)\nto document that it is rejected (distinct from absent key). Apply\nblack/isort formatting to test files.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T17:08:01+00:00"
+    },
+    {
+      "sha": "107f19b2524da437edcda57961adc3fe9a4caddc",
+      "message": "fix(tests): add existing-user absent email_verified regression test\n\nCover the existing-user login path when the provider omits the\nemail_verified claim (e.g. Entra ID returning users).  Closes the\ncoverage gap identified during code review.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T19:23:25+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 712,
+  "deletions": 241,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:12.955354",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:12.960276",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3635,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3635.json"
+  }
+}

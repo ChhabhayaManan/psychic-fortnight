@@ -1,0 +1,89 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3981,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3981"
+  },
+  "metadata": {
+    "title": "fix: Fix team join RBAC permissions",
+    "state": "closed",
+    "created_at": "2026-04-01T22:58:32+00:00",
+    "updated_at": "2026-04-03T20:20:47+00:00",
+    "closed_at": "2026-04-03T20:20:45+00:00",
+    "merged_at": "2026-04-03T20:20:45+00:00",
+    "author": "gcgoncalves",
+    "labels": [
+      "bug",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\n<img width=\"391\" height=\"193\" alt=\"Screenshot 2026-04-02 at 00 00 57\" src=\"https://github.com/user-attachments/assets/681ff39f-5893-4dc9-a0c3-bbdabff248c5\" />\r\n\r\nCloses #3980\r\n\r\n## 🔁 Reproduction Steps\r\n1. Login as an Admin user in the Admin UI\r\n2. Create a public team\r\n3. Create a non-admin user\r\n4. Logout, then login as the new (non-admin) user\r\n5. Request to create the public team\r\n\r\n## 🐞 Root Cause\r\nThe team permission check returned `[]` when `team_id` was out of token scope, incorrectly discarding global and personal roles needed for the join endpoint.\r\n\r\n## 💡 Fix Description                                                                                                                                                                                                                                                    Changed the guard to skip adding out-of-scope team roles while preserving global and personal roles in the scope conditions.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4049548256",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-02T09:43:08+00:00",
+      "body": "LGTM 🚀  The change in `mcpgateway/services/permission_service.py` fixes the reported regression by preserving global and personal roles when team_id is out of token scope, which matches the join-request use case without reintroducing out-of-scope team-role access.\n\nI also checked the new tests in `tests/unit/mcpgateway/services/test_permission_service.py `and `tests/unit/mcpgateway/services/test_permission_service_token_narrowing.py.` Coverage around token narrowing, public-only behavior, and cache-key isolation is strong, and the targeted test run passed locally. Nice fix and good regression coverage."
+    },
+    {
+      "id": "4049781920",
+      "author": "Lang-Akshay",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-02T10:31:14+00:00",
+      "body": "This PR fixes a regression introduced by #3924 where _get_user_roles() returned [] early when team_id was outside the caller's token scope, inadvertently discarding global and personal roles (e.g. a platform-wide teams.join permission). The fix replaces the return [] with a conditional that skips injecting team-scoped SQL conditions while still querying global/personal roles. The change is surgical."
+    },
+    {
+      "id": "4057115861",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-03T20:03:15+00:00",
+      "body": "Nice fix, Gabriel — the root cause analysis is spot-on and the approach is clean.\n\n## What the PR does well\n\n- Correctly identifies that the early `return []` in `_get_user_roles()` was over-broad: it discarded global and personal roles along with out-of-scope team roles, breaking `teams.join` for users whose token didn't already include the target team.\n- The fix is minimal and surgical — just restructures the guard into an if/else so team-scoped conditions are skipped while global/personal conditions are preserved.\n- Good regression tests covering both the happy path (in-scope team includes team roles) and deny paths (out-of-scope team excludes team roles).\n\n## Changes made during review\n\nA few small additions on top of the original commits:\n\n1. **Cleaned up stream-of-consciousness comments** in `test_get_user_roles_public_only_token_with_team_id_returns_global_personal_only` — replaced thinking-out-loud notes with a single clear comment.\n2. **Added `test_explicit_team_id_excludes_out_of_scope_narrowed_token`** — query-level verification that the compiled SQL doesn't include out-of-scope team conditions for narrowed tokens (mirrors the existing public-only token test).\n3. **Downgraded log from `warning` to `debug`** at the out-of-scope guard (line 519) — after this fix, every team join/leave by a non-member hits this branch as normal flow, so warning-level would be noisy in production.\n4. **Fixed misleading comment** that said \"should return empty list\" right before asserting `len(roles) == 1`.\n5. **Added `test_explicit_team_id_includes_team_roles_when_token_unrestricted`** — covers the `token_teams=None` + explicit `team_id` branch with query-level verification.\n6. **Applied black formatting** to pre-existing violations in the token narrowing test file.\n\n## Security review\n\n- Team-scoped roles for out-of-scope teams are still excluded (invariant preserved).\n- Consistent with existing behavior when `team_id=None` — global/personal roles were always returned.\n- `check_permission()` still suppresses admin bypass for public-only tokens.\n- No privilege escalation path identified.\n- 104 permission service tests pass, 98% coverage on `permission_service.py` (3 uncovered lines are all pre-existing code outside this PR)."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "3ae2b7a1db81c2e13e3240f520025add6cd0ff30",
+      "message": "fix: Fix team join RBAC permissions\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-01T22:56:41+00:00"
+    },
+    {
+      "sha": "fa88b549e2b5a06a57bf5b1bc2a6b63cfe6d36df",
+      "message": "Fix failing test\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-02T07:44:50+00:00"
+    },
+    {
+      "sha": "e308c7074bd62732ca57bc4667d4d862d6dd648e",
+      "message": "fix: clean up test comments and add query-level narrowed-token regression test\n\n- Remove stream-of-consciousness comments from test\n- Add test_explicit_team_id_excludes_out_of_scope_narrowed_token to\n  verify the compiled query excludes team-scoped roles for narrowed tokens\n- Apply black formatting to token narrowing test file\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T17:19:14+00:00"
+    },
+    {
+      "sha": "bc080cfd25688b77f8908856e984ae6bd4dd27b0",
+      "message": "fix: address codex review feedback\n\n- Downgrade out-of-scope team log from warning to debug: this path is\n  normal flow for join/leave endpoints, not an anomaly\n- Fix misleading comment that said \"empty list\" before asserting 1 role\n- Add test_explicit_team_id_includes_team_roles_when_token_unrestricted\n  covering the token_teams=None + explicit team_id branch\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T19:45:34+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 209,
+  "deletions": 52,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:01.349560",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:01.350107",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3981,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3981.json"
+  }
+}

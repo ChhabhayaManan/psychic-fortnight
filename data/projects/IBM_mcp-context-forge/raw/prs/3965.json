@@ -1,0 +1,187 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3965,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3965"
+  },
+  "metadata": {
+    "title": "refactor(plugins): migrate in-tree plugins to PyPI packages (cpex-*)",
+    "state": "closed",
+    "created_at": "2026-04-01T06:19:59+00:00",
+    "updated_at": "2026-04-10T14:58:29+00:00",
+    "closed_at": "2026-04-10T14:58:27+00:00",
+    "merged_at": "2026-04-10T14:58:27+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "lucarlig",
+      "gandhipratik203",
+      "brian-hussey"
+    ]
+  },
+  "description": "## Summary\n\n- Migrate 6 in-tree plugins (pii_filter, secrets_detection, url_reputation, retry_with_backoff, encoded_exfil_detection, rate_limiter) to standalone PyPI packages (`cpex-*`)\n- Delete all `plugins_rust/` Rust plugin implementations — plugins are now distributed as pre-built wheels from PyPI\n- Remove Rust plugin builder stages from all Containerfiles (keep `tools_rust/mcp_runtime`)\n- Remove ~100 lines of `rust-*` plugin Makefile targets\n- Add `[plugins]` extra to `install-dev` and CI pytest workflow so cpex packages are installed\n- Update `tool_service.py` import from `plugins.retry_with_backoff` to `cpex_retry_with_backoff`\n- Update plugin `kind` paths across 7+ doc files from `plugins.pii_filter.pii_filter.PIIFilterPlugin` to `cpex_pii_filter.PIIFilterPlugin`\n- Clean up pre-commit configs, CODEOWNERS, MANIFEST.in, whitesource, .gitignore\n\n## Test plan\n\n- [ ] `make install-dev && make test` passes (cpex packages installed via `[plugins]` extra)\n- [ ] CI pytest workflow installs plugins via `--extra plugins`\n- [ ] Container builds succeed without `plugins_rust/` directory\n- [ ] Plugin loading test (`test_all_plugins_load_together`) passes with correct count\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+  "comments": [
+    {
+      "id": "3020042922",
+      "author": "Copilot",
+      "created_at": "2026-04-01T06:25:55+00:00",
+      "body": "The plugin `version: 0.1.0` no longer matches the implementation referenced by `kind: cpex_rate_limiter.RateLimiterPlugin` (package is pinned to >=0.0.2). Since plugin version is surfaced via admin plugin APIs/UI, consider updating this value to the external package version (or omitting it like `plugins/config.yaml` does) to avoid misleading metadata.\n```suggestion\n\n```"
+    },
+    {
+      "id": "3020042963",
+      "author": "Copilot",
+      "created_at": "2026-04-01T06:25:55+00:00",
+      "body": "The plugin `version: \"0.1.0\"` is now inconsistent with `kind: \"cpex_rate_limiter.RateLimiterPlugin\"` (external package is >=0.0.2). Because plugin version is exposed in admin plugin APIs/UI, update this value to the external package version or remove it to avoid misleading operators.\n```suggestion\n\n```"
+    },
+    {
+      "id": "3020042988",
+      "author": "Copilot",
+      "created_at": "2026-04-01T06:25:56+00:00",
+      "body": "This fixture still advertises `version: \"0.1.0\"` while `kind` now points to the external `cpex_rate_limiter.RateLimiterPlugin` (>=0.0.2). Even though the plugin is disabled in this test config, keeping the version accurate (or omitting it) helps avoid confusion when debugging plugin metadata or admin plugin listings.\n```suggestion\n\n```"
+    },
+    {
+      "id": "3020043021",
+      "author": "Copilot",
+      "created_at": "2026-04-01T06:25:56+00:00",
+      "body": "This dev test config now depends on the external `cpex-rate-limiter` package (`kind: cpex_rate_limiter.RateLimiterPlugin`). Add an explicit note here about installing the optional extra (e.g. `uv pip install '.[plugins]'`) or set this plugin to `mode: disabled` by default, otherwise following the config file may fail with an import error in environments without that extra installed."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4041959672",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-01T06:25:56+00:00",
+      "body": "## Pull request overview\n\nThis PR migrates the gateway’s rate limiter plugin from an in-tree Python implementation to the external `cpex-rate-limiter` PyPI package, updating configs/build artifacts accordingly and removing the old plugin code and its tests.\n\n**Changes:**\n- Add `cpex-rate-limiter>=0.0.2` as a new optional dependency group (`[plugins]`) and lock it in `uv.lock`.\n- Update plugin configuration files to reference `cpex_rate_limiter.RateLimiterPlugin` (and disable it in default/unit-test configs).\n- Install the new optional dependency group in `Containerfile.lite` and remove the in-tree `plugins/rate_limiter` implementation and related tests/docs.\n\n### Reviewed changes\n\nCopilot reviewed 16 out of 17 changed files in this pull request and generated 4 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `uv.lock` | Locks `cpex-rate-limiter` and adds the `plugins` extra. |\r\n| `pyproject.toml` | Introduces optional dependency group `plugins` with `cpex-rate-limiter`. |\r\n| `Containerfile.lite` | Installs `.[...,plugins]` so container builds include the package. |\r\n| `plugins/config.yaml` | Switches rate limiter `kind` to `cpex_rate_limiter...` and disables by default. |\r\n| `plugins/config-pii-guardian-policy.yaml` | Switches `kind` to external rate limiter. |\r\n| `tests/unit/.../init_hooks_plugins_test.yaml` | Switches `kind` to external rate limiter and disables it for unit tests. |\r\n| `tests/performance/plugins/config.yaml` | Switches `kind` to external rate limiter (still enabled for perf runs). |\r\n| `plugins/webhook_notification/test_config.yaml` | Switches `kind` to external rate limiter for webhook testing config. |\r\n| `docs/docs/using/plugins/plugins.md` | Updates rate limiter entry to point to external package. |\r\n| `llms/plugins-llms.md` | Updates plugin list entry to `cpex-rate-limiter`. |\r\n| `docs/docs/testing/unittest.md` | Removes rate limiter unit test from the unit test list. |\r\n| `plugins/rate_limiter/*` | Removes in-tree plugin implementation, manifest, and README. |\r\n| `tests/unit/.../rate_limiter/test_rate_limiter.py` | Removes in-tree rate limiter unit tests. |\r\n| `tests/integration/test_rate_limiter.py` | Removes in-tree rate limiter integration tests. |\n</details>\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (1)</summary>\n\n**tests/performance/plugins/config.yaml:248**\n* This performance config enables `cpex_rate_limiter.RateLimiterPlugin` (mode: permissive). Since `cpex-rate-limiter` is an optional extra, running `tests/performance/test_plugins_performance.py` will fail unless users have installed `.[plugins]`. Consider either disabling the rate limiter here by default or adding an explicit note in this config about the required extra/install command.\n```\n  # Rate limiter (fixed window, in-memory)\n  - name: RateLimiterPlugin\n    kind: cpex_rate_limiter.RateLimiterPlugin\n    description: Per-user/tenant/tool rate limits\n    version: 0.1.0\n    author: Mihai Criveti\n    hooks: [prompt_pre_fetch, tool_pre_invoke]\n    tags: [limits, throttle]\n    mode: permissive\n    priority: 20\n```\n</details>\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "4043407127",
+      "author": "lucarlig",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-01T11:08:36+00:00",
+      "body": ""
+    },
+    {
+      "id": "4088810835",
+      "author": "gandhipratik203",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-10T09:54:04+00:00",
+      "body": "Thanks for putting this together — moving plugins to standalone PyPI packages opens up some nice operational flexibility (independent versioning, runtime upgrades via `RELOAD_PLUGIN_REQUIREMENTS_TXT`).\n\nA few things I'd suggest addressing before this lands, mostly around making sure we don't lose validation coverage in the migration:\n\n| # | Item | Why |\n|---|---|---|\n| 1 | **Keep the integration tests and make sure they still run** | 1,529 lines of integration coverage (`test_rate_limiter.py` 1,418 lines + `test_encoded_exfil.py` 111 lines) are removed by this PR. Keep them in whichever repo is preferred, but ensure they continue to run and validate the cpex packages against the gateway. |\n| 2 | **Run the rate limiter backend correctness test and add results to the PR description** | Run `make benchmark-rate-limiter` (or `locustfile_rate_limiter_backend_correctness.py`) against a gateway built with the new cpex packages. Confirm the multi-pod Redis enforcement still produces the expected ~50/50 split. Attach the results to the PR description so reviewers have concrete evidence of behavioral parity. |\n| 3 | **Verify `url_reputation` is a real implementation** | Its Rust source (`lib.rs`) is only 195 bytes — possibly a stub. Confirm the plugin is functional or remove it from `config.yaml` until it is. |\n| 4 | **Explain the rate limiter version regression** | `cpex_rate_limiter` is at `0.0.2` while the in-tree version was `0.1.0`. A version downgrade is a yellow flag for feature parity. Confirm this is just numbering, not missing functionality. |\n| 5 | **Add an ADR justifying the architectural change** | An architectural change of this size should have an ADR documenting the motivation, alternatives considered, and trade-offs — so the rationale isn't lost and future contributors understand why the gateway is on this path. |\n\nHappy to help with any of these — particularly running the rate limiter backend correctness test against a cpex-built gateway if that would unblock things.\n"
+    },
+    {
+      "id": "4090153886",
+      "author": "gandhipratik203",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-10T13:58:29+00:00",
+      "body": "Thanks for turning these around so quickly — really appreciate the responsiveness, and the scope decisions feel right.\n\n- ✅ Integration tests preserved (`test_rate_limiter.py` and `test_encoded_exfil.py` kept in-tree) — good call keeping them where they're already wired into CI.\n- ✅ `url_reputation` pulled from the migration scope — appreciate the conservative approach here, much better to ship it when it's ready.\n- ✅ ADR added (`048-extract-rust-backed-plugins-first-and-preserve-python-examples.md`) — nice to have the rationale documented for future contributors.\n- ✅ Luca's plan to freeze plugin code in cpex-plugins and decouple CI is a clean way to stabilize things and addresses the testing concern well.\n\nApproving — thanks again @lucarlig @jonpspri for the quick turnaround on this."
+    },
+    {
+      "id": "4090530774",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-10T14:58:17+00:00",
+      "body": "Approval as @lucarlig and @gandhipratik203 have previously approved."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "dc27ab995c0b897a0fba6136a16407f021994c30",
+      "message": "refactor(plugins): replace in-tree rate_limiter with cpex-rate-limiter package\n\nRemove the in-tree rate_limiter plugin and replace it with the\ncpex-rate-limiter PyPI package, a compiled Rust extension providing\nthe same RateLimiterPlugin class with additional algorithms\n(sliding-window, token-bucket) alongside the original fixed-window.\n\n- Add cpex-rate-limiter>=0.0.2 as a [plugins] optional dependency\n- Update Containerfile.lite to install the plugins extra\n- Remove plugins/rate_limiter/ source directory\n- Remove unit and integration tests that imported plugin internals\n- Update all config files to use cpex_rate_limiter.RateLimiterPlugin\n- Disable RateLimiterPlugin in test fixture config (package not\n  available in unit test environment)\n- Update documentation to reflect the external package\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-01T06:19:32+00:00"
+    },
+    {
+      "sha": "04b0a7c928143bf185b6704890a6d44ca236c8bb",
+      "message": "feat(rate-limiter): pluggable algorithms with Rust-backed execution engine, benchmarks, and validation (#3809)\n\n* feat(rate-limiter): pluggable algorithms, tenant isolation fix, and scale load test\n\n- Add pluggable algorithm strategy: fixed_window, sliding_window, token_bucket\n- Add Redis backend for shared cross-instance rate limiting\n- Fix tenant isolation: skip by_tenant when tenant_id is None\n- Fix sliding window: sweep expired timestamps before counting\n- Fix backend validation: restore _validate_config check\n- Fix token bucket memory path: apply max(1,...) guard to reset timestamp\n- Add Redis integration tests for all three algorithms\n- Add direct regression tests for get_current_user tenant_id fallback\n- Add scale load test with Redis memory timeline and live algorithm detection\n- Add RL_PACE_MULTIPLIER for near-limit pace testing and boundary burst detection\n- Remove redundant algorithm locustfile; scale file is canonical\n- Correct stale comments and README limitations\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>\n\n* feat(rate-limiter): add Rust-backed engine, check() API, benchmarks, and validation\n\n- Rust-backed sliding window engine with pyo3-log integration\n- check() API with tenant propagation, sweep/retry-after support\n- Eliminate redundant ZRANGE in sliding window Lua script\n- Fix detect-secrets baseline for rate limiter load tests\n- Clarify memory backend is single-instance only in docs\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>\n\n* chore: regenerate detect-secrets baseline after rebase\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>\n\n* refactor(rate-limiter): review fixes, Redis hardening, key-format parity tests\n\n- Extract _dispatch_hook() shared by prompt_pre_fetch and tool_pre_invoke,\n  reducing each hook to a single-line wrapper\n- Elevate Redis val_i64/val_f64 parse-error logging from warn to error so\n  silent fail-open degradation surfaces in operator dashboards\n- Clamp sliding-window reset_timestamp with .max(1) so it is always strictly\n  in the future even when the oldest entry expires in < 1 s\n- Add 5 s tokio::time::timeout around Redis connection establishment to\n  prevent indefinite blocking on network partition\n- Replace silent except-pass in EVALSHA SHA tracking with logger.debug\n- Document dual Lua-script invariant (rolling-upgrade key-format parity)\n  in both Python RedisBackend docstring and Rust redis_backend.rs header\n- Add 7 parametrized test_redis_key_format_parity_* tests validating that\n  Python and Rust produce identical Redis keys for the same inputs\n- Revert unrelated .pyi stub changes for encoded_exfil_detection, pii_filter,\n  retry_with_backoff, and secrets_detection\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\n* fix: strip trailing whitespace in pyi stubs, remove accidental .claude/ralph-loop.local.md\n\n- Remove plugins_rust/rate_limiter/.claude/ralph-loop.local.md which\n  was accidentally committed — this is a local Claude Code loop state\n  file and should never have been checked in.\n- Fix trailing whitespace in plugins_rust/rate_limiter/python/\n  rate_limiter_rust/__init__.pyi docstrings to pass pre-commit hooks.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>\n\n* chore: regenerate detect-secrets baseline for new exfil test strings\n\nUpdate .secrets.baseline after adding test_extra_sensitive_keywords\nin plugins_rust/encoded_exfil_detection/src/lib.rs:969 which contains\na fake credential string that triggers the Secret Keyword detector.\nAll new entries are false positives (test data).\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>\n\n* chore: audit new detect-secrets baseline entries as false positives\n\nThe baseline regeneration reset is_secret to null for entries whose\nline numbers shifted. Mark all 17 unaudited entries as is_secret=false\n(test data, example configs, fake credentials) to pass the\n--fail-on-unaudited pre-commit check.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>\n\n---------\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>\nCo-authored-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-02T15:51:05+00:00"
+    },
+    {
+      "sha": "0ebf958ec89d7df10acfc25a160b58b3c80b8275",
+      "message": "feat(discovery): add automatic tool discovery with hot/cold classification (#3839)\n\nImplement automatic tool discovery for upstream MCP servers via\nusage-aware adaptive polling. The gateway can now continuously\nsynchronise tool lists from registered servers without manual\nintervention.\n\nServer classification (hot/cold):\n- Classify servers based on MCP session pool usage patterns\n- Hot servers (top 20% by recent usage): polled at 1x base interval\n- Cold servers (remaining 80%): polled at 3x base interval\n- Classification is deterministic: sorted by recency, active sessions,\n  use count, and URL for tie-breaking\n- Leader election via Redis with TTL renewal for multi-worker\n  coordination\n- Falls back to local-only operation without Redis\n\nIntegration with GatewayService:\n- Health checks respect hot/cold classification intervals\n- Auto-refresh of tools/resources/prompts respects classification\n- Fail-open on classification errors (poll anyway)\n- Poll timestamps tracked via Redis with TTL expiry\n- Uses base gateway URL (pre-auth) for classification lookups to\n  avoid leaking query-param auth secrets to Redis\n\nConfiguration:\n- AUTO_REFRESH_SERVERS=true enables automatic tool sync (default: false)\n- GATEWAY_AUTO_REFRESH_INTERVAL=300 sets base polling interval\n- HOT_COLD_CLASSIFICATION_ENABLED=false (opt-in, requires Redis)\n\nIncludes comprehensive tests with 100% coverage on the new\nServerClassificationService and integration tests for the\nGatewayService hot/cold polling paths.\n\nCloses #3734\n\nSigned-off-by: Lang-Akshay <akshay.shinde26@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Lang-Akshay",
+      "date": "2026-04-03T02:45:56+00:00"
+    },
+    {
+      "sha": "d6e30353c325e37b3e2ab8d3a0237632b3b758d7",
+      "message": "refactor(plugins): replace in-tree rate_limiter with cpex-rate-limiter package\n\nRemove the in-tree rate_limiter plugin and replace it with the\ncpex-rate-limiter PyPI package, a compiled Rust extension providing\nthe same RateLimiterPlugin class with additional algorithms\n(sliding-window, token-bucket) alongside the original fixed-window.\n\n- Add cpex-rate-limiter>=0.0.2 as a [plugins] optional dependency\n- Update Containerfile.lite to install the plugins extra\n- Remove plugins/rate_limiter/ source directory\n- Remove unit and integration tests that imported plugin internals\n- Update all config files to use cpex_rate_limiter.RateLimiterPlugin\n- Disable RateLimiterPlugin in test fixture config (package not\n  available in unit test environment)\n- Update documentation to reflect the external package\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-01T06:19:32+00:00"
+    },
+    {
+      "sha": "3d0e81ecfaec4f36b4ee517e2f84a3d90daace18",
+      "message": "refactor(plugins): update build, CI, and docs for PyPI plugin migration\n\nRemove all plugins_rust/ build infrastructure and update references\nacross Containerfiles, Makefile, CI workflows, pre-commit configs,\nCODEOWNERS, and documentation to reflect that plugins are now\ndistributed as PyPI packages (cpex-*) via the [plugins] optional extra.\n\n- Remove Rust plugin builder stages from all Containerfiles\n- Remove ~100 lines of rust-* plugin Makefile targets (keep mcp-runtime)\n- Add --extra plugins to CI pytest workflow\n- Add [plugins] extra to install-dev Makefile target\n- Update tool_service.py import to use cpex_retry_with_backoff\n- Update plugin kind paths in 7 doc files to cpex_pii_filter.*\n- Clean up pre-commit, CODEOWNERS, MANIFEST.in, whitesource, .gitignore\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-10T00:01:20+00:00"
+    },
+    {
+      "sha": "5527113c6a081fd969a728c09ee955a9f4d4dcd3",
+      "message": "fix(plugins): address PR review findings on PyPI plugin migration\n\nRound 1 (blockers + high):\n- Restore exclude-newer = \"10 days\" in pyproject.toml; replace stale\n  langchain/requests pins with cpex-* per-package overrides anchored\n  to 2026-04-09 so the plugins resolve newer than the global window\n- Guard cpex_retry_with_backoff import in tool_service.py with\n  try/except ImportError; falls back to (None, True) for the Python\n  pipeline when the optional [plugins] extra is not installed\n- Delete orphaned .github/workflows/rust-plugins.yml and the\n  associated test cases in tests/unit/test_rust_plugins_workflow.py;\n  drop the workflow card from docs/docs/architecture/explorer.html\n- Delete orphaned docs/docs/using/plugins/rust-plugins.md and remove\n  it from docs/docs/using/plugins/.pages mkdocs nav\n- Harden docker-entrypoint.sh install_plugin_requirements:\n  canonicalize /app and the resolved requirements path with\n  readlink -f and require the path to live under /app/, log\n  non-comment lines from the requirements file before pip runs,\n  and skip cleanly on validation failure\n- Delete PLUGIN-MIGRATION-PLAN.md (one-time planning doc)\n- Add COPY plugins/requirements.txt to Containerfile.scratch (the\n  layered Containerfile.lite already had it; the broad COPY . in\n  Containerfile already includes it)\n\nRound 2 (medium + low):\n- Bump cpex-* version pin floors in pyproject.toml [plugins] to\n  match resolved versions in uv.lock (cpex-rate-limiter>=0.0.3,\n  cpex-encoded-exfil-detection>=0.2.0, cpex-pii-filter>=0.2.0,\n  cpex-url-reputation>=0.1.1)\n- Add Prerequisites section to tests/performance/PLUGIN_PROFILING.md\n  documenting the [plugins] extra requirement\n- Add Status: Partially superseded note to ADR-041 explaining that\n  plugins_rust/ was removed when in-tree Rust plugins migrated to\n  PyPI packages\n- Document upgrade semantics in plugins/requirements.txt header\n  (pip without --upgrade skips already-satisfied constraints)\n- Add importlib.util.find_spec() precheck to\n  tests/performance/test_plugins_performance.py main(); the script\n  now skips cleanly with an actionable message if any of the five\n  cpex packages referenced by the perf config are missing\n- Rename tests/unit/test_rust_plugins_workflow.py to\n  test_go_toolchain_pinning.py to match its remaining contents\n  (Go workflow pin and Makefile toolchain assertion)\n\nFollow-ups tracked in IBM/mcp-context-forge#4116 and\nibm/cpex-plugins#21 for the longer-term tool_service.py refactor\nthat will eliminate the cross-package import entirely.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-10T07:04:51+00:00"
+    },
+    {
+      "sha": "06fdce4889e8af848da559e9d6bec2e6a00e9c24",
+      "message": "revert: restore tests changes from PR #3965\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-10T09:29:57+00:00"
+    },
+    {
+      "sha": "863e3b1b74c3a245539d12fdf8127a7deaa6bc20",
+      "message": "fix(ci): align plugin tests with PyPI migration\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-10T09:50:58+00:00"
+    },
+    {
+      "sha": "479b921078ce7198f63c1f053c687bf1bb0eb8ac",
+      "message": "test: remove legacy plugin test skip infrastructure\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-10T10:40:39+00:00"
+    },
+    {
+      "sha": "8f10d0d144f23d10b5394835332395545c57573d",
+      "message": "test: align packaged plugin tests with rust shims\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-10T10:54:38+00:00"
+    },
+    {
+      "sha": "284829f3add32ec7dee15588f9894fb193b3ab1d",
+      "message": "test: cover retry policy import path in tool service\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-10T11:13:37+00:00"
+    },
+    {
+      "sha": "a89c599cf002e426620c983f290dd2b71c8fa847",
+      "message": "fix: harden cpex plugin migration paths\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-10T11:53:16+00:00"
+    },
+    {
+      "sha": "3f6559a0a687bd21ccd6db5eb9efddc21e843791",
+      "message": "test: cover retry policy parser branches\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-10T12:16:36+00:00"
+    },
+    {
+      "sha": "fc5a959347dd3b9ead170569d2a8134aa433dce4",
+      "message": "test: cover plugin requirements entrypoint path\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-10T14:05:02+00:00"
+    }
+  ],
+  "files_changed": 171,
+  "additions": 1590,
+  "deletions": 39592,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:54.990632",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:54.992519",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3965,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3965.json"
+  }
+}

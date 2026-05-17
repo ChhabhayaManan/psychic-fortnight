@@ -1,0 +1,34 @@
+{
+  "id": "68d30fff-9e13-4358-a607-5e1c1259c9a5",
+  "title": "fix(oauth): honor advisory contract and accept array-shaped scope/scp",
+  "summary": "## 🔗 Related Issue\r\nCloses #4213\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nTwo small regressions in the OAuth token claim validator introduced in #3941 break tool fetching for non-conforming IdPs:\r\n\r\n1. `_validate_scopes` calls `.split()` on the `scope` / `scp` claim, which crashes when the IdP emits an array (Ory Hydra, Keycloak, some Auth0 configurations).\r\n2. `gateway_service.py::fetch_tools_after_oauth` raises `GatewayConnectionError` on any mismatched claim, contradicting the module's own \"advisory — the upstream MCP server remains the authoritative validator\" contract stated in `token_validation_service.py`.\r\n\r\nThis PR:\r\n- Normalizes array-shaped `scope`/`scp` to a space-separated string before tokenization.\r\n- Wraps each `_validate_*` call in its own `try / except` so one crashing validator cannot abort siblings or propagate to the caller; crashes become non-blocking warnings.\r\n- Downgrades the hard-block in `fetch_tools_after_oauth` to a `logger.warning` that preserves the existing operator guidance (`Fix oauth_config(resource/scopes/issuer) …`). The upstream MCP server remains the authoritative validator, per the module docstring.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    pass    |\r\n| Unit tests                | `make test`     |   pass     |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n- Reproduced end-to-end against **Amplitude's public MCP server** (`https://mcp.amplitude.com/mcp`, Ory Hydra-backed, issuer `https://auth.amplitude.com`) which emits `scp` as an array and `aud` as an empty list even when the client sends RFC 8707 `resource=` on both `/authorize` and `/token`. Full decoded JWT claims (from a direct DCR + PKCE flow, bypassing ContextForge) are included in #4213.\r\n- The previous \"Refusing to forward OAuth token … Fix oauth_config …\" diagnostic is preserved as a warning log, so operators still get the remediation hint when a mismatch is genuinely their misconfiguration.\r\n- If reviewers prefer to keep the strict blocking behavior available to deployments that want it, happy to follow up with an opt-in `oauth_config.strict_claim_validation` flag — did not include it here to keep the change focused on the regression.",
+  "reasoning": "## 🔗 Related Issue\r\nCloses #4213\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nTwo small regressions in the OAuth token claim validator introduced in #3941 break tool fetching for non-conforming IdPs:\r\n\r\n1. `_validate_scopes` calls `.split()` on the `scope` / `scp` claim, which crashes when the IdP emits an array (Ory Hydra, Keycloak, some Auth0 configurations).\r\n2. `gateway_service.py::fetch_tools_after_oauth` raises `GatewayConnectionError` on any mismatched claim, contradicting the module's own \"advisory — the upstream MCP server remains the authoritative validator\" contract stated in `token_validation_service.py`.\r\n\r\nThis PR:\r\n- Normalizes array-shaped `scope`/`scp` to a space-separated string before tokenization.\r\n- Wraps each `_validate_*` call in its own `try / except` so one crashing validator cannot abort siblings or propagate to the caller; crashes become non-blocking warnings.\r\n- Downgrades the hard-block in `fetch_tools_after_oauth` to a `logger.warning` that preserves the existing operator gu",
+  "confidence": 0.75,
+  "related_services": [],
+  "contributors": [
+    "kimsehwan96"
+  ],
+  "tags": [
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "d5d83be1-5789-4db8-a960-e8f644115f5f",
+      "source_type": "pr",
+      "source_id": "4214",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/4214",
+      "contributor": "kimsehwan96",
+      "timestamp": "2026-04-15T08:27:17Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4214.json"
+    }
+  ],
+  "timestamp": "2026-04-15T08:27:17Z",
+  "created_at": "2026-05-17T17:25:02.772040",
+  "updated_at": "2026-05-17T17:25:02.772042",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:25:02.772739",
+    "artifact_type": "decisions",
+    "artifact_id": "68d30fff-9e13-4358-a607-5e1c1259c9a5"
+  }
+}

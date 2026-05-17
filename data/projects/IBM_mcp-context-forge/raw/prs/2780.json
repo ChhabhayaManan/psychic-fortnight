@@ -1,0 +1,69 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2780,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2780"
+  },
+  "metadata": {
+    "title": "Fix: Refresh teams list automatically after team creation",
+    "state": "closed",
+    "created_at": "2026-02-09T10:09:55+00:00",
+    "updated_at": "2026-02-10T21:20:25+00:00",
+    "closed_at": "2026-02-10T21:20:23+00:00",
+    "merged_at": "2026-02-10T21:20:23+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "ui"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nWith this fix, teams list now updates automatically after creating a new team, eliminating the need for manual page refresh.\r\n\r\n**Why:** The HTMX response after team creation wasn't triggering a list refresh, causing users to see an outdated teams list until they manually refreshed the page. This created a confusing UX where the create operation succeeded but the new team wasn't visible.\r\n\r\n## 🔗 Related Issue\r\nCloses #2690 \r\n\r\n## 🐞 Root Cause\r\n\r\nThe backend returned custom HTML that was inserted via `hx-swap=\"afterbegin\"`, but this approach had two problems:\r\n\r\n1. **No actual refresh triggered**: The `HX-Trigger: adminTeamAction` header sent `resetTeamCreateForm: true` but NOT `refreshUnifiedTeamsList: true`, so the JavaScript refresh logic never executed\r\n2. **HTML structure mismatch**: Backend-generated HTML had a different structure than template-rendered teams (missing relationship badges, action buttons, filtering attributes)\r\n\r\n**Location:** `mcpgateway/admin.py:4065-4100` and `mcpgateway/templates/admin.html:14136`\r\n\r\n## 💡 Fix Description\r\n\r\nImplemented **solution 2** from suggestion provided: \"A trigger to refresh the teams table after successful creation\"\r\n\r\n**Key changes:**\r\n\r\n1. **Backend** (`admin.py:4066-4068`): Return empty 201 response instead of custom HTML\r\n   ```python\r\n   response = HTMLResponse(content=\"\", status_code=201)\r\n   return response\r\n   ```\r\n\r\n2. **Frontend** (`admin.html:14137-14139`): Changed form target to error container\r\n   ```html\r\n   hx-target=\"#create-team-error\"\r\n   hx-swap=\"innerHTML\"\r\n   ```\r\n\r\n3. **Existing handler** (`admin.html:14737-14742`): Leverages already-present `htmx:afterRequest` listener that refreshes the list via `initializeTeamManagement()`\r\n\r\n**Design rationale:**\r\n- Eliminates HTML duplication (single source of truth: `teams_partial.html`)\r\n- Reuses existing refresh infrastructure\r\n- Cleaner than `hx-swap-oob` approach (no full table rendering in response)\r\n- All teams render consistently via template with proper structure\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | Tested via Admin UI - team appears immediately after creation without F5  |        |\r\n\r\n**Test updates:**\r\n- Updated `test_admin_create_team_success` to expect empty 201 response\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n\r\n---",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3779457422",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-10T14:47:35+00:00",
+      "body": "Tested locally and worked well. Great seeing a fix with `+5 -40` lines!"
+    },
+    {
+      "id": "3781669679",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-10T21:20:14+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "5deb8a83f2244b469f5d542d766ea3f2bc706414",
+      "message": "fix: refresh teams list automatically after team creation\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-09T09:51:49+00:00"
+    },
+    {
+      "sha": "6c5a45332b41b799b8f4f21721b4d628907bb830",
+      "message": "test fixes\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-02-09T10:25:39+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 5,
+  "deletions": 40,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:18.603393",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:18.604677",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2780,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2780.json"
+  }
+}

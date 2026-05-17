@@ -1,0 +1,89 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4582,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4582"
+  },
+  "metadata": {
+    "title": "chore(plugins): align rate-limiter config with gateway convention",
+    "state": "closed",
+    "created_at": "2026-05-04T08:07:04+00:00",
+    "updated_at": "2026-05-06T13:19:15+00:00",
+    "closed_at": "2026-05-06T13:19:13+00:00",
+    "merged_at": "2026-05-06T13:19:13+00:00",
+    "author": "gandhipratik203",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88",
+      "gandhipratik203",
+      "brian-hussey"
+    ]
+  },
+  "description": "## Summary\n\nAlign the rate-limiter plugin's `redis_url` in `plugins/config.yaml` with the gateway's existing convention of sourcing Redis URLs from the `REDIS_URL` env via the plugin loader's Jinja substitution. Operators set `REDIS_URL` once and the rate-limiter picks it up — no more hand-editing the yaml or templating it in deployment tooling.\n\nCompanion to #4581.\n\n## Changes\n\n- `plugins/config.yaml`: `redis_url: \"redis://redis:6379/0\"` → `redis_url: '{{ env.REDIS_URL | default(\"redis://redis:6379/0\") }}'` plus a short comment about the env-source. Outer single / inner double quotes survive `yaml.safe_dump` round-trips cleanly.\n- `tests/integration/test_rate_limiter_redis_url_from_yaml.py`: new test — env-var substitution flows through the plugin loader cleanly and the resolved URL reaches a live Redis (PING → PONG). Skips when Redis isn't reachable.\n\n## Test plan\n\n- [x] `pytest tests/integration/test_rate_limiter_redis_url_from_yaml.py` green locally with Redis running\n- [x] Skips cleanly without Redis\n- [ ] CI green\n\nThe schema-regression test and `redis_fallback` cleanup originally bundled here are now tracked as #4603.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4227278340",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-05T10:47:05+00:00",
+      "body": "As mentioned in comments"
+    },
+    {
+      "id": "4229588437",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-05T15:45:53+00:00",
+      "body": "Good direction — the Jinja `| default(...)` pattern matches what the rest of `config.yaml` already does for `IBM_WATSON_*`, and the outer-single/inner-double quoting to survive `yaml.safe_dump` round-trips is a nice touch. A couple of things worth addressing before this lands:\n\n## Blocking\n\n**Relative path in the integration test**\n\n```python\ncfg = ConfigLoader.load_config(\"plugins/config.yaml\")   # test line 56\n```\n\nThis resolves from `cwd`, so the test silently breaks whenever pytest is invoked from any directory other than the repo root (e.g. `cd tests && pytest`). Suggest anchoring to the file's own location:\n\n```python\nimport pathlib\n_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]\ncfg = ConfigLoader.load_config(str(_REPO_ROOT / \"plugins\" / \"config.yaml\"))\n```\n\n**Security Scan CI failure**\n\n25/28 checks pass but the Security Scan job is failing. Worth checking whether Bandit is flagging something in the new test file (e.g. the bare `except Exception` in `_redis_reachable`, or the `socket` usage) and either suppressing with a `# nosec` + justification comment or adjusting the code. Happy to take a look at the job log if you can share it.\n\n## Suggestions\n\n**No test for the `default` fallback path**\n\nThe test always injects `REDIS_URL` via `monkeypatch.setenv`, so the `| default(\"redis://redis:6379/0\")` branch is never exercised. A small unit test (no live Redis needed) would pin that:\n\n```python\ndef test_rate_limiter_redis_url_uses_default_when_env_unset(monkeypatch, tmp_path):\n    monkeypatch.delenv(\"REDIS_URL\", raising=False)\n    cfg = ConfigLoader.load_config(\"plugins/config.yaml\")\n    rl = next(p for p in cfg.plugins if p.name == \"RateLimiterPlugin\")\n    assert rl.config.get(\"redis_url\") == \"redis://redis:6379/0\"\n```\n\n(Same relative-path caveat applies here.)\n\n## Minor\n\nThe comment in `config.yaml` mentions WASM sandboxes — a bit surprising in a Redis URL context, since WASM plugins typically can't open TCP sockets. Trimming to just \"separate container\" would avoid confusion:\n\n```yaml\n# Sourced from the gateway's REDIS_URL env; when the plugin runs in a\n# separate container, ensure that host is reachable from within it.\n```\n\n---\n\nOne pre-existing issue worth tracking separately (not blocking this PR): `SandboxedEnvironment` in `config.py:80` is constructed with `autoescape=True`, which HTML-encodes `&`, `<`, `>`, `\"`. That's correct for HTML templates but wrong for YAML — if `REDIS_URL` ever includes a percent-encoded password or similar, the rendered value would be silently corrupted. Probably worth a follow-up issue since it affects all Jinja-templated values in the config, not just this one."
+    },
+    {
+      "id": "4234775800",
+      "author": "msureshkumar88",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-06T09:18:09+00:00",
+      "body": "Solid work scoping this down to just the Jinja substitution — that's the right call. All four actionable items from the original review are addressed and CI is green.\n\n**What's good**\n- Path anchored via `pathlib.Path(__file__).resolve().parents[2]` — test works from any invocation directory\n- `test_rate_limiter_redis_url_uses_default_when_env_unset` pins the `default(...)` filter contract cleanly, runs without Redis\n- WASM comment trimmed to what actually applies\n- `redis_fallback` cleanup and schema-validation regression test correctly separated to #4603\n\n**One non-blocking nit**\n`test_rate_limiter_redis_url_from_yaml.py:70` still uses the sync `redis.from_url()` client. No event loop in this test so it won't cause flakiness, but worth converting to `redis.asyncio` in a follow-up if the test suite moves to async fixtures.\n\n**On #4605 (`autoescape=True`)**\nGood catch filing that separately. Worth prioritising — `config.py:80` silently corrupts any env-sourced value containing `&`, `<`, `>`, or `\"` before `yaml.safe_load` sees it. A Redis password like `p & w` becomes `p & amp; w` and the connection fails with a confusing error. Fix is one line (`autoescape=False`) but the blast radius covers every Jinja-rendered config value across all plugins, so it warrants its own PR and test coverage. Happy to review that one when it's up.\n\nApproving — this is mergeable as-is."
+    },
+    {
+      "id": "4236360839",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-06T13:19:01+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "fc0ea00f926c543d4b395e590e2a6d8c6d3ba079",
+      "message": "chore(plugins): align rate-limiter Redis config with gateway convention\n\nCloses IBM/mcp-context-forge#4581.\n\nSources the rate-limiter plugin's redis_url from the gateway's REDIS_URL\nenv var via the plugin loader's existing Jinja substitution, instead of\nhardcoding it as a literal string in plugins/config.yaml.\n\nWhy\n---\n\nThe gateway already sources its own Redis URL from REDIS_URL via\npydantic Settings (mcpgateway/config.py). Operators set REDIS_URL once\nand the gateway picks it up.  The rate-limiter plugin previously\nignored that env var and forced a second, separate edit if operators\nwanted to point the limiter at a different Redis (different host,\ndifferent DB number, different deployment topology, etc.). One env var\nmapping to two configuration surfaces is mildly surprising and creates\ndrift over time.\n\nBackwards-compatible: docker-compose.yml exports\nREDIS_URL=redis://redis:6379/0 by default, so the resolved value\nmatches the prior literal in local dev.  Operators who currently set\nREDIS_URL in their deployment pick up the new convention transparently.\n\nTest\n----\n\nAdds tests/integration/test_rate_limiter_redis_url_from_yaml.py — a\nsmall smoke test that loads plugins/config.yaml, asserts the redis_url\nresolves to a non-empty string with no leaked Jinja placeholder, and\nPINGs a live Redis at the resolved URL.  Skips cleanly when Redis\nisn't reachable, so the suite stays green on runners without Redis.\n\nOut of scope\n\n  * URL log sanitization or other observability changes.\n  * Plugin-loader changes — Jinja substitution already supported.\n  * Other plugin yaml entries — this PR is scoped to the rate-limiter\n    block only.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-05-04T07:56:01+00:00"
+    },
+    {
+      "sha": "f34d7a123c1328f9bc8f2fe7339f61b7baef56d6",
+      "message": "chore(plugins): add Jinja default filter for redis_url + invert quoting to survive yaml round-trip\n\nThe previous form ``\"{{ env.REDIS_URL }}\"`` rendered to an empty string\nin any environment that did not set the ``REDIS_URL`` env var, including\nthe existing ``test_manager_initializes_packaged_plugins_from_shipped_configs``\nunit test on CI.  The empty URL then hit the redis crate as a parse\nfailure (``InvalidClientConfig: Redis URL did not parse``).\n\nFix uses Jinja's ``default()`` filter to fall back to the previous\nliteral default when the env var is unset.  Operators in production\nwho set ``REDIS_URL`` get the override; CI / fresh-laptop environments\nget the same value as before this PR.\n\nQuoting note: YAML outer-single + Jinja inner-double, not the other\nway around.  ``yaml.safe_dump`` (used by the existing test to filter\nplugins and write a tmp config) doubles the inner ``'`` when it\nround-trips a double-quoted YAML scalar, producing\n``default(''redis://...'')`` which Jinja parses as empty-string + bare\nidentifier ``redis`` (the source of the CI failure).  Inverting the\nquotes preserves the Jinja expression byte-for-byte across\n``yaml.safe_load`` -> ``yaml.safe_dump`` and is the standard\nrecommendation for embedding Jinja in YAML scalars.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-05-05T08:08:18+00:00"
+    },
+    {
+      "sha": "aa5ded9961f0ea24636f16a01669e91f876348df",
+      "message": "test(rate-limiter): anchor config path + cover Jinja default branch\n\nAddress review feedback on #4582:\n\n- ``test_rate_limiter_redis_url_from_yaml.py``: anchor\n  ``plugins/config.yaml`` to the test file's location via\n  ``pathlib.Path(__file__).resolve().parents[2]`` so the test works\n  whether pytest is invoked from the repo root or from any\n  subdirectory (``cd tests && pytest`` was silently broken).\n- Add ``test_rate_limiter_redis_url_uses_default_when_env_unset``:\n  the existing test always set ``REDIS_URL`` via\n  ``monkeypatch.setenv``, so the ``| default(\"redis://redis:6379/0\")``\n  branch was untested.  The new test deletes the env var and\n  asserts the default resolves — runs without a Redis service.\n- ``plugins/config.yaml``: trim the ``redis_url`` comment to drop\n  the WASM-sandbox reference (WASM plugins can't open TCP sockets,\n  so ``REDIS_URL`` doesn't apply to them).  Keep the\n  separate-container caveat which is the realistic case.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-05-05T16:14:04+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 94,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:44.422398",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:44.423637",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4582,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4582.json"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3254,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3254"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Fix pagination leak across tabs",
+    "state": "closed",
+    "created_at": "2026-02-25T15:08:03+00:00",
+    "updated_at": "2026-02-25T21:05:58+00:00",
+    "closed_at": "2026-02-25T21:05:56+00:00",
+    "merged_at": "2026-02-25T21:05:56+00:00",
+    "author": "madhav165",
+    "labels": [
+      "ica"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3244\r\n\r\n---\r\n\r\n# Bug-fix PR\r\n\r\n## Summary\r\n\r\nPagination navigation buttons disappear for visible sections when `MCPGATEWAY_UI_HIDE_SECTIONS` or `MCPGATEWAY_UI_HIDE_HEADER_ITEMS` are configured. A Jinja2 variable scoping issue in `admin.html` causes a shared `pagination` variable to cascade stale values between section blocks, poisoning later sections with earlier sections' `total_items` and `total_pages`.\r\n\r\n## Reproduction Steps\r\n\r\n1. Set `MCPGATEWAY_UI_HIDE_SECTIONS=overview,logs` (or any combination that leaves multiple data sections visible)\r\n2. Ensure the first visible section with pagination (servers/catalog) has 0 items\r\n3. Navigate to the second visible section (tools) which has items\r\n4. Observe: pagination navigation buttons (prev/next/page numbers) are missing\r\n\r\nAlternatively:\r\n\r\n1. Have servers with 200 items, tools with 25 items\r\n2. Open tools tab — pagination shows \"200 items\" and 4 pages instead of \"25 items\" and 1 page\r\n\r\n## Root Cause\r\n\r\nAll five paginated sections in `admin.html` (servers, tools, gateways, tokens, a2a-agents) compute pagination inline using a shared `pagination` variable:\r\n\r\n```jinja2\r\n{% set total_items = (pagination.total_items if pagination is defined else ...) %}\r\n{% set pagination = { 'total_items': total_items, ... } %}\r\n```\r\n\r\nJinja2's `{% set %}` inside `{% if %}` blocks propagates to the enclosing scope (unlike `{% for %}` loops). After section #1 renders and sets `pagination`, section #2 reads section #1's stale `total_items` and `total_pages` instead of computing from its own data.\r\n\r\nWhen an earlier section has 0 items, it sets `pagination.total_pages = 0`. The `<template x-if=\"totalPages > 0\">` guard in `pagination_controls.html` then hides all navigation buttons for subsequent sections, even if they have hundreds of items.\r\n\r\n**Affected lines**: `admin.html` lines 2489, 3437, 4978, 6658, 6804\r\n\r\n## Fix Description\r\n\r\nEach section now computes `total_items` directly from its own data list, ignoring any pre-existing `pagination` variable:\r\n\r\n```jinja2\r\n{# Before (buggy): #}\r\n{% set total_items = (pagination.total_items if pagination is defined else (tools|length if tools is defined else 0)) %}\r\n\r\n{# After (fixed): #}\r\n{% set total_items = tools|length if tools is defined else 0 %}\r\n{% set total_pages = (total_items + per_page - 1) // per_page if total_items > 0 else 0 %}\r\n```\r\n\r\nApplied to all 5 pagination blocks: servers, tools, gateways, tokens, a2a-agents.\r\n\r\n## Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage >= 80 %                      | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n| JS tests (Vitest)                     | `npm test`           |        |\r\n\r\n### Test coverage added\r\n\r\n**Python** (`tests/unit/mcpgateway/test_admin.py::TestPaginationVariableCascade`):\r\n- `test_tools_pagination_not_poisoned_by_empty_servers` — 0-item servers don't poison tools (75 items) or gateways (30 items)\r\n- `test_tools_pagination_correct_when_servers_hidden` — hidden servers section doesn't leak stale pagination to tools\r\n- `test_later_section_not_poisoned_by_earlier_with_different_counts` — servers (200), tools (25), gateways (150) each show own counts\r\n\r\n**JavaScript** (`tests/js/admin-pagination.test.js`):\r\n- `getPaginationParams namespace isolation` (3 tests) — each table reads only its own `{table}_page`/`{table}_size` URL params\r\n- `buildTableUrl namespace isolation` (2 tests) — URLs built per-table, no search query cross-contamination\r\n- `pagination component goToPage behavior` (6 tests) — goToPage no-op when totalPages=0 (cascade poison scenario), works when >0, independent section state, bounds checking\r\n\r\n## MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] Tests added for the fix (Python + JS)\r\n- [x] No new files created (tests added to existing files)\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3856886719",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-25T20:52:31+00:00",
+      "body": "Reviewed and E2E validated. The pagination cascade fix is correct, minimal, and well-tested. Each section now computes from its own data — no cross-contamination."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c6c63620427ba0116cf798d29010469b8a9b82a6",
+      "message": "branched from main\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-25T12:12:10+00:00"
+    },
+    {
+      "sha": "0b5e7984a98883f0493777445421f101f1fddd22",
+      "message": "fix(ui): prevent pagination variable cascade between admin sections (#3244)\n\nEach section in admin.html shared a single Jinja2 pagination variable,\ncausing later sections to inherit stale total_items/total_pages from\nearlier ones. When an earlier section had 0 items, subsequent sections\nlost their pagination controls entirely.\n\nReplace the pagination.X-if-defined fallback chain with direct\ncomputation from each section's own data list (servers|length,\ntools|length, etc.), eliminating cross-section variable leakage.\n\nCloses #3244\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-25T14:43:48+00:00"
+    },
+    {
+      "sha": "e228120b92e5d5de5aebe4266596f157a1a1235b",
+      "message": "test(js): add pagination cascade isolation tests (#3244)\n\nVerify that URL-namespaced pagination params (servers_page, tools_page,\netc.) remain independent per section, and that the Alpine.js pagination\ncomponent correctly hides navigation when totalPages is 0.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-25T14:48:57+00:00"
+    },
+    {
+      "sha": "5b9edf82a7a179c6c9a83f1a84adab215f35e02c",
+      "message": "remove issue.md\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-25T14:50:12+00:00"
+    },
+    {
+      "sha": "3183b95dd28610c40cc61724a8548ab5737d4fe1",
+      "message": "refactor(test): move pagination cascade tests into existing test files\n\nMove Python tests from standalone test_admin_pagination_cascade.py into\ntest_admin.py as TestPaginationVariableCascade class. Move JS tests from\nstandalone admin-pagination-cascade.test.js into admin-pagination.test.js\nalongside existing pagination tests. Delete standalone files.\n\nAlso inject getPaginationParams/buildTableUrl/safeReplaceState via\nbeforeEval so admin.js globals are available for namespace isolation tests.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-25T14:57:27+00:00"
+    },
+    {
+      "sha": "be55c9b21855c7889abd4da9b85a04ad3dcf06d8",
+      "message": "fix tests\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-25T17:05:53+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 468,
+  "deletions": 25,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:28.830305",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:28.831831",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3254,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3254.json"
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3330,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3330"
+  },
+  "metadata": {
+    "title": "fix(ui): display CRUD changes on Users and Teams pages without full reload",
+    "state": "open",
+    "created_at": "2026-02-27T16:12:11+00:00",
+    "updated_at": "2026-04-03T11:50:03+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "marekdano",
+    "labels": [
+      "bug",
+      "ui",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2691 #2864 \r\n\r\n## 📌 Summary\r\n\r\nFixes stale UI data on Teams and Users admin pages when running multiple gateway replicas behind nginx. The root cause was three layers of caching preventing CRUD changes from being reflected:\r\n\r\n1. Missing HTMX refresh triggers — Create team and delete user endpoints returned responses without `HX-Trigger` headers, so the frontend never knew to refresh the lists\r\n2. Nginx/browser caching — Nginx's proxy_cache_valid 200 5s and add_header Cache-Control \"private, max-age=5\" always caused stale responses for all /admin GET requests. Since nginx overrides backend Cache-Control headers, this was solved client-side with `_t=Date.now()` cache-busting query parameters only after CRUD actions on Teams and Users.\r\n3. Fix the issue with clicking `Edit` on the freshly-swapped card, which caused `htmx:targetError` in the browser console and the edit modal never opened.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\nUsers Page\r\n\r\nScenario 1:\r\n1. Go to http://localhost:8080/admin\r\n2. Navigate to the Users page\r\n3. Create, Edit, Delete User(s)\r\n4. Observe that a new / updated / deleted user is not updated on the page. The page has to be reloaded to see the change.\r\n\r\nScenario 2: \r\n1. Go to http://localhost:8080/admin\r\n2. Navigate to the Users page\r\n3. Deactivate or Activate a user\r\n4. Hit the Edit button to modify the user\r\n5. Observe that the edit modal is not displayed, and the error is logged in the browser console\r\n\r\n\r\nTeams Page\r\n1. Go to http://localhost:8080/admin\r\n2. Navigate to the Teams page\r\n3. Create, Edit, Activate / Deactivate, Delete Team(s)\r\n4. Add / Remove members to / from Teams\r\n6. Observe that a new / updated / deleted teams or updated members are not updated on the page. The page has to be reloaded to see the change.\r\n\r\n\r\n## 🐞 Root Cause\r\n\r\nCRUD operations on Users and Teams are cached behind the nginx 5s cache time. So when the operations are executed on the admin UI, the changes are not reflected on the UI. The whole page must be reloaded to see them. \r\n\r\nAfter clicking Activate or Deactivate on a user card, the card is replaced via `hx-swap=\"outerHTML\"` using HTML generated server-side by `_render_user_card_html()`. The `Edit` button produced by that function was missing three HTMX attributes present in the Jinja template (`users_partial.html`). Clicking `Edit` on the freshly-swapped card caused `htmx:targetError` in the browser console and the edit modal never opened.\r\n\r\n\r\n## 💡 Fix Description\r\n\r\n`mcpgateway/admin.py`\r\n\r\n- `_render_user_card_html()` — added `hx-on::before-request, hx-swap`, and `hx-on::config-request` to the Edit button f-string to match `users_partial.html` exactly\r\n- `admin_get_user_edit()` — added `Cache-Control: no-cache, no-store, must-revalidate / Pragma: no-cache / Expires: 0` response headers to prevent nginx from serving stale edit-form HTML\r\n- `admin_get_team_edit()` — same no-cache headers as above\r\n- `admin_delete_user()` — added `HX-Trigger: adminUserAction` response header so the users list refreshes automatically after deletion\r\n- `admin_create_team()` — added `HX-Trigger: adminTeamAction` response header so the teams list refreshes automatically after team creation\r\n\r\n`mcpgateway/static/admin.js`\r\n\r\n- `handleAdminTeamAction()` — added `params.set(\"_t\", Date.now())` cache-busting timestamp to the teams-list refresh URL\r\n\r\n`mcpgateway/templates/admin.html`\r\n\r\n- `editTeamSafe()` — replaced string concatenation URL with a template literal including `?_t=${Date.now()}` cache-busting param\r\n- `loadTeamMembersView()` — same cache-busting param added to the team members modal load URL\r\n\r\n`mcpgateway/templates/users_partial.html`\r\n\r\n- Add hx-on::config-request to dynamically append _t on the user edit button's hx-get request\r\n\r\nAdd unit tests to cover changes in `admin.py` and `admin.js` files\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |       |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [
+    {
+      "id": "2910939574",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-10T10:57:49+00:00",
+      "body": "This test is overindented and will never run (it is registered as a subfunction of `test_admin_get_user_edit_returns_no_cache_headers`)"
+    },
+    {
+      "id": "2910941342",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-10T10:58:04+00:00",
+      "body": "Same as above."
+    },
+    {
+      "id": "2910950351",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-10T10:59:45+00:00",
+      "body": "This comment was copied from teams, but relates to users. Please update."
+    },
+    {
+      "id": "2911081066",
+      "author": "marekdano",
+      "created_at": "2026-03-10T11:27:15+00:00",
+      "body": "Good catch! 👍 "
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3921524891",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-10T10:57:48+00:00",
+      "body": ""
+    },
+    {
+      "id": "3921526723",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-10T10:58:04+00:00",
+      "body": ""
+    },
+    {
+      "id": "3921535273",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-10T10:59:45+00:00",
+      "body": ""
+    },
+    {
+      "id": "3921669163",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-10T11:27:15+00:00",
+      "body": ""
+    },
+    {
+      "id": "3975515502",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-19T14:20:41+00:00",
+      "body": "Have you considered adding the `HX-Trigger` header to team edit/update as well?"
+    },
+    {
+      "id": "4054663500",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-03T07:38:18+00:00",
+      "body": "### Summary\n\nThis PR adds `tools.execute` permission to the team-scoped `viewer` role, allowing team members to invoke MCP tools without requiring the `developer` role (which also grants mutation permissions). The `platform_viewer` role is intentionally NOT modified.\n\n### Architecture Alignment\n\nThe change correctly maintains the **two-layer security model**:\n\n- **Layer 1 (Token Scoping)**: Controls visibility - unchanged\n- **Layer 2 (RBAC)**: Controls actions - viewer now has `tools.execute` in team scope\n\n### ✅ Appropriate Scope Limitation\n\n- ✅ Team-scoped `viewer` gets `tools.execute`\n- ✅ Global `platform_viewer` does NOT get `tools.execute`\n- ✅ Maintains principle of least privilege for unauthenticated/public access\n\n### ✅ Test Coverage\n\n- **Positive path**: Developer and viewer can execute team tools\n- **Deny path**: Cross-team isolation maintained\n- **Cookie session auth**: Tested for both developer and viewer\n- **RPC endpoint**: `/rpc tools/call` tested with proper error codes\n\n### Migration File\n\n```python\n# mcpgateway/alembic/versions/cbedf4e580e0_add_tools_execute_to_viewer_role.py\nrevision: str = \"cbedf4e580e0\"\ndown_revision: Union[str, Sequence[str], None] = \"a7f3c9e1b2d4\"  # ✅ Correct head\n\nROLE_PERMISSION_ADDITIONS = {\n    \"viewer\": [\"tools.execute\"],  # Only viewer, not platform_viewer\n}\n```\n\n### Bootstrap Changes\n\n```python\n# mcpgateway/bootstrap_db.py\n{\n    \"name\": \"viewer\",\n    \"description\": \"Read access and tool execution within team scope\",  # Updated\n    \"scope\": \"team\",\n    \"permissions\": [\n        # ... existing permissions ...\n        \"tools.execute\",  # ✅ Added\n        # ...\n    ],\n}\n```\n\n### Conclusion\n\nThis is a **well-implemented feature** that appropriately extends the `viewer` role capabilities while maintaining security boundaries. The change is:\n\n- ✅ Backward-compatible\n- ✅ Properly tested with comprehensive coverage\n- ✅ Follows all project conventions\n- ✅ Maintains security invariants\n- ✅ Includes proper documentation updates\n- ✅ Uses idempotent migration pattern\n\nLGTM 🚀 \n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b238e8638ed20b442ea45fbf29bcdbbc1d777bc0",
+      "message": "fix(ui): display CRUD changes on Users and Teams pages without full reload\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-27T15:36:49+00:00"
+    },
+    {
+      "sha": "bdaaedbbb00a394fafb30123bc6f22cd631f0a29",
+      "message": "fix: unit tests in test_admin.py\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-09T11:42:02+00:00"
+    },
+    {
+      "sha": "6a48e6da00802a9116491960b81cfd93ed0bcc28",
+      "message": "fix: indented tests in test_admin.py file and typo in admin.py\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-10T11:39:19+00:00"
+    },
+    {
+      "sha": "48dc563e71dc7b7c6e57a9a6ff4e26e11b5ee53e",
+      "message": "Merge branch 'main' into teams-users-pages-not-updated-after-crud",
+      "author": "Marek Dano",
+      "date": "2026-04-03T07:38:28+00:00"
+    },
+    {
+      "sha": "fdf0ca177791dbe9af20b9becfa20f2bfe31aba1",
+      "message": "Merge branch 'main' into teams-users-pages-not-updated-after-crud",
+      "author": "Marek Dano",
+      "date": "2026-04-03T11:46:39+00:00"
+    },
+    {
+      "sha": "59635f34a56318af31cfee8c3ed7cd547d6a1f0f",
+      "message": "chore: add playwright tests for editing teams and users\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-04-03T11:49:58+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 477,
+  "deletions": 9,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:56.243790",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:56.244593",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3330,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3330.json"
+  }
+}

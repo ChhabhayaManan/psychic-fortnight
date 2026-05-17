@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2802,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2802"
+  },
+  "metadata": {
+    "title": "Fix HTML Entity Encoding in Descriptions and Display Names",
+    "state": "closed",
+    "created_at": "2026-02-10T08:42:16+00:00",
+    "updated_at": "2026-02-11T01:06:13+00:00",
+    "closed_at": "2026-02-11T01:06:11+00:00",
+    "merged_at": "2026-02-11T01:06:10+00:00",
+    "author": "rakdutta",
+    "labels": [
+      "ui"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "closes issue #2710\r\n\r\n### Summary\r\nRemoves HTML entity encoding from user-facing text fields (descriptions and display names) to improve readability and fix display issues where special characters were being double-encoded.\r\n\r\n### Problem\r\nThe `sanitize_display_text()` method in `SecurityValidator` was using `html.escape()` to convert special characters (like `'`, `\"`, `&`, `<`, `>`) into HTML entities (e.g., `&#x27;`, `&quot;`, `&amp;`). This caused:\r\n- Poor user experience with encoded characters visible in the UI\r\n- Double-encoding issues when text was processed multiple times\r\n- Unnecessary complexity since the frontend already handles HTML escaping via DOMPurify\r\n\r\n### Changes\r\n\r\n#### 1. **Validator Changes** (`mcpgateway/common/validators.py`)\r\n- **Removed**: `html.escape()` call from `sanitize_display_text()` method\r\n- **Kept**: All security validations (XSS patterns, dangerous HTML/JS, polyglot attacks)\r\n- **Result**: Special characters now preserved as-is (e.g., `User & Admin` stays `User & Admin`)\r\n\r\n#### 2. **Database Migration** (`mcpgateway/alembic/versions/c1c2c3c4c5c6_decode_html_entities_in_descriptions.py`)\r\n- **Purpose**: Decode existing HTML entities in database records\r\n- **Scope**: Processes `description` fields in 7 tables (tools, resources, prompts, gateways, servers, a2a_agents, grpc_services) and `display_name` fields in 2 tables (tools, prompts)\r\n- **Features**:\r\n  - Handles multiple levels of encoding (iterative unescaping)\r\n  - Idempotent and safe for both SQLite and PostgreSQL\r\n  - Uses SQLAlchemy ORM to prevent SQL injection\r\n  - Reversible downgrade path\r\n\r\n#### 3. **Frontend Updates** (`mcpgateway/static/admin.js`, templates)\r\n- Enhanced HTML sanitization using DOMPurify for user-generated content\r\n- Improved rendering of descriptions and display names in admin UI\r\n- Better handling of special characters in forms and displays\r\n\r\n#### 4. **Test Updates** (`tests/unit/mcpgateway/test_admin.py`, `tests/unit/mcpgateway/validation/test_validators_advanced.py`)\r\n- Updated test expectations to reflect new behavior (no HTML entity encoding)\r\n- Added validation for proper special character handling\r\n\r\n### Security Considerations\r\n- **No security regression**: All XSS and injection protections remain in place\r\n- Frontend sanitization via DOMPurify provides defense-in-depth\r\n- HTML tags and dangerous patterns still blocked by validator\r\n- Only affects display of legitimate special characters\r\n\r\n### Migration Safety\r\n- Migration checks for table/column existence before processing\r\n- Only updates records containing HTML entities (efficient)\r\n- Supports both upgrade and downgrade paths\r\n- Tested with both SQLite and PostgreSQL\r\n\r\n### Testing\r\n- All existing tests updated and passing\r\n- Validator doctests updated to reflect new behavior\r\n- Migration tested on sample databases with encoded content",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3782401208",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-11T01:03:43+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "91b409dd92cf839ebc822a3c5676c879839eb26e",
+      "message": "fix: remove HTML entity encoding from descriptions and display names\n\nRemove html.escape() from sanitize_display_text() and replace with HTML\ntag stripping that preserves special characters. This fixes double-encoding\nissues where characters like &, \", ' were being displayed as HTML entities\n(&amp;, &quot;, &#x27;) in the UI.\n\nChanges:\n- Replace html.escape() with _strip_html_tags() in sanitize_display_text()\n- Add Alembic migration to decode existing HTML entities in the database\n- Add decode_html Jinja2 filter for backward compatibility with legacy data\n- Update admin.js with decodeHtml() for proper form field population\n- Update templates to use decode_html filter\n- Remove redundant | escape in templates (autoescape=True handles this)\n\nSecurity: All XSS/injection protections remain intact. Dangerous HTML\npatterns, script patterns, and polyglot attacks are still rejected before\ntag stripping occurs. Jinja2 autoescape and DOMPurify provide defense\nin depth.\n\nCloses #2710\n\nCo-authored-by: rakdutta <rakhibiswas@yahoo.com>\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-10T23:30:47+00:00"
+    },
+    {
+      "sha": "fdfdb24e65d2201f88ba10420281af062a1956d8",
+      "message": "fix: apply decode_html consistently and fix alembic down_revision\n\nFix alembic migration down_revision to point to v1a2b3c4d5e6 (actual\nmain head) instead of 04cda6733305 which caused multiple heads.\n\nAdd missing decode_html filter to templates that were overlooked:\nplugins_partial, mcp_registry_partial, teams_partial, and admin.html\n(gRPC services). Add decodeHtml() to JS createRowElement for\nconsistent entity decoding in dynamic table rows.\n\nRemove redundant decodeHtml() calls in handleEditToolFormSubmit and\nhandleEditResFormSubmit that incorrectly transformed user input on\nform submission (the form fields are already populated with decoded\ntext).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-10T23:38:13+00:00"
+    }
+  ],
+  "files_changed": 16,
+  "additions": 468,
+  "deletions": 63,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:24.646064",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:24.648236",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2802,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2802.json"
+  }
+}

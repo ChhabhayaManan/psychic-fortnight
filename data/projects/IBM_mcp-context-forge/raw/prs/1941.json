@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1941,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1941"
+  },
+  "metadata": {
+    "title": " Avoid per-window recomputation in log search custom windows #1826",
+    "state": "closed",
+    "created_at": "2026-01-07T05:47:23+00:00",
+    "updated_at": "2026-01-08T09:16:44+00:00",
+    "closed_at": "2026-01-08T09:16:43+00:00",
+    "merged_at": "2026-01-08T09:16:42+00:00",
+    "author": "Nayana-R-Gowda",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "Signed-off-by: NAYANAR <nayana.r7813@gmail.com>\r\ncloses #1826\r\n\r\n\r\nThis change introduces a batched aggregation path for custom log search windows to avoid per-window recomputation. Instead of scanning log data separately for each window, the implementation computes metrics for all requested windows in a single pass over the full time range. For PostgreSQL, a single SQL query using generate_series and ordered-set aggregates computes per-window percentiles efficiently. For other databases, logs are fetched once per component/operation and bucketed into windows in Python. Existing aggregation semantics and filters are preserved, while significantly reducing CPU usage and database load for large custom ranges.\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3638482297",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-08T09:07:49+00:00",
+      "body": "Rebased, updated, tested"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "888048f8970ff81508c8816238673ee82d0b3576",
+      "message": "perf(#1826): avoid per-window recomputation in log search custom windows\n\nThis change introduces a batched aggregation path for custom log search\nwindows to avoid per-window recomputation. Instead of scanning log data\nseparately for each window, the implementation computes metrics for all\nrequested windows in a single pass over the full time range.\n\nFor PostgreSQL, a single SQL query using generate_series and ordered-set\naggregates computes per-window percentiles efficiently. For other\ndatabases, logs are fetched once per component/operation and bucketed\ninto windows in Python.\n\nKey changes:\n- Add aggregate_all_components_batch() method to LogAggregator service\n- Modify _aggregate_custom_windows() to collect all windows first and\n  delegate to batch method\n- Implement proper fallback to per-window aggregation if batch fails\n- Include db.rollback() before fallback to handle PostgreSQL failed state\n- Filter duration_ms IS NOT NULL in batch SQL JOIN for consistent\n  error_count semantics with per-window path\n- Filter component/operation_type IS NOT NULL and non-empty in both\n  PostgreSQL and Python paths for consistency with per-window behavior\n- Add warning log for large ranges in non-PostgreSQL fallback path\n- Add warning when sparse window_starts detected (batch generates full range)\n- Limit window list to 10000 entries, keeping most recent windows\n- Preserve existing aggregation semantics and filters\n- Add comprehensive tests for batch aggregation parity\n\nPerformance impact:\n- Before: N windows × M component/operation pairs = N×M database queries\n- After PostgreSQL: 1 SQL query for all windows and pairs\n- After SQLite: M queries regardless of window count\n\nCloses #1826\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-08T01:53:35+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 582,
+  "deletions": 6,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:49.358581",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:49.360591",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1941,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1941.json"
+  }
+}

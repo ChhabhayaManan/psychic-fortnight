@@ -1,0 +1,207 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3167,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3167"
+  },
+  "metadata": {
+    "title": "feat(api): auto-populate REST tool schemas from OpenAPI specs",
+    "state": "closed",
+    "created_at": "2026-02-24T09:29:30+00:00",
+    "updated_at": "2026-04-13T08:20:46+00:00",
+    "closed_at": "2026-04-13T08:20:44+00:00",
+    "merged_at": "2026-04-13T08:20:43+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "COULD"
+    ],
+    "milestone": "Release 1.3.0",
+    "assignees": [
+      "jonpspri"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3054 due to repository maintenance. Your code and branch are intact. @rakdutta please verify everything looks good.\n\ncloses #2784 \r\n\r\n\r\n### Summary\r\nImplements automatic `input_schema` and `output_schema` population for REST tools by fetching and parsing OpenAPI specifications, eliminating manual schema definition and ensuring API contract consistency.\r\n\r\n### Changes\r\n- **New Service Layer** (`mcpgateway/services/openapi_service.py`): Core logic for fetching OpenAPI specs and extracting schemas with SSRF protection\r\n- **Admin API Endpoint** (`mcpgateway/admin.py`): Single endpoint `POST /admin/tools/generate-schemas-from-openapi` for schema generation\r\n- **Admin UI Enhancement** (`mcpgateway/static/admin.js`, `mcpgateway/templates/admin.html`): Interactive schema population with \"Fetch Schemas from OpenAPI Spec\" button in both Create and Edit tool forms\r\n- **Schema Enhancements** (`mcpgateway/schemas.py`): Enhanced `ToolCreate` and `ToolUpdate` validators to extract base_url/path_template from URL and set default empty input_schema for REST tools\r\n- **Comprehensive Tests**: 869 lines of unit tests covering service layer, admin endpoints, and edge cases\r\n\r\n### Key Features\r\n- **SSRF Protection**: URL validation against Server-Side Request Forgery attacks\r\n- **Async I/O**: Non-blocking HTTP requests using `httpx.AsyncClient`\r\n- **$ref Resolution**: Handles both inline schemas and component references\r\n- **Error Handling**: Graceful fallbacks with detailed error messages\r\n- **Frontend Integration**: Button-triggered workflow that calls backend endpoint directly (no CORS issues since request originates from same domain)\r\n\r\n### Technical Details\r\n- 9 files changed: 2,844 insertions(+), 57 deletions(-)\r\n- New endpoint: `POST /admin/tools/generate-schemas-from-openapi`\r\n- Schema validators enhanced to auto-extract base_url/path_template and set default input_schema\r\n- Test coverage: 689 lines for service layer, 378 lines for admin endpoints, 869 lines for integration scenarios\r\n\r\n### How to Test Frontend Integration\r\n1. Start ContextForge: `make dev`\r\n2. Open Admin UI: `http://localhost:8000/admin`\r\n3. Navigate to Tools → Create Tool\r\n4. Select \"REST\" as integration type\r\n5. Enter a REST API URL (e.g., `http://localhost:8100/calculate`)\r\n6. Click \"Fetch Schemas from OpenAPI Spec\" button\r\n7. Verify schemas auto-populate in the input/output schema fields\r\n8. The request goes through the backend endpoint (same-origin), avoiding CORS issues\r\n\r\n### Testing\r\nAll tests passing with comprehensive coverage of:\r\n- OpenAPI spec fetching and parsing\r\n- Schema extraction (inline and $ref)\r\n- SSRF protection validation\r\n- Error handling and edge cases\r\n- Admin UI integration",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4004701839",
+      "author": "MohanLaksh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-25T07:58:12+00:00",
+      "body": "## APPROVED\r\n\r\n### WORKS AS INTENDED:\r\n\r\n\r\n### LGTM\r\n\r\n## GOOD TO MERGE!!!\r\n\r\n<img width=\"1231\" height=\"813\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/81d18b46-f85a-4159-8361-e2a688004b89\" />\r\n\r\n\r\nWorks as Intended.\r\n\r\n⏺ PR Review: issue_2784_REST_TOOL_INPUT_SCHEMA        \r\n                                                                                                                                                                                           \r\n  Summary                                                                                                                                                                                  \r\n   \r\n  This PR implements automatic input_schema and output_schema population for REST tools by fetching and parsing OpenAPI specifications. The implementation includes comprehensive SSRF     \r\n  protection, RBAC enforcement, and extensive test coverage (77 tests total). The PR also fixes the underlying issue #2784 by ensuring REST tools always have a default input_schema, which\r\n   was likely causing tools to not be listed.                                                                                                                                              \r\n                             \r\n  ✅ Security Review - PASS                                                                                                                                                                \r\n   \r\n  ┌───────────────────┬────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐   \r\n  │       Check       │ Status │                                                                        Details                                                                        │\r\n  ├───────────────────┼────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤   \r\n  │ SSRF Protection   │ ✅     │ Uses SecurityValidator.validate_url() with comprehensive SSRF protection including: IP allowlist/blocklist, private network blocking, cloud metadata  │\r\n  │                   │ PASS   │ blocking, DNS resolution validation                                                                                                                   │\r\n  ├───────────────────┼────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤   \r\n  │ Authentication    │ ✅     │ Endpoint requires tools.create permission via @require_permission decorator                                                                           │\r\n  │                   │ PASS   │                                                                                                                                                       │   \r\n  ├───────────────────┼────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤\r\n  │ Input Validation  │ ✅     │ URL, HTTP method, and OpenAPI URL are validated before use                                                                                            │\r\n  │                   │ PASS   │                                                                                                                                                       │   \r\n  ├───────────────────┼────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤\r\n  │ Output Encoding   │ ✅     │ Uses ORJSONResponse for safe JSON encoding                                                                                                            │   \r\n  │                   │ PASS   │                                                                                                                                                       │\r\n  │ Frontend Security │ ✅     │ Uses JSON.stringify() for display, no innerHTML or eval()                                                                                             │\r\n  │                   │ PASS   │                                                                                                                                                       │\r\n  │ Timeout           │ ✅     │ 10-second timeout prevents DoS via slow endpoints                                                                                                     │\r\n  │ Protection        │ PASS   │                                                                                                                                                       │   \r\n  │ Error Handling    │ ✅     │ Comprehensive error handling with appropriate HTTP status codes (400/404/500)                                                                         │   \r\n  │                   │ PASS   │                                                                                                                                                       │\r\n  │ Bandit Scan       │ ✅     │ No security issues identified (323 lines scanned)                                                                                                     │\r\n  │                   │ PASS   │                                                                                                                                                       │\r\n\r\n  Key Security Features:\r\n\r\n  - SSRF Protection: mcpgateway/common/validators.py:_validate_ssrf() blocks private IPs, cloud metadata endpoints (169.254.169.254), localhost (configurable), and validates DNS\r\n  resolution\r\n  - Fail-safe defaults: Empty URL triggers 400 error, security validation failures return clear error messages\r\n  - No user-controlled redirects: OpenAPI spec URL is validated before HTTP request\r\n\r\n  ✅ Code Quality - PASS\r\n\r\n  ┌────────────┬─────────┬─────────────────────────────────────────────────────────┐\r\n  │   Check    │ Status  │                         Details                         │\r\n  ├────────────┼─────────┼─────────────────────────────────────────────────────────┤\r\n  │ Pylint     │ ✅ PASS │ No issues found in services/openapi_service.py          │\r\n  ├────────────┼─────────┼─────────────────────────────────────────────────────────┤\r\n  │ Flake8     │ ✅ PASS │ No issues in modified files                             │\r\n  ├────────────┼─────────┼─────────────────────────────────────────────────────────┤\r\n  │ Type Hints │ ✅ PASS │ Full type annotations with Tuple, Optional, dict        │\r\n  ├────────────┼─────────┼─────────────────────────────────────────────────────────┤\r\n  │ Docstrings │ ✅ PASS │ Comprehensive docstrings with examples and doctests     │\r\n  ├────────────┼─────────┼─────────────────────────────────────────────────────────┤\r\n  │ Imports    │ ✅ PASS │ Properly organized (stdlib → third-party → first-party) │\r\n  └────────────┴─────────┴─────────────────────────────────────────────────────────┘\r\n\r\n  ✅ Test Coverage - PASS\r\n\r\n  All 77 tests passing in 3 test files:\r\n  - tests/unit/mcpgateway/services/test_openapi_service.py: 26 tests - Service layer logic\r\n  - tests/unit/mcpgateway/test_admin_openapi.py: 14 tests - Admin endpoint behavior       \r\n  - tests/unit/mcpgateway/test_rest_schema_population.py: 37 tests - Integration scenarios\r\n                                                                                          \r\n  Test coverage includes:                                                                                                                                                                  \r\n  - ✅ OpenAPI spec fetching and parsing                                                                                                                                                   \r\n  - ✅ Schema extraction (inline and $ref references)                                                                                                                                      \r\n  - ✅ SSRF protection validation                                                                                                                                                          \r\n  - ✅ Error handling and edge cases                                                                                                                                                       \r\n  - ✅ Admin UI integration         \r\n                                                                                                                                                                                           \r\n  ✅ Project Standards - PASS                                                                                                                                                              \r\n                                                                                                                                                                                                                                                                \r\n  │    Standard     │  Status  │                                       Notes                                        │                                                                  \r\n  │ Coding Style    │ ✅ PASS  │ Black, isort, proper naming conventions                                                 │\r\n │ Documentation   │ ✅ PASS  │ Good inline comments and docstrings                                                │                                                                                                                                            \r\n  │ Error Messages  │ ✅ PASS  │ Clear, actionable error messages returned to user                                  │\r\n                                                                                                   \r\n  Key Changes Analysis                                                                                                                                                                     \r\n                             \r\n  1. Core Bug Fix (addresses #2784)                                                                                                                                                        \r\n                             \r\n  The schema validators now ensure REST tools always have an input_schema:                                                                                                                 \r\n  # ToolCreate and ToolUpdate validators\r\n  if not values.get(\"input_schema\"):                                                                                                                                                       \r\n      values[\"input_schema\"] = {\"type\": \"object\", \"properties\": {}}                                                                                                                        \r\n  Impact: This fixes the issue where REST tools without schemas weren't being listed by the MCP gateway.                                                                                   \r\n                                                                                                                                                                                           \r\n  2. New Service Layer (services/openapi_service.py)                                                                                                                                       \r\n                                                                                                                                                                                           \r\n  - 323 lines of well-documented code                                                                                                                                                      \r\n  - Async HTTP client with timeout                                                                                                                                                         \r\n  - $ref resolution for component schemas                                                                                                                                                  \r\n  - SSRF protection at entry point                                                                                                                                                         \r\n                                                                                                                                                                                           \r\n  3. Admin Endpoint (mcpgateway/admin.py)                                                                                                                                                  \r\n                                                                                                                                                                                           \r\n  - Single POST endpoint: /admin/tools/generate-schemas-from-openapi                                                                                                                       \r\n  - Requires tools.create permission\r\n  - Returns both input_schema and output_schema                                                                                                                                            \r\n                                                                                                                                                                                           \r\n  4. Frontend Integration (mcpgateway/static/admin.js, mcpgateway/templates/admin.html)                                                                                                    \r\n                                                                                                                                                                                           \r\n  - \"Fetch Schemas from OpenAPI Spec\" button in Create and Edit forms                                                                                                                      \r\n  - Calls backend endpoint (same-origin, no CORS issues)\r\n  - Populates CodeMirror editors with formatted JSON                                                                                                                                       \r\n                                                                                                                                                                                           \r\n  Findings                                                                                                                                                                                 \r\n                                                                                                                                                                                           \r\n  🟢 Strengths                                                                                                                                                                             \r\n                             \r\n  1. Comprehensive SSRF protection - Industry-standard safeguards against server-side request forgery                                                                                      \r\n  2. Excellent test coverage - 77 tests covering service, endpoint, and integration layers\r\n  3. Clean separation of concerns - Service layer handles business logic, admin.py handles HTTP                                                                                            \r\n  4. Async I/O - Non-blocking HTTP requests using httpx.AsyncClient                                                                                                                        \r\n  5. Graceful error handling - Clear error messages for debugging                                                                                                                          \r\n  6. Frontend UX - Button-triggered workflow is intuitive                                                                                                                                  \r\n                            \r\n  ⚪ Non-Issues (Verified Safe)                                                                                                                                                            \r\n                             \r\n  - ✅ Synchronous SQLAlchemy in async handler - Documented design decision in CLAUDE.md                                                                                                   \r\n  - ✅ URL parsing - Uses urllib.parse.urlparse() before validation, which is safe\r\n  - ✅ JSON handling - Uses ORJSONResponse for safe encoding                                                                                                                               \r\n                                                                                                                                                                                           \r\n  📋 Recommendation                                                                                                                                                                        \r\n                                                                                                                                                                                           \r\n  ✅ Ready to merge                                                                                                                                                                        \r\n                             \r\n  This PR meets all project standards and security requirements. The implementation is solid, well-tested, and properly secured against SSRF attacks. The core bug fix (default            \r\n  input_schema for REST tools) addresses issue #2784, and the OpenAPI auto-population feature is a valuable addition that will improve the REST tool creation workflow.\r\n                                                                                                                                                                                           \r\n  Optional Improvements (Non-Blocking)                                                                                                                                                     \r\n   \r\n  1. Consider squashing the 27 commits into a more concise history before merge                                                                                                            \r\n  2. Update PR description to explicitly mention the bug fix (default schema) in addition to the feature (OpenAPI auto-population)\r\n                                                                                                                                                                                           \r\n  ---                        \r\n  Reviewed by: Claude Opus 4.6                                                                                                                                                             \r\n  Review Date: 2026-03-25                                                                                                                                                                  \r\n  Branch: issue_2784_REST_TOOL_INPUT_SCHEMA\r\n  Commits: 27 (a3c782511...75bde14e6)                                                                                                                                                      \r\n  Files Changed: 9 files (+2,842, -57)                                                                                                                                                     \r\n                                                                                                                                                                                           \r\n✻ Worked for 8m 5s                                                                                                                                                                         \r\n                                                                                                                                                                                           \r\n⏺ Background command \"Run tests to check coverage\" completed (exit code 0)                                                                                                                 \r\n                             \r\n  Read 1 file (ctrl+o to expand)                                                                                                                                                           \r\n                                                                                                                                                             \r\n⏺ The background test task failed (no test target in Makefile), but I already verified the tests separately - all 77 tests pass:                                                           \r\n                              \r\n  ✅ 26 tests in test_openapi_service.py - Service layer                                                                                                                                   \r\n  ✅ 14 tests in test_admin_openapi.py - Admin endpoints                                                                                                                                   \r\n  ✅ 37 tests in test_rest_schema_population.py - Integration scenarios                                                                                                                    \r\n                                                                                                                                                                                           \r\n  ---                                                                                                                                                                                      \r\n  Final Verdict: ✅ Ready to Merge                                                                                                                                                         \r\n                                                                                                                                                                                           \r\n  Your PR #3167 is excellent - it meets all project standards and introduces no security issues. Here's what I found:\r\n                                                                                                                                                                                           \r\n  🔒 Security - PASS                                                                                                                                                                       \r\n                                                                                                                                                                                           \r\n  - SSRF Protection: Comprehensive validation blocks private IPs, cloud metadata, and malicious URLs                                                                                       \r\n  - RBAC: Requires tools.create permission\r\n  - Input Validation: All inputs validated before processing                                                                                                                               \r\n  - Bandit Scan: Clean (0 issues in 323 lines)                                                                                                                                             \r\n                                                                                                                                                                                           \r\n  ✅ Code Quality - PASS                                                                                                                                                                   \r\n                                                                                                                                                                                           \r\n  - Clean architecture with proper separation of concerns                                                                                                                                  \r\n  - Full type hints and comprehensive docstrings\r\n  - Passes pylint, flake8 with no issues                                                                                                                                                   \r\n  - Follows project naming conventions                                                                                                                                                     \r\n                                                                                                                                                                                           \r\n  🧪 Testing - PASS                                                                                                                                                                        \r\n                             \r\n  - 77 comprehensive tests covering all paths                                                                                                                                              \r\n  - Tests SSRF protection, error handling, edge cases\r\n  - Integration tests verify frontend-to-backend flow                                                                                                                                      \r\n                                                                                                                                                                                           \r\n  🎯 Fixes Issue #2784                                                                                                                                                                     \r\n                                                                                                                                                                                           \r\n  The core bug fix ensures REST tools always have a default input_schema, which was causing tools to not be listed. The OpenAPI auto-population feature is a bonus that significantly      \r\n  improves UX.               \r\n                                                                                                                                                                                           \r\n                                                                                                                                                                                           \r\n  No security vulnerabilities detected. No architectural concerns. This is production-ready code. 🚀   "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "3d3ae7aabcf54e2fd66903a4c4c956b53df27b93",
+      "message": "input_schema\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-18T14:35:17+00:00"
+    },
+    {
+      "sha": "5a54ee4e314d3987d0207ffac673fc097f1a91d2",
+      "message": "toolupdate change\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-18T14:48:45+00:00"
+    },
+    {
+      "sha": "12847a3e9f809d909e7218a4d662383b4ac6c31f",
+      "message": "lint\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-19T06:10:10+00:00"
+    },
+    {
+      "sha": "0c3602e1ba3e75a5fbed92256a3f88b0b4590fe4",
+      "message": "test case fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-19T06:27:59+00:00"
+    },
+    {
+      "sha": "c49d09c42d8b1f2feba6748b29c68d8b02c05556",
+      "message": "missing testcases\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-19T06:54:18+00:00"
+    },
+    {
+      "sha": "438be8ff475b8f73271faf19b3a433d234a77bfe",
+      "message": "missing coverage fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-19T07:18:58+00:00"
+    },
+    {
+      "sha": "0a48f279e30a5e87642885642777d71163bd90d6",
+      "message": "remove\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-19T07:24:54+00:00"
+    },
+    {
+      "sha": "bd9af0ff0e956b0c2fa9c7150773081bd65c93b8",
+      "message": "docstring\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-19T08:29:20+00:00"
+    },
+    {
+      "sha": "4ce05b2eddb3eea8ac8fe0d25df7c34cd9df02b5",
+      "message": "edittool\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-19T13:35:17+00:00"
+    },
+    {
+      "sha": "8dcd368fda6e844d8502dc1a73a6eb42203a5eda",
+      "message": "review\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-19T14:01:07+00:00"
+    },
+    {
+      "sha": "5be1d79586f922a800d2c882d441c43a97c4c6d2",
+      "message": "lint\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T05:28:12+00:00"
+    },
+    {
+      "sha": "25947658996605c50fca917b515117e8194adecd",
+      "message": "add button\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T05:58:40+00:00"
+    },
+    {
+      "sha": "b56c9869301bd7d6494a3f81087edcf7494eec36",
+      "message": "outshcem fix in admin ui\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T06:22:29+00:00"
+    },
+    {
+      "sha": "092035c3e6729fb4e78a8dfccd8022feb51127bc",
+      "message": "output_schema\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T07:09:18+00:00"
+    },
+    {
+      "sha": "de3518851bdb8f734a13d1005d5c7f8d1f6a6d96",
+      "message": "openai endpoint fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T08:29:26+00:00"
+    },
+    {
+      "sha": "03482cee488acbc5939950a0b987606e7d7a4061",
+      "message": "docstring\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T10:13:12+00:00"
+    },
+    {
+      "sha": "02d5734de8f2ee43b99320858dc058be28204ab5",
+      "message": "test case fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T11:04:17+00:00"
+    },
+    {
+      "sha": "2a06b50d0f5af4b8b1b1ab967a8b61172d6e8f07",
+      "message": "refactor\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T11:28:13+00:00"
+    },
+    {
+      "sha": "75e4badc8ad3ca94bc1b31760709c4c963a5f2a5",
+      "message": "refactor\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T12:03:39+00:00"
+    },
+    {
+      "sha": "9fa6b4821f605a36c155c4a40f49ddd3a419c3a5",
+      "message": "doctest\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T12:16:39+00:00"
+    },
+    {
+      "sha": "e148944600d08579fa0ceeac36cbe6ea2c24a922",
+      "message": "pylint\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T12:38:42+00:00"
+    },
+    {
+      "sha": "aae638fd7352cfd426a642a61c4598d98698e95b",
+      "message": "test coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T12:55:54+00:00"
+    },
+    {
+      "sha": "a7b6f0077dfdd96ca1d3400dc7775d381ecc57ac",
+      "message": "pre-commit\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-23T13:06:02+00:00"
+    },
+    {
+      "sha": "0f0e302d7829ba6f9a69997135ba55df64820f89",
+      "message": "remove doc file\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-02-24T04:43:16+00:00"
+    },
+    {
+      "sha": "c1472906223193dfbcf3de4965821ba35512f797",
+      "message": "lint fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-25T07:02:18+00:00"
+    },
+    {
+      "sha": "bf398dd92345767e971be2b8dfd1ed599825f6a8",
+      "message": "fix: harden OpenAPI schema endpoint — SSRF, size limits, dead code removal\n\nSecurity:\n- Disable HTTP redirects (follow_redirects=False) to prevent SSRF bypass\n  via attacker-controlled 302 redirects to internal addresses\n- Add 10 MiB response size cap to prevent memory exhaustion from\n  malicious servers\n- Remove broken frontend buttons that called undefined JS functions\n- Require 'url' parameter (not just openapi_url) to prevent empty URL\n  parsing producing invalid base_url/path\n\nComplexity reduction (-1,900 lines):\n- Remove unused extract_all_schemas_from_openapi and\n  fetch_and_extract_all_schemas (zero production callers)\n- Extract _extract_rest_url_components helper to deduplicate URL parsing\n  in ToolCreate and ToolUpdate validators\n- Remove excessive doctests that duplicated unit test coverage\n- Collapse phantom tests mocking requests.get (never called by validators)\n  into focused tests of actual validator behaviour\n- Consolidate admin endpoint error-mapping tests via parametrize\n- Remove unused _db dependency from endpoint signature\n- Remove debug logging from ToolCreate validator\n\nCloses #2784\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-12T17:10:41+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 1265,
+  "deletions": 66,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:57.649566",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:57.650564",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3167,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3167.json"
+  }
+}

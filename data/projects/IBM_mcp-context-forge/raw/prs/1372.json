@@ -1,0 +1,203 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1372,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1372"
+  },
+  "metadata": {
+    "title": "refactor: enable plugins extensibility",
+    "state": "closed",
+    "created_at": "2025-10-30T12:49:21+00:00",
+    "updated_at": "2025-11-08T21:19:02+00:00",
+    "closed_at": "2025-11-08T21:19:00+00:00",
+    "merged_at": "2025-11-08T21:19:00+00:00",
+    "author": "terylt",
+    "labels": [
+      "enhancement",
+      "plugins"
+    ],
+    "milestone": "Release 0.9.0",
+    "assignees": [
+      "araujof",
+      "terylt"
+    ]
+  },
+  "description": "## Plugin Framework Refactor: Dynamic Hook Discovery\r\n\r\n  This PR refactors the plugin framework to support flexible, dynamic hook registration patterns while maintaining\r\n  backward compatibility.\r\n\r\n  ### Key Changes\r\n\r\n  #### 1. Plugin Base Class\r\n  - `Plugin` is now an abstract base class (ABC)\r\n  - No longer requires predefined hook methods\r\n  - Plugins only need to implement the hooks they actually use\r\n\r\n  #### 2. Three Hook Registration Patterns\r\n\r\n  **Pattern 1: Convention-Based (Simplest)**\r\n\r\n  ```python\r\n  class MyPlugin(Plugin):\r\n      async def tool_pre_invoke(self, payload, context):\r\n          # Method name matches hook type - automatically discovered\r\n          return ToolPreInvokeResult(continue_processing=True)\r\n ```\r\n\r\n**Pattern 2: Decorator-Based (Custom Names)**\r\n\r\n  ```python\r\n  class MyPlugin(Plugin):\r\n      @hook(ToolHookType.TOOL_POST_INVOKE)\r\n      async def my_custom_method_name(self, payload, context):\r\n          # Method name doesn't match, but decorator registers it\r\n          return ToolPostInvokeResult(continue_processing=True)\r\n ```\r\n\r\n  **Pattern 3: Custom Hooks (Advanced)**\r\n\r\n  ```python\r\n  class MyPlugin(Plugin):\r\n      @hook(\"email_pre_send\", EmailPayload, EmailResult)\r\n      async def validate_email(self, payload, context):\r\n          # Completely new hook type with custom payload/result\r\n          return EmailResult(continue_processing=True)\r\n```\r\n\r\n  #### 3. Dynamic Hook Discovery\r\n\r\n  The PluginManager now discovers hooks dynamically using:\r\n  1. Convention-based lookup: Checks for methods matching hook type names\r\n  2. Decorator scanning: Uses inspect.getmembers() to find @hook decorated methods\r\n  3. Signature validation: Validates parameter count and async requirement at load time\r\n\r\n #### 4. Hook Invocation\r\n\r\n  ```python\r\n  # Initialize plugin manager with config\r\n  manager = PluginManager(\"plugins/config.yaml\")\r\n  await manager.initialize()\r\n\r\n  # Invoke a hook across all registered plugins\r\n  result, contexts = await manager.invoke_hook(\r\n      ToolHookType.TOOL_PRE_INVOKE,\r\n      payload,\r\n      global_context=global_context\r\n  )\r\n  # Result contains aggregated output from all plugins\r\n  # contexts preserves plugin-specific state across pre/post hooks\r\n```\r\n\r\n\r\n####  5. Result Type System\r\n\r\n  All hooks return PluginResult[PayloadType]:\r\n  - ToolPreInvokeResult = PluginResult[ToolPreInvokePayload]\r\n  - ToolPostInvokeResult = PluginResult[ToolPostInvokePayload]\r\n  - Results can include modified_payload, metadata, violations, or just continue_processing\r\n\r\n#### 6. Agent Hooks\r\n\r\n  Added new hooks for intercepting and transforming agent interactions in multi-agent workflows:\r\n\r\n  **`agent_pre_invoke`** - Intercept agent requests before invocation\r\n\r\n  ```python\r\n  class AgentPreInvokePayload(PluginPayload):\r\n      agent_id: str                           # Agent identifier (can be modified for routing)\r\n      messages: List[Message]                 # Conversation messages (can be filtered/transformed)\r\n      tools: Optional[List[str]] = None       # Available tools list\r\n      headers: Optional[HttpHeaderPayload]    # HTTP headers\r\n      model: Optional[str] = None             # Model override\r\n      system_prompt: Optional[str] = None     # System instructions\r\n      parameters: Optional[Dict[str, Any]]    # LLM parameters (temperature, max_tokens, etc.)\r\n```\r\n\r\n  Use cases:\r\n  - Filter/transform conversation messages (content moderation, PII redaction)\r\n  - Modify agent routing (load balancing, A/B testing)\r\n  - Validate tool access and permissions\r\n  - Override model selection or system prompts\r\n\r\n  agent_post_invoke - Process agent responses after invocation\r\n\r\n```python\r\n  class AgentPostInvokePayload(PluginPayload):\r\n      agent_id: str                           # Agent identifier\r\n      messages: List[Message]                 # Response messages from agent (can be filtered)\r\n      tool_calls: Optional[List[Dict]]        # Tool invocations made by agent\r\n```\r\n\r\n  Use cases:\r\n  - Filter/transform response messages (safety checks, post-processing)\r\n  - Audit tool invocations made by the agent\r\n  - Track conversation quality and metrics\r\n  - Block inappropriate responses\r\n\r\n  Example Usage:\r\n\r\n```python\r\n  class MessageFilterPlugin(Plugin):\r\n      async def agent_pre_invoke(\r\n          self, \r\n          payload: AgentPreInvokePayload, \r\n          context: PluginContext\r\n      ) -> AgentPreInvokeResult:\r\n          \"\"\"Filter messages containing blocked words.\"\"\"\r\n          blocked_words = self.config.config.get(\"blocked_words\", [])\r\n\r\n          # Filter out messages with blocked content\r\n          filtered_messages = [\r\n              msg for msg in payload.messages\r\n              if not any(word in msg.content.text.lower() for word in blocked_words)\r\n          ]\r\n\r\n          if not filtered_messages:\r\n              return AgentPreInvokeResult(\r\n                  continue_processing=False,\r\n                  violation=PluginViolation(\r\n                      code=\"BLOCKED_CONTENT\",\r\n                      reason=\"All messages contained blocked content\"\r\n                  )\r\n              )\r\n\r\n          # Return modified payload with filtered messages\r\n          modified_payload = AgentPreInvokePayload(\r\n              agent_id=payload.agent_id,\r\n              messages=filtered_messages,\r\n              tools=payload.tools\r\n          )\r\n          return AgentPreInvokeResult(modified_payload=modified_payload)\r\n```\r\n\r\n  These hooks enable sophisticated multi-agent orchestration patterns like message filtering for safety, conversation\r\n  routing based on content, tool access control, and cross-agent observability. See\r\n  `tests/unit/mcpgateway/plugins/agent/test_agent_plugins.py` for complete examples including content filtering, context\r\n  persistence across pre/post hooks, and partial message filtering.\r\n\r\n### Benefits\r\n\r\n  - Flexibility: Choose the pattern that fits your use case\r\n  - Extensibility: Create custom hooks without modifying the framework\r\n  - Type Safety: Full type hint support with validation\r\n  - Backward Compatible: Existing plugins continue to work\r\n  - Developer Experience: Clear errors when hooks are misconfigured\r\n\r\n### Testing\r\n\r\n  - Added comprehensive test suite: test_hook_patterns.py\r\n  - Demonstrates all three patterns with working examples\r\n  - All existing plugin tests pass\r\n\r\n ### Documentation\r\n\r\n  - Updated plugins/README.md with detailed examples of all patterns\r\n  - Added hook signature requirements and type system explanation\r\n  - Included troubleshooting section for common issues\r\n\r\n ### Files Changed\r\n\r\n  - mcpgateway/plugins/framework/base.py - Plugin ABC, dynamic hook discovery\r\n  - mcpgateway/plugins/framework/decorator.py - @hook decorator implementation\r\n  - mcpgateway/plugins/framework/hooks/*.py - Updated hook type definitions\r\n  - tests/unit/mcpgateway/plugins/fixtures/plugins/simple.py - Test fixture plugins\r\n  - plugins/README.md - Comprehensive documentation\r\n  - Fixed import paths across framework (hooks.registry not hook_registry)\r\n\r\n  ### Migration Guide\r\n\r\n  Existing plugins continue to work unchanged. To adopt new patterns:\r\n\r\n  1. No changes needed for plugins using convention-based naming\r\n  2. Add @hook decorator if you want custom method names\r\n  3. Define custom payloads if creating new hook types\r\n\r\n  See `tests/unit/mcpgateway/plugins/framework/hooks/test_hook_patterns.py` for complete working examples.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3426081480",
+      "author": "araujof",
+      "state": "APPROVED",
+      "submitted_at": "2025-11-06T04:53:48+00:00",
+      "body": "LGTM\r\n\r\nThis PR is a major refactoring to make the plugin system more extensible with dynamic hook discovery. Overall, this is a significant improvement for the plugin framework. \r\n\r\nThe PR maintains backward compatibility - existing plugins work unchanged.\r\n\r\nNotes: \r\n- I fixed lint issues, tests, and doctests. Made minor changes all around.\r\n\r\nSummary of Changes:\r\n- Decouples plugin framework from common gateway objects; the plugin framework is ready to be split as an independent package \r\n- Converts Plugin to an abstract base class (ABC) for better type safety\r\n- Introduces 3 hook registration patterns: convention-based, decorator-based, and custom hooks\r\n- Implements dynamic hook discovery using decorators, naming conventions, and explicit registration\r\n- Adds new agent lifecycle hooks (agent_pre_invoke, agent_post_invoke) for multi-agent workflow interception\r\n- Standardizes all hooks to return PluginResult[PayloadType] for consistent result handling."
+    },
+    {
+      "id": "3438675467",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-11-08T21:17:23+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c3b4057f80d381ebb7d1dc14f4d0ae6d558210b4",
+      "message": "refactor: refactor plugins to make them extensible.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2025-10-30T12:38:37+00:00"
+    },
+    {
+      "sha": "61a51323eaba300366a159f6def827a060bc6d2b",
+      "message": "fix: pylint issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-10-30T13:23:36+00:00"
+    },
+    {
+      "sha": "9c6b8fc41dbd5407f3348034e5f4e12d486eeb05",
+      "message": "chore: uv lock\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-10-30T13:39:32+00:00"
+    },
+    {
+      "sha": "3e6193c7fb85b442c54f301d51bc9c58dd5e6ba6",
+      "message": "refactor: created a common directory for classes used across packages.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2025-10-30T17:20:17+00:00"
+    },
+    {
+      "sha": "16493830899a81227618564a82c5edbf0cd58840",
+      "message": "feat: added agent hooks.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2025-10-30T22:15:24+00:00"
+    },
+    {
+      "sha": "dd191ac64de4322b87077c9da02a049f41870f84",
+      "message": "refactor: plugins to support 3 hook patterns\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2025-10-31T23:51:39+00:00"
+    },
+    {
+      "sha": "5c3b05ce4f6d8a3e929d2fbc8986c1bb8feae39c",
+      "message": "chore: fix lint issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-11-03T01:37:18+00:00"
+    },
+    {
+      "sha": "4df81f7f6aad208b997f33f27efbf1f70ccede08",
+      "message": "feat: add comparison function to deal with PluginCondition\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2025-11-03T17:32:38+00:00"
+    },
+    {
+      "sha": "7e73668c57c2c9e6ba792e56a79dc9d309ab1b01",
+      "message": "Merge branch 'refactor/plugins' of github.com:IBM/mcp-context-forge into refactor/plugins",
+      "author": "Teryl Taylor",
+      "date": "2025-11-03T17:33:52+00:00"
+    },
+    {
+      "sha": "5f8bcbf573535972630877b82a51e34b8c33f844",
+      "message": "chore: removed unrecognized mypy option\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-11-04T01:56:41+00:00"
+    },
+    {
+      "sha": "d3e4ea953b8390d6f7ab93d0686614c49bd46cd8",
+      "message": "fix: static type check issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-11-04T02:28:14+00:00"
+    },
+    {
+      "sha": "8527cc2fb07e9696066f83554a6c6d8ff788cc79",
+      "message": "merge: with main.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2025-11-05T17:01:28+00:00"
+    },
+    {
+      "sha": "52b70c8c97112fa1231c77d8479a0f4a055e9a4e",
+      "message": "Merge branch 'refactor/plugins' of github.com:IBM/mcp-context-forge into refactor/plugins",
+      "author": "Teryl Taylor",
+      "date": "2025-11-05T17:02:18+00:00"
+    },
+    {
+      "sha": "d4a24373e5cf52fe55469994fc26b741cf02a20a",
+      "message": "fix: updated schemas imports.\n\nSigned-off-by: Teryl Taylor <terylt@ibm.com>",
+      "author": "Teryl Taylor",
+      "date": "2025-11-05T17:06:04+00:00"
+    },
+    {
+      "sha": "79dfcaa971aedbfd4bbfdba5b30fb0096f6fb852",
+      "message": "fix: doctests\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-11-06T03:12:48+00:00"
+    },
+    {
+      "sha": "0ebb6495e32b089211cda0b216e2297ca49d2aea",
+      "message": "fix: remaining doctests\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-11-06T04:41:59+00:00"
+    },
+    {
+      "sha": "88739c469df84fcaaaa75accc776cbeafdb28065",
+      "message": "fix: lint issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-11-06T05:31:08+00:00"
+    },
+    {
+      "sha": "c3e7466a4de40cb912148f4e69a02081ebc5c868",
+      "message": "chore: fix pylint issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-11-06T05:57:32+00:00"
+    },
+    {
+      "sha": "c02949929ac78db4b277f14a54471e1cae3f9852",
+      "message": "fix: pylint issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-11-06T06:37:30+00:00"
+    },
+    {
+      "sha": "2eb8938ec317762e82f389bb646b90be63c47fea",
+      "message": "fix: common validator tests\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-11-06T15:06:26+00:00"
+    },
+    {
+      "sha": "ce6aee6aae2e383e9e95b864c8bc3561a21add68",
+      "message": "chore: fix flake8 issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2025-11-06T17:06:51+00:00"
+    },
+    {
+      "sha": "941a88253ec58fb5153c76692597693a3e36124d",
+      "message": "fix: correct imports for plugin framework hooks\n\n- Fix import path from mcpgateway.plugins.mcp.entities to correct location\n- Use ToolHookType from mcpgateway.plugins.framework.hooks.tools\n- Import HttpHeaderPayload from mcpgateway.plugins.framework.hooks.http\n- Update HookType references to ToolHookType",
+      "author": "Mihai Criveti",
+      "date": "2025-11-08T20:23:30+00:00"
+    },
+    {
+      "sha": "fdf77e6a01caf05f7bcb79863753f8288b1d23cb",
+      "message": "Merge refactor/plugins into main\n\nIntegrate plugin extensibility refactoring with observability features.\nResolves conflicts in plugin manager, models, and tool service.\n\n# Conflicts:\n#\tmcpgateway/plugins/framework/manager.py\n#\tmcpgateway/services/tool_service.py",
+      "author": "Mihai Criveti",
+      "date": "2025-11-08T20:32:25+00:00"
+    },
+    {
+      "sha": "9cf6c2de1e8c78c061bd0cde4d13c082dca030a2",
+      "message": "Fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-11-08T21:04:59+00:00"
+    }
+  ],
+  "files_changed": 146,
+  "additions": 6844,
+  "deletions": 3764,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:22:21.238643",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:22:21.239256",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1372,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1372.json"
+  }
+}

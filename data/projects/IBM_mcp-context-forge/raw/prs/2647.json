@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2647,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2647"
+  },
+  "metadata": {
+    "title": "Remove Forwarding Methods & Fix SSE Parsing",
+    "state": "closed",
+    "created_at": "2026-02-02T11:08:53+00:00",
+    "updated_at": "2026-02-11T13:19:35+00:00",
+    "closed_at": "2026-02-11T13:19:32+00:00",
+    "merged_at": "2026-02-11T13:19:32+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #1595\r\n\r\n## 📌 Summary\r\n\r\nAddressed two distinct items:\r\n\r\n1. Federation Cleanup: Removes the deprecated `forward_request`, `_forward_request_to_gateway`, and `_forward_request_to_all` methods from gateway_service.py. This finalizes the removal of the unused \"Federation\" logic as tracked in Issue:\r\n#1912.\r\n\r\n\r\n2. SSE Parsing Fix: Updates the SSE parser in llm_proxy_service.py to correctly handle data: lines that are missing a space after the colon (e.g., data:{\"key\": \"value\"}).\r\n\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n**1. Federation/Forwarding Removal:**\r\n\r\n- (Code Cleanup) Examine `mcpgateway/services/gateway_service.py` to see the methods are removed.\r\n- Attempt to call resources/read for a non-existent local resource. Previously, it might have attempted to forward. Now, it immediately returns a Resource not found (-32002) error.\r\n\r\n\r\n**2. SSE Parsing Bug:**\r\n\r\n- Configure an LLM provider that returns SSE events formatted as data:{...} (no space) instead of data: {...}.\r\n- Initiate a streaming chat completion.\r\n- Before: The parser would fail or misinterpret the JSON payload.\r\n- After: The parser correctly handles the data regardless of the leading space.\r\n\r\n## 🐞 Root Cause\r\n\r\n**1. Forwarding:** The forwarding logic was legacy code from the \"Federation\" module which has been deprecated. It was duplicating logic handled by ToolService and was no longer wired correctly into the application lifecycle. This federation/forwarding logic is removed but some functions still existed in gateway_service.py for forwarding  to other gateways (this feature is deprecated now.)\r\n\r\n**2. SSE Parsing:** The existing parser assumed a strict data:  prefix (with space). While the spec recommended a space, some providers/implementations omit it, causing orjson.loads to fail on the malformed string.\r\n\r\n## 💡 Fix Description\r\n\r\n1. Removed Forwarding Logic:\r\n\r\n- Deleted forward_request, _forward_request_to_gateway, and _forward_request_to_all from gateway_service.py.\r\n- Updated main.py call sites to log a warning and return strict JSON-RPC errors (e.g., -32000 / -32002) when a local resource/tool is not found, rather than attempting a fallback.\r\n- Removed unit tests in test_gateway_service.py and test_gateway_service_oauth_comprehensive.py that covered this deprecated functionality.\r\n\r\n2. Robust SSE Parsing:\r\n\r\n- Updated llm_proxy_service.py (and translate.py) to inspect the line content after data:.\r\n- Added logic to conditionally strip the leading space only if it exists, ensuring both data: {...} and data:{...} are parsed correctly as valid JSON.\r\n\r\n**References:**\r\n1. Issue for Federation: #1912\r\n2. PR for Federation: #1928\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3784739602",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-11T13:12:00+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "fb8324ca11007a55694d882f769f7261e134b590",
+      "message": "fix: remove deprecated forwarding methods and fix SSE data parsing\n\nRemove deprecated forward_request, _forward_request_to_gateway, and\n_forward_request_to_all methods from gateway_service.py. Replace\nforwarding fallbacks in main.py with proper JSON-RPC error responses.\n\nFix SSE parser in llm_proxy_service.py and translate.py to handle\ndata: lines with or without a space after the colon, per the SSE spec.\n\nCloses #1595\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-11T11:32:55+00:00"
+    },
+    {
+      "sha": "055e7c3a9e6329b214281d6908d943cfe6df0144",
+      "message": "fix: clean up redundant except clause and align SSE parsing in tests\n\nSimplify except (ValueError, Exception) to except Exception since\nValueError is a subclass of Exception. Update SSE data: line parsing\nin integration and e2e tests to match the spec-correct pattern used\nin production code.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-11T11:38:14+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 123,
+  "deletions": 1159,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:51.974788",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:51.975682",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2647,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2647.json"
+  }
+}

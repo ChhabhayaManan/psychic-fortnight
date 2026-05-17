@@ -1,0 +1,91 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3492,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3492"
+  },
+  "metadata": {
+    "title": "fix: preserve search filters across pagination pages",
+    "state": "closed",
+    "created_at": "2026-03-05T07:55:44+00:00",
+    "updated_at": "2026-03-10T14:16:52+00:00",
+    "closed_at": "2026-03-10T14:16:50+00:00",
+    "merged_at": "2026-03-10T14:16:49+00:00",
+    "author": "suciu-daniel",
+    "labels": [
+      "bug",
+      "ui",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "suciu-daniel"
+    ]
+  },
+  "description": "## Description\n\nFixes #3128\n\nThe admin UI search filters (for tools, resources, prompts, gateways) were only filtering visible DOM rows on the current page, not across all records. This caused confusion when users searched and then navigated to page 2, where the search filter was lost.\n\n## Changes\n\n- **Updated **: Added dynamic reading of current search input values ( and ) when loading pages\n- **Updated **: Removed obsolete client-side DOM filtering calls from  function that only filtered visible rows\n- Server-side filtering already works correctly via the  parameter; this fix ensures pagination preserves those filters\n\n## Testing\n\nThe fix ensures that when users:\n1. Enter a search query in the search box\n2. Navigate to page 2, 3, etc. using pagination controls\n3. The search filter is preserved and applied server-side across all pages\n\n## Impact\n\n- Affects: Tools, Resources, Prompts, Gateways, and A2A Agents tables\n- No breaking changes\n- Improves UX by making search work as expected across pagination\n\n## Related Issues\n\nCloses #3128",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3920678947",
+      "author": "VladMRusu1",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-10T08:36:24+00:00",
+      "body": ""
+    },
+    {
+      "id": "3922147678",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-10T12:50:02+00:00",
+      "body": "## Review: Approved ✅\n\n### Approach\nSound fix. The pagination `loadPage()` method now reads the **live DOM search input** value instead of relying solely on `data-extra-params` (which becomes stale if the user modifies the search after the last server render). Removing client-side DOM filtering in `clearSearch()` is correct — it was redundant with the server-side reload.\n\n### Changes made during review\n\n**Rebased** onto `main` — removed 3 merge commits for a clean 3-commit history.\n\n**Bug fix** — the original code only set `q`/`tags` when the input had a value, but didn't clear them when empty. This means if a user clears the search input and paginates before the 250ms debounced reload fires, the stale `q` from `data-extra-params` would persist. Fixed by calling `url.searchParams.delete('q')` / `delete('tags')` when the input exists but is empty.\n\n**Tests** — added 9 tests covering: input value forwarding, stale extraParams override, empty input clearing, whitespace trimming, non-search param preservation, and tableName guard. Total: 82 tests passing (was 73).\n\n### Security & Performance\n- No issues. Search values flow through `URLSearchParams` (auto-encoded) and are validated server-side.\n- Reading two DOM inputs by ID in `loadPage()` is negligible overhead.\n\n### Consistency\n- Follows the existing `pagination_controls.html` pattern (extraParams loop, then overrides).\n- Input IDs match `PANEL_SEARCH_CONFIG` in `admin.js`."
+    },
+    {
+      "id": "3922735470",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T14:12:28+00:00",
+      "body": "## Updated Review: Approved ✅\n\n### Additional fix added: pre-existing `$el` bug\n\nDuring Playwright E2E testing, I discovered that `this.$el` inside Alpine.js `loadPage()` resolves to the **clicked button element**, not the component root. This caused `this.$el.dataset.extraParams` to always return `undefined`, silently breaking all server-side query param forwarding (`q`, `tags`, `team_id`, etc.) during pagination.\n\n**Root cause:** Alpine.js scopes `$el` to the element where the directive is evaluated. When `@click=\"goToPage(2)\"` triggers on a button, `$el` stays as that button through the `goToPage → loadPage` call chain.\n\n**Fix:** Store the root element in `init()` where `$el` is correctly scoped (`this._rootEl = $el`), then use `this._rootEl` in `loadPage()`.\n\n### Full change summary (4 commits)\n\n1. **Original PR** (2 commits, contributor): Dynamic search input reading + remove client-side DOM filtering\n2. **Empty input edge case**: `url.searchParams.delete('q'/'tags')` when input cleared, preventing stale extraParams leaking. +9 tests.\n3. **`$el` → `_rootEl` fix**: Pre-existing bug where `this.$el` resolved to clicked button, breaking `data-extra-params` reading in `loadPage()`.\n\n### Validation\n- 870/870 JS tests pass (0 regressions)\n- Playwright E2E: confirmed search filter preserved across pagination pages after fix\n- No security or performance concerns\n- Consistent with existing codebase patterns"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "bd623ce5d4908c1194ef5aaeb194cb4995fb93ba",
+      "message": "fix: preserve search filters across pagination pages\n\nFixes #3128\n\nThe admin UI search filters (for tools, resources, prompts, gateways)\nwere only filtering visible DOM rows on the current page, not across\nall records. This caused confusion when users searched and then\nnavigated to page 2, where the search filter was lost.\n\nChanges:\n- Updated pagination_controls.html to dynamically read current search\n  input values (q and tags) when loading pages\n- Removed obsolete client-side DOM filtering calls from clearSearch()\n  function in admin.js that only filtered visible rows\n- Server-side filtering already works correctly via the 'q' parameter;\n  this fix ensures pagination preserves those filters\n\nThe fix ensures that when users:\n1. Enter a search query in the search box\n2. Navigate to page 2, 3, etc. using pagination controls\nThe search filter is preserved and applied server-side across all pages.\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-03-05T07:55:21+00:00"
+    },
+    {
+      "sha": "3026134f084d7fee5cafc0aac370525ec22a79d0",
+      "message": "test: update clearSearch test to reflect server-side filtering\n\nUpdated the test to verify that clearSearch clears input values\nand triggers server-side reload, rather than calling the removed\nclient-side DOM filtering functions.\n\nThis aligns with the fix for #3128 where we removed client-side\nfiltering in favor of proper server-side filtering across all pages.\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-03-05T08:20:47+00:00"
+    },
+    {
+      "sha": "4d4aae36f5776da16ab8a477a8c4451cd4d43531",
+      "message": "fix(ui): clear stale search params when input is emptied during pagination\n\nWhen the user clears the search input and paginates before the debounced\nreload fires (~250ms window), stale q/tags values from data-extra-params\nwould persist in the pagination request. Fix by calling\nurl.searchParams.delete() when the input exists but is empty, ensuring\nthe live DOM state is always authoritative over server-rendered extras.\n\nAdd 9 tests covering the dynamic input-reading logic in\npagination_controls.html: override, clear, trim, and tableName guard.\n\nRefs: #3128\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T12:24:38+00:00"
+    },
+    {
+      "sha": "31e88926696c7a53b3db489c5ef998dbe5bedcc3",
+      "message": "fix(ui): use stored root element ref instead of $el in pagination loadPage\n\nAlpine.js $el resolves to the clicked button element (not the component\nroot) when loadPage is called from a @click handler via goToPage. This\ncaused this.$el.dataset.extraParams to always return undefined, silently\nbreaking server-side query param forwarding (q, tags, team_id, etc.)\nduring pagination.\n\nFix by storing the root element reference in init() where $el correctly\npoints to the x-data element, then using this._rootEl in loadPage.\n\nRefs: #3128\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T13:43:58+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 180,
+  "deletions": 45,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:35.918550",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:35.920573",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3492,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3492.json"
+  }
+}

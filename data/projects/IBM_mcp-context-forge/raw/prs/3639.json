@@ -1,0 +1,77 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3639,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3639"
+  },
+  "metadata": {
+    "title": "Add MCP Plugin Session Reconnection",
+    "state": "closed",
+    "created_at": "2026-03-12T10:41:39+00:00",
+    "updated_at": "2026-03-12T18:09:16+00:00",
+    "closed_at": "2026-03-12T18:09:14+00:00",
+    "merged_at": "2026-03-12T18:09:14+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "bug",
+      "resilience",
+      "plugins",
+      "SHOULD",
+      "release-fix",
+      "ready"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# Add MCP Plugin Session Reconnection\r\n\r\n## 🎯 Overview\r\n\r\nImplements automatic session reconnection for MCP external plugins to handle plugin restarts gracefully.\r\n\r\n**Closes:** #2796\r\n\r\n## 📋 Problem\r\n\r\nWhen an external MCP plugin restarts, the next request fails with \"Session terminated\" error and no recovery mechanism exists. This causes plugin failures that require manual intervention.\r\n\r\n## ✅ Solution\r\n\r\nAdded automatic reconnection logic with exponential backoff that:\r\n1. Detects session termination errors (McpError or PluginError with \"session terminated\")\r\n2. Cleans up stale session state\r\n3. Reconnects to the plugin server (up to 3 attempts with 0.1s base delay)\r\n4. Retries the original request once after successful reconnection\r\n\r\n## 🔧 Changes\r\n\r\n### Configuration (`mcpgateway/plugins/framework/models.py`)\r\n- Added `reconnect_attempts: int = 3` to `MCPClientConfig`\r\n- Added `reconnect_delay: float = 0.1` to `MCPClientConfig`\r\n\r\n### Core Logic (`mcpgateway/plugins/framework/external/mcp/client.py`)\r\n- Added `_cleanup_session()` method to reset session state\r\n- Added `_reconnect_session()` method with exponential backoff\r\n- Updated `invoke_hook()` to catch and retry on session termination\r\n- Supports both STREAMABLEHTTP and STDIO transports\r\n\r\n### Tests (`tests/unit/mcpgateway/plugins/framework/external/mcp/test_client_reconnect.py`)\r\n- 12 comprehensive tests covering:\r\n  - Configuration loading\r\n  - Session cleanup\r\n  - Reconnection with backoff\r\n  - Error handling for both transports\r\n  - Retry exhaustion scenarios\r\n\r\n## 🧪 Testing\r\n\r\n```bash\r\n# All tests pass\r\npytest tests/unit/mcpgateway/plugins/framework/external/mcp/test_client_reconnect.py -v\r\n# 12 passed\r\n\r\n```\r\n\r\n## 📊 Implementation Details\r\n\r\n**Error Detection:**\r\n- Catches `McpError` from mcp library\r\n- Catches `PluginError` with \"session terminated\" message\r\n- Hybrid approach ensures broad compatibility\r\n\r\n**Reconnection Strategy:**\r\n- Linear backoff: 0.1s → 0.2s → 0.3s (delay increases by `reconnect_delay` per attempt)\r\n- Single retry after successful reconnection\r\n- Re-raises original error if all reconnection attempts fail\r\n\r\n**Transport Support:**\r\n- ✅ STREAMABLEHTTP (HTTP/SSE)\r\n- ✅ STDIO (subprocess)\r\n\r\n## 🔍 Design Decisions\r\n\r\n1. **Follows Unix socket client pattern** - Maintains consistency with existing reconnection implementation in `external/unix/client.py`\r\n2. **Linear backoff** - Simpler than exponential, sufficient for plugin restart scenarios\r\n3. **Single retry** - Avoids cascading retries while providing recovery for transient failures\r\n4. **Preserves original error** - Re-raises the original PluginError (not reconnection error) for better debugging\r\n\r\n## ⚠️ Breaking Changes\r\n\r\n### **None.** This is a backward-compatible enhancement.\r\n\r\n## 📝 Checklist\r\n\r\n- [x] Code follows project style guidelines (black, isort, flake8)\r\n- [x] Tests added and passing\r\n- [x] Documentation updated (docstrings)\r\n- [x] Commits signed with DCO\r\n- [x] No breaking changes\r\n\r\n## 🔗 Related Issues\r\n\r\n- Closes #2796\r\n- Related to Unix socket reconnection implementation in `external/unix/client.py`",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3938498443",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-12T17:36:51+00:00",
+      "body": "## Review\n\nGood feature — brings MCP client to parity with the Unix socket client's reconnection support. A few issues were found and fixed during review:\n\n### Bugs Fixed\n- **STDIO reconnection was broken**: `_cleanup_session()` didn't reset STDIO-specific state (`_stdio_task`, `_stdio_ready`, `_stdio_stop`, `_stdio_error`). After cleanup, `__connect_to_stdio_server` would skip creating new events because the old ones still existed but were already signaled, returning immediately without waiting for the new session. Fixed by mirroring `shutdown()`'s STDIO cleanup pattern.\n- **Missing generic exception handler**: Refactoring the `McpError` catch dropped the fallback `except Exception` handler. Re-added.\n\n### Code Quality\n- Removed \"Authors: AI Assistant\" from test copyright.\n- Fixed misleading \"exponential backoff\" → \"linear backoff\" (code uses `delay * attempt`).\n- Moved `McpError` import to module level; used Python's automatic name mangling instead of explicit `_ExternalPlugin__` form.\n\n### Tests Added (12 → 17)\n- STDIO task cleanup (proper stop, exception handling, HTTP-only path)\n- Session-terminated reconnect failure re-raises original error\n- Generic exceptions converted to PluginError\n\n### Design Notes (no changes, for awareness)\n- Nested retry: `_reconnect_session()` → `__connect_to_http_server()` = up to 9 total attempts with defaults.\n- String-based error detection (`\"session\"` + `\"terminated\"`) is fragile if MCP library changes messages.\n- No concurrency protection for simultaneous reconnections (Unix socket client uses `asyncio.Lock`).\n\nRebased cleanly onto main. All 195 MCP external client tests pass. Linting clean."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2f0b965e9938ebd897d7486b91b7aeb510de11b0",
+      "message": "fix: Add session reconnection logic to MCP external plugin client\n\nResolves #2796\n\nThe MCP external plugin client now implements automatic session recovery\nwhen the remote plugin restarts. This brings feature parity with the Unix\nsocket client which already has reconnection support.\n\nChanges:\n- Add reconnect_attempts and reconnect_delay config fields to MCPClientConfig\n- Implement _cleanup_session() to reset session state without full shutdown\n- Implement _reconnect_session() with exponential backoff retry logic\n- Update invoke_hook() to catch session termination errors and retry once\n- Add comprehensive unit tests for reconnection behavior (12 tests)\n\nThe reconnection logic:\n1. Detects session termination via McpError or PluginError messages\n2. Cleans up stale session state\n3. Attempts reconnection with exponential backoff\n4. Retries the original request once after successful reconnection\n5. Re-raises original error if reconnection fails\n\nTested with both STREAMABLEHTTP and STDIO transports.\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-03-12T09:57:13+00:00"
+    },
+    {
+      "sha": "07420c0d9461d87c33933d29749596357fae9686",
+      "message": "style: Fix import ordering in MCP client per isort\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-03-12T10:04:44+00:00"
+    },
+    {
+      "sha": "29fad26a712051e3c3afbd8b86efa58ba945a197",
+      "message": "fix linting errors\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-03-12T10:33:39+00:00"
+    },
+    {
+      "sha": "da5189407106cf43bdfd86909d3bd6715cae3b5f",
+      "message": "fix: correct STDIO reconnection and improve MCP client reconnect logic\n\n- Fix _cleanup_session() to properly reset STDIO state (task, events,\n  error) mirroring shutdown() logic, preventing broken STDIO reconnect\n- Move McpError import to module level for cleaner except clause\n- Use Python automatic name mangling instead of explicit form\n- Fix misleading \"exponential backoff\" references to \"linear backoff\"\n- Remove AI attribution from test file copyright\n- Add tests for STDIO cleanup, reconnect failure, and generic exceptions\n- Restore generic except Exception handler for non-MCP errors\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T17:36:31+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 607,
+  "deletions": 4,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:14.220639",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:14.222250",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3639,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3639.json"
+  }
+}

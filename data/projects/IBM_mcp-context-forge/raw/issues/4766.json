@@ -1,0 +1,47 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4766,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4766"
+  },
+  "metadata": {
+    "title": "[CHORE]: Remove `init_db()` create_all bypass and migrate raw CREATE TABLE to Alembic",
+    "state": "closed",
+    "created_at": "2026-05-14T12:13:20+00:00",
+    "updated_at": "2026-05-17T11:27:20+00:00",
+    "closed_at": "2026-05-17T11:27:20+00:00",
+    "author": "Lang-Akshay",
+    "labels": [
+      "triage",
+      "chore"
+    ],
+    "milestone": null,
+    "assignees": [
+      "cafalchio"
+    ]
+  },
+  "description": "## Summary\n\nTwo locations create database schema outside Alembic migrations, risking inconsistent schema state and broken upgrade paths:\n\n1. **`mcpgateway/db.py:6027`** — `init_db()` calls `Base.metadata.create_all()` directly\n2. **`mcp-servers/python/mcp_eval_server/mcp_eval_server/storage/results_store.py:35–70`** — raw `CREATE TABLE IF NOT EXISTS` SQL for three tables\n\n---\n\n## 1. `mcpgateway/db.py` — `init_db()` / `__main__` block\n\n### Location\n\n```\nmcpgateway/db.py:6027–6038   # init_db() definition\nmcpgateway/db.py:6595–6599   # __main__ block that calls init_db()\n```\n\n### Code\n\n```python\ndef init_db():\n    try:\n        Base.metadata.create_all(bind=engine)   # <-- bypasses Alembic\n    except SQLAlchemyError as e:\n        raise Exception(f\"Failed to initialize database: {str(e)}\")\n\nif __name__ == \"__main__\":\n    wait_for_db_ready(...)\n    init_db()\n```\n\n### Problem\n\n- `create_all()` creates every table in `Base.metadata` but writes **no Alembic version row**.\n- Running `python -m mcpgateway.db` leaves the DB in a state where `alembic upgrade head` will fail or re-apply already-applied DDL.\n- There is no call site for `init_db()` in any production path (verified: only `__main__`), so the function is dead production code — but it is a footgun for developers and CI scripts.\n- `bootstrap_db.py` already handles fresh-DB creation correctly (`create_all` + `stamp head` + `upgrade head`). `init_db()` duplicates that path without the stamp, making it strictly worse.\n\n### Fix\n\n- Delete `init_db()` and the `__main__` block from `db.py`.\n- Document that `python -m mcpgateway.bootstrap_db` is the canonical entry point for schema setup.\n- Add a note to `CLAUDE.md` / `AGENTS.md` that `db.py` must not contain DDL execution.\n\n---\n\n## 2. `mcp-servers/python/mcp_eval_server/` — raw CREATE TABLE\n\n### Location\n\n```\nmcp-servers/python/mcp_eval_server/mcp_eval_server/storage/results_store.py:35–70\n```\n\n### Code\n\n```python\nCREATE TABLE IF NOT EXISTS evaluation_results (...)\nCREATE TABLE IF NOT EXISTS evaluation_steps (...)\nCREATE TABLE IF NOT EXISTS judge_evaluations (...)\n```\n\n### Problem\n\n- Three tables created with inline SQL strings on every startup — no migration history, no downgrade path, no schema versioning.\n- Schema changes require manual `DROP TABLE` or `ALTER TABLE` — invisible to any migration tooling.\n- Inconsistent with the rest of the project's schema management strategy.\n\n### Fix\n\nOptions (pick one based on eval server scope):\n\n**Option A** — Introduce Alembic to the eval server (preferred if it has a long-lived DB):\n\n- Add `alembic.ini` + `alembic/env.py` to `mcp-servers/python/mcp_eval_server/`\n- Move table definitions to ORM models + initial migration\n- Call `alembic upgrade head` on startup\n\n**Option B** — Accept `CREATE TABLE IF NOT EXISTS` as intentional (if eval server is ephemeral/single-use):\n\n- Add a comment documenting the intentional choice and its constraints\n- Track in a `SCHEMA_VERSION` table or similar lightweight mechanism for future changes\n\n---\n\n## Scope\n\n| File                                                                            | Action                                                      |\n| ------------------------------------------------------------------------------- | ----------------------------------------------------------- |\n| `mcpgateway/db.py`                                                            | Delete `init_db()` + `__main__` block                   |\n| `mcp-servers/python/mcp_eval_server/mcp_eval_server/storage/results_store.py` | Migrate to Alembic**or** document intentional raw SQL |\n\n## Out of Scope\n\n`mcpgateway/bootstrap_db.py` — tracked separately- #4555\n",
+  "comments": [
+    {
+      "id": "4451497694",
+      "author": "cafalchio",
+      "created_at": "2026-05-14T14:18:33+00:00",
+      "body": "@Lang-Akshay it is addressed on https://github.com/IBM/mcp-context-forge/pull/4690\n\nI will review to check if all tables are there"
+    },
+    {
+      "id": "4470428652",
+      "author": "cafalchio",
+      "created_at": "2026-05-17T11:27:20+00:00",
+      "body": "closed by https://github.com/IBM/mcp-context-forge/pull/4690"
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:35.917800",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:35.919015",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4766,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4766.json"
+  }
+}

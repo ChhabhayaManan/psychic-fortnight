@@ -1,0 +1,257 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4537,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4537"
+  },
+  "metadata": {
+    "title": "feat(UI): Add gateways table",
+    "state": "closed",
+    "created_at": "2026-04-30T09:25:44+00:00",
+    "updated_at": "2026-05-01T14:14:00+00:00",
+    "closed_at": "2026-05-01T14:13:57+00:00",
+    "merged_at": "2026-05-01T14:13:57+00:00",
+    "author": "gcgoncalves",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "closes #4172\r\n\r\n<img width=\"1840\" height=\"1162\" alt=\"Screenshot 2026-04-30 at 10 24 22\" src=\"https://github.com/user-attachments/assets/9dc56767-9d8d-4997-9cfe-c9c14216c157\" />\r\n\r\n<img width=\"1820\" height=\"1162\" alt=\"Screenshot 2026-04-30 at 14 44 28\" src=\"https://github.com/user-attachments/assets/b2457610-ce20-470e-893b-b31e991de7fc\" />\r\n",
+  "comments": [
+    {
+      "id": "3172688953",
+      "author": "marekdano",
+      "created_at": "2026-05-01T09:05:42+00:00",
+      "body": "Do we need to have `prop-types` dep? The Prop types should be handled by TS."
+    },
+    {
+      "id": "3172690093",
+      "author": "marekdano",
+      "created_at": "2026-05-01T09:06:14+00:00",
+      "body": "Why is this removed?"
+    },
+    {
+      "id": "3172704248",
+      "author": "marekdano",
+      "created_at": "2026-05-01T09:12:45+00:00",
+      "body": "Do we need to have `/* prettier-ignore */` here?"
+    },
+    {
+      "id": "3172718322",
+      "author": "marekdano",
+      "created_at": "2026-05-01T09:18:44+00:00",
+      "body": "I think all `displayName` and `propTypes` should be handled by TS instead of PropTypes dep."
+    },
+    {
+      "id": "3172721264",
+      "author": "marekdano",
+      "created_at": "2026-05-01T09:19:57+00:00",
+      "body": "We can remove this mock with MSW one, where we can define the responses.\r\nWe can mock the response in the file `/client/src/test/mocks/handlers.ts`"
+    },
+    {
+      "id": "3172723329",
+      "author": "marekdano",
+      "created_at": "2026-05-01T09:20:48+00:00",
+      "body": "Is it possible to use the real router instead of mocking it?"
+    },
+    {
+      "id": "3172732056",
+      "author": "marekdano",
+      "created_at": "2026-05-01T09:24:33+00:00",
+      "body": "Can we replace this hardcoded value with the value from API?"
+    },
+    {
+      "id": "3172733446",
+      "author": "marekdano",
+      "created_at": "2026-05-01T09:25:06+00:00",
+      "body": "Are we not getting the `per_page` value from API?"
+    },
+    {
+      "id": "3172739038",
+      "author": "marekdano",
+      "created_at": "2026-05-01T09:27:32+00:00",
+      "body": "Is it the correct type `string`? I'd expect `number` instead."
+    },
+    {
+      "id": "3172748610",
+      "author": "gcgoncalves",
+      "created_at": "2026-05-01T09:32:00+00:00",
+      "body": "Unforfunately, TS was complaining about the `className` type not being defined. I accepted the tradeoff as a dev dependancy."
+    },
+    {
+      "id": "3172750657",
+      "author": "gcgoncalves",
+      "created_at": "2026-05-01T09:32:40+00:00",
+      "body": "I have no idea, tbh. It was removed automatically, I'll put it back. 👍 "
+    },
+    {
+      "id": "3172753173",
+      "author": "gcgoncalves",
+      "created_at": "2026-05-01T09:33:34+00:00",
+      "body": "Yes, for the \"pragma: allowlist secret\", otherwise prettier pushes that to the next line and we have to add that to `.secres.baseline`. :("
+    },
+    {
+      "id": "3172755632",
+      "author": "gcgoncalves",
+      "created_at": "2026-05-01T09:34:26+00:00",
+      "body": "I'll try to resolve without `PropTypes`, then get back here with the results."
+    },
+    {
+      "id": "3173197502",
+      "author": "gcgoncalves",
+      "created_at": "2026-05-01T12:45:07+00:00",
+      "body": "Actually, found a way to get it through without the ignore:\n\n```tsx\n  const login = useCallback(\n    async (\n      email: string,\n      password: string, // pragma: allowlist secret\n    ): Promise<void> => {\n      const data = await api.post<LoginResponse>(\n        \"/auth/login\",\n        { email, password },\n        { unauthenticated: true },\n      );\n\n      setToken(data.access_token);\n      setState({ user: data.user, isAuthenticated: true });\n    },\n    [],\n  );\n```"
+    },
+    {
+      "id": "3173338569",
+      "author": "marekdano",
+      "created_at": "2026-05-01T13:27:47+00:00",
+      "body": "prop-types dep is still here. I think you need to run `npm install` to remove it"
+    },
+    {
+      "id": "3173412212",
+      "author": "gcgoncalves",
+      "created_at": "2026-05-01T13:48:05+00:00",
+      "body": "TL;DR: MSW (Mock Service Worker) has compatibility issues with AbortSignal in Node.js test environments, causing tests to fail. We've switched to direct API client mocking as a workaround.\r\n\r\nTechnical Details\r\n\r\nThe Problem:\r\n 1. Our API client (@/api/client) uses AbortSignal for request cancellation (standard fetch API feature)\r\n 2. MSW intercepts HTTP requests at the network level in Node.js using the http/https modules\r\n 3. Node.js's native HTTP modules don't fully support AbortSignal in the same way browsers do\r\n 4. When MSW tries to intercept requests with AbortSignal, it causes compatibility errors in the test environment\r\n\r\nThe Solution:\r\nInstead of using MSW to mock HTTP responses, we:\r\n 1. Mock the @/api/client module directly using Vitest's vi.mock()\r\n 2. Control the mock responses at the API client level, before any HTTP layer is involved\r\n 3. This bypasses the AbortSignal incompatibility entirely\r\n\r\nCode Example:\r\n  1 // Mock the entire api client module\r\n  2 vi.mock(\"@/api/client\", () => ({\r\n  3   api: {\r\n  4     get: vi.fn(),\r\n  5     delete: vi.fn(),\r\n  6     post: vi.fn(),\r\n  7   },\r\n  8 }));\r\n  9\r\n 10 // Then control responses in tests\r\n 11 vi.mocked(api.get).mockResolvedValue({ data: [...] });\r\n\r\nTrade-offs:\r\n - ✅ Tests run reliably without AbortSignal issues\r\n - ✅ Faster test execution (no network layer simulation)\r\n - ✅ Simpler test setup\r\n - ⚠️ We're not testing the actual HTTP client behavior (but that's covered by integration tests)\r\n\r\nThis is a pragmatic solution that keeps unit tests focused on component logic while avoiding Node.js/MSW compatibility issues."
+    },
+    {
+      "id": "3173413840",
+      "author": "gcgoncalves",
+      "created_at": "2026-05-01T13:48:36+00:00",
+      "body": "This is what bob says."
+    },
+    {
+      "id": "3173424517",
+      "author": "gcgoncalves",
+      "created_at": "2026-05-01T13:51:51+00:00",
+      "body": "From our openapi.json:\r\n\r\n```json\r\n  {\r\n      \"CursorPaginatedGatewaysResponse\": {\r\n        \"properties\": {\r\n          \"gateways\": {\r\n            \"items\": {\r\n              \"$ref\": \"#/components/schemas/GatewayRead\"\r\n            },\r\n            \"type\": \"array\",\r\n            \"title\": \"Gateways\",\r\n            \"description\": \"List of gateways for this page\"\r\n          },\r\n          \"nextCursor\": {\r\n            \"anyOf\": [\r\n              {\r\n                \"type\": \"string\"\r\n              },\r\n              {\r\n                \"type\": \"null\"\r\n              }\r\n            ],\r\n            \"title\": \"Nextcursor\",\r\n            \"description\": \"Cursor for the next page, null if no more pages\"\r\n          }\r\n        },\r\n        \"type\": \"object\",\r\n        \"required\": [\r\n          \"gateways\"\r\n        ],\r\n        \"title\": \"CursorPaginatedGatewaysResponse\",\r\n        \"description\": \"Cursor-paginated response for gateways list endpoint.\"\r\n      }\r\n  }\r\n```"
+    },
+    {
+      "id": "3173472004",
+      "author": "marekdano",
+      "created_at": "2026-05-01T14:05:33+00:00",
+      "body": "Great! 👍 "
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4205938734",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-30T14:24:49+00:00",
+      "body": "Nice progress on the gateways table. I found a couple of blocking runtime issues worth tightening before merge:\n\n- client/src/pages/Servers.tsx - The table pagination looks like it does not match the current /gateways API contract. The UI sends page / per_page and then derives total_pages: 1, while the backend route appears to use cursor/limit pagination. As a result, users may only ever see the first backend page and won’t be able to reach later gateways. It may be worth switching the UI to use limit + nextCursor, or explicitly adding page pagination support to the API route.\n\nThis one is worth checking - \n- client/src/pages/Servers.tsx - The “Test Connection” action calls POST /gateways/{id}/test, but I couldn’t find a matching backend route for that endpoint. The existing gateway test endpoint seems to be POST /admin/gateways/test, with a different request shape. As-is, this action looks like it will fail at runtime for every gateway."
+    },
+    {
+      "id": "4210650908",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-01T09:29:31+00:00",
+      "body": "Left some comments"
+    },
+    {
+      "id": "4210709360",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-01T09:32:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "4210711597",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-01T09:32:40+00:00",
+      "body": ""
+    },
+    {
+      "id": "4210714354",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-01T09:33:34+00:00",
+      "body": ""
+    },
+    {
+      "id": "4210717200",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-01T09:34:26+00:00",
+      "body": ""
+    },
+    {
+      "id": "4211151861",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-01T12:45:07+00:00",
+      "body": ""
+    },
+    {
+      "id": "4211307836",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-01T13:30:00+00:00",
+      "body": ""
+    },
+    {
+      "id": "4211389882",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-01T13:48:05+00:00",
+      "body": ""
+    },
+    {
+      "id": "4211391730",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-01T13:48:36+00:00",
+      "body": ""
+    },
+    {
+      "id": "4211403191",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-01T13:51:51+00:00",
+      "body": ""
+    },
+    {
+      "id": "4211454418",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-05-01T14:05:34+00:00",
+      "body": ""
+    },
+    {
+      "id": "4211473350",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-01T14:11:03+00:00",
+      "body": "It looks good!\n\nLGTM 🚀 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "495cb1df69e17c9b6f2ef6e4c11f093b933492ae",
+      "message": "feat(ui): Add gateways table\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-30T13:55:34+00:00"
+    },
+    {
+      "sha": "349d5bb3dc534d3161adfc3f36370e69c2ef07c7",
+      "message": "fix(ui): change pagination to cursor pattern\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-05-01T10:55:17+00:00"
+    }
+  ],
+  "files_changed": 21,
+  "additions": 1450,
+  "deletions": 186,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T17:17:11.425546",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:11.426601",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4537,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4537.json"
+  }
+}

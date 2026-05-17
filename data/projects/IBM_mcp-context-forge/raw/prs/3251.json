@@ -1,0 +1,101 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3251,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3251"
+  },
+  "metadata": {
+    "title": "feat(security):  Enforce Content Size Limits for resources and prompts (fixes #538 US-1)",
+    "state": "closed",
+    "created_at": "2026-02-25T14:46:51+00:00",
+    "updated_at": "2026-03-22T23:11:14+00:00",
+    "closed_at": "2026-03-22T23:11:12+00:00",
+    "merged_at": "2026-03-22T23:11:12+00:00",
+    "author": "msureshkumar88",
+    "labels": [
+      "enhancement",
+      "security",
+      "COULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nAssociated with #538 US-1\r\n\r\n---\r\n\r\n## 📝 Summary\r\n_What does this PR do and why?_\r\n\r\nImplements **User Story 1 (US-1)** from [issue #538](https://github.com/IBM/mcp-context-forge/issues/538): Security - Enforce Content Size Limits. This PR adds configurable content size validation to prevent DoS attacks, resource exhaustion, and ensure data quality.\r\n\r\n---\r\n## 🔒 Security Impact\r\nDoS Prevention: Blocks oversized content submissions that could exhaust memory/storage\r\nResource Management: Enforces configurable limits on resource content (100KB default) and prompt templates (10KB default)\r\nAudit Trail: Logs all size limit violations with user context for security monitoring\r\n\r\n## ✨ Changes Made\r\n\r\n### Core Implementation\r\n\r\n1. **Content Security Service** ([`mcpgateway/services/content_security.py`](mcpgateway/services/content_security.py))\r\n   - New [`ContentSecurityService`](mcpgateway/services/content_security.py:40) class for centralized validation\r\n   - [`validate_resource_size()`](mcpgateway/services/content_security.py:65) - validates resource content against configured limits\r\n   - [`validate_prompt_size()`](mcpgateway/services/content_security.py:96) - validates prompt templates against configured limits\r\n   - [`ContentSizeError`](mcpgateway/services/content_security.py:23) exception with detailed size information\r\n   - Singleton pattern via [`get_content_security_service()`](mcpgateway/services/content_security.py:132)\r\n\r\n2. **Configuration** ([`mcpgateway/config.py`](mcpgateway/config.py:1477-1478))\r\n   - [`content_max_resource_size`](mcpgateway/config.py:1477): 100KB default (configurable 1KB-10MB)\r\n   - [`content_max_prompt_size`](mcpgateway/config.py:1478): 10KB default (configurable 512B-1MB)\r\n\r\n3. **Service Integration**\r\n   - [`resource_service.py`](mcpgateway/services/resource_service.py:437-448): Size validation before database operations\r\n   - [`prompt_service.py`](mcpgateway/services/prompt_service.py:467-473): Size validation before template processing\r\n   - Validation applies to both **create** and **update** operations\r\n\r\n4. **Error Handling** ([`main.py`](mcpgateway/main.py:128), [`admin.py`](mcpgateway/admin.py:125))\r\n   - Returns **413 Payload Too Large** with structured error response\r\n   - Includes `actual_size`, `max_size`, `error`, and `message` fields\r\n   - Clear, actionable error messages for clients\r\n\r\n---\r\n\r\n### Testing\r\n\r\nComprehensive integration tests ([`tests/integration/test_content_size_limits.py`](tests/integration/test_content_size_limits.py)):\r\n- ✅ Content within limits succeeds\r\n- ✅ Content at exact limit succeeds  \r\n- ✅ Content exceeding limit returns 413\r\n- ✅ One byte over limit returns 413\r\n- ✅ Unicode content size calculated correctly (UTF-8 bytes)\r\n- ✅ Validation applies to both create and update operations\r\n- ✅ Bulk operations validate each item\r\n- ✅ Error responses include size details\r\n\r\n---\r\n\r\n**Reproduce** \r\n1. Start the gateway with config.yaml\r\n(e.g. make dev or python -m mcpgateway.main)\r\n\r\n- visit prompts and try to create and also update one with a large template size greater than 10KB  \r\n- visit resource and try to create and also update one with a large content size greater than 100KB \r\n- Visit admin and public APIs for prompts and resources try to create and update with large sized content \r\n\r\n2. observation\r\n\r\n- Should see and error \r\n- create and update is not allowed \r\n\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 📋 Acceptance Criteria Met\r\n\r\nFrom issue #538 US-1:\r\n\r\n- ✅ Resource content exceeding 100KB limit returns 413 Payload Too Large\r\n- ✅ Prompt template exceeding 10KB limit returns 413 Payload Too Large  \r\n- ✅ Content within limits succeeds\r\n- ✅ Error responses include size limit information\r\n- ✅ Size validation applies to both create and update operations\r\n- ✅ Security violations logged with user context\r\n\r\n## 🔧 Configuration\r\n\r\n```bash\r\n# Environment variables (optional - defaults shown)\r\nCONTENT_MAX_RESOURCE_SIZE=102400  # 100KB for resources\r\nCONTENT_MAX_PROMPT_SIZE=10240     # 10KB for prompt templates\r\n```\r\n\r\n## 🚀 Usage Example\r\n\r\n```python\r\n# Automatic validation on resource creation\r\nPOST /api/resources\r\n{\r\n  \"uri\": \"test://resource\",\r\n  \"content\": \"...\" # Validated against 100KB limit\r\n}\r\n\r\n# Returns 413 if oversized:\r\n{\r\n  \"detail\": {\r\n    \"error\": \"Content size limit exceeded\",\r\n    \"message\": \"Resource content size (200000 bytes) exceeds maximum allowed size (102400 bytes)\",\r\n    \"actual_size\": 200000,\r\n    \"max_size\": 102400\r\n  }\r\n}\r\n```\r\n\r\n## 📊 Impact\r\n\r\n- **Security**: Prevents resource exhaustion attacks\r\n- **Performance**: Validation occurs before database operations (fail-fast)\r\n- **Compatibility**: Non-breaking change with sensible defaults\r\n- **Observability**: All violations logged for security monitoring\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    PASS       |\r\n| Unit tests                | `make test`     |     PASS   |\r\n| Coverage ≥ 80%            | `make coverage` |   99%     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] Tests added/updated for changes\r\n- [X] Documentation updated (if applicable)\r\n- [X] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3855868342",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-02-25T17:54:37+00:00",
+      "body": "# Linked Issues — Completion Status\r\n\r\n| Issue | Title | Status | Notes |\r\n|-------|-------|--------|-------|\r\n| #538 (US-1) | Security - Enforce Content Size Limits | ⚠️ Partial | Core validation logic implemented; 2 bugs and missing deny-path tests (see Security Findings) |\r\n\r\n## Acceptance Criteria Detail\r\n\r\n| Issue | Criterion | Status | Notes |\r\n|-------|-----------|--------|-------|\r\n| #538 US-1 | Resource content exceeding 100KB returns 413 | ⚠️ Partial | admin_edit_resource returns 409 instead of 413 (admin.py L11792) |\r\n| #538 US-1 | Prompt template exceeding 10KB returns 413 | ✅ Done | Verified across all 4 handlers |\r\n| #538 US-1 | Content within limits succeeds | ✅ Done | Tests cover exact-limit and under-limit cases |\r\n| #538 US-1 | Error responses include size limit information | ⚠️ Partial | main.py handlers return `{\"detail\": str(e)}` (flat string), but tests expect structured dict with `actual_size`, `max_size`, `error`, `message` keys — these tests will fail |\r\n| #538 US-1 | Validation on both create and update | ✅ Done | Both paths validated in services and tested |\r\n| #538 US-1 | Security violations logged with user context | ✅ Done | `logger.warning()` with user/IP context in content_security.py |\r\n\r\nOverall Issue Coverage: 4 of 6 criteria fully addressed, 2 partially addressed.\r\n\r\n```bash\r\n# Run - fails the test\r\nuv run pytest tests/integration/test_content_size_limits.py --with-integration\r\n```\r\n\r\n# Security Findings\r\n\r\n## Findings Summary\r\n\r\n| # | File | Line | Severity | CWE | Description |\r\n|---|------|------|----------|-----|-------------|\r\n| 1 | `admin.py` | 11792 | **High** | CWE-436 | Inconsistent HTTP status: `admin_edit_resource` returns `409` for `ContentSizeError` while all other handlers return `413` |\r\n| 2 | `main.py` | 4501, 4685, 5007, 5202 | Medium | CWE-209 | Response format mismatch: Handlers return `{\"detail\": str(e)}` (string) but tests expect structured dict `{\"detail\": {\"actual_size\":..., \"max_size\":..., \"error\":..., \"message\":...}}` — tests will fail |\r\n| 3 | `content_security.py` | 91, 122 | Medium | CWE-117 | Log injection via f-strings: `uri`, `user_email`, `ip_address` are user-controlled values interpolated in `logger.warning()` f-strings |\r\n| 4 | `content_security.py` | 91, 122 | Medium | CWE-532 | PII in logs: `user_email` and `ip_address` logged at WARNING level on every size violation |\r\n| 5 | `content_security.py` | 132–147 | Medium | CWE-362 | Non-thread-safe singleton: `get_content_security_service()` uses check-then-set without locking |\r\n| 6 | `resource_service.py` | 434 | Low | CWE-20 | Silent byte coercion: `errors=\"ignore\"` drops non-UTF-8 bytes, potentially shrinking measured size below actual storage size |\r\n| 7 | `main.py` | 4501, 4685, 5007, 5202 | Low | CWE-755 | `ORJSONResponse` vs `HTTPException`: Returning `ORJSONResponse` bypasses FastAPI's exception middleware (CORS, OpenAPI, centralized logging) |\r\n| 8 | `main.py` | 5201 | Low | — | Typo: `\"Content size exceeded in in updating prompt\"` (double `\"in\"`) |\r\n\r\n---\r\n\r\n## Suggestions\r\n\r\n1. **Finding 1** — Change `status_code=409` to `status_code=413` in `admin.py:11792`. One-line fix. Effort: trivial.\r\n\r\n2. **Finding 2** — Update the 4 `ContentSizeError` handlers in `main.py` to return structured responses matching the test expectations. Effort: low. *(OWASP: Consistent error responses — A09:2021)*\r\n\r\n3. **Finding 3** — Use `%s` format placeholders instead of f-strings in `logger.warning()` calls to prevent log injection. Effort: trivial. *(CWE-117, RFC 5424)*\r\n\r\n4. **Finding 4** — Replace `user_email` with `user_id` in all log statements — email addresses are strong PII identifiers and must not be logged directly. For `ip_address`, note that under **GDPR (Article 4(1))**, IP addresses are classified as personal data by default (confirmed by the ECJ); logging raw IPs is non-compliant unless a lawful basis is documented. Prefer one of the following approaches:\r\n   - **Anonymise** the IP before logging (e.g. zero out the last octet: `192.168.1.123` → `192.168.1.0`), or\r\n   - **Hash** it (e.g. SHA-256 with a rotating salt) to enable correlation without storing the raw value, or\r\n   - **Drop it entirely** if the IP adds no actionable security value for this log event.\r\n\r\n   Additionally, move any remaining identifiers to `DEBUG` level or use structured logger `extra={}` fields so they can be filtered or masked by the log pipeline before reaching external log stores. Effort: low–medium. *(GDPR Article 4(1), Article 5(1)(c) — data minimisation; CWE-532)*\r\n\r\n5. **Finding 5** — Add `threading.Lock` to the singleton getter, or use module-level initialization. Effort: trivial.\r\n\r\n6. **Finding 6** — Pass `resource.content` as bytes directly to `validate_resource_size()` instead of decoding with `errors=\"ignore\"`. The method already accepts `Union[str, bytes]`. Effort: trivial.\r\n\r\n7. **Finding 7** — Consider using `raise HTTPException(status_code=413, detail=...)` for consistency with existing error handlers. Effort: low.\r\n\r\n8. **Finding 8** — Fix typo: `\"in in\"` → `\"in\"`. Effort: trivial.\r\n\r\n"
+    },
+    {
+      "id": "3988726212",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-22T23:05:08+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "020fc2e939176d9079c5f80dbf172d701360277e",
+      "message": "feat(security): enforce content size limits for resources and prompts\n\nImplement configurable content size validation to prevent DoS attacks\nvia oversized content submissions. Resources are limited to 100KB and\nprompt templates to 10KB by default (configurable via environment\nvariables CONTENT_MAX_RESOURCE_SIZE and CONTENT_MAX_PROMPT_SIZE).\n\nValidation occurs at the service layer before database operations,\nreturning 413 Payload Too Large with structured error details.\n\nCloses #538\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-22T21:53:16+00:00"
+    },
+    {
+      "sha": "a9b7a2cba4fe18732bd402aee00ef1890fcfac5d",
+      "message": "fix(security): review fixes for content size limits PR\n\n- Fix ResourceCreate.validate_content to remove MAX_CONTENT_LENGTH\n  schema-level check (now handled by service layer, consistent with\n  ResourceUpdate)\n- Fix broken test assertions checking raw bytes in formatted messages\n  (TestErrorMessageClarity was asserting \"200000\" in human-readable\n  \"195.3 KB\" strings)\n- Fix broken test_update_prompt_validation_and_integrity_errors which\n  had its body accidentally deleted by the original PR\n- Restore accidentally deleted assertions in test_list_resources and\n  test_create_resource_endpoint\n- Add global exception handler for ContentSizeError (defense-in-depth,\n  consistent with existing handlers for ValidationError/IntegrityError)\n- Add reset_content_security_service() for test isolation\n- Remove \"Made with Bob\" watermark from test file\n- Remove duplicate pytest import in integration tests\n- Fix broken README link to non-existent migration guide\n- Fix double-commented lines in .env.example\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T21:53:33+00:00"
+    },
+    {
+      "sha": "0e0f6483254f25487ec100ced3f24502a6e7f4d6",
+      "message": "fix: resolve flake8 lint issues in content size limits PR\n\n- Move noqa:DUO138 to the line flake8 reports (validators.py)\n- Add Args/Returns to content_size_exception_handler docstring (DAR101/DAR201)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T22:05:50+00:00"
+    },
+    {
+      "sha": "7ff795f47184f648e963d5ac6b4298e49ad8f1fb",
+      "message": "fix(tests): update security tests for service-layer size validation\n\nContent size validation moved from Pydantic schema to service layer\n(returns 413 instead of 422). Update test_resource_create_content_validation\nand test_zip_bomb_prevention to reflect that ResourceCreate no longer\nrejects oversized content at schema level.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T22:08:36+00:00"
+    },
+    {
+      "sha": "bb5a70c854d46dc02ee157fe6c303f40ac04695f",
+      "message": "fix(security): address codex review findings for content size limits\n\n1. Remove MAX_TEMPLATE_LENGTH check from SecurityValidator.validate_template\n   so the configurable CONTENT_MAX_PROMPT_SIZE is not silently capped at 64KB\n   by the schema-level validator (finding #1)\n\n2. Add db.rollback() to ContentSizeError handlers in resource_service to\n   prevent partial metadata mutations from being committed when content\n   size validation fails after ORM fields are already updated (finding #2)\n\n3. Include actual_size and max_size in admin route 413 responses to match\n   the structured error contract used by API routes (finding #3)\n\n4. Update security and validator tests that expected schema-level length\n   rejection — size enforcement now happens at service layer\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T22:19:19+00:00"
+    },
+    {
+      "sha": "33ada94089f50672ef126c17d6930b79d80bdc7c",
+      "message": "chore: fix trailing whitespace in test files\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T23:04:32+00:00"
+    },
+    {
+      "sha": "032674582d9d9935528b9d0bb9da236a3eb757f4",
+      "message": "docs: add content size limits to configuration docs, securing guide, and Helm values\n\n- docs/docs/manage/configuration.md: add Content Security section with\n  env var table, scope note, and error response example\n- docs/docs/manage/securing.md: add section 9 (Content Size Limits)\n  to production security checklist, renumber subsequent sections\n- charts/mcp-stack/values.yaml: add CONTENT_MAX_RESOURCE_SIZE and\n  CONTENT_MAX_PROMPT_SIZE to gateway env config\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-22T23:08:15+00:00"
+    }
+  ],
+  "files_changed": 23,
+  "additions": 1564,
+  "deletions": 56,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:27.519513",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:27.521128",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3251,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3251.json"
+  }
+}

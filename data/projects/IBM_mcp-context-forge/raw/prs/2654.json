@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2654,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2654"
+  },
+  "metadata": {
+    "title": "Fix Gateway Error Propagation & Frontend JSON Parse Issues",
+    "state": "closed",
+    "created_at": "2026-02-02T19:19:07+00:00",
+    "updated_at": "2026-02-11T10:43:57+00:00",
+    "closed_at": "2026-02-07T01:09:03+00:00",
+    "merged_at": "2026-02-07T01:09:03+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "ica"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2562\r\n\r\n## 📌 Summary\r\n\r\nThis PR addresses two issues:\r\n\r\n1.  **Backend Error Propagation:** Fixes an issue where specific backend errors (e.g., `401 Unauthorized` or `405 Method Not Allowed`) were masked by generic \"Failed to initialize gateway\" messages. This prevented users from seeing the actual cause of gateway registration failures allowing users to find the root cause of failure and fix it, instead of relying on backend logs.\r\n\r\n2.  **Frontend JSON Parsing:** Fixes a frontend silent crash/error with  (\"JSON.parse: unexpected character\") that occurred when the server or a proxy returned an HTML response (e.g., error pages, auth redirects) instead of the expected JSON.\r\nRoot Cause documented here: https://github.com/IBM/mcp-context-forge/issues/2562#issuecomment-3816485639. \r\n\r\n## 🔁 Reproduction Steps\r\n**1. Backend Error Propagation:**\r\n- Attempt to register a gateway with invalid credentials (causing a 401).\r\n- **Before:** Error message in UI/logs: `Failed to initialize gateway...`.\r\n- **After:** Error message in UI/logs: `Failed to initialize gateway... Client error '401 Unauthorized'`.\r\n\r\n**2. Frontend JSON Parse Error:**\r\n- Trigger an HTML response for a form submission endpoint (e.g., `POST /admin/gateways`) by simulating a proxy error (502/504) or session expiry redirect.\r\n- **Before:** The UI crashes or shows a console error: `SyntaxError: JSON.parse: unexpected character at line 1 column 1` because the code tried to parse `<html>...` as JSON.\r\n- **After:** The UI correctly handles the non-JSON response and displays a user-friendly error message: \"The server returned an unexpected response...\"\r\n\r\n## 🐞 Root Cause\r\n**Backend:**\r\n- The MCP SDK uses `anyio.TaskGroup` for concurrency, which wraps raised exceptions in a `BaseExceptionGroup`.\r\n- The existing error handling code simply called `str(e)` on the caught exception, which returned the wrapper's generic message instead of the inner exception's detail.\r\n\r\n**Frontend:**\r\n- Multiple form handlers in `admin.js` directly awaited `response.json()` without validating the response status or `Content-Type`.\r\n- If an upstream proxy or the server returned an HTML error page (common in enterprise variants or during outages), `response.json()` would fail with a syntax error, breaking the error handling flow.\r\n\r\n## 💡 Fix Description\r\n**Backend (`gateway_service.py`):**\r\n- Updated `_initialize_gateway` to inspect caught exceptions.\r\n- Implemented logic to unwrap `BaseExceptionGroup` and extract the root cause exception (matching patterns used elsewhere in `tool_service.py`).\r\n- Ensures the actual HTTP error detail is propagated to the `GatewayConnectionError`.\r\n\r\n**Frontend (`admin.js`):**\r\n- Created a reusable helper function `safeParseJsonResponse(response, fallbackError)` that:\r\n    1. Checks `response.ok` status first.\r\n    2. Validates that the `Content-Type` header includes result \"application/json\".\r\n    4. Throws a descriptive error if the response is not valid JSON, preventing the parse crash.\r\n- Refactored **12 high-risk form handlers** (POST/PUT operations) to use this safe helper instead of direct `response.json()`:\r\n    - Gateway (Add & Edit)\r\n    - Resource (Add & Edit)\r\n    - Prompt (Add & Edit)\r\n    - Server (Add & Edit)\r\n    - A2A Agent (Add & Edit)\r\n    - Tool (Add & Edit)\r\n    Note: There can be more occurrences where the safeParseJsonResponse can be used, but currently have targeted to the high impact ones in this PR.\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3765769010",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-07T01:02:41+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f33a13fa0898e502c15f101c23b825c35bcb6366",
+      "message": "fix: propagate gateway errors and handle non-JSON responses in frontend\n\n- Backend: Extract root cause from BaseExceptionGroup when MCP SDK uses\n  TaskGroup, ensuring actual HTTP errors (401, 405, etc.) are shown\n  instead of generic \"Failed to initialize gateway\" messages\n- Backend: Change HTTP status from 503 to 502 for GatewayConnectionError\n  as 502 Bad Gateway more accurately represents upstream server failures\n- Backend: Include sanitized error details in GatewayConnectionError\n  messages for better debugging while protecting sensitive URL params\n- Backend: Add userinfo (user:pass@host) redaction to sanitize_url_for_logging\n  as defense-in-depth against credential leakage in error messages\n- Frontend: Add safeParseJsonResponse() helper to validate response\n  status and Content-Type before parsing JSON, preventing crashes when\n  proxies or auth redirects return HTML error pages\n- Frontend: Update extractApiError() to also check error.message field\n- Frontend: Detect HTML responses and show user-friendly message instead\n  of raw HTML; truncate long text responses to 200 chars\n- Apply safeParseJsonResponse to 12 high-risk form handlers (POST/PUT):\n  Gateway, Resource, Prompt, Server, A2A Agent, Tool (add & edit each)\n\nCloses #2562\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-07T00:25:42+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 139,
+  "deletions": 24,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:54.714040",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:54.715143",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2654,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2654.json"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1482,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1482"
+  },
+  "metadata": {
+    "title": "Bh/make uv use global venv instead of creating project one",
+    "state": "closed",
+    "created_at": "2025-11-20T10:34:23+00:00",
+    "updated_at": "2025-11-25T22:00:37+00:00",
+    "closed_at": "2025-11-25T21:15:49+00:00",
+    "merged_at": "2025-11-25T21:15:49+00:00",
+    "author": "brian-hussey",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nBefore opening this PR please:\r\n\r\n1. `make lint`            - passes `ruff`, `mypy`, `pylint`\r\n2. `make test`            - all unit + integration tests green\r\n3. `make coverage`        - ≥ 90 %\r\n4. `make docker docker-run-ssl` or `make podman podman-run-ssl`\r\n5. Update relevant documentation.\r\n6. Tested with sqlite and postgres + redis.\r\n7. Manual regression no longer fails. Ensure the UI and /version work correctly.\r\n\r\n---\r\n\r\n## 📌 Summary\r\nThis fixes #1461 - an issue with having the virtual environment(s) split between a global virtual env and a project virtual env.\r\nThis change encourages uv to use the global venv instead of accidentally creating a project based one (which it does by default).\r\n\r\n## 🔁 Reproduction Steps\r\nBug: https://github.com/IBM/mcp-context-forge/issues/1461\r\n\r\n#### Steps to reproduce:\r\n1. Clone down the repo\r\n2. `make venv`\r\n  ```\r\n  [brian@dogmatix] ➜  mcp-context-forge git:(main) ✗ make venv\r\n  Requirement already satisfied: pip in /Users/brian/.venv/mcpgateway/lib/python3.11/site-packages (24.0)\r\n  [...]\r\n  # Eventually, we want to transition to using uv/uvx exclusively, at which point we will only need\r\n  # a virtual environment if the user has not installed uv into their account.\r\n  uv is /Users/brian/.local/bin/uv\r\n  ✅  Virtual env created.\r\n  💡  Enter it with:\r\n      . /Users/brian/.venv/mcpgateway/bin/activate\r\n  ```\r\n3. Activate virtual environment\r\n  ```\r\n  [brian@dogmatix] ➜ [mcpgateway] mcp-context-forge git:(main) ✗ . /Users/brian/.venv/mcpgateway/bin/activate\r\n  [brian@dogmatix] ➜ [mcpgateway] mcp-context-forge git:(main) ✗ which python\r\n  /Users/brian/.venv/mcpgateway/bin/python\r\n  ```\r\n4. run `make pylint`\r\n  ```\r\n  [brian@dogmatix] ➜ [mcpgateway] mcp-context-forge git:(main) ✗ make pylint\r\n  🐛 pylint mcpgateway (parallel)...\r\n  uv run pylint -j 0 --fail-on E --fail-under 10 mcpgateway\r\n  warning: `VIRTUAL_ENV=/Users/brian/.venv/mcpgateway` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead\r\n   [...]\r\n  ```\r\n  Note: warning and creation of .venv directory in the project area\r\n5. run `pylint`\r\n  ```\r\n  [brian@dogmatix] ➜ [mcpgateway] mcp-context-forge git:(main) ✗ pylint\r\n  zsh: command not found: pylint\r\n  ```\r\nNote despite having run with make, the tool is not available directly. I'd expect tools to be available in my virtual environment after successful execution of make target.\r\n\r\n\r\n## 🐞 Root Cause\r\nInconsistent virtual environment definition means activating the wrong one stops normal function of project make tasks.\r\n\r\n## 💡 Fix Description\r\nI've updated the `uv run` tasks to use the active virtual environment instead of uv's default action to ignore the active one in favour of a local \".venv\" directory.\r\n\r\nI've confirmed the other `uv` based tasks are not affected, it only seems to be the `uv run` commands that cause this issue.\r\n\r\nNow steps end up with:\r\n#### Steps to reproduce:\r\n1. Clone down the repo\r\n2. `make venv`\r\n  ```\r\n  [brian@dogmatix] ➜  mcp-context-forge git:(main) ✗ make venv\r\n  Requirement already satisfied: pip in /Users/brian/.venv/mcpgateway/lib/python3.11/site-packages (24.0)\r\n  [...]\r\n  # Eventually, we want to transition to using uv/uvx exclusively, at which point we will only need\r\n  # a virtual environment if the user has not installed uv into their account.\r\n  uv is /Users/brian/.local/bin/uv\r\n  ✅  Virtual env created.\r\n  💡  Enter it with:\r\n      . /Users/brian/.venv/mcpgateway/bin/activate\r\n  ```\r\n3. Activate virtual environment\r\n  ```\r\n  [brian@dogmatix] ➜ [mcpgateway] mcp-context-forge git:(main) ✗ . /Users/brian/.venv/mcpgateway/bin/activate\r\n  [brian@dogmatix] ➜ [mcpgateway] mcp-context-forge git:(main) ✗ which python\r\n  /Users/brian/.venv/mcpgateway/bin/python\r\n  ```\r\n4. run `make pylint`\r\n  ```\r\n  > make pylint\r\n  🐛 pylint mcpgateway (parallel)...\r\n  Uninstalled 10 packages in 119ms\r\n  Installed 242 packages in 559ms\r\n\r\n--------------------------------------------------------------------\r\nYour code has been rated at 10.00/10 (previous run: 10.00/10, +0.00)\r\n  ```\r\n  Note: No warning message\r\n5. run `pylint`\r\n  ```\r\n  > pylint\r\n  No files to lint: exiting.\r\n  ```\r\nNote despite having run with make, the tool is not available directly. I'd expect tools to be available in my virtual environment after successful execution of make target.\r\n6. run `ls .venv`\r\n```\r\n> ls .venv\r\nls: .venv: No such file or directory\r\n```\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3506833174",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-11-25T21:12:46+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "cce6b3eb380f8a61d364b840e9910b43d1150019",
+      "message": "Update uv commands to use the global venv instead of using a second venv in the  project dir based and global venv directory\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2025-11-19T16:57:14+00:00"
+    },
+    {
+      "sha": "442de408527d6f8939f2ac3df5b8f8e2b514fb34",
+      "message": "Activate virtualenv for pylint and pre-commit tasks\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2025-11-19T17:25:21+00:00"
+    },
+    {
+      "sha": "c6a851542963f4023ba07431b02886dfed8d45e2",
+      "message": "Update for readability\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2025-11-20T10:35:40+00:00"
+    },
+    {
+      "sha": "a72ac86295940f1714cedbf913018e5be7e787e8",
+      "message": "Use virtualenv for smoketest\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2025-11-20T11:08:56+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 9,
+  "deletions": 5,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:49.785088",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:49.786336",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1482,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1482.json"
+  }
+}

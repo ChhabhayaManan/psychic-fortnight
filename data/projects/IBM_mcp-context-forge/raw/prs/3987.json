@@ -1,0 +1,117 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3987,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3987"
+  },
+  "metadata": {
+    "title": "fix(bootstrap): rename orphaned resources to fix team and name assignment conflict",
+    "state": "closed",
+    "created_at": "2026-04-02T05:31:07+00:00",
+    "updated_at": "2026-04-02T12:35:09+00:00",
+    "closed_at": "2026-04-02T12:35:07+00:00",
+    "merged_at": "2026-04-02T12:35:07+00:00",
+    "author": "madhav165",
+    "labels": [
+      "devops",
+      "wxo",
+      "ica",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 📌 Summary\n\n`bootstrap_resource_assignments` bulk-assigns orphaned resources (NULL `team_id`/`owner_email`/`visibility`) to the platform admin team on startup. It fails with `UniqueViolation` on `uq_team_owner_name_*` constraints when an orphan shares a name with a resource already in the admin team, or when two orphans share the same name.\n\n## 🔁 Reproduction Steps\n\nCloses #3986\n\n1. Deploy with PostgreSQL where resources exist from a pre-multi-tenant migration (NULL `team_id`)\n2. Some resources share a name with resources already assigned to the admin team\n3. On startup, `bootstrap_resource_assignments` throws `UniqueViolation` and skips the affected resource type entirely\n\n## 🐞 Root Cause\n\n`mcpgateway/bootstrap_db.py` — the orphan-assignment loop set `team_id`/`owner_email` on all orphans in bulk then called `db.commit()`. If any row caused a unique constraint violation on `(team_id, owner_email, name)`, the entire batch for that resource type was silently skipped.\n\nTwo conflict sources:\n1. Orphan name matches a resource already assigned to the admin team in the DB\n2. Two orphans share the same name — the second conflicts after the first is committed\n\nAffects all 6 resource types: `servers`, `tools`, `resources`, `prompts`, `gateways`, `a2a_agents`.\n\n## 💡 Fix Description\n\nBefore assigning, issue one query per resource type to fetch all names already taken in the admin team that match any orphan value exactly or as a `value-%` suffixed variant. Track intra-batch claimed names in a `batch_assigned` set (orphans not yet committed are invisible to the DB query). On conflict, parse numeric suffixes from the taken set, compute `max + 1`, and rename to `original-N` before commit. Visibility and ownership are preserved.\n\n## 🧪 Verification\n\n| Check | Command | Status |\n|---|---|---|\n| Lint suite | `make lint` | |\n| Unit tests | `uv run pytest tests/unit/mcpgateway/test_bootstrap_db.py` | ✅ 52 passed |\n| Coverage ≥ 80 % | `make coverage` | |\n| Manual regression no longer fails | deploy against PG with duplicate-named orphans | |\n\n## 📐 MCP Compliance (if relevant)\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make autoflake isort black`)\n- [x] No secrets/credentials committed",
+  "comments": [
+    {
+      "id": "3027681796",
+      "author": "gcgoncalves",
+      "created_at": "2026-04-02T12:12:56+00:00",
+      "body": "The `_like_safe()` function escapes `LIKE` wildcards, but it may not fully protect against SQL injection if `v` contains SQL special chars beyond `LIKE` wildcards. Use SQLAlchemy's `literal()` or ensure full parameterization. "
+    },
+    {
+      "id": "3027713266",
+      "author": "crivetimihai",
+      "created_at": "2026-04-02T12:20:02+00:00",
+      "body": "This is already fully parameterized. SQLAlchemy's `field_col.like(pattern)` generates `column LIKE :param_1` — the pattern string is passed as a bind parameter, never interpolated into the SQL statement. SQL injection through bind parameter values is not possible.\n\n`_like_safe()` escapes LIKE-specific metacharacters (`%`, `_`, `\\`) so the **pattern matching** works correctly (e.g., a resource named `tool_v2` matches literally, not as `tool[any char]v2`). It is not an SQL injection defense — SQLAlchemy's parameter binding already provides that.\n\nUsing `literal()` here would be redundant since SQLAlchemy already wraps the value as a `BindParameter` internally when passed to `.like()` or `==`."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4050207986",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-02T12:03:56+00:00",
+      "body": "Reviewed the conflict detection and suffix-renaming logic, verified the `unique_field` mapping against all 6 DB constraint definitions, and confirmed the algorithm is correct for all edge cases (existing conflicts, intra-batch duplicates, suffix collisions, NULL field values).\n\nThe conservative `(team_id, owner_email)` scoping for `existing_taken` is intentional and safe — it may over-rename for Resource/Prompt models but can never miss a real `UniqueViolation`. This is now documented inline.\n\nAdded log sanitization for consistency, a branch coverage test, and hoisted `_like_safe`. 53 tests passing, full differential coverage.\n\nLGTM."
+    },
+    {
+      "id": "4050250073",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-02T12:14:48+00:00",
+      "body": ""
+    },
+    {
+      "id": "4050283019",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-02T12:20:02+00:00",
+      "body": ""
+    },
+    {
+      "id": "4050309144",
+      "author": "gcgoncalves",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-02T12:25:21+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "4ee38572f99da78abb7aebd83b5b28d54322f4ae",
+      "message": "fix(bootstrap): rename orphaned resources on team assignment conflict\n\nWhen bootstrap assigns orphaned resources to the admin team,\nUniqueViolation fires on uq_team_owner_name_* constraints if a\nresource with the same name already exists in that team.\n\nFix: pre-query for taken names in the admin team (existing DB rows)\nand track intra-batch claims via batch_assigned set. On conflict,\nparse numeric suffixes from taken values and rename to original-N\n(max suffix + 1) before the bulk commit. Affects all 6 resource\ntypes: servers, tools, resources, prompts, gateways, a2a_agents.\n\nCloses #3986\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-02T05:29:01+00:00"
+    },
+    {
+      "sha": "e89ef5bb51fdaecf76e8818a96f8ad745d852991",
+      "message": "fix(bootstrap): escape SQL wildcards in LIKE pattern and hoist regex compile\n\n- Escape %, _, and \\ in resource names before building the existing_taken\n  LIKE filter to prevent false positives when names contain SQL wildcard chars\n- Pre-compile per-value suffix regexes above the inner loop instead of\n  recompiling on each conflicting resource\n- Set explicit name attributes on mock objects in test_resource_assignments_success\n  to satisfy re.escape() called during suffix_res construction\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-02T05:55:48+00:00"
+    },
+    {
+      "sha": "1c0716ad122626b301b4271b5b6c1456da4a950f",
+      "message": "fix(bootstrap): sanitize log messages and add null-field branch test\n\nSanitize user-controlled values (resource names/URIs) in the\nname-conflict warning log using SecurityValidator.sanitize_log_message\nfor consistency with the existing error handler pattern.\n\nAdd test for orphan resources with None unique-field values to cover\nthe conflict-detection skip branch.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T11:38:50+00:00"
+    },
+    {
+      "sha": "f1eb2e846ba275319226e85f464b6229547acd7a",
+      "message": "refactor(bootstrap): hoist _like_safe helper and document gateway_id tradeoff\n\nMove _like_safe() above the resource-type loop to avoid redefinition\non each iteration. Add an inline comment explaining the intentional\nomission of gateway_id from the existing_taken query: the conservative\n(team_id, owner_email)-only filter may over-rename for Resource/Prompt\nmodels but can never miss a real UniqueViolation — the correct\ntradeoff for one-time bootstrap code.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T11:59:14+00:00"
+    },
+    {
+      "sha": "028c40e74ba783c0b30f801ace2be1d05aee8680",
+      "message": "Merge branch 'main' into bugfix/bootstrap-duplicate-name-on-team-assign",
+      "author": "Mihai Criveti",
+      "date": "2026-04-02T12:34:44+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 251,
+  "deletions": 15,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:02.715296",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:02.715631",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3987,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3987.json"
+  }
+}

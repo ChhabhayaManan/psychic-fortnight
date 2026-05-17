@@ -1,0 +1,252 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2638,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2638"
+  },
+  "metadata": {
+    "title": "Issue 1960 Fix high-impact performance issues in llm-guard plugin",
+    "state": "closed",
+    "created_at": "2026-02-01T18:19:09+00:00",
+    "updated_at": "2026-02-07T12:13:51+00:00",
+    "closed_at": "2026-02-06T00:45:38+00:00",
+    "merged_at": "2026-02-06T00:45:38+00:00",
+    "author": "tedhabeck",
+    "labels": [
+      "plugins"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #1960\r\n\r\n---\r\n\r\n## 📝 Summary\r\n#1960 \r\n\r\n### Summary of Commits on Branch issue-1960\r\nThe issue-1960 branch contains 35+ commits focused on improving the LLMGuard plugin's performance, code quality, and maintainability. Here's a summary organized by category:\r\n\r\n### Major Enhancements\r\nCode Quality & Refactoring (Commit 08c3efed)\r\n\r\nReduced cyclomatic complexity by ~50%\r\nExtracted methods for better separation of concerns\r\nImproved testability with isolated components\r\n### Performance Optimizations\r\n\r\nVault Processing: Moved vault retrieval outside message loop to eliminate redundant async cache lookups\r\nScan Caching (76452acc): Added caching mechanism for scan results\r\nPolicy Singleton (1edfeab1): Implemented singleton pattern for policy management\r\nRapidFuzz Integration (7181504c): Replaced word-wise Levenshtein distance with rapidfuzz.distance for better performance\r\nBackground Cache Cleanup (3071cd4c): Moved cache cleanup to background thread instead of running on every scan\r\n### Metrics & Observability\r\n\r\nAdded external plugin metrics endpoint (c72c6241)\r\nAdded metric for policy compile duration (047c2cc5)\r\nAdded metrics for scan duration seconds (7181504c)\r\n### Bug Fixes & Configuration\r\nFixed return type on __update_context API (22f1b788)\r\nPinned transformers to 4.55.1 to prevent TFPreTrainedModel error (ebf99f66)\r\nApplied plugin to all prompts by default since prompt_ids are only known after creation (7b118fd8)\r\nFixed prompts type to Optional[set[str]] (786ef717)\r\nUsed lazy evaluation instead of f-strings for better performance (fc8c6d31)\r\nEnabled sanitizers by default (d518bac7)\r\nAdded env var to disable TensorFlow in plugin startup (25047d79)\r\n### Maintenance\r\nMultiple lint fixes and code cleanup commits\r\nAdded documentation comments (b1eb59b5)\r\nMultiple merges from main branch to keep up-to-date\r\nAdded rapidfuzz dependency (f0040482)\r\n### Key Improvements Summary\r\n50% reduction in cyclomatic complexity through method extraction\r\nSignificant performance gains via caching, background processing, and optimized algorithms\r\nBetter observability with comprehensive metrics\r\nImproved maintainability with clear separation of concerns\r\nEnhanced reliability with bug fixes and dependency pinning\r\n\r\n---\r\n\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 90%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n```\r\nPlugin                            P:post       P:pre      R:post       R:pre      T:post       T:pre\r\n----------------------------------------------------------------------------------------------------\r\nLLMGuardPlugin                   0.102ms     0.149ms           —           —           —           —\r\n```\r\n\r\n### Testing the metrics/prometheus endpoint of the plugin before merge:\r\nThe metric endpoint of the plugin requires that the runtime.py be manually injected into the container image until it is merged into the main build.   To test before merge, run `make build && make start` ,  and then inject the updated runtime.py from this branch into the pod and then restart the pod: e.g.: \r\n\r\nFrom the project root folder:\r\n```bash\r\npodman stop llmguardplugin && \\\r\npodman cp mcpgateway/plugins/framework/external/mcp/server/runtime.py llmguardplugin:/opt/app-root/lib/python3.12/site-packages/mcpgateway/plugins/framework/external/mcp/server && \\\r\npodman start llmguardplugin\r\n```\r\n\r\nThe llmguard plugin will then expose an endpoint `/metrics/prometheus`.\r\n\r\n```bash\r\ncurl -X GET http://127.0.0.1:8001/metrics/prometheus\r\n```\r\n\r\nTo periodically scrape the endpoint with prometheus, create a prometheus.config file. Replace `192.168.1.92` with the ip-address of your local workstation in the example yaml file below:\r\n\r\n```yaml\r\nglobal:\r\n  scrape_interval: 15s # By default, scrape targets every 15 seconds.\r\n\r\n  # Attach these labels to any time series or alerts when communicating with\r\n  # external systems (federation, remote storage, Alertmanager).\r\n  external_labels:\r\n    monitor: 'codelab-monitor'\r\n\r\nscrape_configs:\r\n  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.\r\n  - job_name: 'prometheus'\r\n\r\n    # Override the global default and scrape targets from this job every 5 seconds.\r\n    scrape_interval: 5s\r\n    metrics_path: '/metrics/prometheus'\r\n    static_configs:\r\n      - targets: ['192.168.1.92:8001']\r\n        labels:\r\n          group: 'llmguard'\r\n      - targets: ['192.168.1.92:8000']\r\n        labels:\r\n          group: 'context-forge'\r\n```\r\n\r\nThen start prometheus using that configuration file.  e.g:\r\n```bash\r\n   podman run --name prometheus -d -p 127.0.0.1:9090:9090 \\\r\n-v ./prometheus.yml:/etc/prometheus/prometheus.yml \\\r\n-v prometheus-data:/prometheus \\\r\n<prometheus_image_id>\r\n```\r\n\r\n\r\nExample Grafana dashboard surfacing metrics\r\n\r\n<img width=\"906\" height=\"1942\" alt=\"image\" src=\"https://github.com/user-attachments/assets/00521c46-6ad7-4337-b9d4-6bf74959fabc\" />\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "b850f251302b17cf4ab11bbaf03b9c5fc9a5862c",
+      "message": "fix: prompts are an Optional[set[str]] - set of prompt names.\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-01-28T22:01:35+00:00"
+    },
+    {
+      "sha": "103c638695fa020dfcab0f8665058c2ed98da678",
+      "message": "revert: llmguard plugins.conditions.prompts\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-01-29T15:48:05+00:00"
+    },
+    {
+      "sha": "5a17c90a7999714d22da0ddbf8aabdaebfb6ef8a",
+      "message": "feat: add external plugin metrics endpoint\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-01-30T19:18:08+00:00"
+    },
+    {
+      "sha": "77491b1fc20ad785ef4cf5c2bcd7ad3cb22e9e53",
+      "message": "perf: use rapidfuzz.distance instead of word-wise Levenshtein distance, add metrics for scan duration seconds\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-01T16:08:23+00:00"
+    },
+    {
+      "sha": "81aeb54e63026ab24adf680c60ff90ca545ca690",
+      "message": "perf: add metric for policy compile duration seconds\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-01T16:09:05+00:00"
+    },
+    {
+      "sha": "7127c80dd8def1cc06da2977f65ee6c0e2414d1e",
+      "message": "perf: policy singleton\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-01T16:29:33+00:00"
+    },
+    {
+      "sha": "cab28408744cdc6b94fb847d1d414b730dea5c59",
+      "message": "chore: missed commit to add rapidfuzz dependency\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-01T16:40:23+00:00"
+    },
+    {
+      "sha": "6d2f80b083b7572179d036e5655c9d16cf168a13",
+      "message": "perf: add scan caching\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-01T17:36:14+00:00"
+    },
+    {
+      "sha": "217e30c693b9560b4e058773292a0840e6a7309c",
+      "message": "enh: make _create_new_vault_on_expiry async\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-01T17:42:00+00:00"
+    },
+    {
+      "sha": "4a54ffa26ec08ce9e64c7be216e8dc0c204f03bb",
+      "message": "chore: lint fixes\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-01T18:26:53+00:00"
+    },
+    {
+      "sha": "e4aa942bbe0efa8f103b1d9a0ac1e44bed327047",
+      "message": "chore: lint fix\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-01T18:29:36+00:00"
+    },
+    {
+      "sha": "e6f5c4380995c61f59be343c747d7e5574b35d43",
+      "message": "chore: lint fixes\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-01T18:52:31+00:00"
+    },
+    {
+      "sha": "cfbc1b866d3d993ff587374ac46291150ad71b89",
+      "message": "chore: add doc comments\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-02T15:38:27+00:00"
+    },
+    {
+      "sha": "4bf90858abb86122a47746a18fd647c3bc9398f4",
+      "message": "fix: pin transformers to 4.55.1 to prevent TFPreTrainedModel error\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-02T19:21:28+00:00"
+    },
+    {
+      "sha": "a56d6462ad80d5c6e418661d1c46b69ff3818379",
+      "message": "chore: lint fix\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-02T19:43:31+00:00"
+    },
+    {
+      "sha": "f2e89fbfbc200b9d8002e8a754ad44c6a36efbd8",
+      "message": "fix: Since prompt_ids are only known after creation, apply to all so that the plugin works out of the box.\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-02T19:58:25+00:00"
+    },
+    {
+      "sha": "c56313d50610469d0db18ff0ac92140d94d05fae",
+      "message": "chore: test fix\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-02T23:47:56+00:00"
+    },
+    {
+      "sha": "fcec54d89a6bdea90073428aa21d5aabf2495930",
+      "message": "chore: remove duplicate import\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-03T00:35:03+00:00"
+    },
+    {
+      "sha": "267304f2818776ca6ab242c75593892c6d8551bc",
+      "message": "chore: lint fix\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-03T00:35:42+00:00"
+    },
+    {
+      "sha": "4b1b566748b151580e683de9af6e732764fac568",
+      "message": "enh:\nKey Improvements:\nCode Quality: Reduced cyclomatic complexity by ~50%\nPerformance: Vault retrieval moved outside message loop (eliminates redundant async cache lookups)\nConsistency: All processing methods follow same pattern as input methods\nMaintainability: Clear separation of concerns, easier to test individual components\nZero Breaking Changes: Maintains exact functional behavior\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-03T15:14:16+00:00"
+    },
+    {
+      "sha": "d757b192dedc27ff8bc7e7959aa03960e613de36",
+      "message": "fix: use lazy evaluation rather than f-strings\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-03T18:19:02+00:00"
+    },
+    {
+      "sha": "6c123ebf9c7a335733fe4a4d4450dc96e30229e4",
+      "message": "chore: enable snatizers by default\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T17:35:14+00:00"
+    },
+    {
+      "sha": "2760ed55e065b640756dca351907db941f4af146",
+      "message": "chore: add env var to disable TensorFlow in plugin startup.\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T17:36:08+00:00"
+    },
+    {
+      "sha": "e6bf525b33f14f9fb7124a95e9fa17fbc81e5f55",
+      "message": "chore: fix return type on __update_context api.\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T17:37:55+00:00"
+    },
+    {
+      "sha": "dac94810a5c97a1e9d15eb4f04f52ef7a4d606a2",
+      "message": "enh: run the cache cleanup in a background thread rather than on every scan.\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T19:58:32+00:00"
+    },
+    {
+      "sha": "a0c9b0beb3b38f66c325a4a8f29fd380652829ae",
+      "message": "chore: lint fix\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T20:17:42+00:00"
+    },
+    {
+      "sha": "fc3e816ec1364eae51a65728dcd4df6ea9f0b8f1",
+      "message": "fix: test case for Test _handle_vault_caching handles case when no vault exists.\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T21:24:33+00:00"
+    },
+    {
+      "sha": "f0f9e117b442a19ad4dd06d4844437d247fbd583",
+      "message": "chore: add unit tests for new code\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T21:30:38+00:00"
+    },
+    {
+      "sha": "f1c5d14a2faae8d35b435c2cf67fae47ea1dce66",
+      "message": "chore: test coverage for llmguard.py to 94% from 80%\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T22:28:47+00:00"
+    },
+    {
+      "sha": "cd6458c7b00d58af5915892b5b40dca2edc1f73a",
+      "message": "chore: policy.py coverage to 100%\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T22:40:53+00:00"
+    },
+    {
+      "sha": "07a8b1a82e6259c107c374ea0aecd7c95ed78f31",
+      "message": "chore: cache.py tests to 100%\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T22:55:47+00:00"
+    },
+    {
+      "sha": "b13daa30125aecf1888086592c1c5720bc35c991",
+      "message": "chore: lint fixes\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T23:01:31+00:00"
+    },
+    {
+      "sha": "56dc5a2f3ed18b056e9b77df3c89836cf4417166",
+      "message": "chore: add missing class doc to test_llmguardplugin.py\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-04T23:05:25+00:00"
+    },
+    {
+      "sha": "322731fa75cba8f66a382c9f41472ad968d78011",
+      "message": "chore: update readme\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-05T00:28:56+00:00"
+    },
+    {
+      "sha": "bf8445eac884c6f726154801101620d1cf3ad533",
+      "message": "chore: clearer comment for plugin.conditions.prompts\n\nSigned-off-by: habeck <habeck@us.ibm.com>",
+      "author": "habeck",
+      "date": "2026-02-05T00:30:30+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 2119,
+  "deletions": 202,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:48.660564",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:48.662072",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2638,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2638.json"
+  }
+}

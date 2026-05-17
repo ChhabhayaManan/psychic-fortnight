@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4209,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4209"
+  },
+  "metadata": {
+    "title": "fix: outputSchema declared but no structured output now fails validation (#4208)",
+    "state": "closed",
+    "created_at": "2026-04-14T21:06:24+00:00",
+    "updated_at": "2026-04-15T12:55:03+00:00",
+    "closed_at": "2026-04-15T12:55:03+00:00",
+    "merged_at": null,
+    "author": "xyaz1313",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Fix for #4208: outputSchema declared but no structured output silently passes gateway validation\n\n### Problem\n\nWhen a tool declares `output_schema` but returns no structured content (empty `content`, no parseable JSON, or `structured_content=None`), the gateway silently returns `True` (valid). This violates the MCP 2025-11-25 spec:\n\n> \"If an output schema is provided: Servers **MUST** provide structured results that conform to this schema.\"\n\n### Root Cause\n\n`ToolService._extract_and_validate_structured_content` at lines 1314-1316:\n```python\n# If no structured data found, treat as valid (nothing to validate)\nif structured is None:\n    return True\n```\n\n### Fix\n\nReplaced the lenient early return with strict validation:\n\n1. **Error responses are still exempted** — checks `is_error`/`isError` first (consistent with #4202)\n2. **Success responses with no structured content now fail** with `is_error=True` and error details:\n```json\n{\n  \"code\": \"missing_structured_output\",\n  \"expected\": \"object\",\n  \"received\": \"null\",\n  \"message\": \"outputSchema declared but no structuredContent was returned\"\n}\n```\n\n### Changes\n\n| File | Change |\n|------|--------|\n| `mcpgateway/services/tool_service.py` | Lines 1314-1316: replaced lenient pass with strict validation + error response exemption |\n| `tests/.../test_tool_service_coverage.py` | Updated 2 tests, added 5 new tests |\n\n### Tests\n\n- test_no_structured_data_with_schema_fails_validation — main behavior change\n- test_no_structured_data_error_response_skips_validation — is_error=True exempted\n- test_no_structured_data_error_response_alias_skips_validation — isError=True exempted\n- test_no_structured_data_non_text_content_fails — non-text content fails\n- test_no_structured_data_null_text_fails — text=\"null\" parses to None, fails\n- test_content_with_null_text_parses_to_none — updated from assert ok is True to assert ok is False\n- Existing validation tests (valid candidate, invalid candidate, TextContent parsing) still pass\n\n### Related\n\n- Complements PR #4202 (error-path fix) — this is the success-path fix\n- Aligned with MCP Python SDK server-side validator behavior\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "c871d5c7fc7c8e119302fea5c17b7f76d0e074d2",
+      "message": "fix: outputSchema declared but no structured output now fails validation (#4208)\n\nWhen a tool declares an output_schema but returns no structured content, the gateway now correctly treats this as a validation failure per the MCP 2025-11-25 spec.\n\nError responses (is_error/isError=True) are still exempted per spec.\n\nCloses #4208",
+      "author": "xyaz1313",
+      "date": "2026-04-14T21:05:04+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 68,
+  "deletions": 10,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:06:06.777872",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:06.779306",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4209,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4209.json"
+  }
+}

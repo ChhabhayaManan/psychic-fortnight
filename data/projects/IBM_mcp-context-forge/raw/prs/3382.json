@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3382,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3382"
+  },
+  "metadata": {
+    "title": "fix: connect_to_sse_session incorrectly unpacks 3 values from sse_client causing SSE resource reads to always return Incorrect result",
+    "state": "closed",
+    "created_at": "2026-03-02T11:10:02+00:00",
+    "updated_at": "2026-03-07T11:07:20+00:00",
+    "closed_at": "2026-03-03T02:19:08+00:00",
+    "merged_at": "2026-03-03T02:19:08+00:00",
+    "author": "TS0713",
+    "labels": [
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "### This PR addressess the Issue #3378 \r\n## Problem\r\nAll SSE gateway resource reads were silently returning `None`.\r\n\r\n`connect_to_sse_session` inside `invoke_resource` was unpacking 3 values\r\nfrom `sse_client`:\r\n\r\n    async with sse_client(...) as (read_stream, write_stream, _get_session_id):\r\n\r\n`sse_client` only yields `(read_stream, write_stream)`. The 3-value unpack\r\nraised `ValueError` which was swallowed by the surrounding `except Exception`\r\nblock, returning `None` with no visible error in logs.\r\n\r\n`streamablehttp_client` was unaffected — it correctly yields 3 values\r\nincluding the session ID getter, which is why StreamableHTTP worked and\r\nSSE did not.\r\n\r\nConfirmed via Python introspection:\r\n```\r\n- `inspect.signature(streamablehttp_client)` declares\r\n  `-> AsyncGenerator[tuple[MemoryObjectReceiveStream, MemoryObjectSendStream, Callable[[], str | None]], None]`\r\n- `inspect.signature(sse_client)` has no return annotation and exposes\r\n  session ID via `on_session_created: Callable[[str], None]` input parameter instead\r\n```\r\n\r\n## Fix\r\nRemove `_get_session_id` from the `sse_client` unpack in `connect_to_sse_session`.\r\n\r\n## Tests\r\n- Added regression test `test_invoke_resource_sse_connect_to_sse_session_unpacks_two_values`\r\n  that mocks `sse_client` with the correct 2-value yield and asserts resource\r\n  content is returned (not `None`)\r\n- Fixed all existing SSE mocks in `test_resource_service.py` that were\r\n  returning 3 values — these were inadvertently masking the bug in tests\r\n  while production code was broken\r\n\r\n## Impact\r\n- SSE transport resource reads now return actual content\r\n- No changes to StreamableHTTP path\r\n- No API or schema changes",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3879761693",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-03T02:02:50+00:00",
+      "body": "Rebased onto current `main` (634969f1a), all conflicts resolved cleanly. Fixed two trailing whitespace issues.\n\n**Verification summary (all 9/9 confirmed):**\n\n1. **Root cause correct** — `sse_client` yields `(read_stream, write_stream)` only; `streamablehttp_client` yields 3 values including `get_session_id`. The 3-value unpack raised `ValueError` silently caught by `except Exception`, returning `None`.\n2. **No remaining instances** — No `_get_session_id` remains in any SSE path. `tool_service.py` and `gateway_service.py` use safe `as streams:` patterns.\n3. **StreamableHTTP path unaffected** — Still correctly unpacks 3 values at line 1845.\n4. **Test mocks consistent** — Exactly 17 mocks updated from 3-value to 2-value. No stale 3-value SSE mocks remain.\n5. **Regression test sound** — Sets `transport=\"sse\"`, yields 2 values, asserts content is returned (not `None`), verifies `sse_client` was called.\n6. **Full test suite passes** — 221/221 passed.\n7. **100% differential coverage** — Changed lines (1764-1767) fully covered.\n8. **No security/performance issues** — Purely subtractive fix (1 line removed). Error sanitization unchanged.\n9. **No formatting issues** — No trailing whitespace or tabs in changed files."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f95afe8d83cdeab3decb5fa214d3e18fffeb8de1",
+      "message": "fix: correct sse_client 2-value unpack in connect_to_sse_session\n\nsse_client yields (read_stream, write_stream) only. The code was\nunpacking a 3rd _get_session_id value which raised ValueError,\nsilently caught by except Exception, causing all SSE resource\nreads to return None.\n\nSigned-off-by: TS0713 <tsp.0713@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "TS0713",
+      "date": "2026-03-02T11:06:39+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 110,
+  "deletions": 18,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:11.229387",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:11.230376",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3382,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3382.json"
+  }
+}

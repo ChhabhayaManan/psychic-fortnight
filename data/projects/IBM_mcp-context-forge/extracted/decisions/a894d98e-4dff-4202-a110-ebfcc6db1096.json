@@ -1,0 +1,39 @@
+{
+  "id": "a894d98e-4dff-4202-a110-ebfcc6db1096",
+  "title": "fix(auth): close auth bypass on /mcp/{server_id} virtual server endpoints",
+  "summary": "## Summary",
+  "reasoning": "## Summary\n\nComplete authentication bypass on `/mcp/{server_id}` virtual server endpoints. **Any request — no token, garbage token, forged JWT, `alg:none` attack — receives 200 OK with full tool access.** The `oauth_enabled` flag and `MCP_REQUIRE_AUTH` setting have no effect on this URL pattern.\n\n## Root Cause\n\nTwo independent failures combine to bypass all authentication:\n\n### 1. Auth gate skips `/mcp/{id}` entirely (line 3027)\n\n```python\nif (not path.endswith(\"/mcp\") and not path.endswith(\"/mcp/\")) ...\n    return True  # skip ALL auth\n```\n\n`/mcp/abc123` does **not** end in `/mcp` — it ends in the server ID. So `authenticate()` returns `True` immediately. No JWT check, no proxy auth, no OAuth enforcement.\n\n### 2. `_SERVER_ID_RE` never matches `/mcp/{id}` (line 100)\n\n```python\n_SERVER_ID_RE = re.compile(r\"/servers/(?P<server_id>[a-fA-F0-9\\-]+)/mcp\")\n```\n\nOnly matches `/servers/{id}/mcp`. The `/mcp/{id}` pattern — which Starlette's mount actually routes — is invisible. Server ID is alwa",
+  "confidence": 0.75,
+  "related_services": [],
+  "contributors": [
+    "brian-hussey",
+    "crivetimihai",
+    "marekdano",
+    "madhu-mohan-jaishankar",
+    "junlin3012"
+  ],
+  "tags": [
+    "release-fix",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "1b67bb3d-b415-4d60-8d0b-6784cd8602ad",
+      "source_type": "pr",
+      "source_id": "3812",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/3812",
+      "contributor": "junlin3012",
+      "timestamp": "2026-03-24T03:42:20Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3812.json"
+    }
+  ],
+  "timestamp": "2026-03-24T03:42:20Z",
+  "created_at": "2026-05-17T17:24:49.154338",
+  "updated_at": "2026-05-17T17:24:49.154341",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:24:49.154956",
+    "artifact_type": "decisions",
+    "artifact_id": "a894d98e-4dff-4202-a110-ebfcc6db1096"
+  }
+}

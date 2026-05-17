@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2263,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2263"
+  },
+  "metadata": {
+    "title": "Fix JWT Token Creation Divergence",
+    "state": "closed",
+    "created_at": "2026-01-21T10:21:29+00:00",
+    "updated_at": "2026-01-24T21:47:25+00:00",
+    "closed_at": "2026-01-24T21:47:23+00:00",
+    "merged_at": "2026-01-24T21:47:23+00:00",
+    "author": "madhav165",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2261 \r\n\r\n---\r\n\r\n## 📌 Summary\r\nUnifies JWT token creation between CLI and API paths to produce consistent token formats with rich claims support.\r\n\r\n## Changes\r\n\r\n### Core Implementation\r\n\r\n- **Enhanced `_create_jwt_token()`** (mcpgateway/utils/create_jwt_token.py)\r\n  - Added optional parameters: `user_data`, `teams`, `namespaces`, `scopes`\r\n  - Auto-generates namespaces from teams when not provided\r\n  - Maintains backward compatibility with simple tokens\r\n\r\n- **Simplified `token_catalog_service._generate_token()`** (mcpgateway/services/token_catalog_service.py)\r\n  - Delegates to enhanced `create_jwt_token()` with structured data\r\n  - Removes redundant payload building logic\r\n  - Single source of truth for token creation\r\n\r\n### CLI Enhancement\r\n\r\n- **New flags** for rich token creation (mcpgateway/utils/create_jwt_token.py)\r\n  - `--admin`: Mark user as admin\r\n  - `--teams`: Comma-separated team IDs\r\n  - `--scopes`: JSON scopes object\r\n  - `--full-name`: User's full name\r\n  - Displays ⚠️ security warning when using elevated claims\r\n\r\n### Documentation\r\n\r\n- **README.md**: Comprehensive security warning section with examples for simple, admin, team-scoped, and permission-scoped tokens\r\n- **docs/docs/manage/api-usage.md**: Updated authentication section with security warnings\r\n- **docs/docs/overview/quick_start.md**: Added development-only warning\r\n- **docs/docs/manage/securing.md**: Added CLI security warnings to token scoping examples\r\n- **docs/docs/index.md**: Added inline security comment\r\n\r\n### Tests\r\n\r\n- **10 new tests** for rich token functionality (tests/unit/mcpgateway/utils/test_create_jwt_token.py)\r\n  - User data, teams, namespaces, scopes\r\n  - Auto-generation of namespaces from teams\r\n  - Backward compatibility verification\r\n- **Updated 6 tests** in token_catalog_service.py to work with new signature\r\n- All 22 create_jwt_token tests passing ✅\r\n- All 68 token_catalog_service tests passing ✅\r\n\r\n## Example Usage\r\n\r\n### Before (Simple Token)\r\n```bash\r\nexport TOKEN=$(python3 -m mcpgateway.utils.create_jwt_token \\\r\n  --username admin@example.com --exp 10080 --secret my-test-key)\r\n```\r\n\r\n### After (Rich Admin Token)\r\n```bash\r\nexport TOKEN=$(python3 -m mcpgateway.utils.create_jwt_token \\\r\n  --username admin@example.com \\\r\n  --admin \\\r\n  --teams team-123,team-456 \\\r\n  --full-name \"Admin User\" \\\r\n  --exp 10080 \\\r\n  --secret my-test-key 2>/dev/null | head -1)\r\n```\r\n\r\nToken now includes:\r\n- `user: {email, full_name, is_admin: true, auth_provider: 'cli'}`\r\n- `teams: ['team-123', 'team-456']`\r\n- `namespaces: ['user:admin@example.com', 'public', 'team:team-123', 'team:team-456']`\r\n- `scopes: {...}` (when provided)\r\n\r\n## Security Impact\r\n\r\n✅ **No new vulnerabilities** - CLI already has JWT_SECRET_KEY and can create any token. This change makes the CLI more capable within its existing trust boundary.\r\n\r\n✅ **Runtime protection maintained** - Token scoping middleware validates team membership at request time regardless of how token was created.\r\n\r\n✅ **Clear documentation** - Security warnings prominently displayed in CLI output and all documentation.\r\n\r\n## Breaking Changes\r\n\r\nNone - Simple tokens without rich claims continue to work exactly as before. Backward compatible.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    pass    |\r\n| Unit tests                            | `make test`          |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3702815939",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-24T21:41:10+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "99285bc91bf0e283bcecba8b5a6e14b86351b81c",
+      "message": "update jwt cli with more inputs\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-21T10:20:18+00:00"
+    },
+    {
+      "sha": "e1e11ff333b0d831d3caecb46e6022205473af24",
+      "message": "fix: prevent non-expiring tokens from invalid expires_in_days\n\n- Add ge=1 validation to TokenCreateRequest.expires_in_days schema\n- Add guard in _generate_token to reject expires_at in the past\n- Use math.ceil() and max(1, ...) to ensure exp is always set for\n  sub-minute expirations (prevents rounding to 0)\n- Mark --secret and --algo CLI args as deprecated (always uses config)\n- Add tests for past expiry rejection and ceiling behavior\n\nThis fixes a security regression where negative/zero expires_in_days\ncould create permanent tokens instead of expired ones.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T20:40:01+00:00"
+    },
+    {
+      "sha": "dc0df2783199667c15fdb6794f939e31f0ab6b85",
+      "message": "fix: restore --secret and --algo CLI options\n\nThe --secret and --algo CLI parameters now work as optional overrides:\n- When provided, they override the configuration values\n- When not provided, JWT_SECRET_KEY and JWT_ALGORITHM from config are used\n\nThis preserves backward compatibility while still defaulting to\nconfiguration-based signing for consistency.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T21:32:58+00:00"
+    },
+    {
+      "sha": "b8e089b34cb9c9e5497cd5f5bb9d7b186abf2a5e",
+      "message": "fix: require --secret when --algo is specified\n\nPrevent invalid token generation by requiring --secret when --algo\nis provided. Using --algo alone would mix config-based keys with a\ndifferent algorithm, potentially producing tokens that fail validation.\n\nAlso fixes stale docstring that still referenced DEFAULT_SECRET/DEFAULT_ALGO\ninstead of the new empty-string defaults with config fallback.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-24T21:40:10+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 519,
+  "deletions": 92,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:02.333273",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:02.334526",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2263,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2263.json"
+  }
+}

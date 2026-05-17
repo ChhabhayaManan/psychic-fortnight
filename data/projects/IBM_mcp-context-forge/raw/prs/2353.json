@@ -1,0 +1,50 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2353,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2353"
+  },
+  "metadata": {
+    "title": "fix: Add upsert logic for resources and prompts to prevent unique constraint violations",
+    "state": "closed",
+    "created_at": "2026-01-23T15:12:20+00:00",
+    "updated_at": "2026-01-23T15:14:07+00:00",
+    "closed_at": "2026-01-23T15:13:09+00:00",
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n- Adds upsert logic for resources in `register_gateway()` to handle orphaned resources from previous registrations\n- Adds upsert logic for prompts in `register_gateway()` to handle orphaned prompts\n- Prevents `UniqueViolation` on `uq_team_owner_uri_resource` and `uq_team_owner_name_prompt` constraints\n\n## Root Cause\n\nWhen re-registering a gateway (e.g., Moody's MCP server):\n1. First registration creates resources with unique `(team_id, owner_email, uri)`\n2. Gateway deletion may not properly clean up resources (e.g., due to #2341 crash)\n3. Re-registration tries to INSERT new resources with same unique key\n4. Unique constraint violation occurs\n\n## Solution\n\nBefore creating resources/prompts, query for existing records matching the unique constraint:\n- Resources: `(team_id, owner_email, uri)`\n- Prompts: `(team_id, owner_email, name)`\n\nIf a match exists, update the existing record instead of creating a new one.\n\n## Test Plan\n\n- [x] Run gateway service tests: `pytest tests/unit/mcpgateway/services/test_gateway_service.py` - 75 passed\n- [x] Run all service tests: `pytest tests/unit/mcpgateway/services/` - 1795 passed, 34 skipped\n- [ ] Integration test with Moody's MCP server (requires access)\n\nCloses #2352\nRelated to #2341",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "aa37ae09b1b1546c17f0034a887ab896f266b671",
+      "message": "fix(db): Guard against inactive transaction during async cleanup\n\nWhen registering MCP servers with long initialization times (like Moody's),\na CancelledError can occur during the MCP session teardown (DELETE request).\nThis causes the database transaction to become inactive before get_db()\nattempts to commit, resulting in:\n\n  sqlalchemy.exc.InvalidRequestError: This transaction is inactive\n\nAdd db.is_active checks before commit() and rollback() to handle cases\nwhere the transaction becomes inactive during async context manager cleanup.\n\nCloses #2341\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-23T14:47:39+00:00"
+    },
+    {
+      "sha": "87ab0e70ceaaaecd57f1f4c3bd8e4dc9705ef6d3",
+      "message": "fix: Add upsert logic for resources and prompts to prevent unique constraint violations\n\nWhen re-registering a gateway (e.g., after deletion or crash), orphaned resources\nand prompts from previous registrations could cause unique constraint violations\non `(team_id, owner_email, uri)` for resources and `(team_id, owner_email, name)`\nfor prompts.\n\nThis fix adds upsert logic that:\n1. Queries for existing resources/prompts matching the unique constraint\n2. Updates existing records instead of creating duplicates\n3. Creates new records only when no match exists\n\nThis handles scenarios like:\n- Gateway deletion that didn't properly clean up resources (issue #2341)\n- Re-registration of the same MCP server under a new gateway name\n- Race conditions during concurrent operations\n\nCloses #2352\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-23T15:12:04+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 149,
+  "deletions": 51,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:18.986465",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:18.987804",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2353,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2353.json"
+  }
+}

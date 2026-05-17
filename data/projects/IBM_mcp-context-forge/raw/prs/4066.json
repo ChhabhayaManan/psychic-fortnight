@@ -1,0 +1,110 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4066,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4066"
+  },
+  "metadata": {
+    "title": "fix(security): Validate server ID in Rust MCP runtime proxy to prevent unauthorized access",
+    "state": "closed",
+    "created_at": "2026-04-07T11:08:55+00:00",
+    "updated_at": "2026-04-24T08:21:42+00:00",
+    "closed_at": "2026-04-24T08:21:40+00:00",
+    "merged_at": "2026-04-24T08:21:40+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "security",
+      "MUST",
+      "api",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4059\r\n\r\n---\r\n\r\n## 📝 Summary\r\nFixes a security vulnerability in the Rust MCP runtime proxy where non-hex server IDs (e.g., `ndh45`, `my-server`) bypassed server validation and were forwarded to the Rust sidecar without the `x-contextforge-server-id` header. This caused the runtime to serve global scope instead of returning 404.\r\n\r\nThis is the same class of vulnerability fixed for the Python transport in #3892, but the Rust proxy path was not updated at that time.\r\n\r\n**Changes:**\r\n- Updated regex pattern from hex-only `[a-fA-F0-9\\-]+` to `[^/]+` to match all server IDs\r\n- Added `_validate_server_id()` function with database validation before forwarding\r\n- Added defense-in-depth pattern `_SERVER_SCOPED_PATH_RE` for malformed paths\r\n- Returns 404 for non-existent servers, 503 for database errors\r\n- Added 4 new tests achieving >95% coverage for the validation logic\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n**Security Impact:**\r\nBefore this fix, requests like `POST /servers/ndh45/mcp` would silently fail the regex match and be forwarded to the Rust runtime without server scoping, returning all tools/resources instead of 404.\r\n\r\n**Test Coverage:**\r\nAdded 4 comprehensive tests:\r\n1. `test_validate_server_id_returns_404_when_server_not_found` - Non-existent server validation\r\n2. `test_validate_server_id_returns_503_on_database_error` - Database error handling\r\n3. `test_validate_server_id_rejects_malformed_server_scoped_paths` - Malformed path rejection\r\n4. `test_handle_streamable_http_rejects_invalid_server_id` - End-to-end validation\r\n\r\n**Related:**\r\n- Relates to #3891 (original vulnerability report)\r\n- Relates to #3892 (Python transport fix)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4094960083",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-12T11:15:36+00:00",
+      "body": ""
+    },
+    {
+      "id": "4095024147",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-12T12:28:20+00:00",
+      "body": ""
+    },
+    {
+      "id": "4097820652",
+      "author": "lucarlig",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-13T09:53:19+00:00",
+      "body": ""
+    },
+    {
+      "id": "4099659774",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-13T14:59:53+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2ed5235ee875776de94b2a269fadad361f4c3abd",
+      "message": "fix(security): Validate server ID in Rust MCP runtime proxy to prevent unauthorized access\n\n- Update regex pattern from hex-only to match all server IDs ([^/]+)\n- Add _validate_server_id() function with database validation\n- Add defense-in-depth pattern _SERVER_SCOPED_PATH_RE for malformed paths\n- Return 404 for non-existent servers, 503 for database errors\n- Add 4 new tests for validation logic (>95% coverage)\n- Fix monkeypatching to target mcpgateway.db.SessionLocal\n\nThis fixes the same vulnerability as #3892 but for the Rust proxy path.\nNon-hex server IDs (e.g. ndh45, my-server) were silently failing regex\nmatch and being forwarded without x-contextforge-server-id header,\ncausing the Rust runtime to serve global scope instead of returning 404.\n\nRelates to #3891, #3892\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-07T11:05:50+00:00"
+    },
+    {
+      "sha": "c2f31064948ccdacd9ee31aa48ec87ff005e42c8",
+      "message": "refactor: use fresh_db_session and top-level imports in _validate_server_id\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-12T11:04:35+00:00"
+    },
+    {
+      "sha": "4fda7bbadf3bba1d576908ae2a61aae8aebf9cf0",
+      "message": "fix: restore hex-only server ID regex to avoid unnecessary DB hits\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-12T11:08:56+00:00"
+    },
+    {
+      "sha": "1d4bfa7814bd92cf7469492a08751b33cab4c95c",
+      "message": "fix: remove trailing whitespace in test file\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-12T11:10:53+00:00"
+    },
+    {
+      "sha": "059f75948120ce5d8a147c473d6197c611e00a7b",
+      "message": "fix: update test mocks to use fresh_db_session and hex server IDs\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-12T11:56:06+00:00"
+    },
+    {
+      "sha": "d0fc819bee086eb53d90b93f50aa2d9b92c5d4b0",
+      "message": "fix: harden Rust proxy server-ID validation and test coverage\n\n- Add ^ anchor to _SERVER_SCOPED_PATH_RE for parity with Python transport\n- Move server-ID validation before URL/headers construction\n- Use lightweight EXISTS subquery instead of loading full row\n- Document hex-only _SERVER_ID_RE rationale\n- Add proxy-level test for non-hex server IDs (defense-in-depth path)\n- Hoist duplicate inline imports to module level in tests\n- Fix invalid # noqa directive format\n\nCloses #4059\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T07:50:12+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 275,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:26.980120",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:26.981114",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4066,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4066.json"
+  }
+}

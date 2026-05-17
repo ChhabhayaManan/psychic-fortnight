@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4371,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4371"
+  },
+  "metadata": {
+    "title": "feat(security): implement JWT token security improvements",
+    "state": "closed",
+    "created_at": "2026-04-21T14:28:58+00:00",
+    "updated_at": "2026-04-26T19:17:04+00:00",
+    "closed_at": "2026-04-26T19:17:02+00:00",
+    "merged_at": "2026-04-26T19:17:02+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "enhancement",
+      "security",
+      "SHOULD",
+      "api",
+      "pentesting"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4317\r\n**Jira Issue:** https://jsw.ibm.com/browse/ICACF-18\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR implements comprehensive JWT token security improvements to address X-Force Red security audit findings regarding session token management. The implementation reduces token lifetime from ~70 days to 20 minutes (configurable), adds server-side token blocklist functionality, implements idle timeout enforcement, and provides immediate token invalidation on logout.\r\n\r\n**Key Security Enhancements:**\r\n- **Reduced Token Lifetime**: Configurable 5-1440 minutes (default 20 min) vs. previous ~70 days\r\n- **Server-Side Blocklist**: Redis-cached, database-persisted token revocation with fail-closed security\r\n- **Idle Timeout**: 60-minute default with automatic activity tracking and enforcement\r\n- **Logout Endpoints**: `/auth/logout` and enhanced `/admin/logout` with immediate token invalidation\r\n- **Audit Logging**: Comprehensive security event logging for all token operations\r\n\r\n**Technical Implementation:**\r\n- New `TokenBlocklistService` for centralized token revocation management\r\n- Enhanced `TokenRevocation` model with `token_expiry` and `last_activity` fields\r\n- Idle timeout checking integrated into `get_current_user()` authentication flow\r\n- Configuration validation ensuring token lifetimes meet security requirements\r\n- Alembic migrations for database schema changes\r\n- Enhanced `/admin/logout` to revoke tokens in blocklist\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [x] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n**Test Files:**\r\n- `tests/unit/mcpgateway/test_token_blocklist_service.py` - 27 unit tests for blocklist service\r\n- `tests/unit/mcpgateway/test_admin_logout_token_revocation.py` - 5 tests for admin logout token revocation\r\n- `tests/unit/mcpgateway/test_auth_logout.py` - 8 tests for logout endpoint\r\n- `tests/integration/test_token_security_integration.py` - 14 integration tests covering full auth flows including idle \r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes (47 tests, 86% coverage)\r\n- [x] Documentation updated (`docs/security/JWT_TOKEN_SECURITY_IMPLEMENTATION.md`)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Files Changed\r\n\r\n**New Files (10):**\r\n1. `mcpgateway/services/token_blocklist_service.py` (449 lines) - Core token revocation service\r\n2. `mcpgateway/alembic/versions/aa1_add_token_revocation_idle_timeout_fields.py` - Schema migration\r\n3. `mcpgateway/alembic/versions/cae28b15a507_merge_token_revocation_and_uaid_heads.py` - Merge migration\r\n4. `docs/security/JWT_TOKEN_SECURITY_IMPLEMENTATION.md` (400+ lines) - Complete implementation guide\r\n5. `tests/unit/mcpgateway/test_auth_logout.py` (279 lines) - Logout endpoint tests\r\n6. `tests/unit/mcpgateway/test_admin_logout_token_revocation.py` (166 lines) - Admin logout token revocation tests\r\n7. `tests/unit/mcpgateway/test_token_blocklist_service.py` (449 lines) - Blocklist service tests\r\n8. `tests/integration/test_token_security_integration.py` (485 lines) - Integration tests with idle timeout coverage\r\n9. `tests/security/test_jwt_token_security.md` - Test documentation\r\n10. `.secrets.baseline` - Updated for new test tokens\r\n\r\n**Modified Files (6):**\r\n1. `mcpgateway/config.py` - Added `token_expiry`, `refresh_token_expiry`, `token_idle_timeout` with validation\r\n2. `mcpgateway/db.py` - Enhanced `TokenRevocation` model with `token_expiry` and `last_activity` fields\r\n3. `mcpgateway/auth.py` - Added idle timeout checking and activity tracking in `get_current_user()`\r\n4. `mcpgateway/admin.py` - Enhanced `/admin/logout` to revoke tokens in blocklist\r\n5. `mcpgateway/routers/auth.py` - Implemented `/auth/logout` endpoint\r\n6. `mcpgateway/routers/email_auth.py` - Enhanced token generation with JTI and activity tracking\r\n\r\n### Configuration\r\n\r\nNew environment variables (with secure defaults):\r\n```bash\r\nTOKEN_EXPIRY=20                      # 5-1440 range enforced (minutes)\r\nREFRESH_TOKEN_EXPIRY=10080           # 60-43200 range (minutes, 7 days default)\r\nTOKEN_IDLE_TIMEOUT=60                # 5-1440 range (minutes, 0 to disable)\r\nTOKEN_BLOCKLIST_CLEANUP_HOURS=24     # 1-168 range (hours)\r\n```\r\n\r\n### Security Compliance\r\n\r\nAddresses all X-Force Red recommendations:\r\n- ✅ Server-side token blocklist with automatic cleanup\r\n- ✅ Idle timeout enforcement (prevents indefinite sessions)\r\n- ✅ Short token lifetimes (5-20 minutes recommended, 20 min default)\r\n- ✅ Token invalidation on logout (both `/auth/logout` and `/admin/logout`)\r\n- ✅ Old token invalidation on refresh (framework in place)\r\n- ✅ Comprehensive audit trail for security events\r\n\r\n### Performance Considerations\r\n\r\n- Redis caching for blocklist lookups (sub-millisecond)\r\n- Graceful fallback to database when Redis unavailable\r\n- Automatic cleanup of expired tokens (configurable interval)\r\n- Minimal overhead on authentication flow (~2-3ms per request)\r\n\r\n### Breaking Changes\r\n\r\nNone. All changes are backward compatible with existing authentication flows.\r\n\r\n\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "6246c8c9b8f869858656a6dd55ed277395135ce0",
+      "message": "feat(security): implement JWT token security improvements\n\nImplements comprehensive JWT token security enhancements addressing\nX-Force Red security audit findings:\n\nSecurity Features:\n- Reduced token lifetime from ~70 days to 20 minutes (configurable 5-1440 min)\n- Server-side token blocklist with Redis caching and database persistence\n- Idle timeout enforcement (60 minutes default, configurable)\n- Logout endpoint with immediate token invalidation\n- Activity tracking with automatic updates\n- Token revocation on logout, expiry, and idle timeout\n- Comprehensive audit logging for security events\n\nImplementation:\n- Added TokenBlocklistService for token revocation management\n- Enhanced TokenRevocation model with token_expiry and last_activity fields\n- Added idle timeout checking in get_current_user()\n- Implemented /auth/logout endpoint with proper dependency injection\n- Added security configuration with validation (TOKEN_LIFETIME_MINUTES, TOKEN_IDLE_TIMEOUT_MINUTES)\n- Created Alembic migrations for database schema changes\n\nTesting:\n- 47 tests passing (39 unit + 8 edge cases + 11 integration)\n- 88% coverage on token_blocklist_service.py\n- 84% coverage on routers/auth.py\n- 86% overall coverage for JWT security modules\n- Comprehensive integration tests for all security flows\n- Edge case tests for error handling paths\n\nDocumentation:\n- Added JWT_TOKEN_SECURITY_IMPLEMENTATION.md with complete implementation guide\n- Added test_jwt_token_security.md with test documentation\n- Updated .secrets.baseline for security scanning\n\nCloses #4317\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-21T14:22:54+00:00"
+    },
+    {
+      "sha": "5993807124868f02e8ecf823c6e0f9511c1f7df2",
+      "message": "fix: linting and coverage issues, enhanced /admin/logout to revoke tokens\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-22T09:03:03+00:00"
+    },
+    {
+      "sha": "dd2eee94f7f17f8d90a046a41ecd14ab0e6fc17c",
+      "message": "fix: resolve linting issues and pre-commit checks\n\n- Remove duplicate datetime/timezone imports in admin.py\n- Replace __enter__() calls with proper context managers in token_blocklist_service.py\n- Add pylint disable comments for func.count false positives\n- Fix dict comprehension to use dict() constructor\n- Add newline at end of test_jwt_token_security.md\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-22T09:45:41+00:00"
+    },
+    {
+      "sha": "08258ec74e8bbe98a9d6786d5981a85126ce5ca6",
+      "message": "test: add unit test for logout SecretStr handling and fix pylint issues\n\n- Add test for routers/auth.py line 239 (SecretStr.get_secret_value)\n- Fix 3 pylint R1705 (no-else-return) violations in token_blocklist_service.py\n- Update secrets baseline after merge\n- Add SimpleNamespace import to test_auth.py\n\nImproves diff-cover from 90% to 97.4% for routers/auth.py\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-23T08:08:55+00:00"
+    },
+    {
+      "sha": "86d04d28e08c715ca450d8308f750530c6449021",
+      "message": "fix(security): make idle timeout actually enforce\n\nThe idle-timeout block in get_current_user only read last_activity\nfrom the JWT, but no issuance code wrote it — so the check ran zero\ntimes on real tokens. Read activity from Redis first (update_activity\nwas already writing there but had no consumer), fall back to the JWT\nlast_activity claim, fall back to iat. Emit last_activity=iat in\ncreate_access_token for first-request bootstrap.\n\nFolds in remaining PR-review blockers:\n- bb43712cae28 alembic merge resolves dual-head from rebase past\n  the head referenced by cae28b15a507\n- TOKEN_EXPIRY 10080->20 min default documented in CHANGELOG\n  Behavior Changes with migration & rollback guidance\n- drop dead refresh_token_expiry config field + 3 doc references\n- /auth/logout current_user: dict -> EmailUser (matches actual\n  return type of get_current_user)\n- /admin/logout test rewritten with TestClient + CSRF deny-path\n  regression (was asyncio.run on MagicMock — bypassed middleware\n  and would pass even if the route was unregistered)\n\nCoverage on diff: 91% -> ~100%. New unit tests cover every branch\nof the idle-timeout block plus the Redis-success and fresh-session\npaths in TokenBlocklistService that were previously unreached.\n\nRefs #4317, #4371\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T18:42:47+00:00"
+    }
+  ],
+  "files_changed": 22,
+  "additions": 3707,
+  "deletions": 32,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:49.675822",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:49.676498",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4371,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4371.json"
+  }
+}

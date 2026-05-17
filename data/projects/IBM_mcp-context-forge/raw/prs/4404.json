@@ -1,0 +1,92 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4404,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4404"
+  },
+  "metadata": {
+    "title": "fix(oauth): auto-learn IdP audience and persist as resource for token validation",
+    "state": "closed",
+    "created_at": "2026-04-23T05:44:50+00:00",
+    "updated_at": "2026-04-27T14:39:43+00:00",
+    "closed_at": "2026-04-27T14:39:40+00:00",
+    "merged_at": "2026-04-27T14:39:40+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "ica",
+      "SHOULD",
+      "api",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": [
+      "MohanLaksh"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\n\n## 📌 Summary\n\nOAuth token audience validation fails for IdPs (ServiceNow, Authentik, etc.) that do not honor RFC 8707 and set the `aud` claim to an abstract identifier (e.g. `client_id`) rather than the resource URL sent in the authorization request. Users see \"Token audience mismatch\" errors after a successful OAuth flow, with no way to fix it from the UI.\n\nRFC 8707 Section 2 explicitly allows this behavior:\n\n> The authorization server may use the exact `resource` value as the audience **or it may map from that value to a more general URI or abstract identifier** for the given resource.\n\n## 🔁 Reproduction Steps\n\nCloses #4384\nRelated: #4171\n\n1. Register a gateway with OAuth (e.g. ServiceNow StreamableHTTP)\n2. Complete OAuth authorization flow — succeeds\n3. Click \"Fetch Tools\" — fails with: `Token audience mismatch: token aud=[<client_id>], expected '<gateway_url>'`\n\n## 🐞 Root Cause\n\nTwo disconnected code paths:\n\n1. `/oauth/authorize` and `/oauth/callback` (`oauth_router.py`) inject `resource = _normalize_resource_url(gateway.url)` into a **transient copy** of `oauth_config` and send it to the IdP. This copy is never persisted.\n\n2. `_validate_audience` (`token_validation_service.py:155`) reads `oauth_config.get(\"resource\")` from the **persisted** config (which has no `resource`), falls back to `gateway_url`, and fails because the IdP's `aud` doesn't match the gateway URL.\n\nThe system sends a `resource` to the IdP but never learns what the IdP actually mapped it to.\n\n## 💡 Fix Description\n\n**Auto-learn the audience from the token at callback time and persist it as `resource`.**\n\n1. **`oauth_manager.py`**: Added `_extract_token_audience()` — decodes the access token (best-effort, no signature verification) and extracts the `aud` claim. Returns only the claim value, never the raw token. `complete_authorization_code_flow` now returns `token_aud` in its result dict.\n\n2. **`oauth_router.py`**: Added `_persist_learned_audience()` — after `complete_authorization_code_flow` succeeds in the callback, persists the `token_aud` as `resource` in `gateway.oauth_config`. Skips gracefully for opaque tokens, missing aud, or when resource already matches.\n\n3. **`oauth_router.py`**: Simplified resource injection in both `/oauth/authorize` and `/oauth/callback` — if `resource` is already set (learned from a previous token), use it as-is. If not set (first auth), use `_normalize_resource_url(gateway.url)`.\n\n4. **`token_validation_service.py`**: Simplified `_validate_audience` — `expected = resource or gateway_url`, normalize both sides to lists, simple membership check. Removed token audience and expected values from warning messages to avoid leaking sensitive identifiers (client IDs, etc.) into logs and error responses.\n\n## 🧪 Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Unit tests (6 affected files)         | `uv run pytest tests/unit/mcpgateway/routers/test_oauth_router.py tests/unit/mcpgateway/services/test_token_validation_service.py tests/unit/mcpgateway/services/test_gateway_service_oauth_comprehensive.py tests/unit/mcpgateway/test_oauth_manager.py tests/unit/mcpgateway/services/test_oauth_manager_pkce.py` | ✅ 385 passed |\n| Manual regression (ServiceNow)        | OAuth flow + Fetch Tools | ✅ Fixed via DB update, code fix matches |\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed\n- [x] Sensitive token values removed from log/error messages",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4163875412",
+      "author": "MohanLaksh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-23T15:44:15+00:00",
+      "body": "##  ✅ Approve\r\n                                                                                                                                                                          \r\n  Excellent fix for a critical OAuth bug. The solution is elegant and well-executed.\r\n                                                                                                                                                                          \r\n  What's excellent:          \r\n                                                                                                                                                                          \r\n  - Smart approach: Auto-learning the IdP's actual aud claim at callback and persisting it solves the root disconnect cleanly                                             \r\n  - RFC-compliant: Properly implements RFC 8707 Section 2's allowance for IdPs to map resource to different audiences\r\n  - Security-conscious: Removes sensitive token values from error messages (prevents client ID leaks)                                                                     \r\n  - Code simplification: Replaced 20+ lines of complex resource normalization with simple learned-value logic                                                             \r\n  - Outstanding test coverage: 116 new test lines across 6 files, all 385 tests passing, full CI green (28/28 checks)                                                     \r\n  - Best-effort pattern: Gracefully handles opaque tokens and missing aud claims without breaking flows                                                                   \r\n                                                                                                                                                                          \r\n  Technical highlights:                                                                                                                                                   \r\n                                                                                                                                                                          \r\n  - _extract_token_audience() does best-effort decode without signature verification (appropriate for learning vs. validation)                                            \r\n  - _persist_learned_audience() is idempotent and respects transaction boundaries (flush not commit)\r\n  - Simplified _validate_audience() now handles both string and list forms cleanly                                                                                        \r\n                                                                                                                                                                          \r\n                                                              \r\n## Verdict: Ready to merge. \r\n\r\n### This will unblock real-world OAuth deployments with ServiceNow, Authentik, and other IdPs that don't honor RFC 8707 strictly. Great work! 🎉"
+    },
+    {
+      "id": "4181585964",
+      "author": "brian-hussey",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-27T14:09:42+00:00",
+      "body": "Approved"
+    },
+    {
+      "id": "4181807249",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-27T14:38:57+00:00",
+      "body": "Approved, thank you for the submission."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "edb61d2ddb3b9d01a7ba31646b782cac4b2f0743",
+      "message": "fix(oauth): auto-learn IdP audience and persist as resource for token validation\n\nOAuth token audience validation fails for IdPs (ServiceNow, Authentik,\netc.) that do not honor RFC 8707 and set the aud claim to an abstract\nidentifier (e.g. client_id) rather than the resource URL sent in the\nauthorization request. RFC 8707 Section 2 explicitly allows this: the\nAS may map the resource value to a different audience identifier.\n\nAfter a successful OAuth callback, extract the aud claim from the access\ntoken (best-effort, no signature verification) inside oauth_manager and\nreturn it as token_aud. Persist it as resource in the gateway's\noauth_config. On subsequent flows, use the persisted resource as-is\ninstead of re-deriving from gateway.url. Update _validate_audience to\naccept both resource (string or list) and gateway_url via set\nintersection.\n\nCloses #4384\nRelated: #4171\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-23T06:06:52+00:00"
+    },
+    {
+      "sha": "78cd7c4c83f32928336d5bbd1127d910c9cf2545",
+      "message": "update .secrets.baseline\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-23T06:18:40+00:00"
+    },
+    {
+      "sha": "ccb4127d4aac9c36f35756a7ec8a4ad18c295eec",
+      "message": "fix(oauth): correct doctest quote style for blocking_errors example\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-23T08:26:18+00:00"
+    },
+    {
+      "sha": "65fcd4eb64f912876dc5ed0441e4e2b54fd59f7f",
+      "message": "Update secrets\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-04-27T14:15:27+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 234,
+  "deletions": 73,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:56.644112",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:56.644647",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4404,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4404.json"
+  }
+}

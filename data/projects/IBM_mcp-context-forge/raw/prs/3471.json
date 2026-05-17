@@ -1,0 +1,86 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3471,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3471"
+  },
+  "metadata": {
+    "title": "fix(admin-ui): handle FileUrl JSON serialization error in admin template rendering",
+    "state": "closed",
+    "created_at": "2026-03-04T15:31:11+00:00",
+    "updated_at": "2026-03-08T12:32:44+00:00",
+    "closed_at": "2026-03-08T12:32:42+00:00",
+    "merged_at": "2026-03-08T12:32:42+00:00",
+    "author": "msureshkumar88",
+    "labels": [
+      "bug",
+      "ui",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #3428\r\n\r\n---\r\n\r\n## 📝 Summary\r\n_What does this PR do and why?_\r\n\r\n\r\n✅ Fixed: FileUrl JSON Serialization Error in Admin UI\r\n\r\n### Original Problem Fixed\r\nThe admin UI was crashing with `TypeError: Object of type FileUrl is not JSON serializable` when rendering root directories in the template at line 8048 of `admin.html`.\r\n\r\n**Solution Implemented:**\r\nModified `/home/suresh/dev/issue_3428/mcp-context-forge/mcpgateway/main.py`:\r\n- Added imports for `AnyUrl` (from pydantic) and `FileUrl` (from mcpgateway.common.models)\r\n- Created custom `URLEncoder` class in the `tojson_attr` filter that converts `FileUrl` and `AnyUrl` objects to strings\r\n- Updated `json.dumps()` call to use the custom encoder\r\n\r\n**Testing:** All tests passed successfully ✅\r\n\r\n---\r\n\r\n### Additional Issue Identified: Roots Not Persisting\r\n\r\n**Root Cause:**\r\nThe `RootService` stores roots **in memory only** (`self._roots` dictionary). This is by design, not a bug:\r\n- Roots are ephemeral and only persist for the application's lifetime\r\n- When the app restarts, all roots are lost except those configured in `settings.default_roots`\r\n- There is no database table for roots - they're intentionally transient\r\n\r\n**Current Behavior:**\r\n1. User adds a root via admin UI → stored in memory\r\n2. Application restarts or service reinitializes → all non-default roots disappear\r\n3. Only roots in `settings.default_roots` configuration persist across restarts\r\n\r\n**Workaround:**\r\nTo make roots persist across restarts, add them to the `default_roots` configuration in your environment/config file:\r\n```python\r\ndefault_roots = [\"file:///path/to/dir1\", \"file:///path/to/dir2\"]\r\n```\r\n\r\n**Note:** If roots are disappearing immediately after saving (without restart), that would indicate a different issue. The JSON serialization fix I implemented should resolve any immediate display issues after adding roots.\r\n\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [X] Code formatted (`make black isort pre-commit`)\r\n- [X] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [X] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3897439179",
+      "author": "cafalchio",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-05T15:20:57+00:00",
+      "body": "The code looks good. The URLEncoder will work with nested structures. If in the future other places need it, it can go out of the function."
+    },
+    {
+      "id": "3897566675",
+      "author": "cafalchio",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-05T15:37:28+00:00",
+      "body": ""
+    },
+    {
+      "id": "3911345243",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-08T11:35:45+00:00",
+      "body": "LGTM after rework. The fix now uses the codebase-standard orjson pattern and is properly tested."
+    },
+    {
+      "id": "3911395852",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-08T12:32:37+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "5ec15bc0e579ce527e0cab5aca73037864fb99f9",
+      "message": "fix(admin-ui): use orjson default=str to handle non-serializable types in tojson_attr\n\nReplace stdlib json.dumps() with orjson.dumps(default=str) in the tojson_attr\nJinja2 filter. This fixes the FileUrl JSON serialization crash (TypeError) when\nrendering root directories in the admin template, while staying consistent with\nthe codebase's standard orjson usage pattern.\n\nCloses #3428\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-03-08T11:31:06+00:00"
+    },
+    {
+      "sha": "add5f6aa8f218218bbe38aeefeb7dd9c089dfb01",
+      "message": "fix(tests): pin caplog level on schemas logger to prevent intermittent failure\n\nThe test_gateway_create_duplicate_keys_with_warning test fails intermittently\nwhen LoggingService.initialize() sets the root logger to ERROR (the default\nlog_level). WARNING messages from mcpgateway.schemas are then filtered at\nthe root logger before reaching caplog's handler.\n\nFix: use caplog.set_level(logging.WARNING, logger=\"mcpgateway.schemas\") to\nset the level directly on the target logger, matching the established pattern\nused throughout the test suite (e.g. test_session_registry_coverage.py).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-08T11:56:22+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 76,
+  "deletions": 4,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:27.149734",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:27.152394",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3471,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3471.json"
+  }
+}

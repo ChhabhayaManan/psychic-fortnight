@@ -1,0 +1,172 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2723,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2723"
+  },
+  "metadata": {
+    "title": "feat(`gateway_mode`): Add gateway mode feature with `direct_proxy` support for pass-through MCP operations",
+    "state": "closed",
+    "created_at": "2026-02-06T04:09:50+00:00",
+    "updated_at": "2026-02-23T09:00:11+00:00",
+    "closed_at": "2026-02-13T21:31:29+00:00",
+    "merged_at": "2026-02-13T21:31:29+00:00",
+    "author": "010gvr",
+    "labels": [
+      "wxo"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses https://github.com/IBM/mcp-context-forge/issues/2171 and https://github.com/IBM/mcp-context-forge/issues/2344\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nImplements a new `direct_proxy` gateway mode that enables pass-through proxying of MCP operations directly to remote servers without database caching. This complements the existing `cache` mode (default) and provides flexibility for different use cases.\r\n\r\n:warning: The direct proxy assumes a stateless MCP server is built using Streamable HTTP transport. Further, RBAC architecture need to be analyzed.\r\n\r\n- **New field**: Added `gateway_mode` column to `gateways` table with values `cache` (default) or `direct_proxy`\r\n- **Migration**: Created idempotent Alembic migration\r\n- **Models**: Updated `Gateway` ORM model in `db.py` with new field and documentation\r\n\r\n- **GatewayCreate**: Added `gateway_mode` field with validation pattern `^(cache|direct_proxy)$`\r\n- **GatewayUpdate**: Added optional `gateway_mode` field for updates\r\n- **GatewayRead**: Added `gateway_mode` field to response schema\r\n\r\n**gateway_service.py**\r\n- Added `gateway_mode` field handling in gateway creation and updates\r\n- Passes gateway mode through initialization flow\r\n\r\n**tool_service.py**\r\n- Implements direct proxy mode detection via `X-Gateway-Id` header\r\n- When in `direct_proxy` mode:\r\n  - Bypasses database tool lookup/tool call\r\n  - Creates minimal tool payload for direct proxying\r\n  - Skips access control checks (delegated to remote server)\r\n  - Skips metrics recording (no tool_id in direct mode)\r\n- Enhanced error handling for `extract_using_jq` failures\r\n- Added comprehensive logging for streamablehttp requests\r\n\r\n**resource_service.py**\r\n- Implements direct proxy mode for resource operations\r\n- Proxies `resources/read` and `resources/list` requests directly to remote MCP servers when in direct_proxy mode\r\n- Uses MCP SDK for proper protocol handling\r\n\r\n**streamablehttp_transport.py**\r\n- Proxy methods `tools/list` , `tools/call`, `resources/list` and `resources/read`\r\n\r\n#### Features\r\n- Fast lookups, access control enforced, metrics recorded\r\n- Existing behavior unchanged\r\n- All MCP operations proxied directly to remote server\r\n- No database caching of tools/resources/prompts\r\n- Client sends `X-Context-Forge-Gateway-Id` header to specify gateway\r\n- Gateway must have `gateway_mode: \"direct_proxy\"`\r\n- Minimal overhead, real-time data from remote server\r\n- Access control delegated to remote server\r\n- Existing tests should pass (default cache mode unchanged)\r\n\r\nThis is a backward-compatible feature addition with sensible defaults.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   ✅      |\r\n| Unit tests                | `make test`     |  ✅       |\r\n| Coverage ≥ 80%            | `make coverage` |    ✅     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n**TODOs:**\r\n\r\n1. Support for any MCP server/transport types\r\n2. Improve Normalization. Maintenance overhead to keep up to rapidly changing MCP spec, Code can be simplified if Context Forge acted as a proxy if server is already MCP-compliant.\r\n",
+  "comments": [
+    {
+      "id": "2785994984",
+      "author": "010gvr",
+      "created_at": "2026-02-10T06:11:33+00:00",
+      "body": "There are many test cases where `datetime.now()` is used which pulls in local time. This may work if the developer is in UTC tz or around and tests may pass by fluke. Otherwise time can end up going backward. I'm fixing in this PR but I think a proper fix would really be to avoid adding test cases with plain `datetime.now()` if the implementation standardizes on UTC. "
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3776908369",
+      "author": "010gvr",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-10T06:11:33+00:00",
+      "body": ""
+    },
+    {
+      "id": "3798046546",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T15:55:03+00:00",
+      "body": "Under review"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8d274d234e98d83dd97115635fe6c3f8d36394ca",
+      "message": "feat: add direct_proxy gateway mode for pass-through MCP operations\n\nImplements a new `direct_proxy` gateway mode that enables pass-through proxying of MCP operations directly to remote servers without database caching. This complements the existing `cache` mode (default) and provides flexibility for different use cases.\n\n:warning: The direct proxy assumes a stateless MCP server is built using Streamable HTTP transport. Further, RBAC architecture need to be analyzed.\n\n- **New field**: Added `gateway_mode` column to `gateways` table with values `cache` (default) or `direct_proxy`\n- **Migration**: Created idempotent Alembic migration\n- **Models**: Updated `Gateway` ORM model in `db.py` with new field and documentation\n\n- **GatewayCreate**: Added `gateway_mode` field with validation pattern `^(cache|direct_proxy)$`\n- **GatewayUpdate**: Added optional `gateway_mode` field for updates\n- **GatewayRead**: Added `gateway_mode` field to response schema\n\n**gateway_service.py**\n- Added `gateway_mode` field handling in gateway creation and updates\n- Passes gateway mode through initialization flow\n\n**tool_service.py**\n- Implements direct proxy mode detection via `X-Gateway-Id` header\n- When in `direct_proxy` mode:\n  - Bypasses database tool lookup/tool call\n  - Creates minimal tool payload for direct proxying\n  - Skips access control checks (delegated to remote server)\n  - Skips metrics recording (no tool_id in direct mode)\n- Enhanced error handling for `extract_using_jq` failures\n- Added comprehensive logging for streamablehttp requests\n- Fixed `Accept` header to include both `application/json` and `text/event-stream` for MCP compatibility\n\n**resource_service.py**\n- Implements direct proxy mode for resource operations\n- Proxies `resources/read` and `resources/list` requests directly to remote MCP servers when in direct_proxy mode\n- Uses MCP SDK for proper protocol handling\n\n**streamablehttp_transport.py**\n- Proxy methods for all MCP methods\n\n- Fast lookups, access control enforced, metrics recorded\n- Existing behavior unchanged\n- All MCP operations proxied directly to remote server\n- No database caching of tools/resources/prompts\n- Client sends `X-Context-Forge-Gateway-Id` header to specify gateway\n- Gateway must have `gateway_mode: \"direct_proxy\"`\n- Minimal overhead, real-time data from remote server\n- Access control delegated to remote server\n- Existing tests should pass (default cache mode unchanged)\n\nThis is a backward-compatible feature addition with sensible defaults.\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-01-23T07:13:10+00:00"
+    },
+    {
+      "sha": "af30a813d8fe81120d15f6f2eb45a5029fa184f5",
+      "message": "chore: lint code\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-06T04:06:36+00:00"
+    },
+    {
+      "sha": "55bab0a47ca8c19214127307ec81bc3fd1d935fb",
+      "message": "test(gateway_mode): Schema + Gateway Service tests\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-06T04:46:01+00:00"
+    },
+    {
+      "sha": "90a947e3c0610f8326a48d0d0c2d326f8ade1ea2",
+      "message": "chore(lint): More lint fixes\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-06T05:07:16+00:00"
+    },
+    {
+      "sha": "e3c2855ab8af3f59c1b9958f16e27fbc83e9fb28",
+      "message": "chore(lint): More lint fixes\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-06T05:21:57+00:00"
+    },
+    {
+      "sha": "fbb468e833fd1661cb9843251e55c400e0587daf",
+      "message": "chore(lint): flake8 fix\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-06T05:38:24+00:00"
+    },
+    {
+      "sha": "1922793169b3b86fb29ecb732d50b5d44700f673",
+      "message": "chore(rebase): Rebase with main\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-10T05:53:09+00:00"
+    },
+    {
+      "sha": "e172002aa272e1ba9fd3c9e22c2b2394993ab30d",
+      "message": "chore(tests): Use integration tests\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-10T06:37:59+00:00"
+    },
+    {
+      "sha": "b6fc6742298a89f7dcceb2eaddd757116dce87c4",
+      "message": "fix: User access check to Gateway for all direct_proxy mode\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-10T14:52:27+00:00"
+    },
+    {
+      "sha": "fc1736d040e83eb09066b0a8d689f6b5ef953947",
+      "message": "fix(headers): Helper for auth header propagation\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-10T15:15:42+00:00"
+    },
+    {
+      "sha": "f939d1c3182338067593d3f698d154a7f0b4aebf",
+      "message": "fix: inconsistent initialize()\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-10T15:30:53+00:00"
+    },
+    {
+      "sha": "ee675e409f12290a9fad27e0b00a619dbe0e67d0",
+      "message": "fix(tests): coverage fixes\n\nSigned-off-by: 010gvr <010gvr@gmail.com>",
+      "author": "010gvr",
+      "date": "2026-02-10T15:51:14+00:00"
+    },
+    {
+      "sha": "2bf4d1d9adf673be99f2056796b1a46a9447eb75",
+      "message": "fix(migration): update alembic down_revision to current head\n\nThe migration pointed to an old parent revision (04cda6733305) causing\nmultiple alembic heads. Updated to current head (c1c2c3c4c5c6).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-11T19:24:31+00:00"
+    },
+    {
+      "sha": "2b1f07db69e19a5ef3213b207b0f3a33ff992d74",
+      "message": "fix(security): add missing RBAC checks in direct_proxy mode\n\nAdd check_gateway_access() calls to two code paths that were missing\naccess control before proxying requests in direct_proxy mode:\n\n- streamablehttp_transport.py call_tool(): was forwarding tool calls\n  without verifying the user had access to the target gateway\n- resource_service.py read_resource(): was proxying resource reads\n  without verifying gateway access permissions\n\nAlso adds a defensive access check inside invoke_tool_direct() to\nprevent RBAC bypass if called from new contexts, fixes the migration\ndocstring Revises mismatch, removes stale attribution comment, and\ndefines GATEWAY_ID_HEADER constant for the header name.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T16:27:45+00:00"
+    },
+    {
+      "sha": "af61f72ac876a4331b74a592cd107c0bd97a876e",
+      "message": "feat(direct_proxy): add feature flag, configurable timeout, and full test coverage\n\n- Add MCPGATEWAY_DIRECT_PROXY_ENABLED (default: false) and\n  MCPGATEWAY_DIRECT_PROXY_TIMEOUT (default: 30s) config settings\n  across config.py, .env.example, Helm values, docker-compose, admin UI\n- Add extract_gateway_id_from_headers() helper in gateway_access.py,\n  replacing 6 repeated header-scanning loops with unified constant\n- Add registration-time guards in gateway_service (register + update)\n  that reject direct_proxy mode when the feature flag is disabled\n- Add runtime guards in tool_service, resource_service, and\n  streamablehttp_transport that fall through to cache mode when disabled\n- Replace 5 hardcoded timeout=30.0 with configurable setting\n- Remove all pragma: no cover markers from direct_proxy code paths\n- Add 41 new unit tests covering config defaults, header helper,\n  gateway service guards, invoke_tool_direct, invoke_tool header branch,\n  call_tool direct_proxy, and read_resource direct_proxy\n- Add documentation section in configuration.md and config.schema.json\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T17:16:40+00:00"
+    },
+    {
+      "sha": "abca2c677941aa46bd49c05d75b032134d9e7da3",
+      "message": "fix(direct_proxy): address review feedback for security and consistency\n\n- call_tool: add feature-flag gate (settings.mcpgateway_direct_proxy_enabled)\n  matching list_tools/list_resources/read_resource\n- call_tool: return error on proxy failure instead of falling through to\n  cache mode (fail-closed)\n- call_tool: sanitize error message to avoid leaking exception details\n- read_resource: return empty string directly on access denial instead of\n  raising HTTPException that gets swallowed by outer handler\n- read_resource: remove _meta from session.read_resource() call (MCP SDK\n  only accepts uri parameter)\n- GatewayCreate: change gateway_mode from Optional[str] to str with\n  before-validator defaulting None to 'cache' (prevents DB integrity error)\n- admin: expose direct_proxy_timeout in Connection Timeouts section\n- list_tools docstring: fix refresh_strategy -> gateway_mode\n- Fix jq test assertions to match TextContent return type\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T18:44:41+00:00"
+    },
+    {
+      "sha": "5cfdc81dd9eb3d0eb338088117172c4920e31f03",
+      "message": "test(direct_proxy): add coverage tests for 20 missing diff lines\n\nCovers meta extraction, gateway fallback paths, passthrough headers,\njq filter error handling, and isError attribute fallback.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T19:49:32+00:00"
+    },
+    {
+      "sha": "be00451a31728e2322f74ad58f1e57c9765996f8",
+      "message": "fix(direct_proxy): restore session.initialize() and resolve tool name prefix\n\nTwo bugs discovered during E2E testing:\n\n1. session.initialize() was commented out in all 5 direct_proxy code\n   paths, causing 422 errors from remote MCP servers (MCP protocol\n   requires initialization before operations).\n\n2. invoke_tool_direct sent the gateway-prefixed slug name (e.g.\n   \"fast-test-get-system-time\") to the remote server, which only\n   knows the original name (\"get_system_time\"). Fixed by looking up\n   the tool's original_name from the DB, with a slug-prefix stripping\n   fallback for tools not yet cached locally.\n\nSigned-off-by: Venkat Ramachandran <venkat@contextforge.ai>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T20:27:22+00:00"
+    }
+  ],
+  "files_changed": 29,
+  "additions": 4154,
+  "deletions": 115,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:19.821607",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:19.823051",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2723,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2723.json"
+  }
+}

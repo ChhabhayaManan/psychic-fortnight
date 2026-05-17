@@ -1,0 +1,231 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2506,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2506"
+  },
+  "metadata": {
+    "title": "fix-2360: prevent CPU spin loop after SSE client disconnect",
+    "state": "closed",
+    "created_at": "2026-01-26T02:41:41+00:00",
+    "updated_at": "2026-01-27T12:52:00+00:00",
+    "closed_at": "2026-01-27T12:51:58+00:00",
+    "merged_at": "2026-01-27T12:51:58+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "performance",
+      "revisit"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\nFixes the CPU spin loop issue where Gunicorn workers consume 100%+ CPU when idle after load tests stop. The root cause was fire-and-forget `asyncio.create_task()` patterns leaving orphaned tasks in anyio's `_deliver_cancellation` spin loop.\r\n\r\n**Key fixes:**\r\n- Track respond tasks in `_respond_tasks` dict for proper lifecycle management\r\n- Cancel respond tasks before removing sessions (prevents orphaning)\r\n- Escalation path: cancel → timeout → disconnect transport → retry cancel → move to stuck_tasks\r\n- Add cleanup on SSE response creation failure (prevents orphaned tasks)\r\n- Add stuck task reaper (30s interval) to clean completed tasks and retry cancellation\r\n- Redis respond loop now uses timeout-based polling with session existence check\r\n- SSE generator's `finally` block now also invokes disconnect callback\r\n\r\n**Load testing:**\r\n- Updated `make load-test-spin-detector` to be full-featured (JWT auth, all user classes, 4000-user baseline)\r\n- Spike/drop pattern stress tests session cleanup\r\n\r\nCloses #2360 - [BUG]: anyio cancel scope spin loop causes 100% CPU after load test stops\r\nCloses #2357 - [BUG]: (sse): Granian CPU spikes to 800% after load stops, recovers when load resumes\r\n\r\n## Test plan\r\n\r\n- [x] Unit tests for task tracking/cancellation (9 new tests)\r\n- [x] Test for escalation path with fake transport verifying `disconnect()` is called\r\n- [x] Tests for stuck task reaper lifecycle\r\n- [x] All existing tests pass\r\n- [x] Run `make load-test-spin-detector` to verify CPU returns to idle during pause phases",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3710478520",
+      "author": "jonpspri",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-27T10:50:44+00:00",
+      "body": "Let's be clear.  I hate that we've gotten to this.  But the patch is as clean as it can get without introducing a new object to encapsulate the process.  Let's be sure we're monitoring the upstream so we can rip this out when it's corrected."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "f2322cd52d1aa5324672023a1d178458650965e7",
+      "message": "fix-2360: prevent asyncio CPU spin loop after SSE client disconnect\n\nRoot cause: Fire-and-forget asyncio.create_task() patterns left orphaned\ntasks that caused anyio _deliver_cancellation to spin at 100% CPU per worker.\n\nChanges:\n- Add _respond_tasks dict to track respond tasks by session_id\n- Cancel respond tasks explicitly before session cleanup in remove_session()\n- Cancel all respond tasks during shutdown()\n- Pass disconnect callback to SSE transport for defensive cleanup\n- Convert database backend from fire-and-forget to structured concurrency\n\nThe fix ensures all asyncio tasks are properly tracked, cancelled on disconnect,\nand awaited to completion, preventing orphaned tasks from spinning the event loop.\n\nCloses #2360\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T01:13:37+00:00"
+    },
+    {
+      "sha": "7f7eb0e2d57b5ebf36fef9194465f9c46c3853ac",
+      "message": "fix-2360: additional fixes for CPU spin loop after SSE disconnect\n\nFollow-up fixes based on testing and review:\n\n1. Cancellation timeout escalation (Finding 1):\n   - _cancel_respond_task() now escalates on timeout by calling transport.disconnect()\n   - Retries cancellation after escalation\n   - Always removes task from tracking to prevent buildup\n\n2. Redis respond loop exit path (Finding 2):\n   - Changed from infinite pubsub.listen() to timeout-based get_message() polling\n   - Added session existence check - loop exits if session removed\n   - Allows loop to exit even without cancellation\n\n3. Generator finally block cleanup (Finding 3):\n   - Added on_disconnect_callback() in event_generator() finally block\n   - Covers: CancelledError, GeneratorExit, exceptions, and normal completion\n   - Idempotent - safe if callback already ran from on_client_close\n\n4. Added load-test-spin-detector make target:\n   - Spike/drop pattern to stress test session cleanup\n   - Docker stats monitoring at each phase\n   - Color-coded output with pass/fail indicators\n   - Log file output to /tmp\n\nCloses #2360\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T02:17:53+00:00"
+    },
+    {
+      "sha": "0af9de2014b4fd2e44f1a781b26d32be248d0f00",
+      "message": "fix-2360: fix race condition in sse_endpoint and add stuck task tracking\n\nFinding 1 (HIGH): Fixed race condition in sse_endpoint where respond task\nwas created AFTER create_sse_response(). If client disconnected during\nresponse setup, the disconnect callback ran before the task existed,\nleaving it orphaned. Now matches utility_sse_endpoint ordering:\n1. Compute user_with_token\n2. Create and register respond task\n3. Call create_sse_response()\n\nFinding 2 (MEDIUM): Added _stuck_tasks dict to track tasks that couldn't\nbe cancelled after escalation. Previously these were dropped from tracking\nentirely, losing visibility. Now they're moved to _stuck_tasks for\nmonitoring and final cleanup during shutdown().\n\nUpdated tests to verify escalation behavior.\n\nCloses #2360\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T02:22:28+00:00"
+    },
+    {
+      "sha": "6a6b9c4628d511f683de230464ef62dbb0ca6bc7",
+      "message": "fix-2360: add SSE failure cleanup, stuck task reaper, and full load test\n\nFinding 1 (HIGH): Fixed orphaned respond task when create_sse_response()\nfails. Added try/except around create_sse_response() in both sse_endpoint\nand utility_sse_endpoint - on failure, calls remove_session() to clean up\nthe task and session before re-raising.\n\nFinding 2 (MEDIUM): Added stuck task reaper that runs every 30 seconds to:\n- Remove completed tasks from _stuck_tasks\n- Retry cancellation for still-stuck tasks\n- Prevent memory leaks from tasks that eventually complete\n\nFinding 3 (LOW): Added test for escalation path with fake transport to\nverify transport.disconnect() is called during escalation. Also added\ntests for the stuck task reaper lifecycle.\n\nAlso updated load-test-spin-detector to be a full-featured test matching\nload-test-ui with JWT auth, all user classes, entity ID fetching, and\nthe same 4000-user baseline.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T02:41:13+00:00"
+    },
+    {
+      "sha": "f03c53bef74e1f449aef3764873a3ee105e41ab2",
+      "message": "fix-2360: improve load-test-spin-detector output and reduce cycle sizes\n\n- Reduce logging level to WARNING to suppress noisy worker messages\n- Only run entity fetching and cleanup on master/standalone nodes\n- Reduce cycle sizes from 4000 to 1000 peak users for faster iteration\n- Update banner to reflect new cycle pattern (500 -> 750 -> 1000)\n- Remove verbose JWT token generation log\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T02:51:11+00:00"
+    },
+    {
+      "sha": "a14e2e97431571c6c2fb1efe9f23a57d0892c963",
+      "message": "fix-2360: address remaining CPU spin loop findings\n\nFinding 1 (HIGH): Add explicit asyncio.CancelledError handling in SSE\nendpoints. In Python 3.8+, CancelledError inherits from BaseException,\nnot Exception, so the previous except block wouldn't catch it. Now\ncleanup runs even when requests are cancelled during SSE handshake.\n\nFinding 2 (MEDIUM): Add sleep(0.1) when Redis get_message returns None\nto prevent tight loop. The loop now has guaranteed minimum sleep even\nwhen Redis returns immediately in certain states.\n\nFinding 3 (MEDIUM): Add _closing_sessions set to allow respond loops\nto exit early. remove_session() now marks the session as closing BEFORE\nattempting task cancellation, so the respond loop (Redis and DB backends)\ncan exit immediately without waiting for the full cancellation timeout.\n\nFinding 4 (LOW): Already addressed in previous commit with test\ntest_cancel_respond_task_escalation_calls_transport_disconnect.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T02:56:14+00:00"
+    },
+    {
+      "sha": "cea1d5510fa5cf24c51d094487922bc32a047311",
+      "message": "fix-2360: make load-test-spin-detector run unlimited cycles\n\n- Cycles now repeat indefinitely instead of stopping after 5\n- Fixed log file path to /tmp/spin_detector.log for easy monitoring\n- Added periodic summary every 5 cycles showing PASS/WARN/FAIL counts\n- Cycle numbering now shows total count and pattern letter (e.g., \"CYCLE 6 (A)\")\n- Banner shows monitoring command: tail -f /tmp/spin_detector.log\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T03:18:48+00:00"
+    },
+    {
+      "sha": "19fcd395ef93df6145d9ede3433ee9c8e3a6484d",
+      "message": "fix-2360: add asyncio.CancelledError to SSE endpoint Raises docs\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T03:21:33+00:00"
+    },
+    {
+      "sha": "2e63233e2ae195e63fdfcbfe58465debb0e16371",
+      "message": "Linting\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T03:23:23+00:00"
+    },
+    {
+      "sha": "5ef5b89db9ae31d4f4c87137350beee6ed10a066",
+      "message": "fix-2360: remove redundant asyncio.CancelledError handlers\n\nCancelledError inherits from BaseException in Python 3.8+, so it won't\nbe caught by 'except Exception' handlers. The explicit handlers were\nunnecessary and triggered pylint W0706 (try-except-raise).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T03:26:57+00:00"
+    },
+    {
+      "sha": "883217cdb56e614e3d9c8b0bbbf5db5cbbd73480",
+      "message": "fix-2360: restore asyncio.CancelledError in Raises docs for inner handlers\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T03:36:04+00:00"
+    },
+    {
+      "sha": "44ac5777719603e9610975a2ed2e595e73f3dcc1",
+      "message": "fix-2360: add sleep on non-message Redis pubsub types to prevent spin\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T09:25:47+00:00"
+    },
+    {
+      "sha": "3f53f7bb6234bd66a08aaf6ad92de45694f4ac85",
+      "message": "fix(pubsub): replace blocking listen() with timeout-based get_message()\n\nThe blocking `async for message in pubsub.listen()` pattern doesn't\nrespond to asyncio cancellation properly. When anyio's cancel scope\ntries to cancel tasks using this pattern, the tasks don't respond\nbecause the async iterator is blocked waiting for Redis messages.\n\nThis causes anyio's `_deliver_cancellation` to continuously reschedule\nitself with `call_soon()`, creating a CPU spin loop that consumes\n100% CPU per affected worker.\n\nChanged to timeout-based polling pattern:\n- Use `get_message(timeout=1.0)` with `asyncio.wait_for()`\n- Loop allows cancellation check every ~1 second\n- Added sleep on None/non-message responses to prevent edge case spins\n\nFiles fixed:\n- mcpgateway/services/cancellation_service.py\n- mcpgateway/services/event_service.py\n\nCloses #2360 (partial - additional spin sources may exist)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T11:33:10+00:00"
+    },
+    {
+      "sha": "a57b2c14d6796c0968594998936c3a979c99462d",
+      "message": "fix(cleanup): add timeouts to __aexit__ calls to prevent CPU spin loops\n\nThe MCP session/transport __aexit__ methods can block indefinitely when\ninternal tasks don't respond to cancellation. This causes anyio's\n_deliver_cancellation to spin in a tight loop, consuming ~800% CPU.\n\nRoot cause: When calling session.__aexit__() or transport.__aexit__(),\nthey attempt to cancel internal tasks (like post_writer waiting on\nmemory streams). If these tasks don't respond to CancelledError, anyio's\ncancel scope keeps calling call_soon() to reschedule _deliver_cancellation,\ncreating a CPU spin loop.\n\nChanges:\n- Add SESSION_CLEANUP_TIMEOUT constant (5 seconds) to mcp_session_pool.py\n- Wrap all __aexit__ calls in asyncio.wait_for() with timeout\n- Add timeout to pubsub cleanup in session_registry.py and registry_cache.py\n- Add timeout to streamable HTTP context cleanup in translate.py\n\nThis is a continuation of the fix for issue #2360.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T12:10:23+00:00"
+    },
+    {
+      "sha": "4b5b4ff9bb40a4804cf67aea356481bda3a5bee5",
+      "message": "feat(config): make session cleanup timeout configurable\n\nAdd MCP_SESSION_POOL_CLEANUP_TIMEOUT setting (default: 5.0 seconds) to\ncontrol how long cleanup operations wait for session/transport __aexit__\ncalls to complete.\n\nClarification: This timeout does NOT affect tool execution time (which\nuses TOOL_TIMEOUT). It only affects cleanup of idle/released sessions\nto prevent CPU spin loops when internal tasks don't respond to cancel.\n\nChanges:\n- Add mcp_session_pool_cleanup_timeout to config.py\n- Add MCP_SESSION_POOL_CLEANUP_TIMEOUT to .env.example with docs\n- Add to charts/mcp-stack/values.yaml\n- Update mcp_session_pool.py to use _get_cleanup_timeout() helper\n- Update session_registry.py and registry_cache.py to use config\n- Update translate.py to use config with fallback\n\nWhen to adjust:\n- Increase if you see frequent \"cleanup timed out\" warnings in logs\n- Decrease for faster shutdown (at risk of resource leaks)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T12:17:10+00:00"
+    },
+    {
+      "sha": "7d8d14f29a1f322bb6120a54aa252dfc02d40496",
+      "message": "fix(sse): add deadline to cancel scope to prevent CPU spin loop\n\nFixes CPU spin loop (anyio#695) where _deliver_cancellation spins at\n100% CPU when SSE task group tasks don't respond to cancellation.\n\nRoot cause: When an SSE connection ends, sse_starlette's task group\ntries to cancel all tasks. If a task (like _listen_for_disconnect\nwaiting on receive()) doesn't respond to cancellation, anyio's\n_deliver_cancellation keeps rescheduling itself in a tight loop.\n\nFix: Override EventSourceResponse.__call__ to set a deadline on the\ncancel scope when cancellation starts. This ensures that if tasks\ndon't respond within SSE_TASK_GROUP_CLEANUP_TIMEOUT (5 seconds),\nthe scope times out instead of spinning indefinitely.\n\nReferences:\n- https://github.com/agronholm/anyio/issues/695\n- https://github.com/anthropics/claude-agent-sdk-python/issues/378\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T13:14:21+00:00"
+    },
+    {
+      "sha": "00d46495dacea8f9a059bee84e7c486bed1c95c9",
+      "message": "fix(translate): use patched EventSourceResponse to prevent CPU spin\n\ntranslate.py was importing EventSourceResponse directly from sse_starlette,\nbypassing the patched version in sse_transport.py that prevents the anyio\n_deliver_cancellation CPU spin loop (anyio#695).\n\nThis change ensures all SSE connections in the translate module (stdio-to-SSE\nbridge) also benefit from the cancel scope deadline fix.\n\nRelates to: #2360\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T13:57:53+00:00"
+    },
+    {
+      "sha": "4ba621e26e0bbb3669f0e9df8030ae689742c2bc",
+      "message": "fix(cleanup): reduce cleanup timeouts from 5s to 0.5s\n\nWith many concurrent connections (691 TCP sockets observed), each cancelled\nSSE task group spinning for up to 5 seconds caused sustained high CPU usage.\nReducing the timeout to 0.5s minimizes CPU waste during spin loops while\nstill allowing normal cleanup to complete.\n\nThe cleanup timeout only affects cleanup of cancelled/released connections,\nnot normal operation or tool execution time.\n\nChanges:\n- SSE_TASK_GROUP_CLEANUP_TIMEOUT: 5.0 -> 0.5 seconds\n- mcp_session_pool_cleanup_timeout: 5.0 -> 0.5 seconds\n- Updated .env.example and charts/mcp-stack/values.yaml\n\nRelates to: #2360\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T14:20:12+00:00"
+    },
+    {
+      "sha": "a1d34e39d734aff63518303596c6a28a682bafd2",
+      "message": "refactor(cleanup): make SSE cleanup timeout configurable with safe defaults\n\n- Add SSE_TASK_GROUP_CLEANUP_TIMEOUT setting (default: 5.0s)\n- Make sse_transport.py read timeout from config via lazy loader\n- Keep MCP_SESSION_POOL_CLEANUP_TIMEOUT at 5.0s default\n- Override both to 0.5s in docker-compose.yml for testing\n\nThe 5.0s default is safe for production. The 0.5s override in\ndocker-compose.yml allows testing aggressive cleanup to verify\nit doesn't affect normal operation.\n\nRelates to: #2360\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T14:30:29+00:00"
+    },
+    {
+      "sha": "51606d644e7f636991956fb0b50b78be87848a30",
+      "message": "fix(gunicorn): reduce max_requests to recycle stuck workers\n\nThe MCP SDK's internal anyio task groups don't respond to cancellation\nproperly, causing CPU spin loops in _deliver_cancellation. This spin\nhappens inside the MCP SDK (streamablehttp_client, sse_client) which\nwe cannot patch.\n\nReduce GUNICORN_MAX_REQUESTS from 10M to 5K to ensure workers are\nrecycled frequently, cleaning up any accumulated stuck task groups.\n\nRoot cause chain observed:\n1. PostgreSQL idle transaction timeout\n2. Gateway state change failures\n3. SSE connections terminated\n4. MCP SDK task groups spin (anyio#695)\n\nThis is a workaround until the MCP SDK properly handles cancellation.\n\nRelates to: #2360\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T14:38:30+00:00"
+    },
+    {
+      "sha": "fd9c6b13457a64be41092ee83785e0383a923f36",
+      "message": "Linting\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T16:11:48+00:00"
+    },
+    {
+      "sha": "2ff6cfa971f0ceecf0ab514fdfad030f0eea92d8",
+      "message": "fix(anyio): monkey-patch _deliver_cancellation to prevent CPU spin\n\nRoot cause: anyio's _deliver_cancellation has no iteration limit.\nWhen tasks don't respond to CancelledError, it schedules call_soon()\ncallbacks indefinitely, causing 100% CPU spin (anyio#695).\n\nSolution:\n- Monkey-patch CancelScope._deliver_cancellation to track iterations\n- Give up after 100 iterations and log warning\n- Clear _cancel_handle to stop further call_soon() callbacks\n\nAlso switched from asyncio.wait_for() to anyio.move_on_after() for\nMCP session cleanup, which better propagates cancellation through\nanyio's cancel scope system.\n\nTrade-off: If cancellation gives up after 100 iterations, some tasks\nmay not be properly cancelled. However, GUNICORN_MAX_REQUESTS=5000\nworker recycling will eventually clean up orphaned tasks.\n\nCloses #2360\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T17:54:58+00:00"
+    },
+    {
+      "sha": "710a5c485bad475548d4883831a0234502748b14",
+      "message": "refactor(anyio): make _deliver_cancellation patch optional and disabled by default\n\nThe anyio monkey-patch is now feature-flagged and disabled by default:\n- ANYIO_CANCEL_DELIVERY_PATCH_ENABLED=false (default)\n- ANYIO_CANCEL_DELIVERY_MAX_ITERATIONS=100\n\nThis allows testing performance with and without the patch, and easy\nrollback if upstream anyio/MCP SDK fixes the issue.\n\nAdded:\n- Config settings for enabling/disabling the patch\n- apply_anyio_cancel_delivery_patch() function for explicit control\n- remove_anyio_cancel_delivery_patch() to restore original behavior\n- Documentation in .env.example and docker-compose.yml\n\nTo enable: set ANYIO_CANCEL_DELIVERY_PATCH_ENABLED=true\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T19:02:36+00:00"
+    },
+    {
+      "sha": "c08bb95034c73e3fa75488b8235679b96e8298f2",
+      "message": "docs: add comprehensive CPU spin loop mitigation documentation (#2360)\n\nAdd multi-layered documentation for CPU spin loop mitigation settings\nacross all configuration files. This ensures operators understand and\ncan tune the workarounds for anyio#695.\n\nChanges:\n- .env.example: Add Layer 1/2/3 headers with cross-references to docs\n  and issue #2360, document all 6 mitigation variables\n- README.md: Expand \"CPU Spin Loop Mitigation\" section with all 3 layers,\n  configuration tables, and tuning tips\n- docker-compose.yml: Consolidate all mitigation variables into one\n  section with SSE protection (Layer 1), cleanup timeouts (Layer 2),\n  and experimental anyio patch (Layer 3)\n- charts/mcp-stack/values.yaml: Add comprehensive mitigation section\n  with layer documentation and cross-references\n- docs/docs/operations/cpu-spin-loop-mitigation.md: NEW - Full guide\n  with root cause analysis, 4-layer defense diagram, configuration\n  tables, diagnostic commands, and tuning recommendations\n- docs/docs/.pages: Add Operations section to navigation\n- docs/docs/operations/.pages: Add nav for operations docs\n\nMitigation variables documented:\n- Layer 1: SSE_SEND_TIMEOUT, SSE_RAPID_YIELD_WINDOW_MS, SSE_RAPID_YIELD_MAX\n- Layer 2: MCP_SESSION_POOL_CLEANUP_TIMEOUT, SSE_TASK_GROUP_CLEANUP_TIMEOUT\n- Layer 3: ANYIO_CANCEL_DELIVERY_PATCH_ENABLED, ANYIO_CANCEL_DELIVERY_MAX_ITERATIONS\n\nRelated: #2360, anyio#695, claude-agent-sdk#378\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T20:29:06+00:00"
+    },
+    {
+      "sha": "1226dd567f2e5c5869031735ea5ac99cdaa50f29",
+      "message": "feat(loadtest): aggressive spin detector with configurable timings\n\nUpdate spin detector load test for faster issue reproduction:\n- Increase user counts: 4000 → 4000 → 10000 pattern\n- Fast spawn rate: 1000 users/s\n- Shorter wait times: 0.01-0.1s between requests\n- Reduced connection timeouts: 5s (fail fast)\n\nRelated: #2360\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-26T21:20:53+00:00"
+    },
+    {
+      "sha": "5c177ef79a801101e1579263a1d18cb3b15b263f",
+      "message": "compose mitigation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-27T00:46:26+00:00"
+    },
+    {
+      "sha": "fd6d67899f6173fbf6f1399fef9f4256478a4241",
+      "message": "load test\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-27T01:54:05+00:00"
+    },
+    {
+      "sha": "0c1c6a075ab824c73b1edc09d270a759a0de7189",
+      "message": "Defaults\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-27T10:15:10+00:00"
+    },
+    {
+      "sha": "f205549f4549c654ba9d80309769ba296d004749",
+      "message": "Defaults\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-27T10:16:38+00:00"
+    },
+    {
+      "sha": "5410fa8ef3946697b2cf1c86ed33477c3aaeda80",
+      "message": "docs: add docstring to cancel_on_finish for interrogate coverage\n\nAdd docstring to nested cancel_on_finish function in\nEventSourceResponse.__call__ to achieve 100% interrogate coverage.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-27T10:38:02+00:00"
+    }
+  ],
+  "files_changed": 20,
+  "additions": 3470,
+  "deletions": 107,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:23.573314",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:23.574202",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2506,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2506.json"
+  }
+}

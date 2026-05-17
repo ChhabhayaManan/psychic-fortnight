@@ -1,0 +1,108 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3663,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3663"
+  },
+  "metadata": {
+    "title": "feat: Add PLUGINS_CAN_OVERRIDE_AUTH_HEADERS feature flag for WXO auth",
+    "state": "closed",
+    "created_at": "2026-03-13T11:55:54+00:00",
+    "updated_at": "2026-03-19T12:49:32+00:00",
+    "closed_at": "2026-03-19T12:49:29+00:00",
+    "merged_at": "2026-03-19T12:49:29+00:00",
+    "author": "jonpspri",
+    "labels": [
+      "enhancement",
+      "plugins",
+      "wxo",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "## Summary\n- Adds `PLUGINS_CAN_OVERRIDE_AUTH_HEADERS` setting (default `false`) to control whether pre-request plugin hooks can override auth-sensitive headers (`Authorization`, `Cookie`, `X-Api-Key`, `Proxy-Authorization`)\n- Parameterizes `JWT_SECRET_KEY` across `docker-compose.yml` via env var substitution instead of hardcoded values\n- Adds multi-tenant load test support with per-user JWT identity and `woTenantId` claims\n\n## Test plan\n- [x] Unit tests: deny-path (override blocked by default) and allow-path (override permitted when enabled)\n- [x] All 27 tests in `test_http_auth_headers.py` pass\n- [x] Black, isort, Bandit clean on changed files",
+  "comments": [
+    {
+      "id": "2930795102",
+      "author": "Copilot",
+      "created_at": "2026-03-13T12:06:19+00:00",
+      "body": "The environment variable documentation for `JWT_SECRET_KEY` still says the default is `my-test-key`, but the code now defaults to `my-test-key-but-now-longer-than-32-bytes`. Update the docstring so it matches the actual default (or reword to avoid hardcoding a specific default).\n"
+    },
+    {
+      "id": "2930795131",
+      "author": "Copilot",
+      "created_at": "2026-03-13T12:06:20+00:00",
+      "body": "Logging one INFO line per Locust user initialization (`User ... assigned to ...`) can produce very large log volume at higher user counts and skew load test results. Consider lowering this to DEBUG, logging only on a sample (e.g., first N users), or aggregating tenant assignment counts.\n"
+    },
+    {
+      "id": "2930795145",
+      "author": "Copilot",
+      "created_at": "2026-03-13T12:06:20+00:00",
+      "body": "This test relies on the global `settings.plugins_can_override_auth_headers` being `False`. If a developer runs tests with `PLUGINS_CAN_OVERRIDE_AUTH_HEADERS=true` in their environment (or another test mutates the settings object), this will fail. To make the test deterministic, explicitly patch/monkeypatch the middleware `settings` to `False` for the deny-path case as well.\n"
+    },
+    {
+      "id": "2930795176",
+      "author": "Copilot",
+      "created_at": "2026-03-13T12:06:20+00:00",
+      "body": "The new default JWT secret (`my-test-key-but-now-longer-than-32-bytes`) is still a fixed, well-known value, but it no longer matches the `weak_secrets` list in `mcpgateway/config.py` (which currently flags `my-test-key`). This reduces the effectiveness of the existing “default/weak secret” warning path; consider keeping the default as `my-test-key` (so warnings trigger) or adding the new default value to the weak-secret detection list / documentation as explicitly insecure dev-only.\n"
+    },
+    {
+      "id": "2930795207",
+      "author": "Copilot",
+      "created_at": "2026-03-13T12:06:20+00:00",
+      "body": "The auth-header override guard can be bypassed when a plugin uses different header casing (e.g. \"Authorization\"). `overridden` stores the original key strings, but the filter compares `k.lower()` against that set, so mixed-case keys won’t be stripped even when overrides are disabled. Normalize to lowercase when building `overridden` (and use that normalized set consistently) to ensure the guard reliably blocks overrides regardless of header key casing.\n"
+    },
+    {
+      "id": "2930795232",
+      "author": "Copilot",
+      "created_at": "2026-03-13T12:06:21+00:00",
+      "body": "This log line will raise `IndexError` at import time when `NUM_TENANTS` is set to 0 (or any value that results in an empty `TENANT_IDS`), because it indexes `[0]` and `[-1]`. Add validation (e.g., enforce `NUM_TENANTS >= 1`) or make the logging conditional when the list is empty.\n"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3943553642",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-13T12:06:21+00:00",
+      "body": "## Pull request overview\n\nAdds a new gateway setting/feature flag to optionally allow trusted pre-request plugins (e.g., WXO auth) to override auth-sensitive inbound headers, and updates local/test infrastructure to support per-user JWT identities for multi-tenant load testing.\n\n**Changes:**\n- Introduces `PLUGINS_CAN_OVERRIDE_AUTH_HEADERS` (default `false`) and documents it.\n- Updates `HttpAuthMiddleware` to conditionally allow/deny plugin overrides of auth-protected headers.\n- Enhances the Locust echo-delay load test to generate per-user JWTs with `woTenantId` claims and adds `JWT_SECRET_KEY` env substitution across `docker-compose.yml`.\n\n### Reviewed changes\n\nCopilot reviewed 7 out of 7 changed files in this pull request and generated 6 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `mcpgateway/middleware/http_auth_middleware.py` | Gates auth-header override stripping behind the new settings flag. |\r\n| `mcpgateway/config.py` | Adds the `plugins_can_override_auth_headers` setting with security-focused description. |\r\n| `docs/docs/manage/configuration.md` | Documents the new gateway-level plugin security override setting. |\r\n| `docker-compose.yml` | Parameterizes `JWT_SECRET_KEY` and adds env wiring for the new flag and streamable HTTP tuning. |\r\n| `.env.example` | Adds example/commented config entry for `PLUGINS_CAN_OVERRIDE_AUTH_HEADERS`. |\r\n| `tests/unit/mcpgateway/middleware/test_http_auth_headers.py` | Adds unit tests for deny/allow behavior under the new flag. |\r\n| `tests/loadtest/locustfile_echo_delay.py` | Adds multi-tenant/per-user JWT generation for load testing. |\n</details>\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (1)</summary>\n\n**mcpgateway/middleware/http_auth_middleware.py:149**\n* Merging `original_headers` and `modified_headers_dict` is currently case-sensitive, but the final scope header list lowercases names. If the original request had `authorization` and a plugin returns `Authorization`, `merged_headers` will contain both keys and you’ll emit duplicate `authorization` headers, leading to unpredictable auth behavior. Consider normalizing both dicts to lowercase keys before merging so there is exactly one value per logical header name.\n```\n                    merged_headers = {**original_headers, **modified_headers_dict}\n\n                    # Update request.scope[\"headers\"] which is the raw header list Starlette uses\n                    # Convert dict to list of (name, value) tuples with lowercase byte keys\n                    request.scope[\"headers\"] = [(name.lower().encode(), value.encode()) for name, value in merged_headers.items()]\n```\n</details>\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3971533317",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-18T23:32:00+00:00",
+      "body": "## Review: LGTM — Approved\n\nRebased onto `main` and resolved 5 conflicted files. All 38 auth header tests and 758 utils tests pass.\n\n### What this PR adds (after rebase onto main which already has the core feature)\n\n- **Docker-compose**: Parameterizes `JWT_SECRET_KEY` via env var substitution across all services (was hardcoded `my-test-key`). Adds `PLUGINS_CAN_OVERRIDE_AUTH_HEADERS` and `STREAMABLE_HTTP_MAX_EVENTS_PER_STREAM` env vars.\n- **Integration tests**: `TestPluginsCanOverrideAuthHeaders` (3 tests) — exercises the full middleware dispatch path, complementing the existing `TestRunPreRequestHooks` unit tests.\n- **Documentation**: New \"Gateway-Level Plugin Security Overrides\" section in `configuration.md` with danger admonition. `.env.example` updated in both hot-toggles and detailed sections.\n- **Load test resilience**: Auto-generation fallback when WXO auth is disabled, longer JWT secret default (32+ bytes to satisfy `min_secret_length`).\n- **Test isolation**: New `conftest.py` for `tests/unit/mcpgateway/utils/` to prevent host env leakage into passthrough-header tests.\n\n### Conflict resolution decisions\n\n- Kept `--admin` flag on all JWT commands that had it on `main`\n- Kept `main`'s explicit `ValueError` for `NUM_TENANTS < 1` (clearer than silent clamping)\n- Kept `main`'s `run_pre_request_hooks()` refactored architecture (PR's inline auth protection was already integrated on `main`)\n- Kept both `TestRunPreRequestHooks` (main) and `TestPluginsCanOverrideAuthHeaders` (PR) test classes\n\n### Security\n\n- Default-deny: correct (`plugins_can_override_auth_headers=False`)\n- Protected headers: `{authorization, cookie, x-api-key, proxy-authorization}` — comprehensive\n- Case-insensitive comparison prevents bypass via casing\n- No bypass vectors identified"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ad762f90c84ef83bcd7deaad4994e3c23353ac71",
+      "message": "feat: Add PLUGINS_CAN_OVERRIDE_AUTH_HEADERS feature flag for WXO auth\n\nAdd a gateway-level setting (default false) that controls whether\npre-request plugin hooks can override auth-sensitive headers\n(Authorization, Cookie, X-Api-Key, Proxy-Authorization). Required for\nplugin-driven token exchange workflows such as WXO auth.\n\nChanges:\n- Add plugins_can_override_auth_headers to Settings with security docs\n- Gate auth-header stripping in HttpAuthMiddleware behind the new flag\n- Normalize plugin header keys to lowercase before merging to prevent\n  duplicate scope entries from case mismatches\n- Parameterize JWT_SECRET_KEY across docker-compose.yml via env var\n  substitution instead of hardcoded values\n- Add multi-tenant load test support with per-user JWT identity and\n  woTenantId claims, with auto-generation fallback when WXO auth is\n  disabled\n- Add conftest to isolate passthrough header settings in utils tests\n- Add unit tests for deny-path, allow-path, and case-sensitivity bypass\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-14T08:57:41+00:00"
+    },
+    {
+      "sha": "b6ed124831d04680b0732fe21ff3602be267f551",
+      "message": "fix(loadtest): add jti claim to auto-generated JWT tokens\n\nThe _generate_jwt_token() fallback in the load test was producing\ntokens without a jti claim, which are rejected when REQUIRE_JTI=true\n(the default). Add uuid-based jti to match what create_jwt_token CLI\nproduces.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T07:35:59+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 244,
+  "deletions": 39,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:22.634561",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:22.636140",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3663,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3663.json"
+  }
+}

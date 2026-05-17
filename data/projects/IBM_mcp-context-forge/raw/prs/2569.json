@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2569,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2569"
+  },
+  "metadata": {
+    "title": "Enforce per-tool timeouts and enhanced circuit breaker plugin",
+    "state": "closed",
+    "created_at": "2026-01-29T12:38:08+00:00",
+    "updated_at": "2026-02-01T08:00:18+00:00",
+    "closed_at": "2026-02-01T08:00:17+00:00",
+    "merged_at": "2026-02-01T08:00:16+00:00",
+    "author": "kevalmahajan",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# ✨ Feature / Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\nCloses #2078\r\n\r\n---\r\n\r\n## 🚀 Summary (1-2 sentences)\r\nThis PR implements strict per-tool timeout enforcement for all transports (REST, SSE, StreamableHTTP) and significantly enhances the `CircuitBreakerPlugin` with half-open states, retry headers, and granular configuration overrides.\r\n\r\nAll failure logic is decoupled via the Plugin System:\r\n\r\nToolService: Executes requests, enforces strict limits (Timeouts), reports status.\r\nCircuitBreakerPlugin: Decides if a request should be attempted based on history.\r\n\r\n---\r\n\r\n### Configurations for timeout:\r\n1. Global Tool Call Timeout :\r\n```bash\r\n# Env Variable: \r\nTOOL_TIMEOUT \r\n```\r\n\r\n2. Per Tool Timeout in `Tool Schema`:\r\n```bash\r\ntimeout_ms \r\n```\r\n\r\nExample Precedence Calculation:\r\n\r\n| Tool   | timeout_ms value | Global timeout used | Effective timeout | Notes |\r\n|--------|------------------|---------------------|-------------------|-------|\r\n| Tool A | 10000            | Ignored             | 10 seconds        | Explicit timeout overrides global |\r\n| Tool B | None             | TOOL_TIMEOUT = 60   | 60 seconds        | Falls back to global timeout |\r\n| Tool C | 0                | TOOL_TIMEOUT = 60   | 60 seconds        | 0 treated as not set, uses global |\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [ ] `make lint` passes\r\n- [ ] `make test` passes\r\n- [ ] CHANGELOG updated (if user-facing)\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n### Key Changes\r\n1.  **Strict Timeout Enforcement (tool_service.py)**:\r\n    *   Wrapped all tool invocations (REST, SSE, StreamableHTTP, A2A) in `asyncio.wait_for`.\r\n    *   Ensures per-tool `timeout_ms` overrides global settings.\r\n    *   **Fix**: Modified get_httpx_client_factory\r\n4.  **Circuit Breaker Enhancements (`plugins/circuit_breaker.py`)**:\r\n    *   **Half-Open State**: Allows single \"probe\" request after cooldown. Success closes circuit; failure re-opens it.\r\n    *   **Retry-After**: Returns precise `retry_after_seconds` in violation response.\r\n    *   **Timeout Handling**: Timeouts now explicitly trigger the circuit breaker via `cb_timeout_failure` context flag.\r\n5.  **Metrics**:\r\n    *   Added `tool_timeout_total` and `circuit_breaker_open_total` Prometheus counters.\r\n\r\n```mermaid\r\nflowchart TD\r\n    Client -->|Invoke Tool| Gateway(ToolService)\r\n    Gateway -->|1. check| CB[CircuitBreakerPlugin]\r\n    CB -- Open? --> Reject[429 / Blocked]\r\n    CB -- Closed? --> Gateway\r\n    \r\n    Gateway -->|2. Invoke w/ Timeout| Tool[External Tool]\r\n    \r\n    Tool -- Success --> Gateway\r\n    Gateway -->|3. Record Success| CB\r\n    \r\n    Tool -- Timeout/Error --> Gateway\r\n    Gateway -- Flag: cb_timeout_failure --> CB\r\n    Gateway -->|4. Record Failure| CB\r\n    CB -- Trip Threshold? --> CBState[Open Circuit]\r\n\r\n```\r\n\r\n---\r\n\r\n### Feature Map & Implementation Details:\r\n\r\n| Feature Request              | Implementation Mechanism                                                                                                   | Location                                      |\r\n|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|\r\n| Strict Timeout Enforcement  | Wrapped invocations in `asyncio.wait_for`. Prioritizes tool-specific `timeout_ms` over global default.                     | mcpgateway/services/tool_service.py            |\r\n| Circuit Breaker Logic       | Plugin-based implementation using sliding window for error rates and consecutive failure counters.                        | plugins/circuit_breaker/circuit_breaker.py    |\r\n| Timeouts Count as Failures  | Core catches `TimeoutError` and sets context flag. Plugin reads flag and counts as failure even without HTTP status.       | tool_service.py (Setter), circuit_breaker.py (Getter) |\r\n| Half-Open State             | Probe logic allows 1 request after cooldown. Success closes circuit; failure re-opens immediately.                        | circuit_breaker.py (tool_pre_invoke)           |\r\n| Retry-After Header          | Calculates `open_until - now` and returns exact seconds in violation details.                                               | circuit_breaker.py                             |\r\n| Granular / Per-Tool Config  | `tool_overrides` map allows custom thresholds for critical tools (e.g., higher patience for Payment APIs).               | plugins/config.yaml                            |\r\n| Metrics                     | Added `tool_timeout_total` and `circuit_breaker_open_total` Prometheus counters.                                          | mcpgateway/services/metrics.py                 |\r\n\r\n\r\n### Verification\r\nUnit Tests: Added TestToolTimeoutsAndRetries covering state transitions, timeout precedence, and plugin logic.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3735153822",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-01T07:45:38+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "dcde01e7b4a8fb03ccf952053036b6abd41d4bdf",
+      "message": "feat(plugins): enforce per-tool timeouts and enhanced circuit breaker\n\nImplement strict per-tool timeout enforcement for all transports\n(REST, SSE, StreamableHTTP, A2A) and enhance the CircuitBreakerPlugin\nwith half-open states, retry headers, and granular configuration.\n\nChanges:\n- Wrap all tool invocations in asyncio.wait_for with effective_timeout\n- Add per-tool timeout_ms support (ms to seconds conversion)\n- Add half-open state for circuit breaker recovery testing\n- Add half_open_in_flight flag to prevent concurrent probe requests\n- Add retry_after_seconds in violation response for rate limiting\n- Add tool_timeout_total and circuit_breaker_open_total Prometheus metrics\n- Add cb_timeout_failure context flag for timeout detection in plugins\n- Add tool_overrides for per-tool circuit breaker configuration\n- Handle both asyncio.TimeoutError and httpx.TimeoutException\n- Log actual elapsed time instead of configured timeout\n\nFixes applied during review:\n- Fix _is_error() to detect camelCase isError from model_dump(by_alias=True)\n- Fix half-open probe guard: only check when st.half_open is True\n- Add stale-probe timeout to prevent permanent wedge if plugin blocks\n- Add timeout enforcement to A2A tool invocations\n- Call tool_post_invoke on exceptions so circuit breaker tracks failures\n- Add ToolTimeoutError subclass to distinguish timeouts from other errors\n- Only skip post_invoke for ToolTimeoutError (not all ToolInvocationError)\n- Set error_message and span attributes for ToolTimeoutError observability\n- Update README to document isError camelCase support\n\nTimeout precedence:\n1. Per-tool timeout_ms (if set and non-zero)\n2. Global TOOL_TIMEOUT setting (default: 60s)\n\nCloses #2078\n\nCo-authored-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-01T00:20:56+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 1536,
+  "deletions": 41,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:24.134712",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:24.136266",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2569,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2569.json"
+  }
+}

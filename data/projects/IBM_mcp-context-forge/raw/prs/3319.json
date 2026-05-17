@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3319,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3319"
+  },
+  "metadata": {
+    "title": "fix(security): Enforce per-server oauth_enabled on MCP endpoints",
+    "state": "closed",
+    "created_at": "2026-02-27T12:52:24+00:00",
+    "updated_at": "2026-03-09T01:51:23+00:00",
+    "closed_at": "2026-03-03T02:54:04+00:00",
+    "merged_at": "2026-03-03T02:54:04+00:00",
+    "author": "jonpspri",
+    "labels": [
+      "bug",
+      "MUST",
+      "release-fix",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Enforce the per-server `oauth_enabled` flag on MCP transport endpoints, closing the gap where OAuth was advertised (via RFC 9728) but never enforced\n- Unauthenticated requests to `oauth_enabled` servers now receive 401 regardless of the global `MCP_REQUIRE_AUTH` setting\n- Defense-in-depth checks added to all six MCP handlers (`list_tools`, `call_tool`, `list_prompts`, `get_prompt`, `list_resources`, `read_resource`)\n- Fix DAR202 lint warning in `set_log_level` docstring\n\nCloses #3304\n\n## Test plan\n\n- [ ] Verify unauthenticated requests to `oauth_enabled=True` servers return 401 in permissive mode\n- [ ] Verify unauthenticated requests to `oauth_enabled=False` servers still pass through in permissive mode\n- [ ] Verify authenticated requests to `oauth_enabled=True` servers work normally\n- [ ] Verify DB lookup failures in OAuth enforcement fail-open (preserve permissive mode)\n- [ ] Verify all existing unit tests pass with no regressions (290 transport tests, 12,795 total unit tests)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3866815314",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-27T12:56:44+00:00",
+      "body": "## Pull request overview\n\nThis PR closes a security gap in the Streamable HTTP MCP transport by enforcing each virtual server’s `oauth_enabled` flag (previously advertised via RFC 9728 metadata but not enforced), ensuring unauthenticated requests to OAuth-enabled servers are rejected even when global permissive mode is enabled.\n\n**Changes:**\n- Added `_check_server_oauth_enforcement()` and invoked it from `streamable_http_auth` (permissive-mode exception) plus all MCP handlers as a defense-in-depth guard.\n- Added unit tests covering per-server OAuth enforcement, middleware behavior in permissive mode, and handler-level invocation coverage.\n- Removed an unnecessary `Returns: None` section from `set_log_level` docstring to address a darglint warning.\n\n### Reviewed changes\n\nCopilot reviewed 3 out of 3 changed files in this pull request and generated no comments.\n\n| File | Description |\n| ---- | ----------- |\n| `mcpgateway/transports/streamablehttp_transport.py` | Implements per-server OAuth enforcement and wires it into middleware + handlers. |\n| `tests/unit/mcpgateway/transports/test_streamablehttp_transport.py` | Adds unit coverage for enforcement helper, middleware behavior, and handler defense-in-depth calls. |\n| `mcpgateway/main.py` | Docstring tweak to satisfy doc linting. |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3879865698",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-03T02:40:19+00:00",
+      "body": "LGTM — rebased, reviewed, and applied minor fix (catch-all for unexpected auth errors in _auth_jwt). All 323 transport tests pass with 99% coverage."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "57671833c13d46b84388c8ab8bb739b54ead0ffa",
+      "message": "fix(security): enforce per-server OAuth on MCP endpoints (Closes #3304)\n\nWhen a virtual server has oauth_enabled=True, unauthenticated requests\nto its MCP endpoints are now rejected with HTTP 401 and a\nWWW-Authenticate header containing the RFC 9728 resource metadata URL,\neven when MCP_REQUIRE_AUTH=false (permissive mode). This closes the gap\nwhere OAuth was advertised via metadata but never enforced on requests.\n\nKey changes:\n- Add _check_server_oauth_enforcement() with per-request ContextVar\n  caching and fail-closed behavior on DB errors (503)\n- Add _build_resource_metadata_url() for RFC 9728 WWW-Authenticate\n- Enforce at both middleware and handler levels (defense-in-depth)\n- Refactor auth logic into _StreamableHttpAuthHandler class\n- Extract loadTeamSelectorDropdown() from inline x-data to fix broken\n  HTML attribute parsing with double-quote characters\n- Add OAuthRequiredError and OAuthEnforcementUnavailableError classes\n- Update docs: AGENTS.md, ADR-004, RFC 9728 compliance, security\n  features, multitenancy, configuration reference\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-02T14:13:58+00:00"
+    },
+    {
+      "sha": "4944108e777c922c6f3ef899a6611b5c0a88fce0",
+      "message": "fix(security): add catch-all for unexpected auth errors in _auth_jwt\n\n- Add `except Exception` handler in `_StreamableHttpAuthHandler._auth_jwt`\n  to catch unexpected errors (not HTTPException or SQLAlchemyError) during\n  JWT authentication, returning 401 instead of an unhandled 500.\n- Make OAuth enforcement comment in `set_logging_level` handler consistent\n  with all other handlers (full 6-line rationale block).\n- Add test for unexpected exception path in JWT auth.\n- Black formatting fixes on test file.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T02:31:52+00:00"
+    },
+    {
+      "sha": "286b6ce50ad7852416e3f89653b354018d46a39e",
+      "message": "fix(lint): correct prettier and no-var violations in admin.js\n\n- Break fetch() and querySelector() arguments onto separate lines per\n  prettier formatting rules.\n- Replace var with const for retryBtn (no-var / prefer-const).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T02:47:22+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 1831,
+  "deletions": 360,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:52.614944",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:52.616525",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3319,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3319.json"
+  }
+}

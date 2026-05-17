@@ -1,0 +1,49 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3157,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3157"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Display CRUD changes on Users and Teams pages without full reload",
+    "state": "closed",
+    "created_at": "2026-02-24T09:24:55+00:00",
+    "updated_at": "2026-04-03T08:35:16+00:00",
+    "closed_at": "2026-02-27T16:19:10+00:00",
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3011 due to repository maintenance. Your code and branch are intact. @marekdano please verify everything looks good.\n\n# 🐛 Bug-fix PR\r\n\r\n---\r\n\r\n## 📌 Summary\r\nFixes stale UI data on Teams and Users admin pages when running multiple gateway replicas behind nginx. The root cause was three layers of caching preventing CRUD changes from being reflected:\r\n\r\n1. Cross-replica cache invalidation gap — `auth_cache` published invalidation messages to `mcpgw:auth:invalidate` but `CacheInvalidationSubscriber` only listened on `mcpgw:cache:invalidate`, so other replicas never cleared their in-memory auth caches.\r\n2. Missing HTMX refresh triggers — Create team and delete user endpoints returned responses without `HX-Trigger` headers, so the frontend never knew to refresh the lists\r\n3. Nginx/browser caching — Nginx's `proxy_cache_valid 200 5s` and add_header `Cache-Control \"private, max-age=5\"` always caused stale responses for all /admin GET requests. Since nginx overrides backend Cache-Control headers, this was solved client-side with `_t=Date.now()` cache-busting query parameters.\r\n4. Removed all 6 Cache-Control/Pragma/Expires header additions from partial endpoints — these are unnecessary since the `_t=Date.now()` timestamp cache-busting in admin.js already bypasses both nginx proxy cache and browser cache\r\n\r\n## 🔁 Reproduction Steps\r\nUsers Page\r\n1. Go to http://localhost:8080/admin\r\n2. Navigate to the Users page\r\n3. Create, Edit, Delete User(s)\r\n4. Observe that a new / updated / deleted user is not updated on the page. The page has to be reloaded to see the change.\r\n\r\nTeams Page\r\n1. Go to http://localhost:8080/admin\r\n2. Navigate to the Teams page\r\n3. Create, Edit, Activate / Deactivate, Delete Team(s)\r\n4. Add / Remove members to / from Teams\r\n5. Observe that a new / updated / deleted teams or updated members are not updated on the page. The page has to be reloaded to see the change.\r\n\r\n\r\n## 🐞 Root Cause\r\nCRUD operations on Users and Teams are cached behind the nginx 5s cache time. So when the operations are executed on the admin UI, the changes are not reflected on the UI. The whole page must be reloaded to see them. \r\n\r\n## 💡 Fix Description\r\n Changes by file\r\n\r\n`mcpgateway/cache/registry_cache.py`\r\n\r\n- Subscribe `CacheInvalidationSubscriber` to both `mcpgw:cache:invalidate` and `mcpgw:auth:invalidate` channels\r\n- Route messages by channel in `_listen_loop`\r\n- Add `_process_auth_invalidation()` to clear L1 in-memory auth caches (_user_cache, _team_cache, _role_cache, _teams_list_cache, _revocation_cache, _context_cache, _revoked_jtis) across replicas\r\n\r\n`mcpgateway/admin.py`\r\n\r\n- Add `HX-Trigger` header to `admin_create_team` to refresh teams list\r\n- Add `HX-Trigger` header to `admin_delete_user` to refresh users list\r\n- Add `_t` cache-busting timestamp to server-rendered `hx-get` URLs for members/non-members partials and their infinite scroll `next_page_url`\r\n\r\n`mcpgateway/static/admin.js`\r\n\r\n  - Add `_t=Date.now()` cache-busting to teams partial, users partial, members partial, non-members partial, team edit, user edit, and team members refresh fetches\r\n\r\n`mcpgateway/templates/admin.html`\r\n\r\n  - Add `_t` cache-busting to `loadTeamMembersView()`, `loadAddMembersView()`, and `editTeamSafe()` HTMX ajax calls\r\n\r\n`mcpgateway/templates/users_partial.html`\r\n\r\n- Add `hx-on::config-request` to dynamically append `_t` on the user edit button's `hx-get` request\r\n\r\n`tests/unit/mcpgateway/cache/test_cache_invalidation_subscriber.py`\r\n\r\n- Update `FakePubSub` subscribe/unsubscribe signatures to accept `*channels` (matching the new two-channel subscription)\r\n\r\n`tests/js/admin-search.test.js`\r\n\r\n- Update user edit modal test assertions to use `expect.stringContaining()` to accommodate the `_t` query parameter\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "3b2e358512e7250178da06b0e13fb9bcf3b12375",
+      "message": "fix(ui): prevent nginx proxy cache from serving stale teams/users data\n\n- Add Cache-Control: no-cache headers to teams and users endpoints\n- Update admin.js to handle cache-busting properly\n- Fix ESLint issues in admin.js\n- Update users_partial.html template\n- Add cache invalidation tests\n\nCloses #2691\n\nSigned-off-by: Marek Dano <mk.dano@gmail.com>",
+      "author": "Marek Dano",
+      "date": "2026-02-25T16:58:05+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 29,
+  "deletions": 24,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:51.283068",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:51.287056",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3157,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3157.json"
+  }
+}

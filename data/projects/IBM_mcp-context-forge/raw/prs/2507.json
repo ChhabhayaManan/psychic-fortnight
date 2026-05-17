@@ -1,0 +1,134 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2507,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2507"
+  },
+  "metadata": {
+    "title": "Consistent duplicate constraints/working in tools, prompts and resources",
+    "state": "closed",
+    "created_at": "2026-01-26T08:04:06+00:00",
+    "updated_at": "2026-01-27T14:07:34+00:00",
+    "closed_at": "2026-01-27T13:49:16+00:00",
+    "merged_at": "2026-01-27T13:49:15+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "wxo"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n\r\nCloses #2352\r\n\r\nReference: (Continuation of #2351)\r\n\r\n## 📌 Summary\r\nUpdates the unique constraints for Resources and Prompts tables to support Gateway-level namespacing. Previously, these entities enforced uniqueness globally per Team/Owner (team_id, owner_email, uri/name). This prevented users from registering the same Gateway (e.g., using one-time auth) multiple times with different names, as the Resources/Prompts would collide.\r\n\r\nThis adds consistency with the working of tools, prompts and resources. \r\nHandles both scenarios, prompts and resources added with gateway and without gateway/directly.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Enable \"one-time auth\" for Gateway registration.\r\n2. Register a Gateway (e.g., http://example.com as \"Gateway A\") containing Resources and Prompts.\r\n3. Register the same Gateway again (e.g., http://example.com as \"Gateway B\") for the same Team/User.\r\n4. Observed Error: Registration fails with an IntegrityError (Unique Constraint Violation) for Resources (on uri) or Prompts (on name).\r\n5. Expected Behavior: Registration succeeds; Resources/Prompts are duplicated but namespaced to their respective Gateway (similar to how Tools work).\r\n\r\n## 🐞 Root Cause\r\n\r\nDatabase Schema: The Resource table had a unique constraint on (team_id, owner_email, uri). The Prompt table had a unique constraint on (team_id, owner_email, name).\r\n\r\nLogic: When a second Gateway attempted to sync the same Resources/Prompts, it tried to insert records with the same identifier for the same Team/Owner. Unlike Tools, which compute a namespaced name, Resources/Prompts utilize their raw identifiers, causing a collision at the database level.\r\n\r\n## 💡 Fix Description\r\n\r\n**1. Updated Constraints:** Modified `mcpgateway/db.py` to replace the restrictive team-level constraints with composite constraints that include gateway_id.\r\n\r\n```python\r\n# Resources: \r\nUniqueConstraint(\"team_id\", \"owner_email\", \"gateway_id\", \"uri\")\r\n```\r\n```python\r\n# Prompts: \r\nUniqueConstraint(\"team_id\", \"owner_email\", \"gateway_id\", \"name\")\r\n```\r\n\r\n\r\n2. Added a Partial Unique Index specifically for local items (WHERE gateway_id IS NULL) to both Resources and Prompts:\r\n\r\n| Scope   | Constraint / Index Type | Columns Included                                 | Condition                  | Purpose |\r\n|---------|--------------------------|--------------------------------------------------|----------------------------|---------|\r\n| Global  | Unique Constraint        | (team_id, owner_email, gateway_id, identifier)   | —                          | Handles federated items; allows duplicates across different gateways |\r\n| Local   | Unique Index             | (team_id, owner_email, identifier)               | WHERE gateway_id IS NULL   | Strictly enforces uniqueness for local (non-gateway) items |\r\n\r\n\r\n**3. Migration:** Added a new Alembic migration script (b1b2b3b4b5b6_fix_constraints.py) to apply these schema changes.\r\n\r\n**4. Result:** \r\n\r\n1. Resources and Prompts are now unique per Gateway within a Team when added with one_time_auth constraint while registering a gateway. \r\n2. This maintains data integrity (preventing duplicates within a single Gateway) while allowing the same content to exist across multiple Gateways owned by the same Team.\r\n3. When one-time-auth is disabled, it properly follows, the public/team/private level constraints for exact same gateway and highlights duplicate error in that case.\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed",
+  "comments": [
+    {
+      "id": "2729326134",
+      "author": "brian-hussey",
+      "created_at": "2026-01-26T21:28:50+00:00",
+      "body": "The code is fine, the only thing I'd suggest from a readability point of view is instead of a long list of params we stagger them onto different lines:\r\n```suggestion\r\n        batch_op.create_index(\r\n            \"uq_team_owner_uri_resource_local\",\r\n            [\"team_id\", \"owner_email\", \"uri\"],\r\n            unique=True,\r\n            postgresql_where=text(\"gateway_id IS NULL\"),\r\n            sqlite_where=text(\"gateway_id IS NULL\")\r\n        )\r\n```\r\n\r\nGenerally 2-3 params is manageable on the same line, but beyond that it's easier on everyone if the arguments/are split over multiple lines. "
+    },
+    {
+      "id": "2729330580",
+      "author": "brian-hussey",
+      "created_at": "2026-01-26T21:30:24+00:00",
+      "body": "As above, code fine, just readability:\r\n```suggestion\r\n        batch_op.create_index(\r\n            \"uq_team_owner_name_prompt_local\",\r\n            [\"team_id\", \"owner_email\", \"name\"],\r\n            unique=True,\r\n            postgresql_where=text(\"gateway_id IS NULL\"),\r\n            sqlite_where=text(\"gateway_id IS NULL\")\r\n        )\r\n```"
+    },
+    {
+      "id": "2729335068",
+      "author": "brian-hussey",
+      "created_at": "2026-01-26T21:31:55+00:00",
+      "body": "As above, code fine, just readability:\r\n```suggestion\r\n        UniqueConstraint(\r\n            \"team_id\",\r\n            \"owner_email\",\r\n            \"gateway_id\",\r\n            \"uri\",\r\n            name=\"uq_team_owner_gateway_uri_resource\"\r\n        ),\r\n        Index(\r\n            \"uq_team_owner_uri_resource_local\",\r\n            \"team_id\",\r\n            \"owner_email\",\r\n            \"uri\", unique=True,\r\n            postgresql_where=text(\"gateway_id IS NULL\"),\r\n            sqlite_where=text(\"gateway_id IS NULL\")\r\n        ),\r\n```"
+    },
+    {
+      "id": "2729339935",
+      "author": "brian-hussey",
+      "created_at": "2026-01-26T21:33:39+00:00",
+      "body": "As above, code fine, just suggestion for readability:\r\n```suggestion\r\n        UniqueConstraint(\r\n            \"team_id\",\r\n            \"owner_email\",\r\n            \"gateway_id\",\r\n            \"name\",\r\n            name=\"uq_team_owner_gateway_name_prompt\"\r\n        ),\r\n        UniqueConstraint(\r\n            \"gateway_id\",\r\n            \"original_name\",\r\n            name=\"uq_gateway_id__original_name_prompt\"\r\n        ),\r\n        Index(\r\n            \"uq_team_owner_name_prompt_local\",\r\n            \"team_id\",\r\n            \"owner_email\",\r\n            \"name\",\r\n            unique=True,\r\n            postgresql_where=text(\"gateway_id IS NULL\"),\r\n            sqlite_where=text(\"gateway_id IS NULL\")\r\n        ),\r\n```"
+    },
+    {
+      "id": "2730971278",
+      "author": "brian-hussey",
+      "created_at": "2026-01-27T09:02:23+00:00",
+      "body": "`black` will overwrite any changes like this anyway, resolving."
+    },
+    {
+      "id": "2730971712",
+      "author": "brian-hussey",
+      "created_at": "2026-01-27T09:02:29+00:00",
+      "body": "`black` will overwrite any changes like this anyway, resolving."
+    },
+    {
+      "id": "2730972255",
+      "author": "brian-hussey",
+      "created_at": "2026-01-27T09:02:37+00:00",
+      "body": "`black` will overwrite any changes like this anyway, resolving."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3708098359",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-01-26T21:36:50+00:00",
+      "body": "The code is fine, I've suggested a couple of changes from a readability point of view.\r\n\r\nI tested the DB upgrade and downgrade path to this from rev this-2 to this-1 and this, and then back down to -1 and -2 and everything worked well."
+    },
+    {
+      "id": "3709962163",
+      "author": "brian-hussey",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-27T09:02:24+00:00",
+      "body": ""
+    },
+    {
+      "id": "3709962599",
+      "author": "brian-hussey",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-27T09:02:29+00:00",
+      "body": ""
+    },
+    {
+      "id": "3709963346",
+      "author": "brian-hussey",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-27T09:02:37+00:00",
+      "body": ""
+    },
+    {
+      "id": "3709971308",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-27T09:04:08+00:00",
+      "body": "Tested changes locally, up 2 versions to this and down 2 versions.\r\nEverything worked as expected."
+    },
+    {
+      "id": "3711220313",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-27T13:30:02+00:00",
+      "body": "More changes below:"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c0e20dda4de5b21ab845d742888df364416fb7a9",
+      "message": "fix(db): add gateway namespacing constraints for resources and prompts\n\nUpdates unique constraints for Resources and Prompts tables to support\nGateway-level namespacing. Previously, these entities enforced uniqueness\nglobally per Team/Owner (team_id, owner_email, uri/name). This prevented\nusers from registering the same Gateway multiple times with different names.\n\nChanges:\n- Add gateway_id to unique constraints for resources and prompts\n- Add partial unique indexes for local items (where gateway_id IS NULL)\n- Make migration idempotent with proper existence checks\n\nCloses #2352\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-01-27T13:21:10+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 256,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:25.077692",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:25.079820",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2507,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2507.json"
+  }
+}

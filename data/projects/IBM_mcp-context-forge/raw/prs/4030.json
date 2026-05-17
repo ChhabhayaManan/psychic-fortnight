@@ -1,0 +1,117 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4030,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4030"
+  },
+  "metadata": {
+    "title": "feat: add experimental rust request logging masking extension",
+    "state": "closed",
+    "created_at": "2026-04-03T13:32:02+00:00",
+    "updated_at": "2026-04-13T12:17:53+00:00",
+    "closed_at": "2026-04-13T12:17:51+00:00",
+    "merged_at": "2026-04-13T12:17:51+00:00",
+    "author": "lucarlig",
+    "labels": [
+      "experimental",
+      "rust",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# Feature / Enhancement PR\n\n## Epic / Issue\n#4036\n\n---\n\n## Summary (1-2 sentences)\nAdds an experimental opt-in PyO3-based Rust native extension for request logging sensitive-data masking in `mcpgateway/middleware/request_logging_middleware.py`. When `experimental_rust_request_logging_masking_enabled=true`, the request logging path uses the imported `request_logging_masking_native_extension` module to accelerate header masking, recursive payload masking, and JSON-body logging.\n\n---\n\n## Implementation Details\n- Introduces `tools_rust/request_logging_masking_native_extension/` as a PyO3 native extension that exposes `mask_sensitive_data()` and `mask_sensitive_headers()` to Python.\n- Adds a dedicated native JSON fast path via `mask_sensitive_json_bytes()` so the middleware can avoid Python `orjson.loads(...) -> mask -> orjson.dumps(...)` on JSON request bodies.\n- Adds a bounded thread-local LRU key-sensitivity cache in the native extension so repeated keys can be reused across calls without unbounded cache growth.\n- Adds the Python package import shim for `request_logging_masking_native_extension` so editable installs resolve the exported native functions correctly.\n- Adds the `experimental_rust_request_logging_masking_enabled` feature flag in `mcpgateway/config.py`.\n- Updates `mcpgateway/middleware/request_logging_middleware.py` so the public masking helpers lazily import and delegate to the PyO3 native extension when the flag is enabled.\n- Falls back to the Python masking path if the native extension is unavailable at runtime, and caches the failed import to avoid repeated import attempts.\n- Keeps the default path unchanged when the feature flag is off.\n- Adds parity and enabled-path tests, including malformed-Unicode cookie coverage, non-string nested keys, depth-limit parity checks, Python fallback coverage when the native extension import fails, and the native JSON fast path.\n- Keeps `tests/performance/test_request_logging_masking_native_extension_benchmark.py` focused on the public feature-flagged API path and direct-native comparison.\n\n---\n\n## Checks\n\n- [ ] `make lint` passes\n- [ ] `make test` passes\n- [ ] CHANGELOG updated (if user-facing)\n\n---\n\n## Notes\n### Latest microbenchmark run\nValidated on April 13, 2026 using the current branch code, the real middleware masking source, and the built PyO3 native extension. The benchmark values below are all from this latest run.\n\n| Scenario | Python median | Native extension public median | Direct native median | Public-path speedup |\n|---|---:|---:|---:|---:|\n| `nested_payload_masking` | 28.096 ms | 0.962 ms | 0.960 ms | 29.21x |\n| `headers_masking` | 2.569 ms | 0.164 ms | 0.164 ms | 15.67x |\n\nCold-start and warm-path visibility from the same run:\n- `nested_payload_masking`: public-path overhead vs direct native `0.2%`\n- `headers_masking`: public-path overhead vs direct native `0.0%`\n\n### JSON logging fast path benchmark\nThe latest build also includes a dedicated native JSON-body logging path in the middleware.\n\n| Scenario | Python median | Native JSON-bytes median | Speedup |\n|---|---:|---:|---:|\n| `json_logging_path` | 0.032 ms | 0.003 ms | 9.21x |\n\n### Prior focused request-logging loadtest\nPreviously validated on April 7, 2026 in a Linux container using a focused Locust workload against a FastAPI app with `RequestLoggingMiddleware` enabled for detailed request logging. This run used a heavy nested JSON body and sensitive headers aligned with the request-logging benchmark payloads so the measured throughput reflects the code changed in this PR.\n\n| Scenario | Path | RPS | Failures | Avg | P95 |\n|---|---|---:|---:|---:|---:|\n| Stable (`50` users, `20s`) | Python | 24.18 | 0 | 1807.68 ms | 2500 ms |\n| Stable (`50` users, `20s`) | Rust native extension | 230.30 | 0 | 190.16 ms | 280 ms |\n| Stress (`200` users, `30s`) | Python | 21.37 | 0 | 6038.87 ms | 13000 ms |\n| Stress (`200` users, `30s`) | Rust native extension | 148.02 | 0 | 1119.42 ms | 1900 ms |\n\nFocused-loadtest takeaway from the April 7 run: when the workload is dominated by detailed request logging and masking, the Rust native extension shows a large end-to-end benefit, improving throughput by `9.53x` in the stable scenario and `6.93x` in the stress scenario.\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4081397095",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-09T10:03:33+00:00",
+      "body": ""
+    },
+    {
+      "id": "4098502061",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-13T11:59:55+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "29b9107c71e52486cf342043de856cdf5a5fed18",
+      "message": "feat: add rust request logging masking sidecar\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T13:21:19+00:00"
+    },
+    {
+      "sha": "37f4343b0bc3ac6d0cda18334487e74002f702f6",
+      "message": "perf: cache key sensitivity in rust masking sidecar\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T13:23:36+00:00"
+    },
+    {
+      "sha": "387e9c1ac1a54683c6f55fc85037ddc0d443c836",
+      "message": "feat: restore pyo3 request logging path\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T13:22:25+00:00"
+    },
+    {
+      "sha": "4e1f290cd373f653d9ce06495a23ecb3fc0bbd3f",
+      "message": "refactor: rename request logging native extension\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T15:39:20+00:00"
+    },
+    {
+      "sha": "3149ccdf0c52b2d803d2d944cdc794cf387d8b3c",
+      "message": "perf: add native json request logging fast path\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T16:09:17+00:00"
+    },
+    {
+      "sha": "227e12bf774f48f8d9aa279dfcdbb7f59b4040fd",
+      "message": "test: cover request logging native fallback paths\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-08T07:48:42+00:00"
+    },
+    {
+      "sha": "f10a58245ffdab2d83dcc884f022b828a61a23ae",
+      "message": "feat: generate stubs for request logging native extension\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-08T08:10:31+00:00"
+    },
+    {
+      "sha": "0a1cd590fa31a8b7763e50eecaa6fa8d5bd2ba2a",
+      "message": "perf: reuse request logging key sensitivity cache\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-13T09:32:41+00:00"
+    },
+    {
+      "sha": "713a778bf5a2e4c24358cfa9b3a3583829d280ce",
+      "message": "chore: normalize detect-secrets baseline after rebase\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-13T09:52:53+00:00"
+    },
+    {
+      "sha": "03687f7e535cb5eb8de00b96737790912aba6e70",
+      "message": "Merge branch 'main' into fix/rust-request-logging-sidecar",
+      "author": "Luca",
+      "date": "2026-04-13T12:01:25+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 2172,
+  "deletions": 75,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:14.928818",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:14.929492",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4030,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4030.json"
+  }
+}

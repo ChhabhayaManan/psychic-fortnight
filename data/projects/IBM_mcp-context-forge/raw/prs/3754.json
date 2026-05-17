@@ -1,0 +1,440 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3754,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3754"
+  },
+  "metadata": {
+    "title": "feat: replace the internal plugin framework with CPEX",
+    "state": "closed",
+    "created_at": "2026-03-20T05:22:34+00:00",
+    "updated_at": "2026-05-06T12:51:06+00:00",
+    "closed_at": "2026-05-06T12:51:02+00:00",
+    "merged_at": "2026-05-06T12:51:02+00:00",
+    "author": "araujof",
+    "labels": [
+      "enhancement",
+      "design",
+      "plugins",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": [
+      "msureshkumar88",
+      "cafalchio",
+      "brian-hussey"
+    ]
+  },
+  "description": "## Summary\r\n\r\nReplace the internal plugin framework (`mcpgateway/plugins/framework/`, `mcpgateway/plugins/tools/`, `plugin_templates/`) with the [CPEX](https://github.com/contextforge-org/contextforge-plugins-framework) external package (`cpex>=0.1.0rc1`).\r\n\r\nCloses: #3753 \r\n\r\n## What changed\r\n\r\n- **Added `cpex` as external dependency** in `pyproject.toml`\r\n- **Migrated all imports**: `from mcpgateway.plugins.framework` → `from cpex.framework`, `from mcpgateway.plugins.tools` → `from cpex.tools`\r\n- **Moved `get_plugin_manager()`** singleton factory to `mcpgateway/plugins/__init__.py` (bridges cpex with gateway-specific hook policies)\r\n- **Migrated PluginMode enums**: `ENFORCE` → `SEQUENTIAL`, `PERMISSIVE` → `TRANSFORM`, `ENFORCE_IGNORE_ERROR` → `SEQUENTIAL` + `on_error: ignore` (see https://github.com/IBM/mcp-context-forge/pull/3754#issuecomment-4360555203)\r\n- **Adapted to cpex API changes**:\r\n  - `PluginViolation.http_status_code` / `.http_headers` → `violation.details[\"http_status_code\"]` / `details[\"http_headers\"]`\r\n  - `PromptPosthookPayload.name` → `.prompt_id`; `ToolPreInvokePayload.arguments` → `.args`\r\n- **Deleted internal framework**: `mcpgateway/plugins/framework/`, `mcpgateway/plugins/tools/`, `plugin_templates/` directory, `tests/unit/mcpgateway/plugins/framework/`\r\n- **Created acceptance tests** (`tests/acceptance/plugins/test_cpex_contract.py`) verifying cpex API surface, behavioral contracts, serialization, and settings compatibility\r\n- **Updated YAML configs** across plugins and test fixtures\r\n- **Updated documentation** under `docs/docs/using/plugins/`, `plugins/README.md`, `plugins/AGENTS.md`, `llms/plugins-llms.md`\r\n\r\n## Test results\r\n\r\n- Unit tests pass\r\n- Acceptance tests pass\r\n- Performance profiling shows no regression\r\n- flake8, bandit, pylint all clean\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4228693680",
+      "author": "msureshkumar88",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-05T13:58:39+00:00",
+      "body": "## Verification Report ✅\r\n\r\nI've verified that the gateway successfully integrates with the cpex framework and all plugins are correctly installed.\r\n\r\n### Verification Approach\r\n- Installed cpex framework (`cpex>=0.1.0rc1`) in mcp-context-forge\r\n- Installed all 6 plugins from cpex-plugins PR https://github.com/IBM/cpex-plugins/pull/57 branch (`fix/use-cpex-framework-dependency`)\r\n- Verified gateway plugin manager uses cpex framework\r\n- Confirmed all plugins import and function correctly\r\n\r\n### Integration Verified\r\n- ✅ **cpex>=0.1.0rc1** added as core dependency\r\n- ✅ All 6 plugins installed successfully from git branch\r\n- ✅ Gateway plugin manager (`mcpgateway.plugins.get_plugin_manager`) uses cpex\r\n- ✅ Plugin framework active (`PLUGINS_ENABLED=true` in .env)\r\n- ✅ All plugin imports work correctly\r\n\r\n### Plugins Installed and Verified (6/6)\r\n1. ✅ cpex-pii-filter==0.3.0\r\n2. ✅ cpex-rate-limiter==0.1.0\r\n3. ✅ cpex-url-reputation==0.3.0\r\n4. ✅ cpex-retry-with-backoff==0.3.0\r\n5. ✅ cpex-secrets-detection==0.3.0\r\n6. ✅ cpex-encoded-exfil-detection==0.3.0\r\n\r\n### Key Changes Validated\r\n- Internal `mcpgateway.plugins.framework` successfully replaced with external `cpex.framework`\r\n- ~10,000+ lines of internal framework code removed\r\n- All imports migrated: `from mcpgateway.plugins.framework` → `from cpex.framework`\r\n- Plugin mode migration completed: `ENFORCE` → `SEQUENTIAL`, `PERMISSIVE` → `TRANSFORM`\r\n\r\nThe gateway successfully integrates with cpex framework and all plugins are functional. This PR is ready to merge. 🚀"
+    },
+    {
+      "id": "4229405663",
+      "author": "cafalchio",
+      "state": "DISMISSED",
+      "submitted_at": "2026-05-05T15:20:10+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "4230542150",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-05T18:11:27+00:00",
+      "body": "## Review: Request for Changes\n\n**Note on earlier approval:** My previous approval (submitted earlier today) was premature — it was triggered while validating the gateway integration as part of reviewing and testing [IBM/cpex-plugins#57](https://github.com/IBM/cpex-plugins/pull/57). That validation confirmed the cpex framework wiring works and plugins load correctly, but it was not a full code review of this PR. This review supersedes that approval.\n\n---\n\n### What cpex-plugins#57 accomplished (context)\n\n[IBM/cpex-plugins#57](https://github.com/IBM/cpex-plugins/pull/57) (now merged) completed the complementary side of this migration:\n\n- **Migrated all plugin imports** from `mcpgateway.plugins.framework` → `cpex.framework` across `encoded_exfil_detection`, `pii_filter`, `rate_limiter`, `retry_with_backoff`, `secrets_detection`, `url_reputation`\n- **Pinned `cpex>=0.1.0rc1,<0.2`** in each plugin `pyproject.toml` (bounded, non-dev)\n- **Updated the Rust bridge** (`crates/framework_bridge/src/lib.rs`) to resolve from `cpex.framework` instead of `mcpgateway.plugins.framework`, with new Rust unit tests for bridge object construction\n- **Added CI scaffolding checks** that grep for stale `mcpgateway.plugins.framework` references in generated scaffold templates\n- **Bumped minor versions** for all 6 affected packages (0.x.y → 0.(x+1).0) to make the migration distinguishable from patch releases\n- **Added `real_cpex_imports.py`** regression tests to the release pipeline\n\nThis confirms the ecosystem side is ready. The issues below are specific to this PR.\n\n---\n\n## Blocking Issues (must fix before merge)\n\n### 1. `instructions.md` must be removed\n\nThe file `instructions.md` added at the repo root is an internal merge-planning document (221 lines covering merge strategy, PR numbers, CPEX repo references, internal decision rationale). It is not documentation for repo consumers. Please delete it before merging.\n\n### 2. `cpex>=0.1.0.dev11` must be replaced with a stable pin\n\n`pyproject.toml` declares `cpex>=0.1.0.dev11`. Dev pre-release versions can be yanked, have unstable APIs, and are a supply-chain risk in production dependencies. cpex-plugins#57 already uses `cpex>=0.1.0rc1,<0.2`. This PR should use the same bounded constraint — or a tagged release — before merge. The PR comments acknowledge this; it just needs to land.\n\n### 3. Data migration gap: existing `enforce_ignore_error` DB rows\n\n`_BINDING_MODE_TO_PLUGIN_MODE` in `gateway_plugin_manager.py` maps only `\"enforce\"`, `\"permissive\"`, `\"disabled\"`. Existing `ToolPluginBinding` rows with `mode=\"enforce_ignore_error\"` will hit `mapping=None` → `mode=None`, silently reverting to base YAML default and **dropping enforce semantics**. For deployments with security plugins bound under `enforce_ignore_error`, this is a silent regression.\n\nEither:\n- Add `\"enforce_ignore_error\": (PluginMode.SEQUENTIAL, OnError.IGNORE)` to `_BINDING_MODE_TO_PLUGIN_MODE`, **or**\n- Write an Alembic migration that rewrites `mode='enforce_ignore_error'` rows to `mode='enforce', on_error='ignore'`\n\nA test covering this case should also be added.\n\n---\n\n## Security\n\n### Redis pub/sub global toggle is unauthenticated\n\n`plugins/__init__.py` handles `_GlobalToggleMsg` received over the `plugin:invalidation` pub/sub channel by setting `_PLUGINS_ENABLED = False` across all workers. Any Redis client with write access to this channel can disable all plugin enforcement — including security plugins (PII filters, content moderation, rate limiters, exfil detectors). The channel has no message-level authentication beyond Redis connection auth.\n\n**Hardening required:** Consider signing invalidation messages with HMAC using a shared secret (e.g., `JWT_SECRET_KEY`), and/or restricting the invalidation channel to a dedicated Redis ACL user. At minimum, log `global_toggle` events at WARN/ERROR level with the originating value so operators can detect unexpected toggles.\n\n### `on_error` column lacks DB-level constraint\n\n`db.py` adds `on_error: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)`. Valid values (`\"fail\"`, `\"ignore\"`, `\"disable\"`) are enforced at the API boundary but not at the DB layer. A direct DB write or a future service bug can insert an arbitrary value; `OnError(binding_on_error)` in `get_config_from_db` will then silently ignore it (warning only), leaving the plugin running in an undefined error policy.\n\n**Hardening required:** Add a `CheckConstraint` to the `on_error` column:\n```python\nsa.CheckConstraint(\"on_error IN ('fail', 'ignore', 'disable')\", name=\"ck_tool_plugin_bindings_on_error\")\n```\nThis also needs to be reflected in the Alembic migration.\n\n### `violation.details[\"http_status_code\"]` — unguarded dict access\n\nThe migration from typed `PluginViolation.http_status_code` to `violation.details[\"http_status_code\"]` removes compile-time safety. A missing key raises `KeyError`, which propagates as an unhandled 500 and may leak internal stack details in the response. Use `.get()` with a safe fallback throughout all violation detail accesses.\n\n### `UserContext` import path change — contract not verified\n\n`resource_service.py` and `tool_service.py` now import `UserContext` from `mcpgateway.transports.context` instead of `mcpgateway.plugins.framework.models`. The `isinstance(user_identity, UserCtx)` check in identity propagation depends on field parity. If the two classes differ (e.g., missing `teams` or `username` fields), the check silently skips header injection, breaking downstream authorization. No test covers this path after the import change.\n\n---\n\n## Performance\n\n### `invalidate_all` rebuilds managers sequentially\n\n`gateway_plugin_manager.py` iterates context IDs one-by-one when `invalidate_all` is called (triggered by every mode-change pub/sub message). With many cached contexts each requiring a DB query + Redis MGET, this is O(n) blocking rebuild. Suggest:\n```python\nawait asyncio.gather(\n    *(self.reload_tenant(ctx_id) for ctx_id in context_ids),\n    return_exceptions=True,\n)\n```\n\n### `asyncio.get_event_loop().time()` is deprecated\n\n`plugins/__init__.py:216` uses `asyncio.get_event_loop().time()` inside an async function. Deprecated since Python 3.10; use `asyncio.get_running_loop().time()`.\n\n### `_merge_tenant_config` always deep-copies\n\n`_merge_tenant_config` calls `self._base_config.model_copy(deep=True)` on every manager build even when no override matches any base plugin. Add an early return:\n```python\nif not any(p.name in override_map for p in self._base_config.plugins or []):\n    return self._base_config\n```\n\n---\n\n## Code Quality\n\n### `GatewayTenantPluginManagerFactory` alias should be deprecated or removed\n\n```python\nGatewayTenantPluginManagerFactory = TenantPluginManagerFactory  # gateway_plugin_manager.py, bottom\n```\nThe transition appears complete — the test file already uses both names interchangeably. If this alias is needed for a rolling deploy window, mark it with a deprecation comment and a removal target (e.g., next minor version). If it's safe to remove now, remove it.\n\n### `list_configured_plugin_names` accesses `_base_config` via protected access\n\n`plugins/__init__.py` calls `_plugin_manager_factory._base_config` with `# pylint: disable=protected-access`. The factory should expose a `@property plugin_names` or similar public accessor.\n\n### `apply_attribute_mapping` has inconsistent copy semantics\n\nReturns the original dict reference when `not mapping`, a new dict otherwise. Callers that mutate the returned dict get different behavior depending on whether a mapping was applied. Return a copy in both branches for consistency.\n\n### Critical docstrings removed from `_state.py`\n\nThe PR removed multi-line docstrings explaining the `None`-expiry invariant for single-node deployments and the three-state encoding for the degraded-boot flag. These explain non-obvious invariants that a future developer would need to understand. Per project standards, the WHY belongs in code when it would surprise a reader — these qualify. Restore one-line rationale comments per invariant.\n\n---\n\n## Testing Gaps\n\n- **`enforce_ignore_error` DB binding path** — no test for existing rows with `mode=\"enforce_ignore_error\"` hitting the new `_BINDING_MODE_TO_PLUGIN_MODE` (which doesn't map this value). Needs a regression test.\n- **`_plugin_invalidation_listener` reconnect paths** — the backoff/escalation logic (WARNING → ERROR after 5 failures, exponential backoff, `CancelledError` during `async for`) has no unit tests.\n- **`invalidate_team` prefix collision** — `cid.startswith(f\"{team_id}{sep}\")` is untested for edge cases like team_id `\"t\"` matching `\"t::tool\"` but not `\"t2::tool\"`.\n- **`_handle_invalidation_message` edge cases** — missing `data` key, valid JSON with unrecognized frame type, `_TeamBindingChangeMsg` when factory is `None`.\n- **Pub/sub full round-trip** — no integration test for: API call → Redis write + publish → listener receives → state updated → next `get_manager` picks up new mode. This is the critical path for cross-worker plugin management.\n- **`_CachedManager.is_expired(ttl=0)`** — the \"never expires\" contract for TTL=0 is undocumented by a test.\n- **`UserContext` import parity** — after the import path change, no test verifies identity propagation headers are still injected correctly.\n- **Acceptance tests are surface-only** — `test_cpex_contract.py` verifies imports and model round-trips but does not invoke a hook through `TenantPluginManager` to verify SEQUENTIAL vs TRANSFORM vs AUDIT mode semantics are preserved.\n\n---\n\n## Logging Gaps\n\n- **`_build_manager`** — no log entry at the manager level when build fails before re-raising. Operators need `logger.error(\"Manager build failed for context_id=%s\", ..., exc_info=True)` to correlate failures.\n- **`start_plugin_invalidation_listener`** — Redis probe failure logs at WARNING. Since pub/sub is now critical for cross-worker state, misconfigured Redis should log at ERROR.\n- **`invalidate_all` / `invalidate_team`** — no success log. Operators cannot confirm how many managers were rebuilt after a broadcast.\n- **`_handle_invalidation_message` silent drop** — when `_plugin_manager_factory is None`, `_BindingChangeMsg` and `_TeamBindingChangeMsg` match arms don't fire (guard condition fails). Add a debug log so startups/shutdowns are observable.\n\n---\n\n## Dead Code / Consistency\n\n- **`_BINDING_MODE_TO_PLUGIN_MODE` vs `_GATEWAY_MODE_TO_PLUGIN_MODE`** — these two dicts have different `enforce_ignore_error` handling: `_GATEWAY_MODE_TO_PLUGIN_MODE` handles it (Redis overrides), `_BINDING_MODE_TO_PLUGIN_MODE` does not (DB bindings). The three code paths (DB reads, Redis overrides, pub/sub messages) need consistent behavior for this mode.\n- **`PluginBindingMode` enum missing `ENFORCE_IGNORE_ERROR`** — `schemas.py` adds the new cpex mode names but omits `ENFORCE_IGNORE_ERROR`. Old clients or data using this mode will fail Pydantic validation. Either add it as a deprecated alias or document the migration path explicitly in the schema's field description.\n\n---\n\n## Summary\n\n| Category | Severity | Items |\n|---|---|---|\n| Blocking | Must fix | 3 |\n| Security | Critical/High | 4 |\n| Performance | Medium | 3 |\n| Code quality | Low/Medium | 4 |\n| Testing gaps | High/Medium | 8 |\n| Logging gaps | Low/Medium | 4 |\n| Dead code | Low | 2 |\n\nThe architecture direction is right and the cpex-plugins ecosystem is now aligned (as confirmed by reviewing and validating #57). Resolving the three blocking issues and the security items should be the focus for the next iteration. Happy to re-review once those are addressed."
+    },
+    {
+      "id": "4231482475",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-05T20:42:47+00:00",
+      "body": "## Re-review: Most Blocking Issues Resolved ✅\n\nGood progress — all three original blocking issues are fixed and the security, performance, and code quality items were largely addressed. Noting what closed and what remains.\n\n---\n\n### ✅ Confirmed Fixed\n\n| Item | Evidence |\n|---|---|\n| `instructions.md` removed | not in tree |\n| `enforce_ignore_error` added to `_BINDING_MODE_TO_PLUGIN_MODE` | `gateway_plugin_manager.py:45` |\n| `asyncio.get_event_loop()` → `get_running_loop()` | `plugins/__init__.py:189` |\n| `on_error` CheckConstraint in DB + Alembic migration | `db.py:6813`, `926d3e07d098` migration |\n| HMAC signing for Redis pub/sub | `_sign_message` / `_verify_and_extract` with `hmac.compare_digest` |\n| `GatewayTenantPluginManagerFactory` deprecation comment + v1.1.0 target | `gateway_plugin_manager.py:441` |\n| `list_configured_plugin_names` uses public `factory.plugin_names` property | `plugins/__init__.py:396` |\n| `apply_attribute_mapping` consistent copy semantics | `utils.py:32` — returns `dict(attributes)` in both branches |\n| `invalidate_all` parallel with `asyncio.gather` | `gateway_plugin_manager.py:412` |\n| `_merge_tenant_config` early return when no override matches | `gateway_plugin_manager.py:217` |\n| Testing: `enforce_ignore_error` DB binding path | `test_gateway_plugin_manager.py:974` |\n| Testing: `_CachedManager.is_expired(ttl=0)` contract | `test_gateway_plugin_manager.py:951` |\n| Testing: `invalidate_team` prefix collision | `test_gateway_plugin_manager.py:1011` |\n| Testing: `_handle_invalidation_message` missing data, factory=None debug log | `test_plugin_runtime_management.py:611`, `1613` |\n| `_plugin_invalidation_listener` exponential backoff + WARNING→ERROR escalation | `plugins/__init__.py:490` |\n\n---\n\n### ✅ Also Confirmed Fixed (resolved since last review)\n\n| Item | Evidence |\n|---|---|\n| `cpex>=0.1.0,<0.2` upper bound added | `pyproject.toml:77` |\n| `PluginBindingMode.ENFORCE_IGNORE_ERROR` added to schema enum | `schemas.py:8233` |\n| `invalidate_team` parallelized with `asyncio.gather` | `gateway_plugin_manager.py:421` |\n| HMAC unsigned message escalated to `WARNING` when key configured | `plugins/__init__.py:153` |\n\nThank you for the thorough and timely fixes — the iteration speed on this PR has been great, and the HMAC hardening in particular is solid work. One item remains before merge; see the follow-up review for details.\n\n---\n\n### ❌ Still Open\n\n#### HMAC unit tests — see follow-up review\n\n`_sign_message` and `_verify_and_extract` have no dedicated unit tests. The exact failure paths the security hardening was meant to prevent (tampered signature, missing `payload` key, round-trip correctness, no-key passthrough) need regression coverage. Details in the follow-up review submitted alongside this update."
+    },
+    {
+      "id": "4234585218",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-05-06T08:50:40+00:00",
+      "body": "### ❌ No unit tests for HMAC signing/verification paths\n\n`_sign_message` and `_verify_and_extract` (`mcpgateway/plugins/__init__.py:118–155`) have no dedicated unit tests. These functions are the core of the security hardening added in this PR — they are exactly the paths that need regression coverage.\n\nMissing test cases:\n\n1. **Tampered signature** — `_verify_and_extract` must return `None` and log an error when `sig` does not match the payload:\n   ```python\n   def test_verify_and_extract_tampered_sig(monkeypatch):\n       monkeypatch.setenv(\"JWT_SECRET_KEY\", \"test-secret\")\n       signed = _sign_message('{\"tool\": \"x\"}')\n       envelope = json.loads(signed)\n       envelope[\"sig\"] = envelope[\"sig\"][:-1] + (\"0\" if envelope[\"sig\"][-1] != \"0\" else \"1\")\n       assert _verify_and_extract(json.dumps(envelope)) is None\n   ```\n\n2. **Missing `payload` key in envelope** — a dict with `sig` but no `payload` must not raise; should return `None` or fall through to the plain-message path:\n   ```python\n   def test_verify_and_extract_missing_payload_key(monkeypatch):\n       monkeypatch.setenv(\"JWT_SECRET_KEY\", \"test-secret\")\n       bad_envelope = json.dumps({\"sig\": \"abc123\"})\n       # Should not raise KeyError; return None or the raw string\n       result = _verify_and_extract(bad_envelope)\n       assert result is None or isinstance(result, str)\n   ```\n\n3. **Round-trip: sign → verify** — happy path with key configured:\n   ```python\n   def test_sign_verify_roundtrip(monkeypatch):\n       monkeypatch.setenv(\"JWT_SECRET_KEY\", \"test-secret\")\n       payload = '{\"tool\": \"y\", \"args\": {}}'\n       assert _verify_and_extract(_sign_message(payload)) == payload\n   ```\n\n4. **No key configured** — `_sign_message` returns payload unchanged, `_verify_and_extract` accepts both plain and envelope forms:\n   ```python\n   def test_sign_no_key(monkeypatch):\n       monkeypatch.delenv(\"JWT_SECRET_KEY\", raising=False)\n       payload = '{\"tool\": \"z\"}'\n       assert _sign_message(payload) == payload\n       assert _verify_and_extract(payload) == payload\n   ```\n\nThese are the exact failure modes the HMAC hardening was meant to prevent. Without them, a future refactor that breaks `hmac.compare_digest` or the envelope parsing would pass all existing tests."
+    },
+    {
+      "id": "4235687347",
+      "author": "msureshkumar88",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-06T11:35:16+00:00",
+      "body": "## Final E2E Battery — Approved ✅\n\nRan a full end-to-end check pass before approving.\n\n### Local test results\n\n| Suite | Result |\n|---|---|\n| Full unit suite () | **16,957 passed**, 111 skipped, 2 xfailed |\n| Plugin unit tests () | **518 passed**, 33 skipped |\n| HMAC + acceptance (, ) | **116 passed** |\n| Bandit scan () | **0 issues** |\n| Ruff lint () | **All checks passed** |\n\n### Previously open items — all resolved\n\n- **HMAC unit tests** ( / ): full coverage in `test_plugin_runtime_management.py` — round-trip, tampered sig, tampered payload, unsigned-without-key, unsigned-when-key-configured, invalid JSON ✅\n- **Stale import paths** in `cedar/run-server.sh`, `llmguard/run-server.sh`, `opa/run-server.sh`, `clamav_server/run.sh`, `clamav_server/README.md`: all updated to `cpex.framework.external.mcp.server.runtime` ✅\n- **`llms/plugins-llms.md`**  →  field: fixed ✅\n- **Migration guide anchor links**: corrected to point to Step 3 ✅\n- **`cpex>=0.1.0,<0.2`** upper bound: present ✅\n- **`ENFORCE_IGNORE_ERROR`** in `PluginBindingMode` enum as deprecated alias: present ✅\n- **`asyncio.gather`** in `invalidate_team` (`gateway_plugin_manager.py:420`): implemented ✅\n- **WARNING log** for unsigned messages when HMAC configured (`__init__.py:153`): escalated ✅\n\n### Other checks\n\n- Alembic: single head (`926d3e07d098`) — clean ✅\n- CI checks currently queued (re-triggered by recent commits), not failing ✅\n\nThe framework extraction is clean — 139 files deleted, net code reduction, no regressions in the full test suite. All review blockers resolved. Good to merge."
+    },
+    {
+      "id": "4235694784",
+      "author": "msureshkumar88",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-06T11:36:36+00:00",
+      "body": "## Final E2E Battery — Approved\n\nRan a full end-to-end check pass before approving.\n\n### Local test results\n\n| Suite | Result |\n|---|---|\n| Full unit suite (tests/unit/) | **16,957 passed**, 111 skipped, 2 xfailed |\n| Plugin unit tests (tests/unit/mcpgateway/plugins/) | **518 passed**, 33 skipped |\n| HMAC + acceptance (test_plugin_runtime_management, test_cpex_contract) | **116 passed** |\n| Bandit scan (mcpgateway/plugins/) | **0 issues** |\n| Ruff lint (mcpgateway/plugins/) | **All checks passed** |\n\n### Previously open items — all resolved\n\n- **HMAC unit tests** for `_sign_message` / `_verify_and_extract`: full coverage in `test_plugin_runtime_management.py` — round-trip, tampered sig, tampered payload, unsigned-without-key, unsigned-when-key-configured, invalid JSON ✅\n- **Stale import paths** in `cedar/run-server.sh`, `llmguard/run-server.sh`, `opa/run-server.sh`, `clamav_server/run.sh`, `clamav_server/README.md`: all updated to `cpex.framework.external.mcp.server.runtime` ✅\n- **`llms/plugins-llms.md`** `.name` → `.prompt_id` field: fixed ✅\n- **Migration guide anchor links**: corrected to point to Step 3 ✅\n- **`cpex>=0.1.0,<0.2`** upper bound: present in pyproject.toml ✅\n- **`ENFORCE_IGNORE_ERROR`** in `PluginBindingMode` enum as deprecated alias: present ✅\n- **`asyncio.gather`** in `invalidate_team` (gateway_plugin_manager.py:420): implemented ✅\n- **WARNING log** for unsigned messages when HMAC configured (__init__.py:153): escalated ✅\n\n### Other checks\n\n- Alembic: single head (926d3e07d098) — clean ✅\n- CI checks currently queued (re-triggered by recent commits), not failing ✅\n\nThe framework extraction is clean — 139 files deleted, net code reduction, no regressions in the full test suite. All review blockers resolved. Good to merge.\n"
+    },
+    {
+      "id": "4236125138",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-06T12:45:35+00:00",
+      "body": "Approved based on others' reviews.\nAll issues addressed. Merging."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "275b06f727846320144dbb28c0a5e3cd78ba7a20",
+      "message": "refactor: migrate to CPEX plugin framework\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-03-20T04:57:49+00:00"
+    },
+    {
+      "sha": "97cfd7281e4829b7a4a7b23511aabe1ae3ee6567",
+      "message": "chore: lint fixes\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-03-20T05:03:36+00:00"
+    },
+    {
+      "sha": "160329ecd7af5fd49f9229f5de606e6ca35a8a28",
+      "message": "Merge branch 'main' into feat/cpex\n\nMerge upstream/main into feat/cpex (cpex plugin framework migration).\n\nKey resolutions:\n- All mcpgateway.plugins.framework imports migrated to cpex.framework\n- Plugin singleton functions (get_plugin_manager, enable_plugins, etc.)\n  moved to mcpgateway.plugins gateway module\n- PluginMode.ENFORCE/PERMISSIVE mapped to SEQUENTIAL/AUDIT (cpex modes)\n- PluginViolation.http_status_code moved into details dict (cpex drops\n  unknown kwargs)\n- Rate limiter http_headers moved to violation.details and result.metadata\n- cpex dependency updated to feat/cf_sync branch\n- Legacy mode mapping added to gateway_plugin_manager for DB bindings\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-10T05:02:38+00:00"
+    },
+    {
+      "sha": "b769e2b2b53acd08d12efa8eb203e567978de045",
+      "message": "fix: migrate integration test imports to cpex.framework\n\nUpdate remaining mcpgateway.plugins.framework imports in integration\ntests to use cpex.framework, and map legacy PluginMode values.\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-10T05:05:38+00:00"
+    },
+    {
+      "sha": "d5b30fbb7c37b07814a4caf060dadcc8c8060be8",
+      "message": "chore: update uv.lock\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-10T05:15:43+00:00"
+    },
+    {
+      "sha": "639d62231d3e8852948d025be9c364d95331db9e",
+      "message": "chore: fix lint issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-10T05:26:55+00:00"
+    },
+    {
+      "sha": "1917fd02541b498bdbc45a1f547ae58bb217a6a1",
+      "message": "fix: group mcpgateway imports to satisfy pylint C0412\n\nReorder first-party imports so cpex.framework and mcpgateway imports\nare not interleaved, fixing ungrouped-imports warnings.\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-10T05:39:38+00:00"
+    },
+    {
+      "sha": "ee986b144872e76bd7b4a0be64d632aa4d291812",
+      "message": "chore: update secrets baseline\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-10T05:45:54+00:00"
+    },
+    {
+      "sha": "2be9c33f650f0b5eedd161ad448581dc47cf1bfb",
+      "message": "refactor: map plugin modes\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-10T06:03:39+00:00"
+    },
+    {
+      "sha": "1a1f01ab748da2d4f924026088eadc57ed4b3692",
+      "message": "tests: fix flaky test regex (updated pydantic caused test to fail)\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-13T20:55:18+00:00"
+    },
+    {
+      "sha": "0f9f6da19aaef3f4b02ac030b146265145615e25",
+      "message": "chore: update to cpex 0.1.0.dev11\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-13T21:04:48+00:00"
+    },
+    {
+      "sha": "be145cbe1b9b9d56df1affd3c7506876c14d0e24",
+      "message": "chore: merge main into feat/cpex\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-14T03:27:35+00:00"
+    },
+    {
+      "sha": "ac644c3661f11a41f47c0b0143ee917d944757a9",
+      "message": "chore: fix licence policy issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-14T03:42:45+00:00"
+    },
+    {
+      "sha": "eadc80be9fb66e519df6c40d3a863a2a093d07da",
+      "message": "chore: temporary pin to cpex 0.1.0.dev11\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-28T17:23:14+00:00"
+    },
+    {
+      "sha": "a68be51be8aeea01832828792cdce75bfb42715f",
+      "message": "chore: stage local changes before merge\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-28T17:25:15+00:00"
+    },
+    {
+      "sha": "aa2a4462fa612147e3978b437d335fde58814ab6",
+      "message": "chore: merge upstream/main into feat/cpex\n\nMerge upstream/main (88 commits) into feat/cpex.\n\nResolved conflicts from 3 PRs that modified the now-removed in-tree\nplugin framework:\n- #4292 (runtime plugin management) — refactored Redis/state into CF modules\n- #4331 (span attribute customizer) — moved attribute mapping to CF\n- #3152 (identity propagation) — kept UserContext in CF, not CPEX\n\nAll mcpgateway/plugins/framework/ files remain deleted; functionality\nis provided by cpex>=0.1.0.dev11 and CF-side modules.\n\nNew CF-side modules created:\n- mcpgateway/plugins/_redis.py — Redis provider shim\n- mcpgateway/plugins/_state.py — per-plugin mode override state\n- mcpgateway/plugins/utils.py — apply_attribute_mapping utility\n- mcpgateway/transports/context.py — UserContext model\n\nUpdated mcpgateway/plugins/__init__.py with runtime management\nfunctions (pub/sub invalidation, shared toggle, mode overrides).\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-28T18:36:28+00:00"
+    },
+    {
+      "sha": "8a62daee39f3b7ae6814b036b1a2ae5b845414f4",
+      "message": "chore: fix import ordering after merge\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-28T18:51:23+00:00"
+    },
+    {
+      "sha": "d2dc5573ed5dd1f55a8cb7a71581ff49e4d2f5d4",
+      "message": "fix: restore PluginId/config schemas lost during merge, fix test imports\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-28T18:58:54+00:00"
+    },
+    {
+      "sha": "20fbfa4678935c91863f90805c71bff8ed0d4004",
+      "message": "fix: use GlobalContext.state for user_context (cpex GlobalContext lacks user_context field)\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-28T19:38:45+00:00"
+    },
+    {
+      "sha": "e96be7bbd0b0a4c3212653b710b8130b28dd2cd8",
+      "message": "refactor: remove PluginId enum and config schemas, align with main's PR #4286\n\nAccept main's design: plugin_id is a plain string (class name), not an\nenum. PluginBindingMode uses enforce/permissive/disabled. Config schema\nvalidation is delegated to plugins themselves, not enforced by CF.\n\ngateway_plugin_manager.py maps enforce→sequential, permissive→audit\nfor cpex PluginMode compatibility.\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-28T20:49:42+00:00"
+    },
+    {
+      "sha": "5b452f9c8bf68c9c60e3a1656973c750cab39e63",
+      "message": "fix: update test assertions for plugin_id class names and binding mode values\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-28T20:56:40+00:00"
+    },
+    {
+      "sha": "a2513be299d74cf68d747976191a4fe164a9ac37",
+      "message": "refactor: ported in-tree plugin framework methods outside cpex\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-29T04:00:09+00:00"
+    },
+    {
+      "sha": "3147916922f2178e3c7b50f10b4056696d21b182",
+      "message": "refactor: compatibility layer for legacy plugin modes\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-29T06:16:05+00:00"
+    },
+    {
+      "sha": "a5bca27f24a0de9637f58e1d0875429395078655",
+      "message": "refactor: merge plugin manager factories\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-29T06:32:36+00:00"
+    },
+    {
+      "sha": "e247dfa4bde26a9bad6276f391df7a97d99cbc5f",
+      "message": "test: update plugin manager tests\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-29T06:33:07+00:00"
+    },
+    {
+      "sha": "b3aa8097e1fa79bdb22917b6ffd305b11fdbf931",
+      "message": "chore: fix lint issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-29T06:50:06+00:00"
+    },
+    {
+      "sha": "2692059632292fe811ffc7f424f6cd1793967c31",
+      "message": "chore: update cpex-* to feature branch for tests\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-29T07:15:10+00:00"
+    },
+    {
+      "sha": "0f5d1ca8b936fa33f214f70e114af0074dc72c22",
+      "message": "Merge branch 'main' into feat/cpex",
+      "author": "Frederico Araujo",
+      "date": "2026-04-29T07:25:47+00:00"
+    },
+    {
+      "sha": "4f9c440f4a1e5779ecc88a8a197c129ef991a91a",
+      "message": "chore: update cpex-* references\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-29T07:34:43+00:00"
+    },
+    {
+      "sha": "71adcaa28cceb01297ad521692d2b088a35b1277",
+      "message": "test: improve coverage\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-29T08:03:29+00:00"
+    },
+    {
+      "sha": "92d3c3405d49f78a1ba53e6163c08db5ffe0d7fe",
+      "message": "chore: removed uv sources for cpex-* plugins\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-29T15:54:29+00:00"
+    },
+    {
+      "sha": "a6553b60825ef9e77678f621b4c09b528409f438",
+      "message": "refactor: finish feature backporting with cpex 0.1.0.dev13\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-04-30T06:17:42+00:00"
+    },
+    {
+      "sha": "f8bbc56ffd7a0e9b785618478feb37e85b342703",
+      "message": "chore: update cpex version\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-01T03:40:24+00:00"
+    },
+    {
+      "sha": "f72700e2a33d52d94ac8d2b220e3b92db3181a34",
+      "message": "chore: merge upstream/main into feat/cpex\n\nMerge the v1.0.0 release commit from main. Conflicts resolved:\n- Kept framework/ files deleted (extracted to cpex package)\n- Kept feat/cpex import paths (mcpgateway.plugins, cpex.framework)\n- Accepted copyright year (2026) and version (1.0.0) updates\n- Added brotli dependency from main alongside cpex dependency\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-01T04:25:06+00:00"
+    },
+    {
+      "sha": "22efb1a8f65dd9711505157dd696699d0e3208cb",
+      "message": "chore: lint\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-01T04:45:42+00:00"
+    },
+    {
+      "sha": "5703416b9752359af55f8e84e48307776c1258da",
+      "message": "refactor: UI compatibility layer for plugin modes; playright tests for plugins page\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-01T16:40:43+00:00"
+    },
+    {
+      "sha": "023523b840950b848a14eb9eea50a1d13325aede",
+      "message": "fix: include concurrent model in plugin statscard count\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-01T17:03:54+00:00"
+    },
+    {
+      "sha": "02477177a18c3c99559a28ee62fd6dbe8080cad4",
+      "message": "tests: fix exfil detector tests due to removed APIs\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-01T18:16:57+00:00"
+    },
+    {
+      "sha": "004f872d95500319dd82fd29be7ae2380b57ae3e",
+      "message": "Merge remote-tracking branch 'upstream/main' into feat/cpex\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-01T18:19:43+00:00"
+    },
+    {
+      "sha": "569ffee89c0e25ee23e57dd37bbcd09cd2bb1653",
+      "message": "chore: update detect secrets\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-01T19:54:41+00:00"
+    },
+    {
+      "sha": "9e0d559fbfbe861de7e96dcce5605335be839287",
+      "message": "docs: add migration guide to CPEX\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T04:21:31+00:00"
+    },
+    {
+      "sha": "7bb0f1fd4bddc14df67313f25039f89312baf238",
+      "message": "chore: merge upstream/main into feat/cpex\n\nBring in 5 upstream commits (cpex-rate-limiter 0.0.6 bump, populate-tiny,\nRC3 cleanup, cargo-vet release docs, playwright HTMX fix). No changes to\nmcpgateway/plugins; .secrets.baseline kept from feat/cpex and uv.lock\nregenerated against the merged pyproject.toml.\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T17:43:57+00:00"
+    },
+    {
+      "sha": "add426fa2023771116b63ae61afa7fd1a4349514",
+      "message": "chore: merged main; update dependencies to latest cpex-plugins; updated acceptance tests for new cpex-plugins\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T18:21:47+00:00"
+    },
+    {
+      "sha": "c24bfae5b1b4c7f4b57feab66018a42bdd333c5f",
+      "message": "chore: merge upstream/main into feat/cpex\n\nPull in upstream JSON-RPC error-code fix (#4356). Only conflict was\n.secrets.baseline (timestamp/line-number drift) — kept feat/cpex's\nversion. No mcpgateway/plugins changes from upstream.\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T18:40:03+00:00"
+    },
+    {
+      "sha": "378845f3339dab32714c95120d37851a03618e49",
+      "message": "chore: remove accidentally pushed file\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T18:45:27+00:00"
+    },
+    {
+      "sha": "3ed20ffa7b63d7d279f97c9798afb15f92c7d10c",
+      "message": "fix: address PR reviews\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T20:09:26+00:00"
+    },
+    {
+      "sha": "14a408783fcdd8e2e70a942eb1f9a9cecd750050",
+      "message": "chore: bump cpex-plugins versions\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T20:29:32+00:00"
+    },
+    {
+      "sha": "79e633bb6179ba345bf6400b45a7786767bf5d00",
+      "message": "chore: update .secrets.baseline\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T20:48:05+00:00"
+    },
+    {
+      "sha": "19d232c48deba64ca7f8c0f56f104c0da178e967",
+      "message": "chore: udpate secrets baseline\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T22:49:17+00:00"
+    },
+    {
+      "sha": "1427b6a1c9634305ebcff0d3c92db6b4513845f5",
+      "message": "fix: address review comments\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T23:17:22+00:00"
+    },
+    {
+      "sha": "f7947c29f7b0e8c4695e4fb9bc59561518af0b2a",
+      "message": "chore: update secrets baseline\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-05T23:35:56+00:00"
+    },
+    {
+      "sha": "f37d5d30e7d22f21c331c1367ee8b4560306a4b8",
+      "message": "fix: allembic migration\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-06T01:05:25+00:00"
+    },
+    {
+      "sha": "0457e1cbd7ad5912184ef251770c9a972aa3777e",
+      "message": "chore: Updated the nodejs-24 base image pin from the removed 10.1-1776906674 to 10.1-1777957922 in Containerfile.lite.\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-06T01:58:28+00:00"
+    },
+    {
+      "sha": "93723a4237729125e98d966b57a4fafcdccb41f4",
+      "message": "fix: allembic migration\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-06T02:49:34+00:00"
+    },
+    {
+      "sha": "2c8627c047ad124e4853883a38e3a557c44e577a",
+      "message": "fix: minor fixes\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-06T04:48:11+00:00"
+    },
+    {
+      "sha": "b962d2d030221738cb76a6a104e52a51abfdf53d",
+      "message": "fix: minor issues found in final round of reviews\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-05-06T10:37:52+00:00"
+    }
+  ],
+  "files_changed": 386,
+  "additions": 5652,
+  "deletions": 40017,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:01.311917",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:01.315154",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3754,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3754.json"
+  }
+}

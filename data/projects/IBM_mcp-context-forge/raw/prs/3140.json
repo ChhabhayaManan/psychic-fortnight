@@ -1,0 +1,86 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3140,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3140"
+  },
+  "metadata": {
+    "title": "refactor(plugins): decouple plugin framework from gateway observability service",
+    "state": "closed",
+    "created_at": "2026-02-24T09:18:44+00:00",
+    "updated_at": "2026-02-24T20:44:36+00:00",
+    "closed_at": "2026-02-24T20:44:34+00:00",
+    "merged_at": "2026-02-24T20:44:34+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "enhancement",
+      "plugins",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #2827 due to repository maintenance. Your code and branch are intact. @araujof please verify everything looks good.\n\n## Description\r\n\r\nRemoves the plugin framework's direct dependency on `mcpgateway.db.SessionLocal` and `mcpgateway.services.observability_service` by introducing a protocol-based observability abstraction with dependency injection.\r\n\r\nCloses: #2828 \r\n\r\n### Problem\r\n\r\nThe plugin framework's `_execute_with_timeout` method imported `SessionLocal` and `ObservabilityService` directly from the gateway, creating a tight coupling that prevented the framework from operating standalone. This also required the plugin framework to manage database sessions for tracing — a concern that belongs to the host application.\r\n\r\n### Solution\r\n\r\n- Introduced `ObservabilityProvider` protocol and `NullObservability` no-op default in a new `observability.py` module\r\n- Added a `current_trace_id` ContextVar owned by the plugin framework (replacing the one imported from the gateway's observability service)\r\n- `PluginExecutor` and `PluginManager` now accept an optional `observability` parameter via constructor injection\r\n- `get_plugin_manager()` forwards the observability provider to the manager\r\n- The host application (mcpgateway) can inject its own implementation at startup; the framework operates without tracing when none is provided\r\n\r\n### Dependency direction (before → after)\r\n\r\n```\r\n# Before: circular\r\nplugin framework ──imports──> mcpgateway.db, mcpgateway.services.observability_service\r\n\r\n# After: clean inversion\r\nmcpgateway ──injects──> plugin framework (ObservabilityProvider)\r\n```\r\n\r\n## Changes\r\n\r\n| File | Change |\r\n|------|--------|\r\n| `mcpgateway/plugins/framework/observability.py` | **New** — `ObservabilityProvider` protocol, `NullObservability` default, `current_trace_id` ContextVar |\r\n| `mcpgateway/plugins/framework/manager.py` | `PluginExecutor` and `PluginManager` accept `observability` param; `_execute_with_timeout` uses injected provider instead of direct gateway imports |\r\n| `mcpgateway/plugins/framework/__init__.py` | `get_plugin_manager()` accepts `observability` param; `ObservabilityProvider` added to `__all__` |\r\n| `tests/unit/.../test_observability.py` | **New** — 5 tests: DI injection with tracing, no trace_id, no provider, NullObservability, executor injection |\r\n| `tests/unit/.../test_manager_coverage.py` | Updated `TestExecuteWithTimeout` to test against injected provider instead of mocking `mcpgateway.db`/`mcpgateway.services` |\r\n\r\n## Additional Changes\r\n\r\nA few tests in `tests/unit/../test_http_auth_integration.py` were failing on dev environment when running the coverage target. Solution: Reset Starlette's cached middleware_stack after injecting the mock plugin manager so the middleware chain is rebuilt with the mock, and restore it afterward to avoid side effects on other tests. \r\n\r\n## Test plan\r\n\r\n- [x] All unit tests pass\r\n- [x] All doctests pass\r\n- [x] New observability tests verify: span creation/completion with injected provider, graceful no-op without trace_id, graceful no-op without provider, provider failure fallback\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3848911073",
+      "author": "jonpspri",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-24T15:59:53+00:00",
+      "body": "Clean refactor — protocol-based DI correctly decouples plugin framework from gateway observability internals, and fixes the latent double-execution bug in the old catch-all fallback. Session lifecycle, Borg singleton interaction, and ContextVar bridge are all sound. Test coverage is thorough.\n\nMinor suggestions (non-blocking):\n- Consider exporting or removing `NullObservability` (currently dead code in production).\n- A defensive `if self.observability:` guard before `end_span` in the error/success paths of `_execute_with_timeout` would make the null-safety explicit rather than relying on the surrounding `except`.\n- The duplicated try/except/finally session boilerplate in the adapter could be collapsed into a helper."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d52fd6b3370abfb0dc5dc5198be9f3df3a800f2b",
+      "message": "refactor(plugins/framework): introduce protocol and dependency injection for observability service\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-11T01:41:24+00:00"
+    },
+    {
+      "sha": "b9f8dd499908aeb5c8ef12321bc0677b9d6e9cdb",
+      "message": "chore: fix lint issues\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-11T06:52:04+00:00"
+    },
+    {
+      "sha": "97fe4c2b1c6e4265320048992f65b605193296c0",
+      "message": "feat: add observability adapter for plugins\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-13T17:32:32+00:00"
+    },
+    {
+      "sha": "8e5f775b20c25c7ed42a659f6d90c48155415692",
+      "message": "tests: coverage gaps\n\nSigned-off-by: Frederico Araujo <frederico.araujo@ibm.com>",
+      "author": "Frederico Araujo",
+      "date": "2026-02-13T21:45:44+00:00"
+    },
+    {
+      "sha": "cc7ddcc26fa5efa3df965311c3f83ab77492ce08",
+      "message": "fix: address review findings in observability refactor\n\n- Eliminate double plugin execution on failure by restructuring\n  _execute_with_timeout to separate observability from plugin execution\n- Close orphaned spans with status=\"error\" when plugin hooks raise\n- Fix docstring typo in ObservabilityMiddleware\n- Move ObservabilityServiceAdapter import inside conditional block\n- Document ContextVar bridge requirement on both definitions\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-18T16:36:12+00:00"
+    },
+    {
+      "sha": "dde843a88571244b3bbbaf1f920fea11f0b788ef",
+      "message": "tests: achieve 100% diff coverage for observability refactor\n\nCover error and edge-case paths in plugin executor observability\nspans and get_plugin_manager initialization with plugins enabled.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-19T11:49:19+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 1081,
+  "deletions": 89,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:40.622481",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:40.627198",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3140,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3140.json"
+  }
+}

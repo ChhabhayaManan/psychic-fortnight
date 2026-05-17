@@ -1,0 +1,36 @@
+{
+  "id": "97e01a9c-4799-49b2-b15b-c231c787df4b",
+  "title": "FIX(REDIS): Raise maxclients from 10000 to 30000 to support 10 replicas",
+  "summary": "## 🔗 Related Issue\r\nCloses https://github.com/IBM/mcp-context-forge/issues/4630\r\n\r\n---\r\n\r\n## 📝 Summary\r\nFixes redis \"Too many connections\" error when scaling gateway to 10 replicas. \r\n\r\n**Problem:** The Redis server-side `maxclients` limit (10,000) is exceeded when scaling to 10 replicas with default worker and connection-pool settings, causing `redis.exceptions.ConnectionError: Too many connections` in the rate-limiter and session-registry.\r\n\r\n**Root Cause:** Connection formula `replicas × workers × REDIS_MAX_CONNECTIONS` exceeds server limit:\r\n- 10 replicas × 24 workers × 100 pool = **24,000 connections** > 10,000 maxclients \r\n\r\n**Solution:** Raise Redis `maxclients` from 10,000 to 30,000 to support 10 replicas with 20% headroom:\r\n10 replicas x 24 workers x 100 pool = 24,000 connections < 30000 maxclients.\r\n\r\nThis addresses the root cause as server-side capacity, rather than degrading client-side performance by reducing connection pools. Even if pool was scaled down to 50 from 100, 10replicas x 24 workers x 50 pool = 12,000 > 10,000 (still greater than 10,000)\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [x] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Redis maxclients setting  | `docker compose exec redis redis-cli CONFIG GET maxclients` | ✅ Returns `30000` |\r\n| Baseline connections      | `docker compose exec redis redis-cli INFO clients` | ✅ ~900-1500 clients |\r\n| No connection errors      | `docker compose logs gateway \\| grep \"too many connections\"` | ✅ No errors |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [x] Documentation updated \r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n### Files Changed (11 total):\r\n**Docker Compose (4 files):**\r\n- docker-compose.yml: maxclients 10000 → 30000\r\n- docker-compose-performance.yml: maxclients 20000 → 30000\r\n- docker-compose-debug.yml: maxclients 10000 → 30000\r\n- docker-compose-verbose-logging.yml: maxclients 10000 → 30000\r\n\r\n**Helm Chart (3 files):**\r\n- charts/mcp-stack/templates/configmap-redis.yaml: Added maxclients directive\r\n- charts/mcp-stack/values.yaml: Added redis.maxclients: 30000\r\n- charts/mcp-stack/values.schema.json: Added schema validation\r\n\r\n**Documentation (4 files):**\r\n- docs/docs/architecture/performance-architecture.md\r\n- docs/docs/manage/scale.md (2 locations)\r\n- docs/docs/manage/tuning.md\r\n- docs/docs/manage/configuration.md (added warning box)\r\n\r\n### Capacity Table:\r\n| Configuration | Replicas | Workers | Pool/worker | Total | Within 30K limit? |\r\n|---------------|----------|---------|-------------|-------|-------------------|\r\n| docker-compose default | 3 | 24 | 100 | 7,200 | ✅ |\r\n| docker-compose @ 10 replicas | 10 | 24 | 100 | 24,000 | ✅ (was not with 10,000) |\r\n| Helm chart default | 10 | 2 | 50 | 1,000 | ✅ |\r\n| Helm chart + 24 workers | 10 | 24 | 50 | 12,000 | ✅ |\r\n\r\n### Why 30,000?\r\n- **Required capacity**: 10 replicas × 24 workers × 100 pool = 24,000\r\n- **With 20% headroom**: 24,000 × 1.2 = 28,800",
+  "reasoning": "30,000?\r\n- **Required capacity**: 10 replicas × 24 workers × 100 pool = 24,000\r\n- **With 20% headroom**: 24,000 × 1.2 = 28,800",
+  "confidence": 0.75,
+  "related_services": [],
+  "contributors": [
+    "claudia-gray"
+  ],
+  "tags": [
+    "docker",
+    "bug",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "532cbe36-8f24-4692-875d-cb4dc0af9220",
+      "source_type": "pr",
+      "source_id": "4724",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/4724",
+      "contributor": "claudia-gray",
+      "timestamp": "2026-05-12T12:52:58Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4724.json"
+    }
+  ],
+  "timestamp": "2026-05-12T12:52:58Z",
+  "created_at": "2026-05-17T17:22:58.884955",
+  "updated_at": "2026-05-17T17:22:58.884957",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:58.885692",
+    "artifact_type": "decisions",
+    "artifact_id": "97e01a9c-4799-49b2-b15b-c231c787df4b"
+  }
+}

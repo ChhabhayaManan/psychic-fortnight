@@ -1,0 +1,61 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4587,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4587"
+  },
+  "metadata": {
+    "title": "[BUG]: Proxy-authenticated admin user (admin@admin.com ) cannot access private tools despite is_admin=true and DB resolution",
+    "state": "open",
+    "created_at": "2026-05-05T06:43:18+00:00",
+    "updated_at": "2026-05-07T10:12:18+00:00",
+    "closed_at": null,
+    "author": "vksinha10",
+    "labels": [
+      "bug",
+      "rbac",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": [
+      "bogdanmariusc10"
+    ]
+  },
+  "description": "After applying the recent fix for proxy-based authentication (database lookup for teams/admin resolution), proxy-authenticated requests correctly resolve user identity and admin status from the database.\n\nHowever, platform admin users (is_admin=true) are still unable to access private/team-scoped tools via API endpoints, and only public tools are returned.\n\nEnvironment / Configuration\nMCP_CLIENT_AUTH_ENABLED: \"false\"\nTRUST_PROXY_AUTH: \"true\"\nTRUST_PROXY_AUTH_DANGEROUSLY: \"true\"\nPROXY_USER_HEADER: \"X-Authenticated-User\"\nAUTH_REQUIRED: \"true\"\nREQUIRE_USER_IN_DB: \"true\"\nPLATFORM_ADMIN_EMAIL: \"admin@admin.com\"\n\nSteps to Reproduce\nDeploy MCP Gateway with proxy authentication enabled (as above)\nEnsure user exists in DB:\nemail: admin@admin.com\nis_admin = true\nEnsure tools exist:\nsome with visibility = public\nsome with visibility = team/private (teamId assigned)\nCall API:\nkubectl exec porch-0 -- curl -s \\\n  -H \"X-Authenticated-User: admin@admin.com\" \\\n  http://mcp-gateway-service.default.svc.cluster.local:4444/tools\n\n\nExpected Behavior\n\nFor admin users (is_admin=true):\n\n- RBAC bypass should apply\n- All tools should be returned:\n    ✔ public tools\n    ✔ team/private tools\n\nSpecifically:\n\nis_admin = true → token_teams = None → no filtering\nActual Behavior\n- Only public tools are returned\n- Private/team-scoped tools are NOT included\n\nDespite:\n\nUser exists in DB\nis_admin = true\nProxy auth successfully resolves identity\n\nObservations / Debug Findings\nProxy authentication correctly resolves:\nuser_email = admin@admin.com\nis_admin = true\nHowever, tool filtering still behaves as if:\n{\n  \"is_admin\": false,\n  \"teams\": []\n}\nLogs suggest that:\nAdmin bypass (teams=None) is NOT being applied\nFiltering still depends on team membership\nPrivate tools (with teamId) are excluded\n\nKey Insight\n\nEven after fix #4320 (database lookup in proxy auth):\n\nAdmin users do not consistently receive teams=None (admin bypass) in downstream filtering logic.\n\nInstead, behavior suggests:\n\nteams = []  → treated as non-admin → public-only access\nImpact\nPlatform admin users cannot:\naccess private tools\nvalidate RBAC behavior\nmanage multi-team tool visibility\nBreaks expected behavior of admin bypass\nMakes proxy-auth mode unusable for admin-level automation\nAdditional Context\n\nThis appears related to the earlier issue:\n\nProxy auth originally did not resolve DB context\nFix #4320 added DB lookup\n\nHowever:\n\nThe RBAC filtering path still does not fully respect admin privileges for proxy-authenticated users.\n\nSuggested Investigation Areas\nVerify _get_rpc_filter_context() behavior for proxy-auth payload\n\nEnsure is_admin=true results in:\n\ntoken_teams = None\nValidate consistency between:\nsession-token flow\nproxy-auth flow\nCheck whether team filtering is incorrectly applied even for admins\n\nWorkaround (Temporary)\n\nAssign all users and tools to a single team → works, but:\n\n- defeats RBAC design\n- not scalable\nPriority\n\nHigh (P1) — breaks admin access in proxy-auth deployments",
+  "comments": [
+    {
+      "id": "4377093806",
+      "author": "vksinha10",
+      "created_at": "2026-05-05T06:49:25+00:00",
+      "body": "@bogdanmariusc10 \n"
+    },
+    {
+      "id": "4377372303",
+      "author": "bogdanmariusc10",
+      "created_at": "2026-05-05T07:39:26+00:00",
+      "body": "Hello, @vksinha10 ! Thanks for your report! **Bug Confirmed**: Platform admin users authenticated via proxy headers cannot access private/team-scoped tools despite having `is_admin=true` in the database.\n\n### Root Cause\nThe bug is in [`_authenticate_proxy_user()`](mcpgateway/utils/verify_credentials.py:455-468). This function correctly:\n1. ✅ Resolves teams from DB via `_resolve_teams_from_db()` (returns `None` for admin bypass)\n2. ✅ Creates payload with `\"teams\": None` and `\"is_admin\": True`  \n3. ✅ Caches payload in `request.state._jwt_verified_payload`\n\nHowever, it **fails to set `request.state.token_teams`**, which is critical because:\n\n- [`get_token_teams_from_request()`](mcpgateway/auth_context.py:310-312) checks `request.state.token_teams` FIRST\n- Only if not set does it fall back to `normalize_token_teams()` on the cached payload\n- This fallback path works for API/legacy tokens but creates inconsistency for session tokens\n\n### Why Admin Bypass Fails\n\nWhen [`get_rpc_filter_context()`](mcpgateway/auth_context.py:324-381) is called in the `/tools` endpoint:\n1. It calls `get_token_teams_from_request()` which returns the teams value\n2. For proxy-auth admin users, this should be `None` (admin bypass)\n3. However, without `request.state.token_teams` set, the fallback logic may not consistently return `None`\n4. The `/tools` endpoint at [line 4861-4865](mcpgateway/main.py:4861-4865) then applies the wrong filtering logic\n\n### Comparison with JWT Session Tokens\n\n[`get_current_user()`](mcpgateway/auth.py:1395-1403) correctly handles session tokens by:\n1. Detecting `token_use == \"session\"`\n2. Calling `resolve_session_teams()` to get teams from DB\n3. **Setting `request.state.token_teams = teams`** (line 1403)\n\nProxy authentication creates the same `\"token_use\": \"session\"` payload but skips step 3.\n\n### Fix Location\nAdd `request.state.token_teams = token_teams` after line 468 in [`mcpgateway/utils/verify_credentials.py`](mcpgateway/utils/verify_credentials.py:468), matching the pattern in `auth.py:1403`.\n\n### Impact\n- **Severity**: High (P1) - Breaks admin access in proxy-auth deployments\n- **Scope**: Only affects proxy-authenticated requests when `TRUST_PROXY_AUTH=true`\n- **Workaround**: Assign admin users to all teams (defeats RBAC design)\n\nI'll open a PR for this."
+    },
+    {
+      "id": "4396159107",
+      "author": "vksinha10",
+      "created_at": "2026-05-07T10:05:28+00:00",
+      "body": "@bogdanmariusc10 - just a gentle request, please try to merge this code ASAP as we are waiting for this fix"
+    },
+    {
+      "id": "4396181719",
+      "author": "bogdanmariusc10",
+      "created_at": "2026-05-07T10:09:02+00:00",
+      "body": "@jonpspri @brian-hussey Can you please prioritize this? PR https://github.com/IBM/mcp-context-forge/pull/4591"
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:39.677973",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:39.678624",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4587,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4587.json"
+  }
+}

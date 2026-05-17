@@ -1,0 +1,86 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3775,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3775"
+  },
+  "metadata": {
+    "title": "ci: use native GitHub runners for s390x and ppc64le Docker builds",
+    "state": "closed",
+    "created_at": "2026-03-20T19:13:49+00:00",
+    "updated_at": "2026-03-21T12:33:50+00:00",
+    "closed_at": "2026-03-21T12:33:49+00:00",
+    "merged_at": "2026-03-21T12:33:49+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n- Switch s390x and ppc64le Docker builds from QEMU emulation on `ubuntu-latest` to native GitHub-hosted runners (`ubuntu-24.04-s390x`, `ubuntu-24.04-ppc64le`)\n- Enable s390x and ppc64le builds on PRs since native runners are fast enough (previously skipped due to slow QEMU emulation)\n- Comment out `qemu: true` flags since native runners don't need emulation\n\n## Test plan\n- [ ] Verify the PR triggers multi-platform Docker builds on all four architectures (amd64, arm64, s390x, ppc64le)\n- [ ] Confirm s390x and ppc64le builds complete successfully on native runners\n- [ ] Check build times are improved compared to previous QEMU-based builds\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+  "comments": [
+    {
+      "id": "2967547831",
+      "author": "Copilot",
+      "created_at": "2026-03-20T19:16:10+00:00",
+      "body": "Commenting out `run_on_pr` does not enable PR builds here: all steps are gated by `(matrix.run_on_pr || github.event_name != 'pull_request')`, and an undefined `matrix.run_on_pr` evaluates falsy on PRs. If the goal is to run s390x/ppc64le (and possibly arm64) builds on pull requests, set `run_on_pr: true` (or adjust the `if:` expressions to treat an unset value as `true`)."
+    },
+    {
+      "id": "2967547850",
+      "author": "Copilot",
+      "created_at": "2026-03-20T19:16:10+00:00",
+      "body": "`tag_only: true` still prevents ppc64le from running on PRs and on non-tag pushes (and the manifest job also skips ppc64le unless `refs/tags/*`). This contradicts the PR description that ppc64le builds should run on PRs; either remove/override `tag_only` for ppc64le or update the gating logic accordingly."
+    },
+    {
+      "id": "2967547864",
+      "author": "Copilot",
+      "created_at": "2026-03-20T19:16:11+00:00",
+      "body": "Relying on commented-out matrix keys (`# qemu: true`, `# run_on_pr: false`) makes the matrix contract implicit and depends on how GitHub Actions treats missing values in expressions. For clarity and to avoid surprises, keep the keys present with explicit booleans (e.g., `qemu: false`, `run_on_pr: true/false`) and update the adjacent comments (they still refer to QEMU slowness)."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3983579264",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-20T19:16:11+00:00",
+      "body": "## Pull request overview\n\nThis PR updates the multi-arch Docker build workflow to move s390x and ppc64le builds from QEMU-on-x86 to native GitHub-hosted runners, with the stated goal of enabling those builds on pull requests due to improved performance.\n\n**Changes:**\n- Switch matrix runners for `linux/s390x` and `linux/ppc64le` to `ubuntu-24.04-s390x` and `ubuntu-24.04-ppc64le`.\n- Comment out the `qemu: true` flags for those architectures.\n- Adjust caching behavior for ppc64le (`cache_mode: max`) and comment out PR-skip flags.\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3985981846",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-21T12:31:30+00:00",
+      "body": "Rebased onto main, reviewed, and applied the following fixes:\n\n**Workflow changes:**\n- Runners switched to `ubuntu-24.04-s390x` / `ubuntu-24.04-ppc64le` — looks good\n- Removed `qemu: true` and `tag_only: true` from matrix entries; QEMU setup step retained (commented) for potential reuse; `tag_only` conditions in steps also retained\n- Fixed manifest job: since `tag_only` was removed from ppc64le, ppc64le now builds on every push — updated manifest to include all four architectures instead of gating ppc64le on tags (which would waste builds)\n- ppc64le `cache_mode` upgraded from `min` to `max` (appropriate for native runners)\n- Updated stale header comments referencing QEMU\n\n**Containerfile.lite changes:**\n- Kept shell glob quoting fixes (4 locations) — good defensive coding\n- Dropped `mysql` pip extra (being removed from the project)\n- Kept `granian` — `docker-entrypoint.sh` still dispatches to `./run-granian.sh`, removing it from the image would break `HTTP_SERVER=granian`\n- Updated stale comments referencing QEMU emulation\n\nLGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d61fe2f65cd0152b464e3454d1b41cfc886d184d",
+      "message": "ci: use native GitHub runners for s390x and ppc64le Docker builds\n\nReplace QEMU emulation with native GitHub-hosted runners\n(ubuntu-24.04-s390x, ubuntu-24.04-ppc64le) for faster and more\nreliable multi-platform Docker builds.\n\n- Switch s390x from ubuntu-latest + QEMU to ubuntu-24.04-s390x\n- Switch ppc64le from ubuntu-latest + QEMU to ubuntu-24.04-ppc64le\n- Remove qemu: true from matrix (QEMU step retained for reuse)\n- Remove tag_only restriction on ppc64le (native runners are fast enough)\n- Upgrade ppc64le cache_mode from min to max\n- Include ppc64le in manifest on all non-PR builds (not just tags)\n- Update stale QEMU references in header comments\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-21T12:24:22+00:00"
+    },
+    {
+      "sha": "3bf89ebabfd8a95babbbf8d3974de0bd9bfea602",
+      "message": "fix(docker): quote glob patterns and drop mysql extra from Containerfile.lite\n\n- Add proper quoting around glob patterns to prevent word splitting\n- Drop mysql pip extra (support being removed)\n- Update stale comments referencing QEMU emulation\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-21T12:24:26+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 20,
+  "deletions": 30,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:58.994917",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:58.999629",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3775,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3775.json"
+  }
+}

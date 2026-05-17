@@ -1,0 +1,69 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4382,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4382"
+  },
+  "metadata": {
+    "title": "feat(runtime): add request body size limiting",
+    "state": "closed",
+    "created_at": "2026-04-22T03:34:26+00:00",
+    "updated_at": "2026-04-26T06:35:27+00:00",
+    "closed_at": "2026-04-26T06:35:26+00:00",
+    "merged_at": "2026-04-26T06:35:25+00:00",
+    "author": "MohanLaksh",
+    "labels": [
+      "security",
+      "ica",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Problem\n\nThe Rust MCP runtime currently accepts unbounded request payload sizes, creating a vulnerability to resource exhaustion attacks. Large malicious or misconfigured payloads can:\n\n- Consume excessive memory during request processing\n- Cause out-of-memory conditions affecting service availability\n- Enable denial-of-service vectors through oversized JSON-RPC requests\n- Impact other services sharing the same infrastructure\n\nThis is particularly concerning for the MCP protocol, where tool execution payloads and resource data can legitimately be large, making it difficult to distinguish between valid large requests and malicious traffic without explicit size controls.\n\n## Solution\n\nImplement configurable request body size limiting using Axum's `DefaultBodyLimit` middleware layer. This provides:\n\n1. **Hard size limit enforcement** at the HTTP layer before request deserialization\n2. **Standard HTTP 413 responses** for oversized payloads\n3. **Configurable thresholds** via environment variable for different deployment scenarios\n4. **Secure defaults** (10MB) suitable for typical MCP use cases\n\n## Changes\n\n### Core Implementation\n\n**RuntimeConfig** (`src/config.rs`):\n- Add `max_request_body_size_bytes: usize` field (default: 10,485,760 bytes = 10MB)\n- Add `DEFAULT_MAX_REQUEST_BODY_SIZE_BYTES` public constant for reuse in tests\n- Parse from `MCP_RUST_MAX_REQUEST_BODY_SIZE_BYTES` environment variable\n\n**AppState** (`src/lib.rs`):\n- Add `max_request_body_size_bytes` field to state\n- Initialize from RuntimeConfig in `new()`\n\n**Router Configuration** (`src/lib.rs`):\n- Apply `DefaultBodyLimit::max(max_body_size)` layer to `build_router()`\n- Apply `DefaultBodyLimit::max(max_body_size)` layer to `build_public_router()`\n- Both internal and public endpoints protected\n\n### Testing\n\nAdded 4 comprehensive tests in `src/lib.rs`:\n\n1. **`request_body_limit_accepts_small_payloads`** - Verifies requests under limit succeed (1KB limit, small ping payload → 200 OK)\n2. **`request_body_limit_rejects_oversized_payloads`** - Verifies requests over limit rejected (100 byte limit, 200 byte payload → 413 Payload Too Large)\n3. **`request_body_limit_uses_configured_value`** - Verifies custom configuration honored (set 5MB, read 5MB)\n4. **`request_body_limit_default_is_10mb`** - Verifies default value correct (10,485,760 bytes)\n\n### Documentation\n\n**README.md** - New Configuration section:\n- Environment variable reference\n- Usage examples for different deployment scenarios (50MB for large payloads, 1MB for constrained environments)\n- Behavior documentation (413 response code)\n\n## Configuration\n\n```bash\n# Default (10MB)\nMCP_RUST_MAX_REQUEST_BODY_SIZE_BYTES=10485760\n\n# Large tool payloads (50MB)\nMCP_RUST_MAX_REQUEST_BODY_SIZE_BYTES=52428800\n\n# Constrained environments (1MB)\nMCP_RUST_MAX_REQUEST_BODY_SIZE_BYTES=1048576\n```\n\n## Technical Details\n\n### Why Axum DefaultBodyLimit?\n\n- **Early rejection**: Enforced at HTTP layer before JSON parsing\n- **Memory efficient**: Prevents large allocations for oversized bodies\n- **Standard compliant**: Returns RFC-compliant 413 status code\n- **Zero overhead**: Layer-based, no per-request allocation\n\n### Why 10MB Default?\n\nBalances security and usability:\n- Large enough for typical MCP tool payloads and resource data\n- Small enough to prevent memory exhaustion with concurrent requests\n- Aligns with common API gateway defaults\n- Can be increased for specialized deployments\n\n### Deployment Considerations\n\n**Connection pool sizing**: With 210 total connections (200 pool + 10 overflow) and 10MB limit, theoretical max memory: ~2.1GB for request bodies alone. In practice, requests are much smaller and processed quickly.\n\n**Recommended limits by deployment**:\n- Development: 10MB (default)\n- Production edge: 5-10MB\n- Internal trusted networks: 20-50MB\n- Constrained (embedded, edge): 1-5MB\n\n## Testing\n\n**Test Results:**\n```\nrunning 92 tests\ntest result: ok. 92 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n```\n\n**Quality Checks:**\n```bash\ncargo fmt --check  # ✓ Clean\ncargo clippy -- -D warnings  # ✓ Clean\ncargo test --all-features  # ✓ 151 tests passing\n```\n\n**Run specific tests:**\n```bash\ncd crates/mcp_runtime\ncargo test request_body_limit\n```\n\n## Dependencies\n\nAdded `tower 0.5` as **dev-dependency** (features: [\"util\"]):\n- Required for `ServiceExt::oneshot()` trait in tests\n- Not included in production builds\n- Already used by Axum internally (no new transitive dependency)\n\n## Performance Impact\n\n**Negligible overhead:**\n- Layer is compiled into router at startup\n- No runtime allocations per request\n- Early rejection prevents expensive JSON parsing\n- Faster failure path for oversized requests\n\n## Security Considerations\n\n**What this protects against:**\n- Memory exhaustion via large payloads\n- Slowloris-style attacks with massive bodies\n- Accidental large uploads\n- Misconfigured clients\n\n**What this does NOT protect against:**\n- Many small concurrent requests (rate limiting needed)\n- Slow-read attacks (connection timeout handles this)\n- Application-layer logic bombs (separate validation needed)\n\n## Backwards Compatibility\n\n✅ **Fully backwards compatible**\n- Existing deployments get secure 10MB default\n- No breaking changes to APIs or behavior\n- Opt-in configuration for custom limits\n\n## Future Work\n\nThis change complements but does not replace:\n- Application-layer JSON schema validation (existing)\n- Rate limiting per client (future)\n- Request timeout configuration (existing: `MCP_RUST_REQUEST_TIMEOUT_MS`)\n\n---\n\n**Ready for review.** This PR adds essential resource protection with comprehensive testing and clear documentation.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4156873740",
+      "author": "dawid-nowak",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-22T17:59:56+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "3297e421a963eeb71714a8b5302dabca14dff4bd",
+      "message": "feat(runtime): add request body size limiting\n\nAdds configurable maximum request body size to prevent resource exhaustion.\n\nChanges:\n- Add max_request_body_size_bytes field to RuntimeConfig (default 10MB)\n- Apply DefaultBodyLimit layer to both main and public routers\n- Add 4 tests covering small/large payloads and configuration\n- Document MCP_RUST_MAX_REQUEST_BODY_SIZE_BYTES in README\n\nThe limit is applied via Axum's DefaultBodyLimit layer, returning 413\nPayload Too Large for oversized requests.\n\nTests verify:\n- Small payloads accepted\n- Oversized payloads rejected with 413\n- Configured values honored\n- Default is 10MB (10,485,760 bytes)\n\nSigned-off-by: Mohan Lakshmaiah <mohan.economist@gmail.com>",
+      "author": "Mohan Lakshmaiah",
+      "date": "2026-04-22T03:21:07+00:00"
+    },
+    {
+      "sha": "540204c0db4d22fae23cfc246a720b11edb7801a",
+      "message": "chore(runtime): expose MCP_RUST_MAX_REQUEST_BODY_SIZE_BYTES to operators\n\nWire the new body-size limit into the two operator surfaces that\nalready carry the sibling MCP_RUST_* knobs, so the default (10MB)\nand any override can be tuned without editing the Rust config.\n\n- .env.example: document the variable alongside MCP_RUST_DB_POOL_MAX_SIZE\n- docker-compose.yml: pass the variable through to the gateway service\n\nUpstream nginx (client_max_body_size 100M) and the Python streamable\ntransport (4MB soft peek cap) remain more permissive, so RUST_MCP_MODE=\nedge|full is where this cap takes effect.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T12:44:11+00:00"
+    },
+    {
+      "sha": "6f18c079c2c0d329ca34b2157d42d1c380e769b1",
+      "message": "test(runtime): add 413 regression test for internal router body-limit\n\nThe existing request_body_limit_rejects_oversized_payloads test only\nexercises build_public_router. Add a twin against build_router so the\ntwo near-identical router builders can't silently drift on body-limit\nenforcement.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-24T12:44:17+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 194,
+  "deletions": 37,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:53.637677",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:53.638072",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4382,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4382.json"
+  }
+}

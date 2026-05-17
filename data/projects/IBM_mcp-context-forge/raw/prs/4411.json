@@ -1,0 +1,115 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4411,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4411"
+  },
+  "metadata": {
+    "title": "ci: enable path filters for lint and pytest workflows",
+    "state": "closed",
+    "created_at": "2026-04-23T10:05:53+00:00",
+    "updated_at": "2026-04-23T12:17:55+00:00",
+    "closed_at": "2026-04-23T12:17:53+00:00",
+    "merged_at": "2026-04-23T12:17:53+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n- Uncomment path filters on the `push` and `pull_request` triggers in `.github/workflows/lint.yml` and `.github/workflows/pytest.yml`.\n- Workflows now run only when relevant Python source, tests, workflow, or dependency files change, skipping unrelated docs/chart changes.\n\n## Test plan\n- [ ] Verify workflows still trigger on PRs touching `mcpgateway/`, `plugins/`, `tests/`, `pyproject.toml`, `uv.lock`, or the workflow files themselves\n- [ ] Verify workflows are skipped on PRs that only touch unrelated paths (e.g. `docs/`, `charts/`)",
+  "comments": [
+    {
+      "id": "3130228302",
+      "author": "lucarlig",
+      "created_at": "2026-04-23T10:52:30+00:00",
+      "body": "why remove paths? it will then run on every push, and it's one of the slowest workflows. \nShould the whole push be removed?"
+    },
+    {
+      "id": "3130264096",
+      "author": "jonpspri",
+      "created_at": "2026-04-23T10:59:13+00:00",
+      "body": "I think so.  AI botched that one -- I'll go fix it now."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4161761428",
+      "author": "lucarlig",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-23T10:58:02+00:00",
+      "body": ""
+    },
+    {
+      "id": "4161805578",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-23T10:59:13+00:00",
+      "body": ""
+    },
+    {
+      "id": "4162201637",
+      "author": "lucarlig",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-23T12:07:33+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6f64b05b124c06d17024682290d48c8f91f4e4f7",
+      "message": "ci: enable path filters for lint and pytest workflows\n\nUncomment path filters on push and pull_request triggers so the Lint\nand Tests workflows only run when relevant source, test, or workflow\nfiles change. Avoids spending CI on unrelated doc or chart updates.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T10:05:39+00:00"
+    },
+    {
+      "sha": "cfaf5b2d21430ca7f0657daaa93550e0d30e4e99",
+      "message": "ci: trim workflow redundancies\n\n- sql-sanitizer.yml: add path filters so the E2E only runs when\n  gateway, sql-sanitizer crate, or fast-test-server change.\n- pytest-rust.yml: drop `make rust-verify-stubs`; rust.yml already\n  covers stub verification.\n- linting-full.yml: restrict to workflow_dispatch; ruff/pylint/\n  vulture/interrogate/radon are already run per-PR by lint.yml.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T10:28:00+00:00"
+    },
+    {
+      "sha": "aa153d2c091fd684632483daf61f039169332731",
+      "message": "Revert \"ci: linting-full workflow_dispatch-only\"\n\nlinting-full runs actionlint, commitlint, helm lint, gosec, and\ngovulncheck via LINTING_FULL_TARGETS in the Makefile. None of these\nare covered by lint.yml (which is Python-only). Restore the push\ntrigger.\n\nNote: the existing path filter (mcpgateway/**, plugins/**,\npyproject.toml) is too narrow for what the workflow actually checks\n(GitHub Actions, Helm charts, Go sources). Fixing that is a\nseparate follow-up.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T10:29:52+00:00"
+    },
+    {
+      "sha": "d456c477f8e5895b88b04a2b203fa730aad79684",
+      "message": "ci(linting-full): align path filter with actual lint scope\n\nLINTING_FULL_TARGETS checks GitHub Actions workflows, Helm charts,\nGo sources in mcp-servers/ and a2a-agents/, and commitlint. The\nprevious filter (Python source) never matched those scopes.\n\nCommitlint has no natural path filter; it is skipped on pushes that\ntouch only non-listed paths. Since this workflow is a post-merge\naudit on main, that is acceptable.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T10:31:38+00:00"
+    },
+    {
+      "sha": "7b27401b2a5824fbf53894809c86b4e22f83e52c",
+      "message": "ci: drop push:[main] from PR-gated workflows\n\nThese workflows validate PR heads and have no main-branch side\neffects (no artifacts published, no release tagging). Dropping the\npush:[main] trigger avoids re-running the same jobs immediately\nafter the PR has already gone green pre-merge.\n\nAffected: pytest, pytest-rust, lint, lint-web, vitest,\nsql-sanitizer, wrapper, playwright, python-package,\nalembic-upgrade-validation, license-check, docker-scan,\ndependency-review, rust.\n\nrust.yml keeps push:tags:v* because release-wheel/release-sdist/\nrelease-publish use rust-build/rust-test/security-audit/\nsupply-chain-vet/license-check as `needs:` dependencies on tag\npush. The main/develop branch push trigger is removed.\n\nAlso update scripts/pre-commit/check_ci_workflows.py to skip the\npush.paths check on rust.yml when push is tag-only; paths do not\nmeaningfully filter tag pushes.\n\nREQUIRES: branch protection on main must list these workflows as\nrequired status checks so the PR gate is enforced at merge time.\nIf required checks are not configured, revert this commit.\n\nWorkflows still triggered on push:[main] (by design):\n  - docker-multiplatform (arm64/s390x/ppc64le + manifest + sign)\n  - helm-publish (release-gated publish)\n  - linting-full (post-merge audit)\n  - rust (tag pushes for release)\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T10:40:23+00:00"
+    },
+    {
+      "sha": "330f53a01ede82c0189dc6a6b838d2c9f7dd1c3e",
+      "message": "test(ci): move workflow-trigger assertions into pre-commit hook\n\nThe failing unit tests asserted `on.push.paths` contents, which no\nlonger exist after dropping push:[main] from docker-scan,\nlicense-check, and wrapper workflows. Port the still-meaningful\npath-invariant checks to scripts/pre-commit/check_ci_workflows.py\nagainst pull_request.paths (the actual gating trigger) and drop\nthe now-stale pytest cases:\n\n- test_docker_scan_tracks_rust_container_inputs\n- test_docker_scan_triggers_on_changed_container_files\n- test_license_check_runs_for_rust_repositories_and_inputs (file removed)\n- test_wrapper_workflow_only_triggers_for_wrapper_changes\n\nRemaining tests in these files (rust-enabled smoke build, matrix\nentries, E2E step content, action SHA pinning) stay as pytest\ncases since they validate job bodies, not triggers.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T11:31:14+00:00"
+    },
+    {
+      "sha": "b3768697dd49726650b56ada110272773af10881",
+      "message": "refactor(pre-commit): trim hooks to repository-integrity invariants\n\nThe scan-style hooks added in PR #4257 mixed genuine cross-file\nintegrity checks with stylistic rules and overfit assertions. This\npass reduces them to the invariants a careful reviewer cannot\nreliably catch, and moves test-shaped assertions back to pytest.\n\nTrimmed (kept the invariant-style portion, dropped style/overfit):\n- check_ci_workflows: now only enforces SHA pinning of third-party\n  GitHub Actions across all workflows. Per-workflow path/job-name\n  assertions were overfit and are better expressed as reviewer\n  norms plus actionlint.\n- check_migration_patterns: now only enforces revision-ID/filename\n  consistency and cross-file duplicate detection. DateTime\n  timezone, SA-vs-raw-SQL, index-count balance, and the\n  one-specific-migration token-uniqueness guard were stylistic or\n  test-shaped.\n- check_rust_workspace: now only verifies deny.toml's RUSTSEC\n  advisory ignore list. The workspace-layout/Makefile/Containerfile\n  assertions were drift-detection for a one-time migration and are\n  no longer load-bearing.\n\nRemoved entirely (review or tests handle these):\n- check_machine_paths: forbade one literal path; any reviewer would\n  catch /home/$dev in a diff, and the hook was trivially overfit.\n- check_no_os_system: guarded one specific file. Replaced with an\n  inline docstring note in run_mutmut.py.\n- check_rbac_decorators: ported to tests/security/\n  test_rbac_decorator_coverage.py (parametrized). Runtime auth\n  tests in tests/security/ remain the authoritative deny-path\n  coverage; this file guards against decorator deletion.\n- check_source_patterns: ported to tests/unit/test_source_patterns.py.\n\nKept unchanged (genuine invariants review cannot catch):\n- check_sensitive_logging — AST scan for secret variable names\n  interpolated into logger calls.\n- check_framework_imports — plugin framework layering boundary.\n- check_logo_assets — asset-reference integrity (invisible in\n  text diffs).\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-23T11:39:30+00:00"
+    }
+  ],
+  "files_changed": 30,
+  "additions": 281,
+  "deletions": 1073,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:02.215626",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:02.216665",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4411,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4411.json"
+  }
+}

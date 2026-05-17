@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4717,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4717"
+  },
+  "metadata": {
+    "title": "fix(OAuth): honor token_endpoint_auth_method in OAuth token exchange",
+    "state": "open",
+    "created_at": "2026-05-12T09:35:24+00:00",
+    "updated_at": "2026-05-12T11:19:25+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "bogdanmariusc10",
+    "labels": [
+      "bug",
+      "SHOULD",
+      "api"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4706\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes a critical OAuth 2.1 compatibility issue where ContextForge ignored the `token_endpoint_auth_method` setting during authorization code token exchange, causing failures with strict OAuth providers like Datadog.\r\n\r\n**Problem:** When DCR registers a client and the authorization server defaults to `token_endpoint_auth_method: \"client_secret_basic\"` (RFC 7591 §2 default), the subsequent token exchange always sent credentials in the POST body (`client_secret_post`), resulting in `400 invalid_client` errors from strict OAuth 2.1 providers.\r\n\r\n**Solution:** \r\n- Updated `exchange_code_for_token()` to read and honor `token_endpoint_auth_method` from credentials\r\n- Added logic to propagate `token_endpoint_auth_method` from DCR-registered clients to the OAuth config\r\n- Implemented proper HTTP Basic Authentication when `client_secret_basic` is specified\r\n- Added fallback handling for public clients (Basic Auth requested but no secret available)\r\n\r\n**Impact:** Enables ContextForge to work with strict OAuth 2.1 providers (Datadog, and others) that enforce the registered authentication method.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Technical Details\r\n\r\n**Files Modified:**\r\n1. **`mcpgateway/services/oauth_manager.py`** (lines 639-665)\r\n   - Added `token_endpoint_auth_method` detection from runtime credentials\r\n   - Implemented conditional authentication: Basic Auth header vs POST body\r\n   - Added graceful fallback for public clients\r\n\r\n2. **`mcpgateway/routers/oauth_router.py`** (line 447)\r\n   - Propagate `token_endpoint_auth_method` from DCR `registered_client` to `oauth_config`\r\n   - Ensures the setting persists across OAuth flow stages\r\n\r\n3. **Test Updates:**\r\n   - Fixed 2 DCR tests to include `token_endpoint_auth_method` attribute\r\n   - Added new test for Basic Auth fallback scenario (public client)\r\n   - Achieved >95% diff coverage\r\n\r\n### Already Working Correctly\r\n- `_exchange_code_for_tokens()` (PKCE path) - already honored the setting\r\n- `refresh_token()` - already honored the setting\r\n- DCR registration - already sends and stores the setting\r\n\r\n### Why Other Providers Didn't Fail\r\nAuth0, Okta, Google, Microsoft are lenient per RFC 6749 §2.3.1 and accept either authentication method. Datadog and other strict OAuth 2.1 servers enforce the registered method, exposing this bug.\r\n\r\n### Testing Against Datadog\r\nTo verify the fix works with Datadog MCP server:\r\n1. Configure gateway with `issuer: \"https://mcp.datadoghq.com\"`\r\n2. Enable DCR auto-registration\r\n3. Trigger OAuth flow - DCR will register with `client_secret_basic`\r\n4. Token exchange will now correctly use HTTP Basic Authentication\r\n5. Flow completes successfully (previously failed with `400 invalid_client`)",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "27e104ae60b3c0c54c19766d8519d5048612cdca",
+      "message": "fix: honor token_endpoint_auth_method in OAuth token exchange\n\nFixes #4706\n\nWhen DCR registers a client with token_endpoint_auth_method set to\n'client_secret_basic' (RFC 7591 default), the token exchange now\ncorrectly uses HTTP Basic Authentication instead of always sending\ncredentials in the POST body.\n\nChanges:\n- oauth_manager.py: Updated exchange_code_for_token() to read and honor\n  token_endpoint_auth_method from credentials\n- oauth_router.py: Propagate token_endpoint_auth_method from DCR\n  registered client to oauth_config\n- Added test coverage for Basic Auth fallback when client_secret missing\n- Updated DCR tests to include token_endpoint_auth_method attribute\n\nThis ensures compatibility with strict OAuth 2.1 providers like Datadog\nthat enforce the registered authentication method.\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-12T09:29:22+00:00"
+    },
+    {
+      "sha": "e30d77b0fce40e2ec5e8d0b3b669daff48afe3c9",
+      "message": "add new test for exchange_code_for_token() non-PKCE path\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-12T10:06:21+00:00"
+    },
+    {
+      "sha": "0b8c9e4ae29271a646f44573f7a5afde2ac9e288",
+      "message": "fix .secrets.baseline\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-05-12T11:19:18+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 92,
+  "deletions": 12,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:04:29.337001",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:29.337650",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4717,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4717.json"
+  }
+}

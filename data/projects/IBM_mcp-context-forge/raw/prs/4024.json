@@ -1,0 +1,58 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4024,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4024"
+  },
+  "metadata": {
+    "title": "feat(gateway): add per-user personal credential store",
+    "state": "open",
+    "created_at": "2026-04-03T10:18:26+00:00",
+    "updated_at": "2026-04-27T10:42:48+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "ecthelion77",
+    "labels": [
+      "COULD"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# ✨ Feature / Enhancement PR\n\n## 🔗 Epic / Issue\nCloses #4006\n\n---\n\n## 🚀 Summary (1-2 sentences)\nAdd a personal credential storage system enabling individual users to store their own API keys/tokens for specific gateways, with automatic per-user auth on non-OAuth tool invocations.\n\n---\n\n## 🧪 Checks\n\n- [x] `make lint` passes (ruff + black)\n- [ ] `make test` passes\n- [ ] CHANGELOG updated (if user-facing)\n\n---\n\n## 📓 Notes\n\n### Use case\n\nSome MCP backends require per-user authentication via API keys rather than OAuth. This feature lets each user store their own credentials for a gateway, which are automatically used during tool invocations.\n\n### Authentication flow (non-OAuth gateways)\n\n```\nTool invocation\n  └─ Is gateway OAuth? → Yes → existing OAuth flow\n  └─ No → Check personal credential for (gateway_id, user_email)\n       └─ Found → Build auth header from credential type\n       └─ Not found → Fall back to shared gateway auth_value\n```\n\n### Supported credential types\n\n- `api_key`: `Authorization: Basic base64(key:X)`\n- `bearer_token`: `Authorization: Bearer <token>`\n- `basic_auth`: `Authorization: Basic base64(value)`\n\n### Changes\n\n| File | Change |\n|------|--------|\n| `db.py` | `user_gateway_credentials` table |\n| `credential_storage_service.py` | CRUD + encryption + auth header builder |\n| `credential_router.py` | REST API (`GET`/`PUT`/`DELETE` per gateway) |\n| `tool_service.py` | Personal credential lookup before shared auth |\n| `main.py` | Router registration |\n| Admin UI (`admin.js`, `gateways.js`, `admin.html`, `gateways_partial.html`) | Credential modal |\n| Alembic migration | New table |\n| Unit tests | Router + service tests |\n\n### Security\n\n- Credentials are encrypted at rest using the existing `EncryptionService`\n- Each user can only access their own credentials\n- Unique constraint on `(gateway_id, user_email)` prevents duplicates\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "d110784148509f57d85d738d4a845f19db540baf",
+      "message": "feat(auth): per-user personal credential store for gateway authentication\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-14T14:56:14+00:00"
+    },
+    {
+      "sha": "8c98fe002aded1d33cccb3bda0776f43c54783f0",
+      "message": "fix(auth): prioritize per-user credentials over OAuth in tool execution\n\nPer-user personal credentials (API keys, basic auth) stored in\nuser_gateway_credentials were only checked when the gateway did NOT\nhave OAuth configured. For OAuth-enabled gateways (like Freshservice),\nthe OAuth token was always used even when a per-user API key existed.\n\nMove the per-user credential lookup BEFORE the OAuth branch so that\npersonal credentials take priority. This fixes write operations on\nAPIs where OAuth tokens lack sufficient permissions but API keys work\n(e.g. Freshservice PM task updates).\n\nAffects both invoke_tool_direct and invoke_tool MCP code paths.\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-20T10:48:59+00:00"
+    },
+    {
+      "sha": "8c423234e3fa32b884b2c6b66a19dc530eb01b50",
+      "message": "fix(services): replace non-existent mcp_session_pool with session_affinity\n\n- mcp_session_pool module was removed in upstream; replaced with\n  get_session_affinity() from session_affinity module\n- settings.mcp_session_pool_enabled replaced with\n  settings.mcpgateway_session_affinity_enabled\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-27T10:42:36+00:00"
+    }
+  ],
+  "files_changed": 16,
+  "additions": 1429,
+  "deletions": 220,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:13.681984",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:13.683230",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4024,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4024.json"
+  }
+}

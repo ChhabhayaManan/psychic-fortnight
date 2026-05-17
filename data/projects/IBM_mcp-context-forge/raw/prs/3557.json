@@ -1,0 +1,61 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3557,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3557"
+  },
+  "metadata": {
+    "title": "fix: test hangs on ~98% completion in parallel test runs",
+    "state": "closed",
+    "created_at": "2026-03-09T13:37:48+00:00",
+    "updated_at": "2026-03-12T11:49:19+00:00",
+    "closed_at": "2026-03-10T17:56:42+00:00",
+    "merged_at": "2026-03-10T17:56:42+00:00",
+    "author": "marekdano",
+    "labels": [
+      "bug",
+      "testing"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nCloses https://github.com/IBM/mcp-context-forge/issues/3536\r\n\r\nChanged to `test_client = TestClient(app)` (without context manager) to skip lifespan initialization. The test only needs endpoint routing to validate HTMX response formatting, not full app initialization. This aligns with existing test patterns in the codebase and resolves the hang.\r\n\r\nThe time required to run tests also improved.\r\n\r\n\r\n## 🔁 Reproduction Steps\r\n```\r\n# Hangs at ~98%:\r\nmake test\r\n```\r\n\r\n## 🐞 Root Cause\r\n\r\n`tests/unit/mcpgateway/test_admin_catalog_htmx.py` was causing the test suite to freeze at ~98% completion when running with `pytest -n auto` (parallel mode). The test used `with TestClient(app)` as `test_client`: which triggered the full gateway lifespan, causing:\r\n\r\n- Global state contention across parallel workers\r\n- Background task leaks (metrics aggregation, log backfill, pool notifications)\r\n- Redis singleton conflicts when workers reset shared state mid-lifespan\r\n\r\n\r\n## 💡 Fix Description\r\n\r\nRemoved the with context manager from the TestClient initialization (line 100), changing:\r\n```\r\n    with TestClient(app) as test_client:\r\n        yield test_client\r\n```\r\nto:\r\n```\r\n    test_client = TestClient(app)\r\n    yield test_client\r\n```\r\n   \r\nThis skips the lifespan entirely, avoiding all real service initialization while still allowing the test to validate HTMX response formatting.\r\n\r\n#### Why This Works\r\n- TestClient without context manager doesn't trigger lifespan startup/shutdown\r\n- Test only needs endpoint routing, not full app initialization\r\n- Aligns with existing test patterns in the codebase\r\n- Simpler and safer than patching the lifespan\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3924175043",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T17:29:25+00:00",
+      "body": "LGTM — correct fix, well-scoped.\n\n**Review summary:**\n\n- **Correctness**: The `TestClient(app)` without context manager correctly skips FastAPI's lifespan startup/shutdown, which was the root cause of the parallel test hang. The test only validates HTMX response formatting and doesn't depend on any lifespan-initialized services — all dependencies are already mocked.\n- **Consistency**: Aligns with the dominant codebase pattern (29 test files use plain assignment vs. 2 using context manager).\n- **Security**: Test-only change, no production code modified.\n- **Performance**: Verified — all 7 tests pass in both serial (1.4s) and parallel (`-n auto`, 7s with worker overhead) mode with no hangs.\n\n**Minor follow-up suggestion** (non-blocking): The fixture still patches lifespan-related objects (`streamable_http_session.initialize/shutdown`, `SharedHttpClient.get_instance/shutdown`) that are no longer triggered. These patches are harmless but could be cleaned up in a future PR."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "72d4d6cf1809f911c432c5d90b10080bc4df9be6",
+      "message": "fix: test hangs on ~98% completion in parallel test runs\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-09T13:27:39+00:00"
+    },
+    {
+      "sha": "f4bac77f19ce301292bad5c3d59dc23bdbbfb7b6",
+      "message": "Merge branch 'main' into 3536-fix-hangs-in-parallel-test-runs",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T17:53:37+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 3,
+  "deletions": 2,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:52.114309",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:52.115251",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3557,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3557.json"
+  }
+}

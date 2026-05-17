@@ -1,0 +1,35 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4586,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4586"
+  },
+  "metadata": {
+    "title": "[BUG][AUTH]: DCR auto-registration fails mid-flow for Atlassian (no registration_endpoint) with no guided fallback to manual credentials",
+    "state": "open",
+    "created_at": "2026-05-05T01:53:05+00:00",
+    "updated_at": "2026-05-05T19:45:36+00:00",
+    "closed_at": null,
+    "author": "a-effort",
+    "labels": [
+      "bug",
+      "triage",
+      "security",
+      "api",
+      "rh"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "### 🐞 Bug Summary\n\nWhen a user adds the Atlassian Remote MCP Server from the MCP Registry and clicks **🔐 Authorize**, ContextForge auto-triggers Dynamic Client Registration (DCR, RFC 7591) because the gateway has an issuer URL but no \\`client_id\\`. Atlassian's authorization server (\\`https://auth.atlassian.com\\`) does not expose a \\`registration_endpoint\\` in its OIDC metadata, so DCR fails mid-flow with a raw error:\n\n```json\n{\n  \"detail\": \"Dynamic Client Registration failed: AS https://auth.atlassian.com does not support Dynamic Client Registration (no registration_endpoint). Please configure client_id and client_secret manually or check your OAuth server supports RFC 7591.\"\n}\n```\n\nThe user is left on a raw JSON error page with no path forward. There is no UI prompt to enter \\`client_id\\` and \\`client_secret\\` manually, and the error appears after the OAuth flow has already been initiated (not at save time where it could be caught early).\n\n---\n\n### 🧩 Affected Component\n\n- [x] \\`mcpgateway\\` - API\n- [x] \\`mcpgateway\\` - UI (admin panel)\n\n---\n\n### 🔁 Steps to Reproduce\n\n1. Open the MCP Registry tab in the Admin UI\n2. Find the **Atlassian Remote MCP Server** (auth type: OAuth2.1) and click **Add Server**\n3. The gateway is registered with \\`auth_type=oauth\\`, \\`oauth_config=None\\`, \\`enabled=False\\`\n4. Navigate to the Gateways tab — the gateway appears with a **🔐 Authorize** button\n5. Edit the gateway, set the issuer to \\`https://auth.atlassian.com\\`, save (no \\`client_id\\` or \\`client_secret\\` set)\n6. Click **🔐 Authorize**\n7. ContextForge auto-triggers DCR since \\`issuer\\` is set but \\`client_id\\` is absent\n8. DCR fetch of \\`https://auth.atlassian.com/.well-known/openid-configuration\\` finds no \\`registration_endpoint\\`\n9. \\`DcrService\\` raises \\`DcrError\\` → \\`initiate_oauth_flow()\\` surfaces it as an unhandled 500/400\n10. User sees raw JSON error, no way back to the admin UI\n\n---\n\n### 🤔 Expected Behavior\n\nOne of:\n\n**Option A — Pre-flight detection (preferred):** When saving a gateway with \\`auth_type=oauth\\` and an issuer but no \\`client_id\\`, ContextForge should probe the issuer's OIDC metadata and warn the user immediately if DCR is unsupported — prompting them to supply \\`client_id\\`/\\`client_secret\\` before saving.\n\n**Option B — Graceful mid-flow fallback:** If DCR is attempted at authorize-time and fails because there is no \\`registration_endpoint\\`, the error should redirect back to the Admin UI (not show raw JSON) with a clear, actionable message and a direct link to the gateway edit form to enter credentials manually.\n\nEither way, the user should never be dropped onto a raw JSON error page with no navigation path.\n\n---\n\n### 📓 Logs / Error Output\n\n```\nDcrError: AS https://auth.atlassian.com does not support Dynamic Client Registration (no registration_endpoint).\nPlease configure client_id and client_secret manually or check your OAuth server supports RFC 7591.\n```\n\nSurfaced to the user as:\n```\n{\"detail\":\"Dynamic Client Registration failed: AS https://auth.atlassian.com does not support Dynamic Client Registration (no registration_endpoint). Please configure client_id and client_secret manually or check your OAuth server supports RFC 7591.\"}\n```\n\n---\n\n### 🧠 Environment Info\n\n| Key | Value |\n|-----|-------|\n| Version or commit | main |\n| Runtime | Python 3.11, FastAPI |\n| Platform / OS | any |\n| Container | any |\n\n---\n\n### 🧩 Additional Context\n\n**Root cause in code:**\n- \\`mcpgateway/services/dcr_service.py\\` — raises \\`DcrError\\` when \\`registration_endpoint\\` is absent from OIDC metadata\n- \\`mcpgateway/routers/oauth_router.py:363-411\\` — \\`initiate_oauth_flow()\\` triggers DCR when \\`issuer\\` is set but \\`client_id\\` is absent; the \\`DcrError\\` is not caught and converted to a graceful redirect\n- \\`mcpgateway/services/catalog_service.py:327-355\\` — Atlassian servers are registered from the catalog with \\`auth_type=oauth\\` but \\`oauth_config=None\\`, leaving the user with no credentials and no wizard to complete setup\n\n**Related issues:**\n- #2861 — OAuth UX Overhaul epic (mentions DCR failure redirect as a sub-task but doesn't address Atlassian-specific pre-flight detection)\n- #3499 — Atlassian \\`audience\\` parameter support (separate but companion issue — Atlassian also requires \\`audience=api.atlassian.com\\` which ContextForge doesn't send)\n- #2148 — DCR proxy (different direction: MCP clients → ContextForge, not ContextForge → Atlassian)\n\n**Atlassian OAuth app setup** requires manual registration at [developer.atlassian.com](https://developer.atlassian.com/console/myapps/), which means DCR will never work for Atlassian — making pre-flight detection or a guided manual-credentials fallback essential for this integration.",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:39.617588",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:39.618767",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4586,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4586.json"
+  }
+}

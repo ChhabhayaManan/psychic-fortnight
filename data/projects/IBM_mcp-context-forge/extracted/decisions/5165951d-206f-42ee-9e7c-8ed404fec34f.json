@@ -1,0 +1,37 @@
+{
+  "id": "5165951d-206f-42ee-9e7c-8ed404fec34f",
+  "title": "feat: forward `_meta` in upstream MCP requests for `resources/read` and `prompts/get`",
+  "summary": "Closes #2332\r\n\r\n## Problem\r\n\r\nIssue #2332 was partially resolved by #2094, which added `_meta` forwarding for `tools/call` via the streamablehttp transport. However, two gaps remained in the **non-direct-proxy (cache) code path**:\r\n\r\n1. **`resources/read`** — `meta_data` was accepted by `invoke_resource()` and `read_resource()` but never forwarded to the upstream MCP server. The MCP SDK's `session.read_resource()` does not accept a `meta` kwarg, so the parameter was silently dropped and commented as \"reserved for future SDK support.\"\r\n\r\n2. **`prompts/get`** — `_meta_data` was accepted by `get_prompt()` but the parameter was documented as \"not used currently\" and never passed through to the upstream `session.get_prompt()` call.\r\n\r\nAdditionally, `read_resource` in the `direct_proxy` branch was re-extracting `ctx.meta` a second time (Pattern B — raw Pydantic object) even though Pattern A (dict) had already been extracted earlier in the same handler, creating an inconsistency.\r\n\r\n## Solution\r\n\r\nThe MCP SDK does not expose `meta` on `session.read_resource()` or `session.get_prompt()`, but both methods are thin wrappers around `session.send_request()`. When `meta_data` is present, the fix constructs the typed request params, injects `_meta` into the serialized dict, re-validates via `model_validate`, and calls `send_request()` directly — the same pattern already used in the `direct_proxy` helper `_proxy_read_resource_to_gateway()`.\r\n\r\n### Changes\r\n\r\n**`mcpgateway/services/resource_service.py`**\r\n- Added `types`, `ReadResourceRequest`, `ReadResourceRequestParams` to MCP imports.\r\n- `invoke_resource()` — all four call sites that previously called `session.read_resource(uri=uri)` unconditionally now branch: if `meta_data` is set, `send_request()` is used with `_meta` injected; otherwise the SDK helper is used unchanged.\r\n- `read_resource()` direct_proxy block — same pattern applied.\r\n- Removed stale \"MCP SDK 1.25.0 does not support meta parameter\" comments and updated docstrings.\r\n\r\n**`mcpgateway/services/prompt_service.py`**\r\n- Added `types`, `GetPromptRequest`, `GetPromptRequestParams` to MCP imports.\r\n- `_fetch_gateway_prompt_result()` — added `meta_data: Optional[Dict[str, Any]] = None` parameter; all three `session.get_prompt()` call sites (session-pool, per-call SSE, per-call streamablehttp) now forward `_meta` via `send_request()` when present.\r\n- `get_prompt()` — passes `_meta_data` down to `_fetch_gateway_prompt_result()`.\r\n- Updated docstring: `_meta_data` is now documented as forwarded upstream, not \"not used currently\".\r\n\r\n**`mcpgateway/transports/streamablehttp_transport.py`**\r\n- `read_resource` handler — removed the redundant Pattern B re-extraction of `ctx.meta` inside the direct_proxy branch. The already-extracted `meta_data` dict (Pattern A) is now passed directly to `_proxy_read_resource_to_gateway()`, making the extraction consistent across all branches.\r\n\r\n## Behaviour\r\n\r\n| Method | Before | After |\r\n|---|---|---|\r\n| `resources/read` (cache path, SSE) | `_meta` dropped | `_meta` forwarded via `send_request` |\r\n| `resources/read` (cache path, streamablehttp) | `_meta` dropped | `_meta` forwarded via `send_request` |\r\n| `resources/read` (direct_proxy) | `_meta` forwarded (duplicate extraction) | `_meta` forwarded (single extraction) |\r\n| `prompts/get` (cache path) | `_meta` accepted but dropped | `_meta` forwarded via `send_request` |\r\n| `tools/call` | unchanged — already working | unchanged |\r\n| `tools/list`, `resources/list`, `prompts/list` | DB queries, no upstream call | unchanged — N/A |",
+  "reasoning": "\r\nCloses #2332\r\n\r\n## Problem\r\n\r\nIssue #2332 was partially resolved by #2094, which added `_meta` forwarding for `tools/call` via the streamablehttp transport. However, two gaps remained in the **non-direct-proxy (cache) code path**:\r\n\r\n1. **`resources/read`** — `meta_data` was accepted by `invoke_resource()` and `read_resource()` but never forwarded to the upstream MCP server. The MCP SDK's `session.read_resource()` does not accept a `meta` kwarg, so the parameter was silently dropped and commented as \"reserved for future SDK support.\"\r\n\r\n2. **`prompts/get`** — `_meta_data` was accepted by `get_prompt()` but the parameter was documented as \"not used currently\" and never passed through to the upstream `session.get_prompt()` call.\r\n\r\nAdditionally, `read_resource` in the `direct_proxy` branch was re-extracting `ctx.meta` a second time (Pattern B — raw Pydantic object) even though Pattern A (dict) had already been extracted earlier in the same handler, creating an inconsistency.\r\n\r\n## Solu",
+  "confidence": 0.75,
+  "related_services": [],
+  "contributors": [
+    "msureshkumar88",
+    "brian-hussey",
+    "Lang-Akshay"
+  ],
+  "tags": [
+    "caching",
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "7942ea8a-37e2-4b8a-bd40-b221653f4685",
+      "source_type": "pr",
+      "source_id": "4141",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/4141",
+      "contributor": "Lang-Akshay",
+      "timestamp": "2026-04-13T13:11:40Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4141.json"
+    }
+  ],
+  "timestamp": "2026-04-13T13:11:40Z",
+  "created_at": "2026-05-17T17:25:01.192485",
+  "updated_at": "2026-05-17T17:25:01.192488",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:25:01.192889",
+    "artifact_type": "decisions",
+    "artifact_id": "5165951d-206f-42ee-9e7c-8ed404fec34f"
+  }
+}

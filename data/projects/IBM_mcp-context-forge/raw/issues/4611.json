@@ -1,0 +1,34 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4611,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4611"
+  },
+  "metadata": {
+    "title": "[BUG]: Prompts service — null visibility crash, missing private conflict guard, and stale argument schema",
+    "state": "open",
+    "created_at": "2026-05-06T07:15:34+00:00",
+    "updated_at": "2026-05-07T05:51:20+00:00",
+    "closed_at": null,
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "triage"
+    ],
+    "milestone": null,
+    "assignees": [
+      "shoummu1"
+    ]
+  },
+  "description": "### 🐞 Bug Summary\nFour related bugs found in the prompts service layer (`mcpgateway/services/prompt_service.py`), discovered during investigation of #2420.\n\n**Bug 1 — `AttributeError` crash when `visibility=None`**\n`register_prompt` and `update_prompt` call `visibility.lower()` unconditionally. The REST API endpoint declares `visibility: Optional[str] = Body(\"public\", ...)`, so a client sending `{\"visibility\": null}` causes `AttributeError: 'NoneType' object has no attribute 'lower'`.\n\n**Bug 2 — Missing `private` conflict check in `register_prompt`**\n`register_prompt` only guards against duplicate `public` and `team` prompts. The `private` conflict check that exists in `update_prompt` is absent, allowing two private prompts with the same name and owner to be silently created.\n\n**Bug 3 — Stale `argument_schema` after template-only update**\nWhen `update_prompt` receives a new `template` but no `arguments`, the `argument_schema.required` list is never recomputed. The stored schema stays tied to the old template's variables, causing spurious validation errors for new template placeholders until `arguments` is also explicitly re-sent.\n\n**Bug 4 — `_get_required_arguments` adds false required args via `Formatter.parse()`**\nIn addition to Jinja2's `meta.find_undeclared_variables`, the method also runs Python's `string.Formatter().parse()` over the raw template source. Any single-brace `{...}` in JSON content, dict literals, or Jinja2 `{% set x = {\"a\": 1} %}` expressions is spuriously added as a required argument.\n\n---\n\n### 🧩 Affected Component\nSelect the area of the project impacted:\n\n- [x] `mcpgateway` - API\n- [ ] `mcpgateway` - UI (admin panel)\n- [ ] `mcpgateway.wrapper` - stdio wrapper\n- [ ] Federation or Transports\n- [ ] CLI, Makefiles, or shell scripts\n- [ ] Container setup (Docker/Podman/Compose)\n- [ ] Other (explain below)\n\n---\n\n### 🔁 Steps to Reproduce\n\n**Bug 1 — `AttributeError` on `None` visibility:**\n1. `POST /prompts` with body `{\"name\": \"test\", \"template\": \"hello\", \"visibility\": null}`.\n2. Observe `500 Internal Server Error` with `AttributeError: 'NoneType' object has no attribute 'lower'`.\n\n**Bug 2 — Duplicate private prompt:**\n1. `POST /prompts` with `{\"visibility\": \"private\", \"name\": \"my-prompt\", \"template\": \"hello\"}` as user `alice`.\n2. Repeat the same request.\n3. Observe: both succeed. No `409 Conflict` is raised, unlike `public` and `team` prompts.\n\n**Bug 3 — Stale argument schema:**\n1. `POST /prompts` with `{\"template\": \"Hello {{ name }}\"}` — `argument_schema.required` is `[\"name\"]`.\n2. `PATCH /prompts/{id}` with only `{\"template\": \"Hello {{ first }} {{ last }}\"}`.\n3. `POST /prompts/{id}` with body `{\"first\": \"A\", \"last\": \"B\"}` (MCP spec prompt retrieval).\n4. Observe: validation error claiming `name` is missing, because `argument_schema.required` was never updated.\n\n**Bug 4 — False required args:**\n1. Register a prompt whose template contains a JSON literal, e.g.:\n   ```\n   Here is the config: {\"key\": \"value\"}\n   ```\n2. Observe: `argument_schema.required` includes `\"key\"` even though it is not a Jinja2 variable.\n\n---\n\n### 🤔 Expected Behavior\n\n1. `visibility=None` should default to `\"public\"` (the declared parameter default) without crashing.\n2. Registering a duplicate private prompt for the same owner should raise `PromptNameConflictError` (HTTP 409), consistent with `update_prompt` and with the existing `public`/`team` checks in `register_prompt`.\n3. Updating only `template` should atomically recompute `argument_schema.required` to reflect the new template variables.\n4. `_get_required_arguments` should return only genuine Jinja2 undeclared variables as identified by `jinja2.meta.find_undeclared_variables`, without adding Python `str.format`-style tokens from literal content.\n\n---\n\n### 📓 Logs / Error Output\n\n**Bug 1:**\n```\nAttributeError: 'NoneType' object has no attribute 'lower'\n  File \"mcpgateway/services/prompt_service.py\", line 844, in register_prompt\n    if visibility.lower() == \"public\":\n```\n\n**Bug 3 — example misleading 422:**\n```json\n{\"detail\": \"Missing required argument: name\"}\n```\nreturned when `{\"first\": \"Alice\", \"last\": \"Smith\"}` is supplied after a template-only update.\n\n---\n\n### 🧠 Environment Info\n\n| Key | Value |\n|-----|-------|\n| Version or commit | `main` (identified during review of #2420) |\n| Runtime | Python 3.11, FastAPI / Gunicorn |\n| Platform / OS | Any |\n| Container | Any |\n\n---\n\n### 🧩 Additional Context\n\n- All four bugs are confined to `mcpgateway/services/prompt_service.py`.\n- Bug 1: `register_prompt` and `update_prompt` call `visibility.lower()` unconditionally — callers can pass `None` explicitly via the REST API.\n- Bug 2: `register_prompt` has `public` and `team` duplicate-name guards but no `private` one; `update_prompt` does have a `private` guard — an asymmetry introduced at some point between the two methods.\n- Bug 3: `argument_schema` is only recomputed inside `if prompt_update.arguments is not None:`; a template-only `PATCH` skips that block entirely.\n- Bug 4: `from string import Formatter` is imported solely for `_get_required_arguments`; `jinja2.meta.find_undeclared_variables` already covers all Jinja2 variables correctly.\n",
+  "comments": [],
+  "ingested_at": "2026-05-17T17:22:42.390863",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:42.391194",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4611,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4611.json"
+  }
+}

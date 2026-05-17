@@ -1,0 +1,103 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2869,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2869"
+  },
+  "metadata": {
+    "title": "feat(ui): flexible admin UI sections for embedded contexts",
+    "state": "closed",
+    "created_at": "2026-02-12T08:57:02+00:00",
+    "updated_at": "2026-02-17T14:29:20+00:00",
+    "closed_at": "2026-02-16T19:13:37+00:00",
+    "merged_at": "2026-02-16T19:13:37+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "ui",
+      "ica"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\nCloses #2075\r\n\r\nAdds flexible Admin UI visibility controls for embedded contexts, allowing specific UI sections and header controls to be hidden without triggering backend data loads. Hidden/\r\ninvalid hash navigation is redirected to the first available visible tab.\r\n\r\n## Configuration\r\n\r\nNew env vars:\r\n\r\n- MCPGATEWAY_UI_EMBEDDED (bool): Enables embedded UI mode (hides logout + team_selector by default).\r\n- MCPGATEWAY_UI_HIDE_SECTIONS (CSV/JSON list): Hide UI sections.\r\n    - Valid: servers, gateways, tools, prompts, resources, teams, users, agents, tokens, settings\r\n    - Aliases supported: catalog/virtual_servers -> servers, a2a/a2a-agents/grpc-services -> agents, api_tokens -> tokens, llm-settings -> settings\r\n- MCPGATEWAY_UI_HIDE_HEADER_ITEMS (CSV/JSON list): Hide header items.\r\n    - Valid: logout, team_selector, user_identity, theme_toggle\r\n\r\nPer-request override:\r\n\r\n- GET /admin/?ui_hide=prompts,resources,teams\r\n- Query override is persisted to a session cookie (mcpgateway_ui_hide_sections); clear by visiting /admin/?ui_hide=.\r\n\r\n## What Changed\r\n\r\n- mcpgateway/config.py\r\n    - Adds embedded/visibility settings with CSV/JSON parsing, aliasing, validation, and dedupe.\r\n- mcpgateway/admin.py\r\n    - Computes effective hidden sections/header items/tabs from env + embedded defaults + query param + cookie.\r\n    - Skips service list calls (and team lookups where possible) for hidden sections so hidden UI does not load data.\r\n    - Persists ui_hide overrides in an HttpOnly cookie (honors secure/samesite settings).\r\n- mcpgateway/templates/admin.html\r\n    - Conditionally renders sidebar links, panels, and header items based on hidden values.\r\n    - Exposes UI_HIDDEN_SECTIONS, UI_HIDDEN_HEADER_ITEMS, UI_HIDDEN_TABS globals for client-side nav.\r\n- mcpgateway/static/admin.js\r\n    - Hidden-aware tab resolution: redirects hidden/invalid hashes to a visible default tab and blocks navigation to hidden tabs.\r\n    - Prevents duplicate loads from overlapping click/hashchange handlers.\r\n    - Skips tools loading and section reload logic when sections are hidden.\r\n- Packaging/docs\r\n    - Updates charts/mcp-stack/values.yaml, charts/mcp-stack/values.schema.json, charts/mcp-stack/README.md\r\n    - Updates docker-compose.yml\r\n    - Updates docs/docs/config.schema.json and docs/docs/manage/configuration.md",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "e1473f91f3f28cd8de7659265c4ab4aa8e35f095",
+      "message": "feat(ui): flexible admin UI sections for embedded contexts\n\nAdd env controls to hide UI sections/header items (including embedded mode defaults).\n\nSupport per-request ?ui_hide= overrides persisted via cookie and prevent hidden sections from loading data.\n\nUpdate Helm values/schema, docker-compose, docs, and add unit + JS tests.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-12T08:30:33+00:00"
+    },
+    {
+      "sha": "67626d733e2020e73f1ca9945080d2fb24f52549",
+      "message": "fix(ui): restore default tab fallback\n\nPrefer the Overview tab when available and fall back to Gateways for minimal DOM states.\n\nAlign JS tab tests with the restored default tab behavior.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-12T09:05:20+00:00"
+    },
+    {
+      "sha": "2db3c7237691132012fd68ea9506bfdc8a607270",
+      "message": "fix(ui): review fixes for admin UI section visibility\n\nDeduplicate UI_HIDABLE_SECTIONS, UI_HIDABLE_HEADER_ITEMS, and\nUI_HIDE_SECTION_ALIASES constants — define once in config.py, import\nin admin.py.\n\nHarden normalizeTabName() against CSS selector injection by\nrestricting to [a-z0-9-] characters.\n\nAdd max_age (30 days) to the ui_hide_sections cookie so preferences\npersist across browser sessions.\n\nFilter global search results to exclude hidden sections.\n\nExpand JS test coverage: normalizeTabName edge cases, admin-only tab\nblocking, idempotency guard, getDefaultTabName priority,\nisTabAvailable, getUiHiddenSections/Tabs normalization, and global\nsearch filtering.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T11:26:15+00:00"
+    },
+    {
+      "sha": "ff51f9efd0b495b2924a8783e5bfe135addd3889",
+      "message": "test(ui): add comprehensive test coverage for admin UI section visibility\n\nCover _normalize_ui_hide_values, cookie set/delete behavior,\nsection-aware data loading, config validators, isTabHidden,\nand resolveTabForNavigation.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T11:51:11+00:00"
+    },
+    {
+      "sha": "0eb7f22da3aca418a6b208fac13ee2894edd2541",
+      "message": "fix(config): use NoDecode class instead of instance for env parsing\n\nNoDecode() (instance) in Annotated metadata is not found by\npydantic-settings' `NoDecode in field.metadata` check, causing\njson.loads to be called on raw CSV strings. Use NoDecode (class)\nwhich matches correctly. Also adds ADR-040 and admin UI\ncustomization guide.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T12:28:45+00:00"
+    },
+    {
+      "sha": "6fbcd36f628ab6d22f270596d134b573bce62d22",
+      "message": "Fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T15:07:22+00:00"
+    },
+    {
+      "sha": "289f1aca8e855252213f7b51483f0a372f8a3eb3",
+      "message": "fix(ui): expand admin section hiding coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T15:40:36+00:00"
+    },
+    {
+      "sha": "1559441687a33a86804dc457cc00e0eb4caff670",
+      "message": "test(metrics): stabilize db engine detection setup test\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T15:57:13+00:00"
+    },
+    {
+      "sha": "fdceb06b72480faaff7d5192c396267a57a0fd76",
+      "message": "fix(playwright): stabilize admin ui tab and search flows\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T17:08:33+00:00"
+    },
+    {
+      "sha": "a02b6851f9fb621dc6182f2e86f0dd5b2f3d89ac",
+      "message": "Fixes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-16T17:32:59+00:00"
+    }
+  ],
+  "files_changed": 26,
+  "additions": 2516,
+  "deletions": 147,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:59.939145",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:59.941013",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2869,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2869.json"
+  }
+}

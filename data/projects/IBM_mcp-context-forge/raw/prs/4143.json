@@ -1,0 +1,261 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4143,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4143"
+  },
+  "metadata": {
+    "title": "feat: add binding_reference_id to tool plugin bindings and expand plugin config schemas",
+    "state": "closed",
+    "created_at": "2026-04-13T14:02:22+00:00",
+    "updated_at": "2026-04-14T09:31:44+00:00",
+    "closed_at": "2026-04-14T09:31:42+00:00",
+    "merged_at": "2026-04-14T09:31:42+00:00",
+    "author": "madhu-mohan-jaishankar",
+    "labels": [
+      "plugins",
+      "wxo",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4122 partially\r\n\r\n---\r\n\r\n## 📝 Summary\r\nAdds `binding_reference_id` to `tool_plugin_bindings` to allow upstream systems (e.g. WXO) to correlate CF plugin bindings with their own identifiers. Also expands `OutputLengthGuardConfig` (4 → 12 fields) and `RateLimiterConfig` (3 → 8 fields, `by_tool` changed from `str` to `Dict[str, str]`) to fully reflect the capabilities of the underlying plugins. All unit tests were updated and extended to cover the new fields and behaviours (76/76 passing).\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     | ✅ 76/76 passing |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n**DB / Migration**\r\n- New nullable `binding_reference_id` column (`VARCHAR(255)`) on `tool_plugin_bindings`, with an index for fast lookups.\r\n- Alembic migration: `d3e4f5a6b7c8_add_binding_reference_id_to_tool_plugin_bindings.py` (reversible).\r\n\r\n**Schema changes**\r\n- `OutputLengthGuardConfig` — added `max_chars` (Optional), `min_tokens`, `max_tokens`, `chars_per_token`, `limit_mode`, `word_boundary`, `max_text_length`, `max_structure_size`, `max_recursion_depth`; `min < max` validator covers both chars and tokens.\r\n- `RateLimiterConfig` — added `algorithm`, `backend`, `redis_url`, `redis_key_prefix`, `redis_fallback`; `by_tool` is now `Dict[str, str]` (per-tool rate strings).\r\n- `PluginPolicyItem` / `ToolPluginBindingResponse` — `binding_reference_id: Optional[str]` added; `config` docstring clarified to reflect full-replacement semantics (no partial configs, no merge).\r\n\r\n**Service**\r\n- `upsert_bindings` stores `binding_reference_id`, logs a `WARNING` on ownership transfer, and prunes stale tool bindings keyed by `(binding_reference_id, plugin_id)`.\r\n- `get_bindings_for_tool` uses specificity-wins wildcard resolution (`\"*\"` is overridden by an exact `tool_name` match).\r\n\r\n**Router**\r\n- `GET /v1/tools/plugin_bindings` and `GET /v1/tools/plugin_bindings/{team_id}` accept an optional `?binding_reference_id=` filter.\r\n- `DELETE /v1/tools/plugin_bindings` supports bulk delete by `binding_reference_id`.",
+  "comments": [
+    {
+      "id": "3073733979",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T14:38:45+00:00",
+      "body": "Please remove all references to WXO, here and throughout the PR's changes."
+    },
+    {
+      "id": "3073749711",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T14:41:10+00:00",
+      "body": "Please don't mention sidecar or WXO. This is a change that allows for any external system to have a secondary unique identification for any plugin bindings they may have implemented."
+    },
+    {
+      "id": "3073804540",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T14:50:02+00:00",
+      "body": "Should we error out if both team_id and binding_id are provided or at least issue a warning.\nIt looks accidental but I agree with it, that if both are present, prefer the `binding_reference_id` filter - but if that's the case I'd say be explicit first of all, and don't do the filter on the team_id if binding_reference_id is present."
+    },
+    {
+      "id": "3073836413",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T14:54:29+00:00",
+      "body": "Are these schema.py changes meant to be part of this PR? It looks like this may have been an accidental commit?"
+    },
+    {
+      "id": "3073936030",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-13T15:09:35+00:00",
+      "body": "they are a part of this PR. the config.yaml we have given to wxo included all these fields in config. we need to verify only these fields (all) are sent and no extra fields."
+    },
+    {
+      "id": "3074169038",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-13T15:49:45+00:00",
+      "body": "removed all wxo reference."
+    },
+    {
+      "id": "3074169573",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-13T15:49:52+00:00",
+      "body": "removed all wxo reference."
+    },
+    {
+      "id": "3074346822",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-13T16:21:24+00:00",
+      "body": "Good catch - addressed in the latest commit. When `binding_reference_id` is present, the service now explicitly skips the `team_id` filter entirely and logs a warning:\r\n\r\n```\r\nBoth team_id='...' and binding_reference_id='...' supplied to list_bindings;\r\nteam_id will be ignored. Omit team_id when filtering by binding_reference_id.\r\n```\r\n\r\nThe `test_binding_reference_id_takes_precedence_over_team_id` test asserts both the correct result and the exact warning message. Decided against returning a 400 because `binding_reference_id` is a cross-team identifier. The warning gives operational visibility without being a breaking change."
+    },
+    {
+      "id": "3074589511",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T17:06:10+00:00",
+      "body": "Please add field validation on this one to limit what could be passed here.\nI'd suggest something like:\n```\n    binding_reference_id: Optional[str] = Field(\n        None,\n        max_length=255, \n        pattern=r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*$',\n        description=\"Optional external reference ID for correlating this binding with an upstream system\"\n)\n```\n\nRationale:\n* Starts with alphanumeric (prevents leading special chars)\n* Allows alphanumeric, underscore, dot, and hyphen (common in UUIDs, slugs, and external IDs)\n* Prevents spaces, quotes, and control characters that could cause issues\n\nCompatible with common ID formats:\n* UUIDs: 550e8400-e29b-41d4-a716-446655440000\n* Slugs: wxo-binding-123\n* Dotted: system.subsystem.id\n* Mixed: WXO_Binding_2024.01.15"
+    },
+    {
+      "id": "3074610397",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T17:10:27+00:00",
+      "body": "Please make implement idempotency checks within the alembic migration scripts.\n\nNote the AI's code sample, where everything is checked/ensured prior to execution (or execution is skipped if needs be).\n\nFrom AI Assistant:\nFor the migration file [d3e4f5a6b7c8_add_binding_reference_id_to_tool_plugin_bindings.py](vscode-webview://0399ncagpop6mgb9e5lg4nhcf9u2qvl7qu752ccpfhmefuofrt2l/mcpgateway/alembic/versions/d3e4f5a6b7c8_add_binding_reference_id_to_tool_plugin_bindings.py:23), here's a suggested idempotent implementation:\n```\ndef upgrade() -> None:\n    \"\"\"Add nullable binding_reference_id column and index to tool_plugin_bindings.\"\"\"\n    inspector = sa.inspect(op.get_bind())\n    \n    # Skip if table doesn't exist (fresh DB uses db.py models directly)\n    if \"tool_plugin_bindings\" not in inspector.get_table_names():\n        return\n    \n    # Skip if column already exists\n    columns = [col[\"name\"] for col in inspector.get_columns(\"tool_plugin_bindings\")]\n    if \"binding_reference_id\" in columns:\n        return\n    \n    # Add column\n    op.add_column(\n        \"tool_plugin_bindings\",\n        sa.Column(\"binding_reference_id\", sa.String(255), nullable=True),\n    )\n    \n    # Add index (check if it exists first)\n    indexes = [idx[\"name\"] for idx in inspector.get_indexes(\"tool_plugin_bindings\")]\n    if \"ix_tool_plugin_bindings_binding_reference_id\" not in indexes:\n        op.create_index(\n            \"ix_tool_plugin_bindings_binding_reference_id\",\n            \"tool_plugin_bindings\",\n            [\"binding_reference_id\"],\n        )\n\n\ndef downgrade() -> None:\n    \"\"\"Remove binding_reference_id column and index from tool_plugin_bindings.\"\"\"\n    inspector = sa.inspect(op.get_bind())\n    \n    # Skip if table doesn't exist\n    if \"tool_plugin_bindings\" not in inspector.get_table_names():\n        return\n    \n    # Drop index if it exists\n    indexes = [idx[\"name\"] for idx in inspector.get_indexes(\"tool_plugin_bindings\")]\n    if \"ix_tool_plugin_bindings_binding_reference_id\" in indexes:\n        op.drop_index(\n            \"ix_tool_plugin_bindings_binding_reference_id\",\n            table_name=\"tool_plugin_bindings\",\n        )\n    \n    # Drop column if it exists\n    columns = [col[\"name\"] for col in inspector.get_columns(\"tool_plugin_bindings\")]\n    if \"binding_reference_id\" in columns:\n        op.drop_column(\"tool_plugin_bindings\", \"binding_reference_id\")\n```\n\nBenefits:\n* Safe re-runs: Can be executed multiple times without errors\n* Fresh DB compatibility: Skips if table doesn't exist (models handle it)\n* Partial migration recovery: Handles cases where column was added but index failed\n* Reversible: Downgrade is also idempotent\n* Testing: This pattern is used throughout the codebase and follows the AGENTS.md guidelines. It prevents the \"Multiple heads\" error that breaks tests."
+    },
+    {
+      "id": "3074722617",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-13T17:32:08+00:00",
+      "body": "Added field validation."
+    },
+    {
+      "id": "3074728047",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-13T17:33:09+00:00",
+      "body": "added the inspector-based idempotency guards to the migration. "
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4099582645",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-13T14:50:46+00:00",
+      "body": "Fix required: sign-offs \n\nSuggestion (nice to have): Document the 0 meaning in\n```\nOutputLengthGuardConfig: max_chars: Optional[int] = Field(\n          None, \n          description=\"Maximum character count. Set to None or 0 to disable the character limit check entirely.\"\n      )\n```"
+    },
+    {
+      "id": "4099619238",
+      "author": "msureshkumar88",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-13T14:55:01+00:00",
+      "body": "Please see the comment for the CR"
+    },
+    {
+      "id": "4099502092",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-13T14:55:56+00:00",
+      "body": "Hey Madhu, \nOverall very good, clear implementation, a few changes from an overall perspective but nothing major but one query on the schema.py file - I\"m not sure if that's meant to be included or not (I think not).\nThanks,\nBrian"
+    },
+    {
+      "id": "4099726746",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-13T15:09:36+00:00",
+      "body": ""
+    },
+    {
+      "id": "4100023079",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-13T15:49:45+00:00",
+      "body": ""
+    },
+    {
+      "id": "4100023672",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-13T15:49:52+00:00",
+      "body": ""
+    },
+    {
+      "id": "4100269868",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-13T16:21:24+00:00",
+      "body": ""
+    },
+    {
+      "id": "4100559114",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-13T17:12:07+00:00",
+      "body": "I've reviewed the changes you made, and I'm sorry I missed 2 other things on that pass.\nThe first is making the alembic migration file more robust and faster. \nAnd the second is a security change that can be made to the patterns that will be accepted as the binding id."
+    },
+    {
+      "id": "4100708901",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-13T17:32:08+00:00",
+      "body": ""
+    },
+    {
+      "id": "4100714164",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-13T17:33:09+00:00",
+      "body": ""
+    },
+    {
+      "id": "4104626771",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-14T08:59:19+00:00",
+      "body": "Code looks good. Thank you for making the changes to the idempotency of alembic and the acceptable pattern for the binding_reference_id."
+    },
+    {
+      "id": "4104820530",
+      "author": "msureshkumar88",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-14T09:26:59+00:00",
+      "body": "# ✅ PR #4143 — APPROVED FOR MERGE\n\n**feat: add binding_reference_id to tool plugin bindings** by @madhu-mohan-jaishankar \n\nThis PR successfully implements external system integration via `binding_reference_id`, enabling WXO and other upstream systems to correlate tool plugin bindings. All requirements from issue #4122 are fully addressed.\n\n## Review Status: All Requested Changes Completed ✅\n\n**Initial Review Findings**: 17 issues identified (2 high, 5 medium, 10 low)\n\n**Author's Response**: All issues resolved in subsequent commits:\n- ✅ Added comprehensive test suite (534 new test lines)\n- ✅ Implemented input validation with pattern `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`\n- ✅ Added migration idempotency guards\n- ✅ Removed WXO-specific references\n- ✅ Fixed list_bindings parameter exclusivity\n- ✅ Added bulk delete endpoint tests (4 scenarios)\n- ✅ Added stale-tool pruning tests (3 scenarios)\n- ✅ Restored plugin config defaults properly\n\n## Automated Verification: 32/32 Checks Passed ✅\n\n**Core Implementation**:\n- ✅ New `binding_reference_id` field with pattern validation\n- ✅ Database migration with proper indexing and reversibility\n- ✅ Stale-tool pruning logic for external system reconciliation\n- ✅ Bulk DELETE endpoint: `DELETE /tool-plugin-bindings?binding_reference_id={id}`\n- ✅ Query filtering on GET endpoints\n\n**Schema Expansions**:\n- ✅ `OutputLengthGuardConfig`: 4→12 fields (max_tokens, truncation_strategy, etc.)\n- ✅ `RateLimiterConfig`: 3→8 fields (by_tool Dict, time windows, burst limits)\n\n**Test Coverage**: 534 new lines\n- ✅ 4 bulk delete test scenarios\n- ✅ 3 stale-tool pruning tests  \n- ✅ Comprehensive validation tests\n- ✅ All edge cases covered\n\n**Code Quality**:\n- ✅ No debug code, TODOs, or print statements\n- ✅ Clean implementation following project standards\n- ✅ Complete API documentation updates\n- ✅ Input validation and security checks in place\n\n**Security**: 🟢 No issues\n- Pattern validation prevents injection\n- Proper parameter sanitization\n- No hardcoded credentials\n\n**Issue Coverage**: 5/5 requirements met\n- ✅ External reference ID field\n- ✅ Stale-tool reconciliation\n- ✅ Bulk operations support\n- ✅ Plugin config schema expansion\n- ✅ Comprehensive testing\n\n## Verification Artifacts Created\n\n- **Automated verification script**: Performs 45+ checks across 10 categories\n- **Detailed review reports**: Comprehensive analysis of all changes\n- **Test validation**: Confirms 534 lines of new test coverage\n\n## Final Recommendation: ✅ APPROVE\n\nAll critical issues from initial review have been resolved. The author addressed every requested change with comprehensive testing, proper validation, and clean implementation. The PR is production-ready with no blocking issues remaining."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "496d633edfaf30ed82472c9832e097cdab6e9a9d",
+      "message": "feat: add binding_reference_id to tool plugin bindings\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-10T14:19:36+00:00"
+    },
+    {
+      "sha": "2dea5cab9bb8da50ab0648744f806114cc13a83a",
+      "message": "feat: expand plugin config schemas and fix tests for binding-reference-id\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-13T13:51:35+00:00"
+    },
+    {
+      "sha": "fd6633ad7cad4b0d4d6aa030f784e339884b2a51",
+      "message": "fix: suppress detect-secrets false positives and update test configs for expanded schemas\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-13T14:39:57+00:00"
+    },
+    {
+      "sha": "1a0718a0ca1c882aa7b0d4e75fa9ca9b728bca7b",
+      "message": "fix: address PR review — add missing tests, input validation, remove WXO refs, fix list_bindings exclusivity\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-13T15:48:38+00:00"
+    },
+    {
+      "sha": "2ceedb2f8ede797e45d4d55d9e26bf290ae8a3d0",
+      "message": "fix: remove trailing blank lines (end-of-file-fixer)\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-13T16:01:28+00:00"
+    },
+    {
+      "sha": "3d604e569ef1707482fe327e3e62250a6930cd38",
+      "message": "fix: warn when both team_id and binding_reference_id supplied to list_bindings\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-13T16:18:47+00:00"
+    },
+    {
+      "sha": "3f2c0dfeaf01297ebcdc835d2d7a76272e29035d",
+      "message": "fix: remove wxo references from db docstring and test binding IDs\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-13T16:50:13+00:00"
+    },
+    {
+      "sha": "bc60409fd578a6cc3802c92c4a060d0c12ec4619",
+      "message": "fix: add idempotency guards to alembic migration and pattern validation to binding_reference_id\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-13T17:29:12+00:00"
+    },
+    {
+      "sha": "4d786547916d9cdf732e684e737eed7bc541751b",
+      "message": "fix(plugins): require all plugin config fields to be explicitly set\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-14T01:10:05+00:00"
+    },
+    {
+      "sha": "2c4ce227fe631d90a03049933c4333763ab739bc",
+      "message": "fix(schemas): restore defaults on plugin config classes\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-14T01:28:03+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 1217,
+  "deletions": 111,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:56.051731",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:56.052530",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4143,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4143.json"
+  }
+}

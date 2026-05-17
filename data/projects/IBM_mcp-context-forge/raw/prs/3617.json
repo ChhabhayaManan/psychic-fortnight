@@ -1,0 +1,1016 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3617,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3617"
+  },
+  "metadata": {
+    "title": "feat: add experimental Rust MCP runtime and session core",
+    "state": "closed",
+    "created_at": "2026-03-11T12:53:45+00:00",
+    "updated_at": "2026-03-17T00:07:19+00:00",
+    "closed_at": "2026-03-17T00:07:17+00:00",
+    "merged_at": "2026-03-17T00:07:17+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "experimental",
+      "rust",
+      "performance"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 🔗 Related Issue\nN/A\n\n---\n\n## 📝 Summary\nThis PR adds an experimental Rust MCP runtime and incrementally moves the MCP transport, high-volume JSON-RPC routing, and the first session/event-store slices into Rust while keeping the Python implementation available behind feature flags.\n\nKey changes:\n- add `tools_rust/mcp_runtime` and integrate it into `Containerfile.lite`, `docker-compose.yml`, and the managed entrypoint flow\n- route public `/mcp` traffic through Rust with explicit runtime visibility in `/health`, `/ready`, startup logs, and MCP response headers\n- narrow `initialize`, `notifications/initialized`, `tools/list`, `tools/call`, `resources/*`, `prompts/*`, and several other MCP methods off the generic Python dispatcher\n- wire the official `modelcontextprotocol/rust-sdk` behind a feature flag for the upstream `tools/call` client path\n- add feature-flagged Rust session metadata and Redis-backed event-store/session sharing, including dedicated session cleanup for server-scoped `DELETE`\n- extend the load-test harness and document the runtime boundary, configuration, and migration status in `tools_rust/mcp_runtime/README.md` and `tools_rust/mcp_runtime/STATUS.md`\n\nThis remains intentionally reversible:\n- full Python fallback: `EXPERIMENTAL_RUST_MCP_RUNTIME_ENABLED=false`\n- Rust transport/runtime only: disable `EXPERIMENTAL_RUST_MCP_SESSION_CORE_ENABLED` and `EXPERIMENTAL_RUST_MCP_EVENT_STORE_ENABLED`\n\n---\n\n## 🏷️ Type of Change\n- [ ] Bug fix\n- [x] Feature / Enhancement\n- [ ] Documentation\n- [ ] Refactor\n- [ ] Chore (deps, CI, tooling)\n- [ ] Other (describe below)\n\n---\n\n## 🧪 Verification\n\n| Check | Command | Status |\n|---|---|---|\n| Rust runtime crate tests | `cargo test --release --manifest-path tools_rust/mcp_runtime/Cargo.toml` | ✅ |\n| MCP CLI parity | `make test-mcp-cli` | ✅ |\n| MCP RBAC parity | `make test-mcp-rbac` | ✅ |\n| Redis stream integration | `uv run pytest -q --with-integration tests/integration/test_streamable_http_redis.py` | ✅ |\n| Compose-built Rust image | `docker compose build gateway` with Rust enabled | ✅ |\n| Load benchmarks | Mixed MCP and tools-only Locust runs on the compose-built stack | ✅ |\n\nPerformance highlights on the compose-built Rust stack:\n- mixed MCP workload: `1007.35 RPS` at `120` users, `1033.01 RPS` at `150` users, `0%` failures\n- tools-only hot path: `1126.96 RPS` overall and `1068.5 RPS` on `MCP tools/call [rapid]` at `125` users, `0%` failures\n\n---\n\n## ✅ Checklist\n- [ ] Code formatted (`make black isort pre-commit`)\n- [x] Tests added/updated for changes\n- [x] Documentation updated (if applicable)\n- [x] No secrets or credentials committed\n\n---\n\n## 📓 Notes\nCurrent boundary:\n- public MCP transport now flows through Rust\n- Python still remains the control plane for auth/RBAC and some session/transport internals\n- the runtime is intentionally feature-flagged so deployments can fall back to the Python path at any time\n\nFollow-on work after this PR is the remaining transport/session ownership: replay/resume behavior, session existence/owner checks on the public path, and multi-worker session-affinity forwarding.\n",
+  "comments": [
+    {
+      "id": "2922755839",
+      "author": "lucarlig",
+      "created_at": "2026-03-12T07:19:03+00:00",
+      "body": "this file should be broken up in a number of files, leaving only the entrypoint for the lib in `lib.rs` to improve human/agent redability\n\nsomething like:\n- src/main.rs: App entry & server initialization.\n- src/routes/: Route definitions (merging sub-routers).\n- src/handlers/: Request/response logic (HTTP layer).\n- src/models/: Data structures & Serde structs.\n- src/services/: Core business logic (agnostic of HTTP).\n- src/db/: Database connections & SQLx/Diesel queries.\n- src/middleware/: Custom layers (auth, logging, etc.).\n"
+    },
+    {
+      "id": "2922837987",
+      "author": "lucarlig",
+      "created_at": "2026-03-12T07:41:16+00:00",
+      "body": "This session ownership check treats any` is_admin` token as globally authorized. Elsewhere in the codebase, admin bypass is only allowed when the token is unscoped (`teams == null`); team-scoped admins should still be restricted. The Rust runtime should mirror the same token-scope semantics here.\n\n"
+    },
+    {
+      "id": "2922873558",
+      "author": "lucarlig",
+      "created_at": "2026-03-12T07:50:13+00:00",
+      "body": "This introduces a second DB access layer in Rust alongside the existing Python one. That means schema and auth/visibility semantics now have to stay aligned across both implementations. Can we converge on a single shared data layer instead of maintaining two?\n\n"
+    },
+    {
+      "id": "2922876076",
+      "author": "lucarlig",
+      "created_at": "2026-03-12T07:50:50+00:00",
+      "body": "This query duplicates Python-owned DB/business logic in Rust. I’m worried about long-term drift every time migrations or filtering rules change. It would be safer to either keep this behind the Python DB/service layer or move to one Rust DB layer that Python also reuses."
+    },
+    {
+      "id": "2922885993",
+      "author": "lucarlig",
+      "created_at": "2026-03-12T07:53:23+00:00",
+      "body": "The internal Python -> Rust proxy is configured with `follow_redirects=True`. Since this hop carries forwarded auth/context headers, transparently following redirects increases the chance of leaking trusted headers to an unintended target and hides misconfiguration. This internal sidecar hop should fail closed on redirects instead.\n"
+    },
+    {
+      "id": "2922895017",
+      "author": "lucarlig",
+      "created_at": "2026-03-12T07:55:44+00:00",
+      "body": "The health path counts active sessions with Redis `KEYS`, which is a blocking full-keyspace scan. That makes `health` O(N) in the number of matching session keys and can become expensive under frequent probes or larger deployments. A maintained counter or a bounded `SCAN` style approach would avoid turning health checks into Redis hot spots.\n\n"
+    },
+    {
+      "id": "2922907793",
+      "author": "lucarlig",
+      "created_at": "2026-03-12T07:58:56+00:00",
+      "body": "Each resumed SSE connection runs its own poll loop against Redis, sleeping and replaying repeatedly until the session disappears. Functionally this works, but it creates steady per-connection Redis load for idle streams, so the cost scales linearly with open resumable connections. A push/notify-based wakeup would scale much better here."
+    },
+    {
+      "id": "2923310855",
+      "author": "sco3",
+      "created_at": "2026-03-12T09:23:01+00:00",
+      "body": "Get my \"yes\" to this direction and I would eventually create gateway in rust with possibility to use some python extension if needed (say prototype extension in python and if it proves to be useful to customer then implement in rust).   For instance Nginx unit provides the functionality when several backends may be combined together. \r\nThe pet project https://github.com/sco3/nginx-unit-playground shows how one can have an nginx sever serving as integration point for go backend and two python backends (one on fastapi (pydantic models) and another on litestar (msgspec models))at the same time. Beside the mix of different languages backends it gives performance improvements to python backends. \r\n```\r\nGo Unit              █████████████████████████████████████████████ 43,230 req/s\r\nLitestar Unit        ████████████████ 16,753 req/s\r\nFastAPI Unit         ███████████████ 14,799 req/s\r\nLitestar + Uvicorn   ███████ 7,006 req/s\r\nFastAPI + Uvicorn    ██████ 6,069 req/s\r\nFastAPI + Gunicorn   ██████ 5,995 req/s\r\n```"
+    },
+    {
+      "id": "2936331442",
+      "author": "jonpspri",
+      "created_at": "2026-03-15T06:29:57+00:00",
+      "body": "@sco3 The first \"gateway\" we'll need is for post_tool_hook plugin execution, which occurs in-stream.  This will be complicated by the fact that the entire plugin module is being factored into an independent component and will be available to our via an API and dependency injection.  I'm trying to sort the component module map for the future state of the system ASAP.  I'll likely call you guys from NYC on Wednesday or Thursday to discuss."
+    },
+    {
+      "id": "2936396508",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-15T07:41:28+00:00",
+      "body": "The replay path currently performs **one awaited `HGET` per event ID** (lines **3840–3842**), which means the replay cost becomes **O(n) Redis round-trips**. On a long stream this will dominate latency, even if the per-event JSON processing itself is cheap.\r\n\r\nRedis provides a way to avoid this pattern. The `HMGET` command accepts **multiple fields in a single call**, so the replay can be reduced to **two round-trips regardless of stream length**:\r\n\r\n1. `ZRANGEBYSCORE` to retrieve the event IDs\r\n2. `HMGET` to retrieve all payloads in one request\r\n\r\nExample:\r\n\r\n```rust\r\nlet messages: Vec<Option<String>> = redis::cmd(\"HMGET\")\r\n    .arg(&messages_key)\r\n    .arg(&event_ids)\r\n    .query_async(&mut redis)\r\n    .await?;\r\n```\r\n\r\nAlternatively, if maintaining **individual `HGET` calls** is preferred for error isolation, the same batching benefit could be achieved using a Redis pipeline:\r\n\r\n```rust\r\nlet mut pipe = redis::pipe();\r\n\r\nfor id in &event_ids {\r\n    pipe.cmd(\"HGET\").arg(&messages_key).arg(id);\r\n}\r\n\r\nlet messages: Vec<Option<String>> = pipe.query_async(&mut redis).await?;\r\n```\r\n\r\nBoth approaches reduce the number of network round-trips significantly and should improve replay latency on longer streams.\r\n"
+    },
+    {
+      "id": "2936460117",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-15T08:45:37+00:00",
+      "body": "Since the Rust runtime is still marked **experimental**, should `httpx.HTTPError` fall back to `python_fallback_app` instead of returning a hard **502**?\n\nRight now, if the sidecar is **down or restarting**, `/mcp` becomes fully unavailable even though a working Python path is already wired up and used on **lines 79 and 84** for other cases.\n\nA graceful fallback on transport error would make **rollout and recovery safer** – operators could enable the Rust runtime without it becoming an **all-or-nothing risk**.\n\nExample:\n\n```python\nexcept httpx.HTTPError as exc:\n    logger.warning(\"Rust MCP runtime unavailable, falling back to Python: %s\", exc)\n    await self.python_fallback_app(scope, receive, send)\n    return\n```\n\nIf the hard **502** is intentional (to make sidecar failures visible rather than silently hiding them), ignore this comment \n\nOR\n\na configuration flag such as:\n\n```\nEXPERIMENTAL_RUST_MCP_RUNTIME_FALLBACK_ON_ERROR\n```\n\ncould give operators the choice between **strict failure** and **graceful fallback**.\n"
+    },
+    {
+      "id": "2936484516",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-15T09:10:22+00:00",
+      "body": "The session read path currently performs a `GET` followed by a separate `EXPIRE` to refresh the TTL (lines **3322–3325**). This has two issues:\n\n1. **Two round-trips on every session lookup** – one `await` for the read and another `await` for the refresh.\n2. **Non-atomic behaviour** – if the key expires between the two calls, the session is returned to the caller but its TTL is never refreshed, silently leaving it closer to expiry than expected.\n\nSince the project already uses `redis:latest` (Redis **7.x**), the `GETEX` command is available and combines both operations into a single atomic call:\n\n```rust\nlet payload: Option<String> = redis::cmd(\"GETEX\")\n    .arg(&key)\n    .arg(\"EX\")\n    .arg(state.session_ttl().as_secs())\n    .query_async(&mut redis)\n    .await\n    .ok()\n    .flatten();\n```\n\nThis keeps the hot path to **one Redis round-trip** and removes the atomicity gap.\n"
+    },
+    {
+      "id": "2936515237",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-15T09:42:03+00:00",
+      "body": "`serde_json::from_str::<Value>(&message_json).unwrap_or(Value::Null)` silently converts a decode failure into a **null payload** that gets pushed into the replay response as a normal event. On a resume/replay path this feels risky – corrupted or partially written data becomes indistinguishable from an intentional `null` message and the stream continues without any signal that something went wrong.\n\nThere is also an inconsistency with **line 3851** – a missing key is already handled with `continue` (skip the event), but a corrupt payload takes the opposite path and emits it as `null`. In Rust, preserving the `Result` here usually gives safer semantics than recovering to a sentinel value.\n\nAt minimum, logging the decode error before skipping the event would make failures observable:\n\n```rust id=\"qgqj3t\"\nmatch serde_json::from_str::<Value>(&message_json) {\n    Ok(message) => events.push(EventStoreReplayEvent { event_id, message }),\n    Err(err) => warn!(\"event store replay: skipping corrupt event {event_id}: {err}\"),\n}\n```\n"
+    },
+    {
+      "id": "2936546590",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-15T10:14:47+00:00",
+      "body": "`DefaultHasher` is not stable across Rust versions or targets — two workers on different toolchains can compute different Redis keys for the same input. The failure mode is silent: missed plan-cache hits and duplicate upstream sessions with no error surfaced.\n\nSince `sha2::Sha256` is already imported on line 35, the fix is a straight swap in both key builders:\n\n```rust\n// replace DefaultHasher with this in build_upstream_session_key and build_tools_call_plan_cache_key\nlet mut hasher = Sha256::new();\nhasher.update(tool_name.as_bytes());\n\nfor (k, v) in &ordered_headers {\n    hasher.update(k.as_bytes());\n    hasher.update(b\"=\");\n    hasher.update(v.as_bytes());\n    hasher.update(b\"\\n\");\n}\n\nformat!(\"tool-plan:{:x}\", hasher.finalize())\n```\n"
+    },
+    {
+      "id": "2936582778",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-15T10:49:55+00:00",
+      "body": "Rust/concurrency note: all three caches follow the same pattern — **check under lock → drop lock → perform expensive `.await` → reacquire lock and insert**. This means concurrent requests for the same key can all miss, all perform the same initialisation in parallel, and then race to populate the cache:\n\n* **`ensure_upstream_session`** — lines **7344, 7354, 7356**: upstream session initialisation duplicated; last writer wins but earlier sessions are kept\n* **RMCP client cache** — lines **7552, 7569, 7575**: same pattern, but no re-check before insert, so earlier clients are silently orphaned with no cleanup\n* **`resolved_tool_call_plans`** — lines **7116, 7126, 7128**: plan resolution duplicated on concurrent misses\n\nA `tokio::sync::OnceCell` per key provides **single-flight semantics**, ensuring only one task performs the initialisation while others await the same result:\n\n```rust id=\"j3h7a1\"\n// DashMap<String, Arc<OnceCell<Arc<RmcpRunningService<...>>>>>\nlet cell = state.rmcp_client_cells\n    .entry(session_key.to_string())\n    .or_insert_with(|| Arc::new(OnceCell::new()))\n    .clone();\n\nlet client = cell.get_or_try_init(|| async {\n    create_rmcp_client(state, plan, protocol_version).await\n}).await?;\n```\n\nWorth addressing before this moves out of **experimental**, particularly the RMCP path where orphaned clients can accumulate silently.\n"
+    },
+    {
+      "id": "2936602006",
+      "author": "crivetimihai",
+      "created_at": "2026-03-15T11:09:33+00:00",
+      "body": "Thanks, will test this soon. Plan is to get the PR in shape for merge by Monday morning, as an experimental, opt-in feature. We can improve further later."
+    },
+    {
+      "id": "2936604341",
+      "author": "crivetimihai",
+      "created_at": "2026-03-15T11:11:39+00:00",
+      "body": "Agreed, will do some further testing on this, thanks!"
+    },
+    {
+      "id": "2936604758",
+      "author": "crivetimihai",
+      "created_at": "2026-03-15T11:12:04+00:00",
+      "body": "Great find - will benchmark this, but should help with performance!"
+    },
+    {
+      "id": "2936605461",
+      "author": "crivetimihai",
+      "created_at": "2026-03-15T11:12:54+00:00",
+      "body": "I like the idea of a feature flag, defaulting to no. Right now, Rust is enabled through a separate build + env. variables and not yet ready for production use. If it fails, it should fail hard, by default."
+    },
+    {
+      "id": "2936690912",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-15T12:39:56+00:00",
+      "body": "Since this is going in as an **experimental opt-in with improvements to follow**, just noting this here as a **possible direction for future performance improvements** if and when this path is optimised further.\n\nThe natural next step on the performance side could be **offloading async work** — session state sync, audit logging, metrics — onto **Redis Streams**, which the PR already uses for the event store. Keeping that pattern consistent would allow the synchronous **Rust → Python** path to remain lean without requiring any transport changes.\n\nIf payload size becomes a bottleneck later, **MessagePack** could be a relatively low-effort drop-in replacement for JSON, with mature support in both `rmp-serde` (Rust) and `msgpack` (Python).\n\nIf MessagePack is not sufficient and raw throughput needs to compete with other Rust-native MCP gateways, **Protobuf** (`prost` in Rust, `betterproto` in Python) could be considered as a further step, though it would require upfront schema definitions and code generation on both sides.\n\n| Option                          | Effort | Gain   | Best for                                                                 |\n|---------------------------------|--------|--------|---------------------------------------------------------------------------|\n| Redis Streams for async offload | Medium | High   | Session sync, audit, metrics                                             |\n| MessagePack over HTTP           | Low    | Medium | Reducing hot-path payload size                                           |\n| Protobuf                        | High   | High   | Future use — if competing on raw throughput with other Rust-native MCP gateways justifies the investment |"
+    },
+    {
+      "id": "2937011257",
+      "author": "gandhipratik203",
+      "created_at": "2026-03-15T16:57:12+00:00",
+      "body": "Makes sense. Given the experimental scope, kept the review focused on `correctness` and `performance`. Structural concerns can be addressed later.\r\n\r\nLooking forward to seeing this merged!"
+    },
+    {
+      "id": "2938632746",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:34:28+00:00",
+      "body": "Agreed, and tracked in tools_rust/mcp_runtime/FOLLOWUPS.md but left for a post-merge follow-up."
+    },
+    {
+      "id": "2938634157",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:34:50+00:00",
+      "body": "Agreed, and tracked in tools_rust/mcp_runtime/FOLLOWUPS.md but left for a post-merge follow-up. Not in scope for this initial PR."
+    },
+    {
+      "id": "2938636272",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:35:26+00:00",
+      "body": "Agreed, and tracked in tools_rust/mcp_runtime/FOLLOWUPS.md but left for a post-merge follow-up. \r\n\r\n"
+    },
+    {
+      "id": "2938644798",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:37:49+00:00",
+      "body": "What changed:\r\n\r\n- internal Python→Rust transport calls now fail closed on redirects instead of following them\r\n- both the shared UDS clients and the request calls were hardened:\r\n    - rust_mcp_runtime_proxy.py\r\n    - streamablehttp_transport.py\r\n\r\nValidation added:\r\n\r\n- unit regression coverage proves redirects are surfaced without being followed:\r\n    - test_rust_mcp_runtime_proxy.py\r\n    - test_streamablehttp_transport.py\r\n\r\nPost-change verification:\r\n\r\n- rebuilt full Rust stack\r\n- make test-mcp-cli\r\n- make test-mcp-session-isolation\r\n- make benchmark-mcp-tools\r\n\r\nAll stayed green."
+    },
+    {
+      "id": "2938646981",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:38:27+00:00",
+      "body": "Thanks, good catch. Addressed earlier in this PR: the Rust health path no longer uses Redis KEYS; it now uses a bounded SCAN-based approach in tools_rust/mcp_runtime/src/lib.rs, so health checks no longer do a full keyspace scan."
+    },
+    {
+      "id": "2938650020",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:39:20+00:00",
+      "body": "Thanks, agreed this is a real scalability concern. The current polling model is functionally correct, but it does create steady per-connection Redis load for idle resumable streams. I left this out of the current PR to avoid widening the design late, and tracked it as follow-up work in tools_rust/mcp_runtime/FOLLOWUPS.md under resumed SSE polling scalability / push-notify improvement."
+    },
+    {
+      "id": "2938654166",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:40:25+00:00",
+      "body": "Thanks, agreed. This is a real performance improvement for longer replays, but I left it out of this PR to keep the current merge scoped to correctness/parity/security for the experimental opt-in release. I've tracked it in tools_rust/mcp_runtime/FOLLOWUPS.md under Redis hot-path polish, including batching replay fetches via HMGET/pipeline."
+    },
+    {
+      "id": "2938658684",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:41:32+00:00",
+      "body": "Thanks, agreed. This is a solid hot-path optimization and also removes the small atomicity gap, but I left it out of this PR to keep the current merge scoped to correctness/parity/security for the experimental rollout. I've tracked it in tools_rust/mcp_runtime/FOLLOWUPS.md under Redis hot-path polish, specifically GET + EXPIRE vs GETEX."
+    },
+    {
+      "id": "2938667720",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:43:56+00:00",
+      "body": "Thanks, fair point in principle, but I checked the current implementation and these DefaultHasher values are only used for in-process cache keys (resolved_tool_call_plans, upstream_tool_sessions, rmcp_upstream_clients), not shared Redis keys or other cross-worker state. So I don’t think this is a correctness issue for the current PR. I did leave it tracked as follow-up in tools_rust/mcp_runtime/FOLLOWUPS.md because switching to a stable hash would be cleaner and would future-proof these keys if we ever move them to shared/distributed caching."
+    },
+    {
+      "id": "2938671271",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:44:51+00:00",
+      "body": "Thanks, agreed. This is a real single-flight/cache-shape improvement, especially for the RMCP client cache where duplicate initialisation can orphan earlier clients. I left it out of this PR to keep the current merge scoped to correctness/parity/security for the experimental rollout, but it is tracked in tools_rust/mcp_runtime/FOLLOWUPS.md under cache single-flight / hot-path polish."
+    },
+    {
+      "id": "2938673894",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:45:30+00:00",
+      "body": "Thanks, this is useful directionally. I’m treating this as follow-up architecture/performance work rather than something to fold into the current PR. For this branch I wanted to keep the transport/wire contract stable and get the experimental Rust MCP path merged with correctness/parity/security in place first. If we push further on throughput after this lands, Redis-backed async offload and possibly MessagePack/Protobuf on the internal seams are good next directions."
+    },
+    {
+      "id": "2938681004",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:47:24+00:00",
+      "body": "Thanks. This is intentional for the current experimental rollout. If Rust mode is enabled, I want sidecar transport failures to be visible rather than silently falling back to Python, because silent fallback could hide runtime failures and also bypass Rust-specific behavior we’re explicitly trying to validate in this PR. So I left the hard 502 behavior in place by design. A configurable fallback flag could be a reasonable future enhancement, but I didn't want to change that failure model in this branch."
+    },
+    {
+      "id": "2938685262",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T07:48:34+00:00",
+      "body": "Thanks, agreed. I revisited this after more testing and changed the implementation, but not in the exact \"log and skip\" direction from the original suggestion.\r\n\r\nI initially tried the permissive approach, but on second review that felt too risky because it can silently lose replayed events. So the final behavior in this PR is:\r\n\r\n- corrupt replay payloads no longer become null\r\n- corrupt replay payloads also no longer get silently skipped\r\n- the replay path now fails closed with a 502 and logs the decode failure\r\n\r\nSo the status here is:\r\n\r\n- addressed in this PR\r\n- final behavior is stricter than the original suggestion\r\n- implemented in tools_rust/mcp_runtime/src/lib.rs\r\n- covered by regression test in tools_rust/mcp_runtime/tests/runtime.rs"
+    },
+    {
+      "id": "2939107576",
+      "author": "sco3",
+      "created_at": "2026-03-16T09:23:57+00:00",
+      "body": "> Option \tEffort \tGain \tBest for\r\n> Redis Streams for async offload \tMedium \tHigh \tSession sync, audit, metrics\r\n> MessagePack over HTTP \tLow \tMedium \tReducing hot-path payload size\r\n> Protobuf \tHigh \tHigh \tFuture use — if competing on raw throughput with other Rust-native MCP gateways justifies the investment\r\n\r\nWhen I tested protobuf in pyhton it was slightly slower than msgpack. And msgpack works as schema free alternative, which can give some flexibility. \r\nToday I re-ran the tests (3.14, originally it was 3.11):\r\n```\r\nmsg_pack.py Took: 1702 ms 587544.0658049354 msg/s  message size: 292\r\nprotobuf.py Took: 3444 ms 290360.0464576074 msg/s  message size: 317\r\n\r\n```\r\n"
+    },
+    {
+      "id": "2939715010",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-16T11:17:15+00:00",
+      "body": "AI generated suggestion:\n\nWhen a session is created without auth (unauthenticated request, `owner_email=None`) and `session_auth_reuse_enabled=false` (the default, which also clears `auth_binding_fingerprint`), both guards are inactive. Any caller that knows (or guesses) the `session_id` can access the session unchecked by Rust's layer. Subsequent callers could then re-initialize with their own auth and bind their credentials to the session, effectively stealing it."
+    },
+    {
+      "id": "2939722048",
+      "author": "gcgoncalves",
+      "created_at": "2026-03-16T11:18:49+00:00",
+      "body": "AI generated comment:\n\nClients can inject a `session_id` in the initialize payload, targeting an existing session. Combined with the ownerless bypass above, this enables a targeted session takeover when `session_core_enabled=true`. No length or format validation either (no UUID check, no max length bound), making this also a potential vector for oversized Redis keys."
+    },
+    {
+      "id": "2940110861",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T12:37:06+00:00",
+      "body": "Thanks, I dug into this one in detail.\r\n\r\nWhat I verified:\r\n\r\n- The broad \"session stealing\" claim does not reproduce on the normal auth-required stack.\r\n- With two different authenticated users targeting the same client-chosen initialize session id:\r\n    - first caller initializes successfully\r\n    - second caller gets -32003 Access denied\r\n- This is also not Rust-only behavior:\r\n    - Python already supports client-supplied initialize session ids too\r\n    - so this is shared MCP/session compatibility behavior, not something newly introduced by the Rust path\r\n\r\nWhat is still true:\r\n- Ownerless sessions are intentionally allowed today.\r\n- In permissive/public MCP mode, custom client-chosen initialize session ids plus ownerless-session semantics are worth reviewing more\r\n  carefully.\r\n\r\nI did not change that behavior in this PR because:\r\n\r\nI tracked that narrower concern in tools_rust/mcp_runtime/FOLLOWUPS.md as a coordinated Python+Rust follow-up around client-supplied\r\ninitialize session ids / ownerless public-session semantics."
+    },
+    {
+      "id": "2940113788",
+      "author": "crivetimihai",
+      "created_at": "2026-03-16T12:37:40+00:00",
+      "body": "Thanks, I checked this one closely too.\r\n\r\nA few important clarifications:\r\n\r\n- This is not Rust-only behavior.\r\n    - Python already accepts client-supplied initialize session ids as well.\r\n    - So this is a shared compatibility choice, not something newly introduced by the Rust runtime.\r\n- On the normal auth-required stack, I could not reproduce authenticated takeover.\r\n    - first caller initializes with a chosen session id\r\n    - second caller targeting the same id is denied with -32003 Access denied\r\n\r\nSo I did not remove this behavior in this PR.\r\n\r\nWhat I do agree with:\r\n\r\n- custom client-supplied initialize session ids are more security-sensitive than server-emitted opaque ids\r\n- the current behavior has no explicit UUID/length validation on the Rust side\r\n- in permissive/public MCP mode, this deserves a broader design review together with ownerless-session semantics\r\n\r\nBecause this is shared Python/Rust behavior and not a confirmed new Rust regression, I left it as follow-up rather than changing protocol behavior late in this PR. I tracked it in tools_rust/mcp_runtime/FOLLOWUPS.md as a coordinated Python+Rust cleanup around client-supplied initialize session ids, validation, and public-session semantics."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3929561260",
+      "author": "lucarlig",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-11T13:21:10+00:00",
+      "body": "Interesting PR, i love the general idea of rust components being fully independent. However I have been working on the `a2a_service` in https://github.com/IBM/mcp-context-forge/pull/3250, and one of the main challenges in fully replacing the Python service in this case is how the database layer is handled. The current Python implementation already contains assumptions around schema management, migrations, connection handling, and ORM/query behavior. Re-implementing or partially replacing that logic can easily introduce inconsistencies (e.g., differences in transaction handling, migration state, connection pooling, or query semantics), which makes the database layer particularly tricky to replicate safely.\r\n\r\nUsing a Python fallback may not provide the same feature set, safety guarantees, or performance characteristics. It could also behave differently under load, which makes this approach quite risky for production use.\r\n\r\nif this PR were merged and then integrated with the changes introduced in https://github.com/IBM/mcp-context-forge/pull/3161, it would benefit from an existing and more robust CI setup. For that reason, I would recommend working toward merging https://github.com/IBM/mcp-context-forge/pull/3161 first and placing this implementation within the `crates` folder so it can leverage that infrastructure.\r\n"
+    },
+    {
+      "id": "3934471131",
+      "author": "lucarlig",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-12T08:04:42+00:00",
+      "body": "I’m a bit concerned about the long-term architecture here. The Rust runtime is no longer just a transport edge; it now depends on an implicit contract with the Python backend across internal headers, internal endpoints, duplicated auth/session semantics, and direct DB knowledge. That works for a staged migration, but it also means changes to Python routing, token-scope behavior, or payload/header shapes can silently break Rust unless both sides evolve in lockstep.\n\nThe DB path has a similar issue. Right now migrations and schema ownership still live in the Python ORM/Alembic layer, while Rust is starting to read the same schema directly and reimplement some of the filtering/visibility logic itself. That creates two sources of truth for data access semantics. Every schema change or business-rule change now has to be maintained in both languages, which is going to get harder over time.\n\nI think it would be healthier to converge on one shared boundary instead of growing both layers independently: either keep Python as the single DB/business-logic layer and expose a narrower internal API to Rust, or move the DB/data layer into Rust and have Python consume that same layer as well. The second option is more work, but it avoids permanent duplication and gives us a cleaner path to Rust-side performance gains.\n"
+    },
+    {
+      "id": "3935072231",
+      "author": "sco3",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-12T09:23:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "3949759324",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T06:29:57+00:00",
+      "body": ""
+    },
+    {
+      "id": "3949833647",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T07:41:29+00:00",
+      "body": ""
+    },
+    {
+      "id": "3949920854",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T08:45:37+00:00",
+      "body": ""
+    },
+    {
+      "id": "3949951128",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T09:10:23+00:00",
+      "body": ""
+    },
+    {
+      "id": "3949984772",
+      "author": "gandhipratik203",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-15T09:43:52+00:00",
+      "body": ""
+    },
+    {
+      "id": "3950014756",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T10:16:54+00:00",
+      "body": ""
+    },
+    {
+      "id": "3950044201",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T10:49:55+00:00",
+      "body": ""
+    },
+    {
+      "id": "3950059558",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T11:09:33+00:00",
+      "body": ""
+    },
+    {
+      "id": "3950061150",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T11:11:39+00:00",
+      "body": ""
+    },
+    {
+      "id": "3950061456",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T11:12:04+00:00",
+      "body": ""
+    },
+    {
+      "id": "3950062032",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T11:12:55+00:00",
+      "body": ""
+    },
+    {
+      "id": "3950127417",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T12:39:56+00:00",
+      "body": ""
+    },
+    {
+      "id": "3950391436",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-15T16:57:12+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951930068",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:34:28+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951931415",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:34:52+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951933557",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:35:27+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951942240",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:37:49+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951944546",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:38:27+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951947782",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:39:20+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951951850",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:40:25+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951956887",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:41:33+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951966249",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:43:57+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951969852",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:44:51+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951972455",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:45:30+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951980066",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:47:24+00:00",
+      "body": ""
+    },
+    {
+      "id": "3951984965",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T07:48:34+00:00",
+      "body": ""
+    },
+    {
+      "id": "3952390041",
+      "author": "gandhipratik203",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-16T09:10:57+00:00",
+      "body": "Looks good! Looking forward to getting this merged soon."
+    },
+    {
+      "id": "3952463632",
+      "author": "sco3",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T09:23:57+00:00",
+      "body": ""
+    },
+    {
+      "id": "3953137683",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T11:17:15+00:00",
+      "body": ""
+    },
+    {
+      "id": "3953145079",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T11:18:48+00:00",
+      "body": ""
+    },
+    {
+      "id": "3953576474",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T12:37:06+00:00",
+      "body": ""
+    },
+    {
+      "id": "3953579463",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-16T12:37:40+00:00",
+      "body": ""
+    },
+    {
+      "id": "3954027835",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-16T13:52:18+00:00",
+      "body": "Can confirm the app is still functional."
+    },
+    {
+      "id": "3954216900",
+      "author": "sco3",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-16T14:21:30+00:00",
+      "body": "works and looks good"
+    },
+    {
+      "id": "3954838419",
+      "author": "lucarlig",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-16T15:48:07+00:00",
+      "body": ""
+    },
+    {
+      "id": "3955292250",
+      "author": "gandhipratik203",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-16T16:51:49+00:00",
+      "body": ""
+    },
+    {
+      "id": "3956190785",
+      "author": "araujof",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-16T19:38:57+00:00",
+      "body": "Nice work @crivetimihai ! This review focuses on any potential regressions or interactions with the Plugin Framework. \n \n### Summary\n\n**No plugin framework regressions identified.** The Rust runtime integration is cleanly separated from plugin execution via the `has_hooks_for` guard. The only semantic change affecting plugins is the `prompt_id` UUID→name switch in post-hook payloads, which aligns with the pre-hook behavior and is unlikely to affect any plugin in practice.\n\n### Test Results\n\n| Suite | Result |\n|-------|--------|\n| Plugin framework unit tests | **All passed** |\n| Service unit tests (tool/prompt/resource) | **All passed** |\n| New sentinel plugin tests | **All passed** |\n| Plugin performance profiling (31 plugins) | **All profiled, 0 errors** |\n\nPerformance numbers are consistent with baseline. No degradation detected.\n\n### Findings\n\n**1. Plugins bypass in Rust path**\n\n`tool_service.py` — `prepare_rust_mcp_tool_execution` correctly falls back to Python when any tool plugin hooks are configured:\n\n```python\nif self._plugin_manager and (self._plugin_manager.has_hooks_for(ToolHookType.TOOL_PRE_INVOKE)\n    or self._plugin_manager.has_hooks_for(ToolHookType.TOOL_POST_INVOKE)):\n    return {\"eligible\": False, \"fallbackReason\": \"plugin-hooks-configured\"}\n```\n\nThe Rust hot path is only taken when no tool hooks are registered.\n\n**2. `prompt_id` UUID→name switch**\n\nIn `prompt_service.py`, `PromptPosthookPayload.prompt_id` changed from `prompt.id` (UUID) to `prompt.name` (string)\n\n**Before:** `PromptPosthookPayload(prompt_id=str(prompt.id), result=result)`\n**After:** `PromptPosthookPayload(prompt_id=prompt.name, result=result)`\n\nAll plugins use `prompt_id` for logging, passthrough in modified payloads, or as a Cedar/OPA policy resource identifier. No plugin parses it as a UUID. The pre-hook already uses the caller-supplied `prompt_id` (name or ID string), so this change actually **improves consistency** between pre-hook and post-hook — both now carry the human-readable prompt name.\n\n**3. New internal MCP handlers correctly propagate plugin context**\n\nThe new `handle_internal_mcp_*` functions in `main.py` all extract `plugin_context_table` and `plugin_global_context` from `request.state` and pass them through to service methods. This matches the existing pattern in `handle_rpc`.\n\n**4. `resource_service.py` server-scoping and `MultipleResultsFound` handling**\n\nThe resource service changes add server-scoped queries and handle `MultipleResultsFound` gracefully. These changes are upstream of plugin hooks (the plugin hooks fire after resource resolution). No interaction with plugin execution.\n\n**5. `_load_invocable_tools` refactoring**\n\nThe extraction of tool lookup logic into `_load_invocable_tools` is purely structural. The existing `invoke_tool` now calls this helper, and the new `prepare_rust_mcp_tool_execution` also calls it. Plugin invocation in `invoke_tool` is untouched.\n\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d0224926b1478e3ae2fe9f3dcfd37c90784f12d1",
+      "message": "feat: add Rust MCP runtime prototype\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T08:55:18+00:00"
+    },
+    {
+      "sha": "ef0a05405e387bfc1535f36329a13706f1d3ae04",
+      "message": "feat: integrate experimental Rust MCP runtime\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T09:30:06+00:00"
+    },
+    {
+      "sha": "0b56743a93e20a4f423e9ca35ebc815421576fdc",
+      "message": "fix: complete Rust MCP compose parity\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T12:22:25+00:00"
+    },
+    {
+      "sha": "a7d7d17a7e6f765b08da8fb78145be4e539166e0",
+      "message": "test: improve Rust MCP runtime observability\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T13:58:30+00:00"
+    },
+    {
+      "sha": "e008800f71791481f98c03a7c7dd712ead0950db",
+      "message": "docs: add Rust MCP runtime status report\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T15:07:39+00:00"
+    },
+    {
+      "sha": "ad2474e676b9d03c4033e18845b09d8754e619a8",
+      "message": "fix: harden Rust MCP parity coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T15:36:58+00:00"
+    },
+    {
+      "sha": "9277f170b4fa275a56e5b772fc7e5a5f0e212276",
+      "message": "perf: streamline Rust MCP proxy path\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T16:02:14+00:00"
+    },
+    {
+      "sha": "f4bb34e691149dbcec423c905157bab89ca6dcac",
+      "message": "perf: streamline server-scoped Rust MCP proxying\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T16:28:40+00:00"
+    },
+    {
+      "sha": "684de3bf84c990196e507298d8c45ce69972b174",
+      "message": "perf: narrow Rust MCP sidecar dispatch\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T17:57:45+00:00"
+    },
+    {
+      "sha": "dd1f2079832177ff0c37a4606ff2955ad713d51b",
+      "message": "perf: trim trusted Rust MCP dispatch overhead\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T19:07:24+00:00"
+    },
+    {
+      "sha": "43459c940d1a46f48850cb33a642f569946e53ec",
+      "message": "perf: specialize Rust MCP tools list dispatch\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-09T19:31:01+00:00"
+    },
+    {
+      "sha": "faf3b2574b3aa822b4f0c2871bf7c2c0bb4c7d20",
+      "message": "perf: optimize Rust MCP tools call hot path\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T00:13:49+00:00"
+    },
+    {
+      "sha": "b60f6598da1de8108a81668045be254151be3c40",
+      "message": "perf: validate Rust MCP benchmark curve\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T07:37:38+00:00"
+    },
+    {
+      "sha": "8ccd2a2d56040635ff6c0544a0b9d1ef0fdd63af",
+      "message": "perf: add Rust MCP tuning knobs\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T08:22:34+00:00"
+    },
+    {
+      "sha": "1d03649c2e79ab98ab0dde0f3cbae36e1bbc34df",
+      "message": "docs: record Rust MCP load-testing updates\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T09:52:26+00:00"
+    },
+    {
+      "sha": "2ecbf17dd2888859445d5aac680b576e20baa5c0",
+      "message": "feat: expand Rust MCP transport parity\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T10:56:42+00:00"
+    },
+    {
+      "sha": "1c9f6f3962e3f70ca1ef3b75c984ed02e01a83a1",
+      "message": "feat: expose active MCP runtime mode\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T11:39:19+00:00"
+    },
+    {
+      "sha": "18c2c680970c26d36acb8dfb1227432d74a79830",
+      "message": "feat: narrow more MCP methods through Rust runtime\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T12:40:15+00:00"
+    },
+    {
+      "sha": "4d13e0b3a5dfb61bcedeadde569f9231f07b6022",
+      "message": "feat: narrow more MCP methods through Rust runtime\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T13:48:38+00:00"
+    },
+    {
+      "sha": "39ebc2e7180c686bf5aaec35fa03f4dbd7534b91",
+      "message": "feat: wire Rust MCP rmcp runtime into compose\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T23:29:26+00:00"
+    },
+    {
+      "sha": "f03df41d08de826fdc086f0bcb9f91cf17fa4621",
+      "message": "docs: refresh Rust MCP runtime README\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T07:22:55+00:00"
+    },
+    {
+      "sha": "bf5bbc7c3d27f505096e8515da91cd380f8f85c7",
+      "message": "feat: add Rust MCP session core slice\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T08:07:13+00:00"
+    },
+    {
+      "sha": "ca9926d05700bc41975fcfb7cc433cb2351ab9b1",
+      "message": "feat: add Rust MCP event store session core\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T10:33:23+00:00"
+    },
+    {
+      "sha": "fb78b0c0224da763d22b19a1842a2b76b87d93dc",
+      "message": "feat: move MCP replay resume path into Rust\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T14:52:52+00:00"
+    },
+    {
+      "sha": "eaf158f2cdc307edaf826219460af0008e29abf8",
+      "message": "feat: move MCP live streaming into Rust\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T17:09:25+00:00"
+    },
+    {
+      "sha": "303be7093675ca91f54e49bf162e11fd2b69a370",
+      "message": "feat: simplify Rust MCP build and runtime UX\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T17:29:37+00:00"
+    },
+    {
+      "sha": "9a766bbc32f0025ec01298db577f441dfdfaa2dd",
+      "message": "feat: add Rust MCP affinity core slice\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T21:13:11+00:00"
+    },
+    {
+      "sha": "2519bd835513899fbf08bb93f05e68738c1e9673",
+      "message": "perf: reuse auth cache on MCP transport path\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T00:05:37+00:00"
+    },
+    {
+      "sha": "1c1da1b4a1f473626a435cf1025d89700823b668",
+      "message": "perf: move MCP read paths and auth cache hot path\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T00:43:47+00:00"
+    },
+    {
+      "sha": "ff75f38ff7e7573cbae77e7827a89b12f2b40123",
+      "message": "fix: restore RPC permission and server scope semantics\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T12:17:49+00:00"
+    },
+    {
+      "sha": "a6bd2c43607765f04645796c2f4459237ff5c8bc",
+      "message": "fix: resolve flake8 and bandit findings\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T13:00:24+00:00"
+    },
+    {
+      "sha": "9d879687fe7d06f75d16a0ccded80009a063556e",
+      "message": "fix: satisfy pylint checks\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T13:13:42+00:00"
+    },
+    {
+      "sha": "03591b0310d8c29d7976f7815be146cba1f7da0e",
+      "message": "fix: align RPC permission tests and docstrings\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T16:15:49+00:00"
+    },
+    {
+      "sha": "62f40acf37ef04637d470538fa7221d33fd2d8ab",
+      "message": "test: raise diff coverage for Rust MCP paths\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T17:37:23+00:00"
+    },
+    {
+      "sha": "a0b3ef51600e3abff924963699114be0b41bdf2f",
+      "message": "perf: route public MCP ingress directly to Rust\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-12T19:58:50+00:00"
+    },
+    {
+      "sha": "fb0a0bc0bf27bf6e9e94dc78c50d93210cb2a71d",
+      "message": "feat: add Rust MCP benchmark targets and safe fallback\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-13T07:55:48+00:00"
+    },
+    {
+      "sha": "33fea068a268aeac025df43fb708877a0d61b698",
+      "message": "feat: clarify Rust MCP mode workflow\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-13T10:41:07+00:00"
+    },
+    {
+      "sha": "d43deca6dbf8298a3734c5df75b5999b0100a675",
+      "message": "test: add MCP session isolation coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-13T19:12:14+00:00"
+    },
+    {
+      "sha": "ee3259719674d5b338e2199e5462174032b7e5df",
+      "message": "docs: add Rust MCP follow-up tracker and quick reference\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-13T20:56:48+00:00"
+    },
+    {
+      "sha": "95683d283f7e4e288b4d60c97862fe5b07531fe9",
+      "message": "test: raise Rust MCP diff coverage to 100 percent\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-13T23:07:09+00:00"
+    },
+    {
+      "sha": "5b840612bba979265fb8040a31b64f9139f4252c",
+      "message": "test: stabilize logger capture assertions\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-13T23:47:43+00:00"
+    },
+    {
+      "sha": "f4181aeb25efeafb29876cb29da1a4491bdb0723",
+      "message": "test: improve Rust MCP runtime coverage and tooling\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T02:21:38+00:00"
+    },
+    {
+      "sha": "132b3ee4e7725a1f95db0936f937066f8368f469",
+      "message": "test: expand Rust MCP runtime unit coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T02:31:04+00:00"
+    },
+    {
+      "sha": "d0a8e5d45f580bef1eb6d76074a9a6b7b7e74e10",
+      "message": "refactor: clean up Rust MCP runtime lint issues\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T03:09:10+00:00"
+    },
+    {
+      "sha": "1c4ca54557257a951c2d51bfbd414f731cee690b",
+      "message": "perf: reduce Rust MCP RMCP and header overhead\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T04:31:04+00:00"
+    },
+    {
+      "sha": "8c2f9a84522705f0c40105f5ec614817dc1338e4",
+      "message": "docs: document Rust MCP runtime architecture\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T10:47:12+00:00"
+    },
+    {
+      "sha": "5debdeb924e7cbd760dff0bff4fd22fb646ff191",
+      "message": "docs: improve Rust MCP runtime code documentation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T11:29:37+00:00"
+    },
+    {
+      "sha": "88e3d003614d51227853004d78af17c56071000d",
+      "message": "docs: refresh Rust MCP runtime guides\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T11:46:46+00:00"
+    },
+    {
+      "sha": "0a0c3cd5530494fdc6300f5839bd5e4b3c0be77c",
+      "message": "docs: add Rust MCP follow-up checklist\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T13:40:52+00:00"
+    },
+    {
+      "sha": "a3c31e9cdd886442ab2d40ab57bffd8bfc8fd4a5",
+      "message": "test: isolate Rust-only MCP E2E coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T15:39:20+00:00"
+    },
+    {
+      "sha": "6b3313f78d0b94747a8c63b3e4475ecc12a99323",
+      "message": "feat: show MCP runtime mode in admin UI\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-14T20:48:28+00:00"
+    },
+    {
+      "sha": "3bbb71005410669e26ad25a16693e3d1d9466c7b",
+      "message": "fix: harden auth service and test stack startup\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T00:17:07+00:00"
+    },
+    {
+      "sha": "34526f184c213d152e0aa2958eee4a0fd0882786",
+      "message": "fix: harden Rust MCP public ingress\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T01:42:00+00:00"
+    },
+    {
+      "sha": "bda7b8386d8376f71dd86557915ef9fd7409249c",
+      "message": "fix: redact Rust MCP transport errors\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T02:17:19+00:00"
+    },
+    {
+      "sha": "60633d2f1f44472df228f1292c40d0a4b6bf9bff",
+      "message": "feat: add optional Postgres TLS for Rust MCP runtime\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T02:43:32+00:00"
+    },
+    {
+      "sha": "ed0cef42fc0dd577dcba2f31d6051f2c759ae920",
+      "message": "test: extend Rust MCP isolation validation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T03:40:53+00:00"
+    },
+    {
+      "sha": "66d920088bf09f3c0e12f6806727da6d85c6dbc8",
+      "message": "fix: handle ambiguous MCP resource reads cleanly\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T10:18:11+00:00"
+    },
+    {
+      "sha": "e124e1b4fa5f733a01eff0c3b282a045ed63b6e7",
+      "message": "test: add Rust MCP access matrix coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T10:42:36+00:00"
+    },
+    {
+      "sha": "f4d20a11356d46bf97177f1122f8e62e9f53e6a4",
+      "message": "fix: tighten Rust MCP response shaping\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T11:06:06+00:00"
+    },
+    {
+      "sha": "aa7f4116cdb45ee83a6570602872993709937d87",
+      "message": "test: expand Rust MCP runtime unit coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T12:00:10+00:00"
+    },
+    {
+      "sha": "ea187abb2b31898374c307db17887d1b1fefd158",
+      "message": "fix: clean up Rust MCP helper plumbing\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T12:50:07+00:00"
+    },
+    {
+      "sha": "47dc6b85662f1d6e0b250b438b29492b44a80eca",
+      "message": "fix: normalize Rust MCP resource fallback payloads\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T14:00:45+00:00"
+    },
+    {
+      "sha": "5fb79615f89cbdd002d5a892f1177f76207884b0",
+      "message": "test: add MCP plugin parity coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T14:43:37+00:00"
+    },
+    {
+      "sha": "bb1d252e23ba16994e1b9966f2fb9cc653545485",
+      "message": "test: gate MCP prompt and plugin parity\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T16:14:39+00:00"
+    },
+    {
+      "sha": "783077ef7cd01a382b284d61e838e0d08def21c3",
+      "message": "docs: expand Rust MCP release checklist\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T16:24:39+00:00"
+    },
+    {
+      "sha": "6d04fb050e0ff366582bdec671af81c8c13de8d0",
+      "message": "test: finalize Rust MCP release validation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T20:55:16+00:00"
+    },
+    {
+      "sha": "254e5b96e9be54bab7623c865b4a7f908ea58f40",
+      "message": "docs: add modular runtime specification\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T22:09:39+00:00"
+    },
+    {
+      "sha": "9f1b4147448a834785a41b6b758c08c269aea6a1",
+      "message": "docs: document implemented MCP module\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T22:14:10+00:00"
+    },
+    {
+      "sha": "270db5ee1e82fb67f5cf6f368d82acb1a59a31a4",
+      "message": "test: harden Rust runtime coverage\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-15T22:39:09+00:00"
+    },
+    {
+      "sha": "46ef0806393d7aedc6d10974e567ec023aa254f4",
+      "message": "fix: harden Rust runtime fail-closed handling\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-16T00:03:02+00:00"
+    },
+    {
+      "sha": "d6c2335ec1104062d86474f023b89816013c34e2",
+      "message": "fix: harden internal MCP trust boundaries\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-16T12:35:36+00:00"
+    },
+    {
+      "sha": "4fe281523f45c9c76c43f20243e487dd6e8f403b",
+      "message": "fix: tolerate string auth secrets in MCP trust helpers\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-16T13:01:10+00:00"
+    },
+    {
+      "sha": "a43a74667152f6bce0cea155d88a45a6da9eeb3b",
+      "message": "test: skip parity E2Es without parity config\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-16T16:00:24+00:00"
+    },
+    {
+      "sha": "e2e68d9c9f215f1baf6d89fe56ee8d575ac8d661",
+      "message": "fix: stabilize minikube release validation\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-16T21:56:12+00:00"
+    },
+    {
+      "sha": "4aff597f5cf2395401e98ad04b2a1cb9fdbda250",
+      "message": "fix: record rust tools call metrics\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-16T23:38:09+00:00"
+    },
+    {
+      "sha": "1ac45fce2cae0ddd80f87070db9ac6df02660125",
+      "message": "fix: satisfy metrics buffer lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-16T23:48:23+00:00"
+    }
+  ],
+  "files_changed": 116,
+  "additions": 40798,
+  "deletions": 680,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:08.446418",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:08.447561",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3617,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3617.json"
+  }
+}

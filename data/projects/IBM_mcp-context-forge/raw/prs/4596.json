@@ -1,0 +1,68 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4596,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4596"
+  },
+  "metadata": {
+    "title": "chore(deps): bump cpex-rate-limiter to 0.0.6",
+    "state": "closed",
+    "created_at": "2026-05-05T09:54:45+00:00",
+    "updated_at": "2026-05-05T12:31:07+00:00",
+    "closed_at": "2026-05-05T12:31:04+00:00",
+    "merged_at": "2026-05-05T12:31:04+00:00",
+    "author": "gandhipratik203",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "gandhipratik203",
+      "brian-hussey"
+    ]
+  },
+  "description": "## Summary\r\n\r\nPulls in the TLS-support release of the rate-limiter plugin published from [cpex-plugins#74](https://github.com/IBM/cpex-plugins/pull/74). Operators with managed Redis services that mandate in-transit encryption (AWS ElastiCache with encryption enabled, Redis Cloud, IBM Cloud Databases for Redis, etc.) can now point the plugin at `rediss://...` URLs without tripping the prior `InvalidClientConfig: TLS feature not enabled` plugin-init failure.\r\n\r\n\r\n## Changes\r\n\r\n- **`pyproject.toml:15`** — bump uv `exclude-newer` date pin from `2026-04-22T23:59:59Z` (covered up to and including 0.0.4) to `2026-05-31T23:59:59Z` so uv sees the 0.0.6 wheel (uploaded `2026-05-05T08:13:13Z`). Without this, uv refuses to resolve the newer version.\r\n- **`pyproject.toml:281`** — bump min-version constraint `cpex-rate-limiter>=0.0.4` -> `cpex-rate-limiter>=0.0.6` so fresh installs pull the TLS-enabled wheel.\r\n- **`uv.lock`** — regenerated via `uv lock --upgrade-package cpex-rate-limiter` to pin the resolved version + per-platform wheel hashes for 0.0.6.\r\n- **`plugins/config.yaml:280`** — bump `RateLimiterPlugin`'s `version:` metadata field from `0.0.3` (stale) to `0.0.6` so the shipped sample config truthfully reflects the wheel version operators are loading. This field is operator-facing metadata mirrored from the plugin's own `plugin-manifest.yaml`; it's not a dependency constraint.\r\n\r\nLocal-dev defaults are unchanged. `docker-compose.yml`'s `REDIS_URL=redis://redis:6379/0` continues to work — TLS is opt-in via a `rediss://` URL.\r\n\r\n## Test plan\r\n\r\n- [x] `uv sync --extra plugins` installs `cpex-rate-limiter==0.0.6` cleanly\r\n- [x] `cpex_rate_limiter.rate_limiter.RateLimiterPlugin` imports without error against the new wheel\r\n- [x] Plugin-framework loader unit tests stay green (`tests/unit/mcpgateway/plugins/framework/loader/` + `test_manager.py` — 27 passed)\r\n- [ ] CI green on this PR\r\n- [ ] Smoke-test against a managed Redis endpoint requiring TLS (`rediss://...`) once a tester is available",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4227070594",
+      "author": "msureshkumar88",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-05T10:10:26+00:00",
+      "body": "## Review Summary\n\nThis is a clean dependency bump that adds TLS support for Redis connections. The changes are well-documented and follow project conventions.\n\n### ✅ Approved - No Major Issues\n\n**Strengths:**\n- Clear motivation and backward-compatible changes (TLS is opt-in)\n- Proper dependency management using uv's exclude-newer mechanism\n- Lock file correctly regenerated with platform-specific wheel hashes\n- Follows conventional commit format\n\n**Minor Observations:**\n1. **Wheel size increase**: New wheels are ~1.3-1.4MB vs ~700-800KB (TLS dependencies add binary size)\n2. **Test coverage**: Unit tests pass, but smoke test against real TLS-enabled Redis endpoint is pending (reasonable for dependency bump)\n3. **Version metadata**: Jump from 0.0.3 → 0.0.6 in config.yaml (correcting stale metadata as noted in PR description)\n\n**Recommendations:**\n- Complete smoke test against TLS-enabled Redis endpoint before merge (marked as pending in test plan)\n- Verify CI passes (marked as pending)\n\n**Security:** ✅ No concerns - TLS support is a security enhancement with no new attack surface\n\nThe changes align with the project's plugin framework patterns and maintain existing Redis configuration defaults for local development. Ready to merge once CI is green and smoke test is complete."
+    },
+    {
+      "id": "4227934913",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-05T12:30:57+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b708eedb75f872bcd0d70c6aad3842af45c8d2ba",
+      "message": "chore(deps): bump cpex-rate-limiter to 0.0.6 (TLS support release)\n\nPulls in the TLS-support release published from cpex-plugins#74,\nwhich enables the rate-limiter plugin to connect to managed Redis\nendpoints that require TLS (`rediss://` URLs).  Operators with\nmanaged Redis services that mandate in-transit encryption (AWS\nElastiCache with encryption enabled, Redis Cloud, IBM Cloud\nDatabases for Redis, etc.) can now point the plugin at those\nendpoints without tripping the prior `InvalidClientConfig: TLS\nfeature not enabled` plugin-init failure.\n\nThree coordinated edits:\n\n- ``pyproject.toml:15`` — bump uv ``exclude-newer`` date pin from\n  ``2026-04-22T23:59:59Z`` (covered up to and including 0.0.4) to\n  ``2026-05-31T23:59:59Z`` so uv sees the 0.0.6 wheel\n  (uploaded 2026-05-05T08:13:13).\n- ``pyproject.toml:281`` — bump min-version constraint\n  ``cpex-rate-limiter>=0.0.4`` -> ``cpex-rate-limiter>=0.0.6`` so\n  fresh installs pull the TLS-enabled wheel.\n- ``uv.lock`` — regenerated via\n  ``uv lock --upgrade-package cpex-rate-limiter`` to pin the\n  resolved version + per-platform wheel hashes for 0.0.6.\n\nLocal-dev defaults unchanged.  ``docker-compose.yml``'s\n``REDIS_URL=redis://redis:6379/0`` continues to work — TLS is\nopt-in via a ``rediss://`` URL.\n\nVerified locally: ``uv sync --extra plugins`` installs 0.0.6 cleanly,\n``cpex_rate_limiter.rate_limiter.RateLimiterPlugin`` imports without\nerror, and the plugin-framework loader unit tests stay green.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-05-05T09:49:07+00:00"
+    },
+    {
+      "sha": "203b5267d3c86f0125e906e6928f7eb036567156",
+      "message": "chore(deps): align RateLimiterPlugin version field in plugins/config.yaml\n\nThe shipped ``plugins/config.yaml`` carried ``version: \"0.0.3\"`` for\n``RateLimiterPlugin`` long after the published wheel had moved on.\nBumping to ``0.0.6`` to match the version the previous commit pulls\nin (the TLS-support release from cpex-plugins#74).\n\nThis field is operator-facing metadata mirrored from the plugin's\nown ``plugin-manifest.yaml``; it's not a dependency constraint, so\nit does not affect resolution.  Updating it keeps the shipped\nsample config truthful about which plugin version operators are\nloading by default.\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-05-05T09:53:25+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 14,
+  "deletions": 14,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:03:47.891150",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:03:47.891594",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4596,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4596.json"
+  }
+}

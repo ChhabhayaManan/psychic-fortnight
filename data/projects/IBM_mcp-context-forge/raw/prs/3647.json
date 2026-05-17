@@ -1,0 +1,92 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3647,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3647"
+  },
+  "metadata": {
+    "title": "feat(ui): persist admin table filters across HTMX pagination and partial refresh",
+    "state": "closed",
+    "created_at": "2026-03-12T11:00:29+00:00",
+    "updated_at": "2026-03-21T02:27:03+00:00",
+    "closed_at": "2026-03-21T02:27:03+00:00",
+    "merged_at": "2026-03-21T02:27:03+00:00",
+    "author": "omorros",
+    "labels": [
+      "enhancement",
+      "ui",
+      "SHOULD",
+      "release-fix",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "  ## 🔗 Related Issue                                                                                                   \r\n  Closes #2992                                                                                                                                                                                                                                    Replaces #3204 (could not push conflict resolution to upstream branch). Original work from #3017 and #3100.             \r\n \r\n ---                                                                                                                   \r\n                                         \r\n  ## 📝 Summary                                                                                                         \r\n  Persist admin table filters (search text, tag filters, \"show inactive\" toggles) across HTMX pagination clicks and\r\n  partial refreshes for all 6 admin tables.\r\n                                                                                                                        \r\n  **Root cause:** `pagination_controls.html` `loadPage()` built HTMX request URLs using template-baked `query_params`     (static Jinja2 values). When pagination controls were rendered before a search, clicking page 2 dropped the active  \r\n  filters.                                                                                                              \r\n\r\n  **Changes:**                                                                                                          \r\n  - `pagination_controls.html` — `loadPage()` now reads live namespaced `q`/`tags` from the browser URL (source of truth\r\n   written by `updatePanelSearchStateInUrl`), overriding stale template-baked values.\r\n  - `admin.js` — Added `htmx:afterSettle` listener that rehydrates search inputs from URL state after content swaps.    \r\n  Added `updateFilterStatus()` for visible filtered row count text.                                                       - `admin.html` — Added `aria-live=\"polite\"` status spans next to all 6 table search bars (servers, tools, resources,\r\n  prompts, gateways, a2a-agents).                                                                                         \r\n  ---                                                                                                                     \r\n  ## 🏷️ Type of Change                                                                                                    \r\n  - [x] Bug fix\r\n  - [x] Feature / Enhancement                                                                                           \r\n  - [ ] Documentation\r\n  - [ ] Refactor\r\n  - [ ] Chore (deps, CI, tooling)                                                                                       \r\n  - [ ] Other (describe below)      \r\n                                                                                        \r\n  ---                                                                                                                   \r\n ## 🧪 Verification                                                                                                    \r\n                                                                                                                        \r\n  | Check                     | Command              | Status                                              |\r\n  |---------------------------|----------------------|-----------------------------------------------------|\r\n  | JS tests (vitest)         | `npx vitest run`     | 583/584 pass (1 pre-existing locale mismatch)       |\r\n  | Unit tests                | `make test`          | 12,349/12,355 pass (6 pre-existing stdio failures)  |            \r\n  | Lint suite                | `make lint`          | N/A — no Python files changed                       |            \r\n  | Coverage ≥ 80%            | `make coverage`      | N/A — no Python files changed                       |            \r\n                                                                                                                        \r\n  ---                                                                                                                   \r\n ## ✅ Checklist                                                                                                       \r\n  - [x] Code formatted (`make black isort pre-commit`)                                                                  \r\n  - [x] Tests added/updated for changes\r\n  - [x] Documentation updated (if applicable)\r\n  - [x] No secrets or credentials committed           \r\n                                                                      \r\n  ---                  \r\n                                                                                                 \r\n ## 📓 Notes (optional)                                                                                                \r\n  Rebased on latest `main` to resolve merge conflicts from #3204. The code and functionality are identical to the       \r\n  previously approved PR.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3935840038",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-12T11:30:08+00:00",
+      "body": "Thanks for the PR, @omorros! \nThis PR correctly fixes the filter persistence issue across pagination with a clean, well-architected solution.\n\n   🎯 Key Strengths\n\n1. Root Cause Correctly Identified: The issue was that loadPage() in pagination_controls.html used template-baked query_params (static Jinja2 values rendered at page load), which became stale after user interactions.\n\n2. Elegant Solution: The fix establishes a clear data flow:\n\n- Source of Truth: Browser URL (written by `updatePanelSearchStateInUrl()`)\n- Pagination: Reads live state from URL via `currentUrlParams.get(livePrefix + 'q')`\n- Rehydration: htmx:afterSettle listener restores input values after HTMX swaps\n\n3. Defense-in-Depth: The fix includes multiple layers:\n\n- Primary: Read live URL params in loadPage() (lines 139-151 in pagination_controls.html)\n- Fallback: Still reads from input elements (lines 115-137) for backward compatibility\n- Rehydration: Restores inputs after HTMX swaps (lines 18743-18760 in admin.js)\n\n4. User Feedback: Added updateFilterStatus() with aria-live regions for accessibility\n\n📋 Technical Review\n\n`pagination_controls.html` (+13 lines):\n\n✅ Correctly reads namespaced params (e.g., servers_q, tools_tags)\n✅ Overrides stale template values\n✅ Preserves team_id for multi-tenancy\n\n`admin.js` (+65 lines):\n\n1. `updateFilterStatus()` (lines 18703-18738):\n\n- ✅ Reads URL params to detect active filters\n- ✅ Displays filtered count from pagination controls\n- ✅ Falls back to \"Filters active\" if count unavailable\n- ✅ Clears status when no filters active\n\n2. `htmx:afterSettle` listener (lines 18743-18760):\n\n- ✅ Triggers on table/pagination swaps\n- ✅ Calls resetSearchInputsState() + initializeSearchInputsMemoized()\n- ✅ Updates filter status after rehydration\n      \n`admin.html` (+6 lines):\n\n- ✅ Added <span id=\"{table}-filter-status\"> to all 6 tables\n- ✅ Proper aria-live=\"polite\" and role=\"status\" for accessibility\n\n🔍 Minor Observations\n\n1. Redundant Input Reading: Lines 115-137 in pagination_controls.html still read from input elements before the URL override. This is harmless (URL wins) but could be simplified in a future refactor.\n \n2. Event Listener Scope: The htmx:afterSettle listener triggers on any element ending with -table, -table-body, -list-container, or -pagination-controls. This is broad but safe since `initializeSearchInputsMemoized()` is memoized.\n \n3. Filter Status Timing: updateFilterStatus() reads pagination totals from Alpine-rendered elements. If Alpine hasn't rendered yet, it falls back to \"Filters active\" (acceptable).\n\n✅ Verification Checklist\n\n- ✅ Fixes root cause (stale template-baked params)\n- ✅ Maintains backward compatibility (still reads inputs as fallback)\n- ✅ Handles all 6 admin tables (servers, tools, resources, prompts, gateways, a2a-agents)\n- ✅ Preserves team_id for multi-tenancy\n- ✅ Accessibility (aria-live regions)\n- ✅ Clean, minimal changes (84 additions, 0 deletions)\n- ✅ No breaking changes\n\nThis PR correctly fixes the filter persistence bug with a well-architected solution. The redundant input reading is harmless and can be cleaned up in a future refactor if desired.\n\nLGTM 🚀 "
+    },
+    {
+      "id": "3964295555",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-17T23:48:21+00:00",
+      "body": "LGTM — rebased, reviewed, and hardened.\n\n**Changes made on top of the original commit:**\n\n1. **Conflict resolution** — kept URL-based filter reading (correct), dropped main's DOM-based approach (had catalog/a2a-agents input ID mismatch bug)\n2. **Debounce race fix** — added `flushPendingSearchState()` so paginating within the 250ms debounce window still picks up live input values via `PANEL_SEARCH_CONFIG` (correct IDs for all 6 tables)\n3. **40 new tests** — `updateFilterStatus`, `htmx:afterSettle` rehydration, URL-param filter reading, and flush function coverage\n\n**905/905 JS tests pass, all linters clean.**"
+    },
+    {
+      "id": "3985012371",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-21T02:19:54+00:00",
+      "body": "Approved — rebased, 4 bugs fixed, 27 differential tests added, verified via vitest (98/98) and Playwright e2e (0 JS errors). Ship it."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "4e9546a246eae7376b98658be7af8005e2c10bbc",
+      "message": "feat(ui): persist admin table filters across HTMX pagination and partial refresh Closes #2992\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>",
+      "author": "Oriol Morros Vilaseca",
+      "date": "2026-02-17T17:57:13+00:00"
+    },
+    {
+      "sha": "163fcc908e5152d8853f67ad0a09f99688d4f4fb",
+      "message": "fix(ui): guard afterSettle detail access and add differential tests (#3647)\n\n- Fix TypeError when htmx:afterSettle fires without evt.detail (use\n  optional chaining)\n- Add 27 tests covering updateFilterStatus, afterSettle rehydration\n  listener, and URL-param filter fallback logic\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T01:34:58+00:00"
+    },
+    {
+      "sha": "bd26831e7288022c2971f67ad7ec488a8b3b7c3d",
+      "message": "fix(ui): prevent stale filter fallback and simplify updateFilterStatus (#3647)\n\n- loadPage() now trusts DOM input values even when empty (user cleared\n  the filter); URL params are only used as fallback when the DOM element\n  itself is absent (bookmarked URL, iframe, or ID mismatch).  Previously\n  an intentional clear during the debounce window fell back to stale URL\n  params and re-sent the old filter.\n- Simplify updateFilterStatus() to always show \"Filters active\" instead\n  of attempting to read Alpine-rendered pagination text, which was\n  unreliable due to listener ordering (ran before Alpine.initTree).\n- Update tests to cover the new element-presence semantics.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T01:55:53+00:00"
+    },
+    {
+      "sha": "eb1b732d6b28061040ae96458464f4285425dde1",
+      "message": "fix(ui): use document instead of document.body for top-level afterSettle listener (#3647)\n\nThe htmx:afterSettle listener added by this PR runs at script load time,\nbut admin.js can be loaded in <head> before document.body exists.  Use\ndocument.addEventListener (consistent with the existing top-level\nafterSettle listener at line 33807) to avoid the null reference error.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-21T02:13:44+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 489,
+  "deletions": 25,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:16.393302",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:16.394170",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3647,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3647.json"
+  }
+}

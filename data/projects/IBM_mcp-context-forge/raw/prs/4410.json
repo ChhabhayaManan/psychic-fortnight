@@ -1,0 +1,100 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4410,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4410"
+  },
+  "metadata": {
+    "title": "fix(oauth): skip audience enforcement for virtual servers when resource is not configured",
+    "state": "closed",
+    "created_at": "2026-04-23T09:48:11+00:00",
+    "updated_at": "2026-04-28T06:04:46+00:00",
+    "closed_at": "2026-04-28T06:04:44+00:00",
+    "merged_at": "2026-04-28T06:04:44+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "SHOULD",
+      "api",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\n\n## 📌 Summary\n\nOAuth audience verification always fails for virtual servers when the IdP does not support RFC 8707 Resource Indicators (e.g. Authentik, some Keycloak configurations). These IdPs set the token `aud` claim to an abstract identifier (typically the OAuth `client_id`) rather than the resource URL the client requested. Since virtual servers only have `authorization_servers` in their `oauth_config` (no `resource`), the only expected audience is the canonical resource URL derived from `APP_DOMAIN` — which never matches.\n\nThis is the virtual-server counterpart to #4404, which applies the same auto-learn pattern to the gateway (OAuth callback) path.\n\n## 🔁 Reproduction Steps\n\nCloses #4171\n\n1. Create a virtual server with `oauth_enabled=true` and an authorization server pointing to an IdP without RFC 8707 support (e.g. Authentik)\n2. Set `APP_DOMAIN` to the gateway's internal domain\n3. Have an MCP client connect to `/servers/{server_id}/mcp` — the client completes the OAuth flow with the IdP\n4. The IdP issues a token with `aud: \"my-oauth-client-id\"` (ignoring the `resource` parameter)\n5. ContextForge builds `expected_audiences = [\"{APP_DOMAIN}/servers/{server_id}/mcp\"]`\n6. Audience mismatch → 401 on every request\n\n## 🐞 Root Cause\n\n`_try_oauth_access_token` in `streamablehttp_transport.py` always enforced audience verification using the canonical resource URL from `_build_server_resource_url()`. When `oauth_config` has no `resource` (which is the case for all virtual servers created via the admin UI), the expected audience list contained only this URL. Non-RFC-8707 IdPs set `aud` to an abstract identifier instead, so every token failed audience verification — even though signature and issuer were valid.\n\nThe admin UI for virtual servers does not expose `resource` fields, so there was no way to configure the expected audience without direct DB manipulation.\n\n## 💡 Fix Description\n\nReplace the old audience-list-building logic with a two-branch strategy in `_try_oauth_access_token`:\n\n1. **When `resource` IS configured** (learned or manually set): Pass it directly to `verify_oauth_access_token` as the expected audience. No canonical resource URL, no list building — the configured value is used as-is (string or list).\n\n2. **When `resource` is NOT configured**: Skip audience enforcement (`expected_audience=None`). Signature + issuer are still verified. After successful verification, extract the `aud` claim from the verified token and persist it as `resource` in `server.oauth_config` via the new `_persist_learned_server_audience()` helper. All subsequent requests then get strict audience enforcement.\n\nThe old `client_id` fallback and canonical resource URL derivation (`_build_server_resource_url`) are removed from the audience path entirely — they were the source of the bug for non-RFC-8707 IdPs.\n\nThis is not a security regression: without this change, every non-RFC-8707 IdP token is rejected outright (the feature is completely broken). The fix maintains signature + issuer verification on the first request and adds strict audience enforcement from the second request onward.\n\n**Why auto-learn instead of a UI toggle (as suggested in #4171)?**\n\nThe issue proposed a per-server toggle or UI field to manually configure the expected audience. But the operator only controls which IdP to use (`authorization_servers`) — the `aud` claim value is determined entirely by the IdP's behavior, which varies across providers (it could be the `client_id`, an application URI, or something else entirely). Asking the operator to pre-configure it would require them to know what the IdP will put in `aud` before any token has been issued. Auto-learning from the first verified token eliminates this guesswork and works correctly regardless of the IdP's audience strategy.\n\nKey implementation details:\n- `_persist_learned_server_audience()` is best-effort — DB failures are caught both internally and at the call site, never breaking the auth flow\n- The `aud` claim is stored as-is: string values stay strings, list values stay lists\n- Persist is called on every successful auth so that IdP-side changes (e.g. client_id rotation) are picked up automatically; a no-op early return skips the write when the stored value already matches\n- SQLAlchemy mutation tracking is handled correctly (new dict object assigned)\n\n## 🧪 Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Unit tests (test_auth.py)             | `uv run pytest tests/unit/mcpgateway/test_auth.py` | ✅ 237 passed |\n| Related OAuth tests                   | `uv run pytest tests/unit/mcpgateway/test_auth.py tests/unit/mcpgateway/routers/test_oauth_router.py tests/unit/mcpgateway/services/test_token_validation_service.py` | ✅ 362 passed |\n| Doctests                              | `uv run pytest --doctest-modules mcpgateway/transports/streamablehttp_transport.py` | ✅ 22 passed |\n| Ruff                                  | `make ruff` | ✅ All checks passed |\n| Formatting                            | `make autoflake isort black` | ✅ Clean |\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed",
+  "comments": [
+    {
+      "id": "3148894746",
+      "author": "brian-hussey",
+      "created_at": "2026-04-27T16:49:53+00:00",
+      "body": "Can we validate the structure of the 'aud' claim here? At the moment it is accepted and trusted by default.\nThe token is verified but it could still be complex, empty or an unexpected type.\nWe could validate that it is a non-empty string or a list of non-empty strings before continuing."
+    },
+    {
+      "id": "3148922483",
+      "author": "brian-hussey",
+      "created_at": "2026-04-27T16:55:08+00:00",
+      "body": "The function returns early if server.oauth_config is falsy, but this means a server with oauth_enabled=True but no oauth_config will silently skip audience learning. This could hide configuration issues. Consider logging a warning when oauth_enabled is True but oauth_config is missing."
+    },
+    {
+      "id": "3149128563",
+      "author": "brian-hussey",
+      "created_at": "2026-04-27T17:34:55+00:00",
+      "body": "There is a potential race condition here: Using db.flush() without explicit transaction isolation. \nIf multiple requests with different aud claims arrive concurrently for the same server, the last write wins without any conflict detection. Consider adding optimistic locking (version field) or documenting that the last-verified-token-wins behavior is intentional."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4182721565",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-27T17:38:41+00:00",
+      "body": "Hey Madhav, thank you for the submission.\nThere are a few issues with this PR as commented below.\nAlso please consider updating the docs/docs/architecture/oauth-design.md with updates to the oauth design that will come through with this change.\n\nThanks,\nBrian"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a0318cc6be0b0402c305acf0588af78beb32e0a7",
+      "message": "fix(oauth): skip audience enforcement for virtual servers when resource is not configured\n\nIdPs that do not support RFC 8707 (e.g. Authentik) set the token aud\nclaim to the OAuth client_id rather than the resource URL the client\nrequested. Virtual servers with only authorization_servers configured\n(no resource or client_id in oauth_config) always fail audience\nverification because the only expected audience is the canonical\nresource URL derived from APP_DOMAIN.\n\nWhen resource is absent from oauth_config, skip audience enforcement\n(signature + issuer are still verified) and persist the aud claim from\nthe first verified token as resource for strict enforcement on all\nsubsequent requests. The aud value is stored as-is (string or list per\nRFC 7519) without normalization.\n\nCloses #4171\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-23T10:07:31+00:00"
+    },
+    {
+      "sha": "238b672523ba65b057eef0636de849070d034e5b",
+      "message": "isort fix\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-23T10:31:21+00:00"
+    },
+    {
+      "sha": "1885111f7b9192c44cb66307adf6b211685f8873",
+      "message": "fix(lint): remove redundant reimports of select, DbServer, and DbGateway in streamablehttp_transport\n\nMove Gateway as DbGateway to top-level import and remove all local\nreimports of select, DbServer, and DbGateway that shadow the existing\nmodule-level imports. Resolves pylint W0404 (reimported) and W0621\n(redefined-outer-name) warnings.\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-04-23T11:48:40+00:00"
+    },
+    {
+      "sha": "7487f96ab7d4a022076ef2f92908bf1c3f2cbe67",
+      "message": "fix(oauth): harden virtual-server audience auto-learn against token confusion\n\nWhen the auto-learn audience pattern was introduced, three issues remained\nthat this commit addresses:\n\n* First-request authentication was effectively issuer-only when no\n  resource was configured. Any valid token from an allowed issuer would\n  authenticate and pin its aud as resource, enabling cross-resource\n  token confusion in shared-IdP deployments. The handler now falls\n  back to a list of acceptable audiences derived from the canonical\n  RFC 8707/9728 resource URL plus the legacy client_id field, and\n  fails closed when neither anchor is available.\n\n* The verified aud claim was persisted with no shape validation. A\n  misconfigured IdP minting a token with a malformed aud (dict, int,\n  empty list, etc.) would persist that value as resource and then\n  crash PyJWT inside verify_oauth_access_token on the next request.\n  A new _is_valid_audience helper enforces RFC 7519 §4.1.3 (string\n  or non-empty list of non-empty strings) before persisting.\n\n* The persist policy was 'always overwrite', which could silently\n  collapse an operator-configured multi-audience list down to a\n  single value, and could mask IdP-side audience changes that\n  should surface as an explicit auth failure. The policy is now\n  learn-once: existing resource values (operator-set or previously\n  learned) are preserved. IdP rotation requires the operator to\n  clear the field before the new value is learned.\n\nAdds regression coverage for: stateful learn-then-enforce, fallback\naudience derivation, malformed aud rejection (parametrized over\ndict/int/empty/whitespace shapes), multi-audience list preservation,\noauth_config=None handling, no-aud-claim handler success, and the\nfail-closed branch when no audience anchor can be derived.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-28T05:11:14+00:00"
+    },
+    {
+      "sha": "a9117ad7f3a08ce20a91dc36f7b97075a2bcddad",
+      "message": "test(oauth): expand coverage of virtual-server audience helpers\n\nFollow-up coverage additions for the audience-learning hardening introduced\nin the previous commit. Covers branches and assertions that the second-pass\nreview identified as gaps:\n\n* C4: canonical URL unavailable but client_id configured → fallback uses\n  client_id alone (the #4171 use case when app_domain is unset).\n* C7/C8: parametrized matrix for non-string and whitespace-only client_id\n  values (whitespace, empty, int, list, dict, None) all excluded from the\n  fallback and producing a 401.\n* B4: db.execute(...).scalar_one_or_none() returning None is handled\n  gracefully (no flush, no error).\n* B5: empty oauth_config dict at helper level (previously covered only\n  for None).\n* B12: db.flush() raising is caught by the outer except, swallowed, and\n  the warning log is asserted via caplog.\n* A1-A10: direct parametrized unit test for _is_valid_audience covering\n  every shape (None, empty/whitespace string, valid string, empty list,\n  list with None/empty/int, valid lists, dict, int, bytes).\n\nExisting tests strengthened with previously-missing assertions:\n* test_skips_when_aud_is_malformed now asserts the warning log emitted\n  on rejection (previously only verified no DB calls).\n* test_db_error_is_swallowed now asserts the warning log emitted on\n  DB execute failure.\n* test_no_resource_no_client_id_no_canonical_fails_closed now asserts\n  the 401 status, WWW-Authenticate: Bearer header, and JSON detail\n  body produced by the fail-closed branch (previously only verified the\n  return value).\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-28T05:47:54+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 739,
+  "deletions": 150,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:02.182596",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:02.183261",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4410,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4410.json"
+  }
+}

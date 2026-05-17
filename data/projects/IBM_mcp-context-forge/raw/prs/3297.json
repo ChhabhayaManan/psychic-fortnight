@@ -1,0 +1,86 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3297,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3297"
+  },
+  "metadata": {
+    "title": "[BUG]: Add fallback path for root path",
+    "state": "closed",
+    "created_at": "2026-02-26T14:15:37+00:00",
+    "updated_at": "2026-02-26T18:08:58+00:00",
+    "closed_at": "2026-02-26T18:08:56+00:00",
+    "merged_at": "2026-02-26T18:08:56+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #3296\r\n\r\n---\r\n\r\n## Summary\r\nFixes broken admin redirects, template URLs, and UI cookie paths in proxy/embedded deployments where `request.scope[\"root_path\"]` is empty but `settings.app_root_path` is configured. Follow-up to #3290 which only fixed the CSRF cookie path.\r\n\r\n## Reproduction Steps\r\n1. Set `APP_ROOT_PATH=/api/proxy/mcp` and deploy behind a proxy that does not populate ASGI `scope[\"root_path\"]`.\r\n2. Open Admin UI and perform any POST action (create gateway, delete tool, toggle state).\r\n3. Observe redirect lands on `/admin#...` instead of `/api/proxy/mcp/admin#...`.\r\n\r\n## Root Cause\r\nThe fix in #3290 introduced a fallback from `scope[\"root_path\"]` to `settings.app_root_path` only in `_admin_cookie_path`. However, ~100 other call sites in `mcpgateway/admin.py` still read `request.scope.get(\"root_path\", \"\")` directly:\r\n- All `_build_admin_redirect()` callers (redirect URLs after POST actions)\r\n- All template context dictionaries (rendered navigation, pagination, asset links)\r\n- UI visibility cookie path construction\r\n- `_request` variant handlers\r\n\r\nThese all produce incorrect paths in the same proxy deployment scenario.\r\n\r\n## Fix Description\r\n- **Extracted `_resolve_root_path(request)`**: A new helper that encapsulates the resolution logic — checks `scope[\"root_path\"]` first, falls back to `settings.app_root_path`, normalizes (leading `/`, no trailing `/`).\r\n- **Refactored `_admin_cookie_path`**: Now delegates to `_resolve_root_path` instead of inlining the logic.\r\n- **Updated all call sites**: Replaced all `request.scope.get(\"root_path\", \"\")` occurrences with `_resolve_root_path(request)` (or `_resolve_root_path(_request) if _request else \"\"` for nullable request variants).\r\n\r\n## Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Targeted tests (10)                   | `uv run pytest -k \"resolve_root_path or admin_cookie_path\"` | 10 passed |\r\n| Full admin test suite                 | `uv run pytest tests/unit/mcpgateway/test_admin.py` | 901 passed |\r\n\r\n## Files Changed\r\n\r\n| File | Changes |\r\n|------|---------|\r\n| `mcpgateway/admin.py` | Added `_resolve_root_path()` helper; replaced ~100 direct `scope[\"root_path\"]` reads |\r\n| `tests/unit/mcpgateway/test_admin.py` | Added 5 unit tests for `_resolve_root_path` |\r\n\r\n## Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n- [x] Existing tests pass (901/901)\r\n- [x] New tests cover helper behavior (5 tests)\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3862216836",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-26T16:45:35+00:00",
+      "body": "Approved after rebase, code review, integration testing under proxy prefix, and fixing 2 missed call sites + hardening _resolve_root_path. 928 tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8a3eebe2c481cae23d4adf25d0627686ae7e4e48",
+      "message": "fix(admin): use _resolve_root_path helper for consistent proxy root path resolution\n\nExtract root path resolution (scope fallback to settings.app_root_path\nwith normalization) into _resolve_root_path() and apply it across all\nadmin handlers. Previously only _admin_cookie_path used the fallback,\nwhile ~100 other call sites (redirects, template contexts) read\nrequest.scope[\"root_path\"] directly — breaking navigation and URL\nconstruction in proxy/embedded deployments where scope root_path is\nempty.\n\nCloses #3290\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-26T14:10:29+00:00"
+    },
+    {
+      "sha": "b9e03067bd11a16dcb6037ef3096685ecde13c39",
+      "message": "Remove commented code\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-26T14:27:28+00:00"
+    },
+    {
+      "sha": "782b8bc9281527b0a900cd9189b07251eaaae01b",
+      "message": "fix(admin): remove dead code and add edge-case tests for _resolve_root_path\n\nRemove unused `request.scope.get(\"root_path\", \"\")` statement (no-op,\nresult never assigned) in `admin_list_join_requests`.\n\nAdd edge-case tests: missing scope key, None settings value, and None\nscope value to ensure fallback logic is robust.\n\nCloses #3296\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T16:08:20+00:00"
+    },
+    {
+      "sha": "14a9fb7f6a749a311891d1745ba05363389a6eac",
+      "message": "fix(admin): fix 2 missed call sites and harden _resolve_root_path\n\nReplace remaining request.scope.get(\"root_path\", \"\") in\nadmin_users_partial_html (controls pagination) and\nadmin_tool_ops_partial (base_url) with _resolve_root_path(request).\n\nHarden _resolve_root_path to strip scheme-relative double-slash\nprefixes (e.g. \"//evil\" → \"/evil\") and properly fall back when\nscope root_path is whitespace-only.\n\nCloses #3296\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T16:37:21+00:00"
+    },
+    {
+      "sha": "7198c18db654b99ca788d5832160e27950fffee0",
+      "message": "test(admin): add regression tests for users controls and tool-ops base_url fallback\n\nAssert that admin_users_partial_html(render=\"controls\") passes\nfallback-prefixed base_url to the template context, and that\nadmin_tool_ops_partial passes it to paginate_query, when\nscope[\"root_path\"] is empty and settings.app_root_path is set.\n\nCloses #3296\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T16:50:22+00:00"
+    },
+    {
+      "sha": "1298bc1848cc3e83b0629c5eb25b32163a969575",
+      "message": "fix(admin): rename unused request param to _request in admin_list_join_requests\n\nFixes pylint W0613 (unused-argument) introduced by removing dead\nscope.get(\"root_path\") statement in prior commit.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T16:57:31+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 283,
+  "deletions": 118,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:44.671089",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:44.672158",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3297,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3297.json"
+  }
+}

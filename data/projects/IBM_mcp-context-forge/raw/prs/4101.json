@@ -1,0 +1,91 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4101,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4101"
+  },
+  "metadata": {
+    "title": "Fix Load Test Accuracy by Eliminating Retry Latency ",
+    "state": "closed",
+    "created_at": "2026-04-08T23:44:22+00:00",
+    "updated_at": "2026-04-11T06:46:50+00:00",
+    "closed_at": "2026-04-11T06:46:49+00:00",
+    "merged_at": "2026-04-11T06:46:49+00:00",
+    "author": "dima-zakharov",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "Closes: \r\nThis PR updates the load testing suite to ensure we are measuring the actual system latency\r\nrather than the artificial delays introduced by the `RetryWithBackoffPlugin`.\r\n\r\nPreviously, the `locustfile_mcp_protocol.py` was sending requests with missing arguments\r\n(e.g., missing `time` parameter for `fast-time-convert-time`). While the system correctly\r\nidentified these as errors, the `RetryWithBackoffPlugin` flagged them as transient\r\nfailures and triggered a recursive retry loop with Jittered Exponential Backoff.\r\n\r\n\r\n---\r\n\r\n## 📝 Summary\r\nDuring performance profiling, it was found that:\r\n\r\n- **Success Path Latency:** ~20ms (Avg)\r\n- **Error Path Latency:** ~250ms (Avg) — **12x slower** (HTTP code 200, mcp error in json-rpc body)\r\n\r\nError extracted with debug logging:\r\n```\r\ntool_call_result.is_error=True! content=[{'type': 'text', 'text': 'time parameter is required', 'annotations': None, '_meta': None}]\r\n```\r\n\r\nThe discrepancy was caused by the Gateway \"sleeping\" for an average of 180ms–230ms per error\r\nbefore returning the result to the client. This skewed the benchmark results, making the system\r\nappear significantly slower than it actually is.\r\n\r\nThe `RetryWithBackoffPlugin` (`plugins/retry_with_backoff/`) treats any `isError=True` response\r\n**without** a `structuredContent.status_code` as an unconditional transient failure. For\r\nsemantic/business-logic errors (e.g., \"time parameter is required\"), this is incorrect — the\r\ntool processed the request successfully and returned a definitive error. Retrying with the same\r\narguments produces the same result, wasting ~200ms of sleep + re-invocation per attempt.\r\n\r\nWith default config (`max_retries: 2`, `backoff_base_ms: 200`, `jitter: true`), a single error\r\ncould trigger up to 3 total attempts, adding 300–600ms of unnecessary latency.\r\nFix related to arguments generation for 'fast-time-convert-time' tool:\r\n```python\r\n# Before: \"time\" matched first → only {timezone} → error\r\nif \"time\" in name_lower:\r\n    args = {\"timezone\": random.choice(TIMEZONES)}\r\nelif \"convert\" in name_lower:\r\n    args = {\"time\": \"...\", \"source_timezone\": \"UTC\", \"target_timezone\": \"Europe/London\"}\r\n\r\n# After: \"convert\" matches first → correct args\r\nif \"convert\" in name_lower:\r\n    args = {\"time\": \"...\", \"source_timezone\": \"UTC\", \"target_timezone\": \"Europe/London\"}\r\nelif \"time\" in name_lower:\r\n    args = {\"timezone\": random.choice(TIMEZONES)}\r\n```\r\n\r\nThe error was in json-rpc body and HTTP status code was 200, so locust does not count this as an error, \r\nbut retry plugin introduced retry with significant delay, this way we measured configured delay rather than gateway latency. \r\n\r\nBefore fix:\r\n```\r\nMCP tools/call [rapid]                           2,487        0     41.5    175.4    580.0\r\n```\r\nAlso in logs:\r\n```\r\ndocker compose logs | grep ERROR | grep invoc | tail -n 1\r\ngateway-3                 | 2026-04-08T23:11:40 - mcpgateway.services.structured_logger - ERROR - [tool_service] Tool 'fast-time-convert-time' invocation failed\r\n\r\n```\r\n\r\nAfter fix:\r\n```\r\nMCP tools/call [rapid]                           7,353        0    122.8     15.5    130.0\r\n```\r\nNo errors related to fast-time-convert-time in docker compse logs.\r\n\r\nAlso the description is not complete:\r\n```\r\n   📝 Auto-registered:\r\n      • MCP gateway: fast_test (from fast_test_server)\r\n      • A2A agent:   a2a-echo-agent\r\n\r\n```\r\nThis description does not specify fast-time-server which is tested in benchmark. \r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [x] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |        |\r\n| Unit tests                | `make test`     |        |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [ ] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n_Screenshots, design decisions, or additional context._\r\n",
+  "comments": [
+    {
+      "id": "3056849341",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-09T09:36:18+00:00",
+      "body": "same logic here."
+    },
+    {
+      "id": "3056872275",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-09T09:40:35+00:00",
+      "body": "same logic here."
+    },
+    {
+      "id": "3056876873",
+      "author": "madhu-mohan-jaishankar",
+      "created_at": "2026-04-09T09:41:29+00:00",
+      "body": "same logic here."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4081041717",
+      "author": "madhu-mohan-jaishankar",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-09T09:05:40+00:00",
+      "body": "The core fix is correct. The fix was only applied to `MCPToolCallerUser.call_tool()`, but the same flawed logic exists in other places. `MCPSessionChurnUser.full_lifecycle()`, `MCPStressUser.stress_call_tool()` and `MCPAgentUser._build_tool_args()` still uses the old ordering. \n**Recommendation:** Extract a shared helper (similar to what MCPAgentUser already has) and use it across all user classes to avoid this class of bug entirely."
+    },
+    {
+      "id": "4081248655",
+      "author": "madhu-mohan-jaishankar",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-09T09:41:40+00:00",
+      "body": ""
+    },
+    {
+      "id": "4089066398",
+      "author": "madhu-mohan-jaishankar",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-10T10:46:38+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "47862fb9ffc772ed5a40154c5a45a62b2510a843",
+      "message": "fix locust benchmark script\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-04-08T23:23:16+00:00"
+    },
+    {
+      "sha": "dc7bad03b94e0b707f144cc5682a9e4add32dda6",
+      "message": "refactor locust script and remove duplicates in arguments creation\n\nSigned-off-by: Dmitry Zakharov <zakharov@ibm.com>",
+      "author": "Dmitry Zakharov",
+      "date": "2026-04-09T10:36:46+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 23,
+  "deletions": 44,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:39.375578",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:39.376388",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4101,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4101.json"
+  }
+}

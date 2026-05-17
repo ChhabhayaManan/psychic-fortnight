@@ -1,0 +1,57 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2534,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2534"
+  },
+  "metadata": {
+    "title": "fix(validation): allow tool names starting with underscore or number",
+    "state": "closed",
+    "created_at": "2026-01-28T02:47:00+00:00",
+    "updated_at": "2026-01-31T15:47:35+00:00",
+    "closed_at": "2026-01-28T12:04:00+00:00",
+    "merged_at": "2026-01-28T12:04:00+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "client-crimson"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "madhav165",
+      "kevalmahajan"
+    ]
+  },
+  "description": "## Summary\n\nFixes the validation pattern for MCP tool names to align with SEP-986, which does not mandate that tool names must start with a letter.\n\n- Updated `VALIDATION_TOOL_NAME_PATTERN` from `^[a-zA-Z][a-zA-Z0-9._-]*$` to `^[a-zA-Z0-9_][a-zA-Z0-9._/-]*$`\n- Tool names starting with underscore (e.g., `_5gpt_query_by_market_id`) or number (e.g., `123_tool`) are now accepted\n- Tool names with slashes (e.g., `namespace/subtool`) are now accepted per SEP-986\n- Tool names starting with hyphen (e.g., `-tool`) remain invalid for safety\n- Removed `/` from HTML special characters regex (not XSS-relevant)\n\n### Files Changed\n\n**Core validation:**\n- `mcpgateway/config.py` - Default pattern\n- `mcpgateway/common/validators.py` - Validation logic, error messages, HTML regex\n- `mcpgateway/schemas.py` - Pydantic schema docstrings\n- `mcpgateway/utils/error_formatter.py` - User-friendly error mapping\n\n**Configuration:**\n- `.env.example` - Documented default\n- `charts/mcp-stack/values.yaml` - Helm chart default\n- `charts/mcp-stack/README.md` - Helm documentation\n\n**Tests:**\n- `tests/unit/mcpgateway/validation/test_validators.py`\n- `tests/unit/mcpgateway/validation/test_validators_advanced.py`\n- `tests/unit/mcpgateway/utils/test_error_formatter.py`\n\n**Documentation:**\n- `docs/docs/testing/acceptance.md`\n\n### Verification\n\nTested against running docker-compose deployment:\n```bash\n# Tool name starting with underscore - PASSES\ncurl -X POST localhost:8080/tools -d '{\"tool\": {\"name\": \"_5gpt_query_by_market_id\", ...}}'\n# Returns 200 OK\n\n# Tool name starting with number - PASSES  \ncurl -X POST localhost:8080/tools -d '{\"tool\": {\"name\": \"123_numeric_tool\", ...}}'\n# Returns 200 OK\n\n# Tool name with slash - PASSES (per SEP-986)\ncurl -X POST localhost:8080/tools -d '{\"tool\": {\"name\": \"namespace/subtool\", ...}}'\n# Returns 200 OK\n\n# Tool name starting with hyphen - CORRECTLY REJECTED\ncurl -X POST localhost:8080/tools -d '{\"tool\": {\"name\": \"-invalid_tool\", ...}}'\n# Returns 422 with validation error\n```\n\nCloses #2528",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3715980154",
+      "author": "kevalmahajan",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-28T10:41:23+00:00",
+      "body": "Reviewed and tested the changes and verified them against the SEP-986 specification for MCP tool names.\r\n\r\n1. Regex Compliance: The updated regex ^[a-zA-Z0-9_][a-zA-Z0-9._/-]*$ correctly implements the SEP-986 standard:\r\n    * Allows forward slashes / for namespacing.\r\n    * Allows starting with valid characters (including numbers/underscores) that were previously restricted.\r\n    * Excludes invalid starting characters like hyphens (correctly blocked).\r\n    \r\n2. Shared Length Limit:\r\n    * The code uses VALIDATION_MAX_NAME_LENGTH (default 255) for tool names.\r\n    * While SEP-986 recommends a 64-character limit, using 255 is acceptable as a permissive gateway limit (it's a superset).\r\n    * Note: Since this constant is shared with validate_display_name, validate_identifier, and validate_uri, changing it would have side effects. If strict 64-char enforcement is required for tool names later, we should introduce a dedicated VALIDATION_MAX_TOOL_NAME_LENGTH.\r\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6522a87b5804b42d1ced2611fbe2f15c7a4b96ff",
+      "message": "fix(validation): allow tool names starting with underscore or number\n\nThe MCP specification does not mandate that tool names must start with\na letter - tool names are simply strings without pattern restrictions.\nThis fix updates the validation pattern to align with SEP-986.\n\nChanges:\n- Update VALIDATION_TOOL_NAME_PATTERN from ^[a-zA-Z][a-zA-Z0-9._-]*$\n  to ^[a-zA-Z0-9_][a-zA-Z0-9._/-]*$ per SEP-986\n- Allow leading underscore/number and slashes in tool names\n- Remove / from HTML special characters regex (not XSS-relevant)\n- Update all error messages, docstrings, and documentation\n- Update tests to verify new valid cases\n\nTool names like `_5gpt_query_by_market_id` and `namespace/tool` are\nnow accepted.\n\nCloses #2528\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-28T02:46:42+00:00"
+    }
+  ],
+  "files_changed": 13,
+  "additions": 74,
+  "deletions": 55,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:32.844150",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:32.845967",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2534,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2534.json"
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3461,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3461"
+  },
+  "metadata": {
+    "title": "fix(ui): redirect authenticated users from login page to dashboard",
+    "state": "closed",
+    "created_at": "2026-03-04T10:50:51+00:00",
+    "updated_at": "2026-03-11T12:50:44+00:00",
+    "closed_at": "2026-03-11T12:50:42+00:00",
+    "merged_at": "2026-03-11T12:50:42+00:00",
+    "author": "marekdano",
+    "labels": [
+      "bug",
+      "ui",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses: https://github.com/IBM/mcp-context-forge/issues/3430\r\n\r\n## 📌 Summary\r\n\r\nFixed issue where authenticated users could still access the login page instead of being redirected to the dashboard.\r\n\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Log in to the application with valid credential\r\n2. Visit /admin/login by typing in to address bar\r\n3. User can view the login page again\r\n\r\n## 🐞 Root Cause\r\n\r\nWhen a logged-in user navigated to /admin/login by typing it directly in the address bar, they would see the login form again instead of being redirected to the dashboard. This created a confusing user experience.\r\n\r\n## 💡 Fix Description\r\n\r\nAdded authentication check in the admin_login_page endpoint to detect already-authenticated users and redirect them to the dashboard.\r\n\r\n### Changes\r\n\r\n1. Core Fix (mcpgateway/admin.py)\r\n\r\nModified admin_login_page() function (line ~3681):\r\n- Added JWT token validation check before rendering login page\r\n- Checks for jwt_token or access_token cookies\r\n- Verifies token validity using verify_jwt_token_cached()\r\n- Redirects authenticated users to /admin dashboard (303 redirect)\r\n- Falls through to show login form if token is invalid/expired\r\n\r\n2. Unit Tests (tests/unit/mcpgateway/test_admin.py)\r\n\r\nAdded two test cases to TestAdminLoginPage class:\r\n\r\n`test_admin_login_page_redirects_authenticated_user`\r\n- Mocks valid JWT token in request cookies\r\n- Verifies redirect to dashboard (status 303)\r\n- Confirms location header points to /app/admin\r\n\r\n`test_admin_login_page_shows_form_for_invalid_token`\r\n- Mocks invalid/expired JWT token\r\n- Verifies login form is displayed (no redirect)\r\n- Confirms CSRF token is set in response\r\n\r\n3. E2E Test (tests/playwright/test_auth.py)\r\n\r\nAdded test_logged_in_user_redirected_from_login_page to TestAuthentication class:\r\n- Performs full login flow with valid credentials\r\n- Verifies JWT cookie is set\r\n- Navigates to /admin/login while authenticated\r\n- Asserts redirect to dashboard occurs\r\n- Confirms login form is not visible\r\n- Verifies admin interface elements are displayed\r\n\r\n### Behavior\r\n\r\n*Before:*\r\n- Logged-in user visits /admin/login → sees login form\r\n\r\n*After:*\r\n- Logged-in user visits /admin/login → redirected to /admin dashboard\r\n- User with invalid/expired token → sees login form (unchanged)\r\n- Unauthenticated user → sees login form (unchanged)\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3889880306",
+      "author": "Lang-Akshay",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-04T14:44:42+00:00",
+      "body": "### Thanks for the PR @marekdano . Great work. Please address the following findings. \n### Findings Summary\n\n| # | File                                    | Line         | Severity      | CWE      | Description                                                                                                                                                                                                                                                                                                                                                                                                                |\n| - | --------------------------------------- | ------------ | ------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| 1 | `mcpgateway/admin.py`                 | 3731–3733   | Low           | CWE-754  | Bare `except Exception: pass` silently swallows all exceptions from JWT verification, including unexpected failures (key-loading errors, cryptographic faults). Masks operational issues.                                                                                                                                                                                                                                |\n| 2 | `mcpgateway/admin.py`                 | 3724         | Low           | CWE-287  | Accepting tokens from two cookie names (`jwt_token` and `access_token`) widens the attack surface. If one cookie has weaker `SameSite`/`Secure`/`Path` attributes, it may be injectable via a different origin.                                                                                                                                                                                                  |\n| 3 | `mcpgateway/admin.py`                 | 3729–3730   | Informational | CWE-613  | When a token is invalid/expired, the code falls through without clearing the stale cookie. The browser continues sending the bad token on every subsequent request.                                                                                                                                                                                                                                                        |\n| 4 | `tests/unit/mcpgateway/test_admin.py` | 13660        | ⚠️  Medium        | CWE-1164 | The assertion `assert \"secure cookies enabled\" in (context.get(\"secure_cookie_warning\") or \"\").lower()` was **deleted** from `test_admin_login_page_secure_cookie_warning_in_development`. The test now grabs the context dict but never validates its content, eliminating coverage for the security warning feature.                                                                                           |\n| 5 | `tests/unit/mcpgateway/test_admin.py` | 13625–13657 | Low           | CWE-1164 | Pre-existing tests `test_admin_login_page_email_auth_enabled` and `test_admin_login_page_secure_cookie_warning_in_development` do not set `request.cookies = {}`. With `MagicMock(spec=Request)`, `request.cookies.get(\"jwt_token\")` returns a truthy MagicMock, unintentionally triggering the new JWT-check code path. Tests pass only because the MagicMock isn't a valid JWT and the exception is swallowed. |\n\n### Suggestions : \n\n1. **Finding 1** — Narrow the exception handler to catch only expected types (`HTTPException`, `jwt.PyJWTError`) instead of blanket `Exception`. This preserves intent while allowing unexpected errors to propagate and be logged. Effort: **trivial**. Ref: CWE-754, OWASP Error Handling.\n2. **Finding 2** — Either gate `access_token` acceptance behind a feature flag (e.g., SSO flow), document that both cookies MUST share identical `Secure`/`HttpOnly`/`SameSite` attributes, or simplify to only read `jwt_token` (the cookie the gateway itself sets). Effort: **low**.\n3. **Finding 3** — Consider clearing the stale cookie on verification failure via `response.delete_cookie()`. Effort: **low** (requires minor flow restructuring).\n4.  **Finding 4**  — ⚠️ **Restore the deleted assertion**. Add `request.cookies = {}` to the test to prevent the new JWT-check path from interfering, then re-add: `assert \"secure cookies enabled\" in context[\"secure_cookie_warning\"].lower()`. Effort: **trivial**. This is the highest-priority fix.\n5. **Finding 5** — Add explicit `request.cookies = {}` to all pre-existing tests that don't intend to test the JWT cookie path. Effort: **trivial**.\n\n---\n### Deny-Path Test Coverage\n\n| Deny-path scenario                                                                                                   | Covered? | Notes                                                                                                                             |\n| -------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |\n| No cookie present → show login form                                                                                 | Implicit | Works via existing test, but `request.cookies` should be explicitly set to `{}`                                               |\n| Valid JWT → redirect to dashboard                                                                                   | ✅ Yes   | `test_admin_login_page_redirects_authenticated_user()` (`tests/unit/mcpgateway/test_admin.py:13663`)                          |\n| Invalid/expired JWT → show login form                                                                               | ✅ Yes   | `test_admin_login_page_shows_form_for_invalid_token()` (`tests/unit/mcpgateway/test_admin.py:13686`)                          |\n| `verify_jwt_token_cached()` (`mcpgateway/utils/verify_credentials.py:229`) returns falsy/None → show login form | ❌ No    | The `if payload:` branch (`mcpgateway/admin.py:3729`) has no test for `None`/`{}` return                                  |\n| `access_token` cookie with valid JWT → redirect                                                                   | ❌ No    | Only `jwt_token` tested; the `or request.cookies.get(\"access_token\")` branch (`mcpgateway/admin.py:3724`) has zero coverage |\n| `access_token` cookie with invalid JWT → show login form                                                          | ❌ No    | Same gap as above (`mcpgateway/admin.py:3724`)                                                                                  |"
+    },
+    {
+      "id": "3902492710",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T09:15:55+00:00",
+      "body": "Code looks good. Tested and works as expected."
+    },
+    {
+      "id": "3913918123",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-09T09:09:06+00:00",
+      "body": ""
+    },
+    {
+      "id": "3929151092",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-11T12:07:44+00:00",
+      "body": "Reviewed and rebased onto latest main (clean, no conflicts).\n\n**Feature review**: The login page redirect logic is correct and well-designed — validates JWT cookies server-side via `verify_jwt_token_cached`, redirects authenticated users to the dashboard (303), and falls through to the login form for invalid/expired tokens. No security or performance concerns.\n\n**Review fixes applied** (commit `281b734`):\n- Fixed stray `@pytest.mark.asyncio` decorator that was separated from `test_admin_login_handler_missing_fields` by the new test insertions\n- Added missing `password_reset_enabled` mock to `access_token` and `None`-payload test variants for consistency with the `jwt_token` variant\n- Added `HTTPException` test case — `verify_jwt_token_cached` raises `HTTPException` (not `jwt.PyJWTError`) for expired/invalid tokens, so this covers the primary real-world error path\n- Simplified Playwright test: removed unnecessary `try/except` around `not_to_be_visible()` and redundant `wait_for_timeout(1000)`\n- Applied `black`/`isort` formatting"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "cd93cc4285caa90626176da44ae072dd84fbb452",
+      "message": "fix: redirecting authenticated users on /admin/login page to /admin one.\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-04T10:40:30+00:00"
+    },
+    {
+      "sha": "5797178e1b58f67fd7931c3e51f3267592ff30e8",
+      "message": "fix: failing pytest in test_admin.py\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-04T11:41:46+00:00"
+    },
+    {
+      "sha": "ad17b1f2f60e460252c40cd676b0be554494519a",
+      "message": "fix: pylint issues\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-04T12:11:12+00:00"
+    },
+    {
+      "sha": "f3100c077d5030cbc5f5758f353538fa77501ce6",
+      "message": "fix: cwe issues and tests\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-05T13:43:03+00:00"
+    },
+    {
+      "sha": "47fa4cba0b0450d51377589e360bd4225fb5e9e8",
+      "message": "fix: unit tests in test_admin.py\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-05T14:17:54+00:00"
+    },
+    {
+      "sha": "281b734f3f8065dcfb000f45a357008dd2822109",
+      "message": "fix: review fixes for login page redirect tests\n\n- Remove stray @pytest.mark.asyncio decorator that was separated from\n  test_admin_login_handler_missing_fields by new test insertions\n- Add missing password_reset_enabled mock to access_token and None\n  payload test variants for consistency\n- Add HTTPException test case (the real-world error path from\n  verify_jwt_token_cached)\n- Simplify Playwright test: remove unnecessary try/except around\n  not_to_be_visible assertion and redundant wait_for_timeout\n- Apply black/isort formatting\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T10:52:30+00:00"
+    },
+    {
+      "sha": "c2405f675e4e490c56935a72367b6edb3973501f",
+      "message": "fix: use URL check instead of email locator in redirect test\n\nThe LoginPage.email_input locator (input[name=\"email\"]) matches\nmultiple elements on the admin dashboard (create-user and invite-user\nforms), causing a strict mode violation. Use is_on_login_page() URL\ncheck instead, which is both more reliable and semantically correct.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T12:17:40+00:00"
+    },
+    {
+      "sha": "68f5dd2ef9cb3330abb8280ac2a80ef74278d1a1",
+      "message": "fix: clear JWT lru_cache in doctests to prevent intermittent failures\n\nThe @lru_cache on get_jwt_public_key_or_secret() in jwt_config_helper\ncauses intermittent doctest failures under pytest-xdist (-n 4). When\nanother test runs first and caches the real settings key, subsequent\ndoctests that assign DummySettings get a stale cached key, causing\nInvalidSignatureError. Adding jch.clear_jwt_caches() after each\nDummySettings assignment ensures cache isolation.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-11T12:35:53+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 252,
+  "deletions": 16,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:24.021704",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:24.024083",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3461,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3461.json"
+  }
+}

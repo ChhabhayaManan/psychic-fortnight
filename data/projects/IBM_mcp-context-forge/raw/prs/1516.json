@@ -1,0 +1,163 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1516,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1516"
+  },
+  "metadata": {
+    "title": "Refactor: Replace String Tags with Structured Tag Objects Across Backend, Database, and UI",
+    "state": "closed",
+    "created_at": "2025-11-27T12:13:51+00:00",
+    "updated_at": "2025-12-01T12:50:59+00:00",
+    "closed_at": "2025-12-01T12:50:57+00:00",
+    "merged_at": "2025-12-01T12:50:57+00:00",
+    "author": "rakdutta",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "kevalmahajan"
+    ]
+  },
+  "description": "This pull request closes issue #1442  and introduces a richer, structured tag system across the entire MCP Context Forge application. Previously, tags were stored and handled as plain strings. They are now represented as objects/dictionaries containing both an id and a label, enabling future extensibility and more consistent filtering and display.\r\n\r\n**Database migration and model changes:**\r\n\r\n* Added Alembic migration `9e028ecf59c4_tag_records_changes_list_str_to_list_` to convert all `tags` columns in key tables from lists of strings to lists of dicts with `id` and `label` fields, and provides a downgrade path to revert the change.\r\n* Updated all relevant Pydantic models in `mcpgateway/schemas.py` (`ToolRead`, `ResourceRead`, `PromptRead`, `GatewayRead`, `ServerRead`, `A2AAgentRead`, `GrpcServiceRead`) so their `tags` field is now a list of dictionaries instead of a list of strings. [[1]](diffhunk://#diff-bb5a3156fa54327c4e6a514a6b3fbdc2319e12ddd3d71045053a7508ad47c0c2L1287-R1287) [[2]](diffhunk://#diff-bb5a3156fa54327c4e6a514a6b3fbdc2319e12ddd3d71045053a7508ad47c0c2L1785-R1785) [[3]](diffhunk://#diff-bb5a3156fa54327c4e6a514a6b3fbdc2319e12ddd3d71045053a7508ad47c0c2L2291-R2291) [[4]](diffhunk://#diff-bb5a3156fa54327c4e6a514a6b3fbdc2319e12ddd3d71045053a7508ad47c0c2L2950-R2950) [[5]](diffhunk://#diff-bb5a3156fa54327c4e6a514a6b3fbdc2319e12ddd3d71045053a7508ad47c0c2L3719-R3719) [[6]](diffhunk://#diff-bb5a3156fa54327c4e6a514a6b3fbdc2319e12ddd3d71045053a7508ad47c0c2L4492-R4492) [[7]](diffhunk://#diff-bb5a3156fa54327c4e6a514a6b3fbdc2319e12ddd3d71045053a7508ad47c0c2L6253-R6253)\r\n\r\n**Backend logic updates:**\r\n\r\n* Updated tag filtering logic in `mcpgateway/services/export_service.py` to match by tag `id` when tags are dictionaries, ensuring consistent filtering regardless of tag format.\r\n* Modified resource conversion and tool creation logic to handle the new tag format, normalizing tags to human-readable labels where needed. [[1]](diffhunk://#diff-08c62d9c35cc87df6623a1d5e8bfdcf5fb3a514c172ad3399adce07f7215c126L224-R224) [[2]](diffhunk://#diff-6dd24b32c559bf26f0b87904fd6f07c2b70e3044d8367915b20a4fb3938ce296R1891-R1907) [[3]](diffhunk://#diff-6dd24b32c559bf26f0b87904fd6f07c2b70e3044d8367915b20a4fb3938ce296L1913-R1930)\r\n\r\n**Frontend and template updates:**\r\n\r\n* Updated all admin panel JavaScript functions in `mcpgateway/static/admin.js` to correctly display and edit tags, showing tag labels (or ids) when tags are objects and maintaining compatibility with string tags. [[1]](diffhunk://#diff-c14eef5270c1a251b36b2ef8aab846f5cf354a8fa43b10f0c367ca6f176d58ecL2615-R2622) [[2]](diffhunk://#diff-c14eef5270c1a251b36b2ef8aab846f5cf354a8fa43b10f0c367ca6f176d58ecL3265-R3279) [[3]](diffhunk://#diff-c14eef5270c1a251b36b2ef8aab846f5cf354a8fa43b10f0c367ca6f176d58ecL3901-R3922) [[4]](diffhunk://#diff-c14eef5270c1a251b36b2ef8aab846f5cf354a8fa43b10f0c367ca6f176d58ecL4003-R4028) [[5]](diffhunk://#diff-c14eef5270c1a251b36b2ef8aab846f5cf354a8fa43b10f0c367ca6f176d58ecL4313-R4345) [[6]](diffhunk://#diff-c14eef5270c1a251b36b2ef8aab846f5cf354a8fa43b10f0c367ca6f176d58ecL4622-R4661) [[7]](diffhunk://#diff-c14eef5270c1a251b36b2ef8aab846f5cf354a8fa43b10f0c367ca6f176d58ecL4980-R5023) [[8]](diffhunk://#diff-c14eef5270c1a251b36b2ef8aab846f5cf354a8fa43b10f0c367ca6f176d58ecL5460-R5510)\r\n* Updated templates in `mcpgateway/templates/admin.html` to display tag ids when tags are dictionaries, ensuring consistent rendering in the UI. [[1]](diffhunk://#diff-b682d47c572db6413154e49d20e5c25175156da6fd767176bad1cc569b631b55L1878-R1891) [[2]](diffhunk://#diff-b682d47c572db6413154e49d20e5c25175156da6fd767176bad1cc569b631b55L3993-R3998)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3524457843",
+      "author": "kevalmahajan",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2025-12-01T11:16:45+00:00",
+      "body": "Everything works well except the GET /tags and GET /tags/{tag_name}/entities APIs.\r\nFailing with an error: Failed to retrieve tags: unhashable type: 'dict'\".\r\nThese APIs are most probably still treating tags as list of strings and not the refactored tags as list of dicts."
+    },
+    {
+      "id": "3524835985",
+      "author": "kevalmahajan",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-01T12:49:22+00:00",
+      "body": "Works as expected."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b98cc7363cf19db1a9f326554db6671b527cbfd2",
+      "message": "tag str to dict\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-26T09:21:26+00:00"
+    },
+    {
+      "sha": "051bda3bcf3901688f2a5ebe9cd6c4d0020f8c68",
+      "message": "alembic, schema change\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-26T13:04:27+00:00"
+    },
+    {
+      "sha": "0fa1e86f21a9dd8e6ed38e013db84b40dbef77ff",
+      "message": "revert tags\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T04:33:02+00:00"
+    },
+    {
+      "sha": "c672abad19ec9a9b635d071cef4488b3b26f04fa",
+      "message": "tag sturcture\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T06:18:32+00:00"
+    },
+    {
+      "sha": "b393809970bc0ca04b782d0aa27c766c7aad5c45",
+      "message": "remove etra function\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T08:03:59+00:00"
+    },
+    {
+      "sha": "5c3cad848e84c6538dcf3087cdbed670886b1c75",
+      "message": "doctest\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T08:21:41+00:00"
+    },
+    {
+      "sha": "6e8aa04a805d217d8c13926298fc3a164bf3b95f",
+      "message": "lint test\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T09:02:48+00:00"
+    },
+    {
+      "sha": "bd2a2e4644ff73792caccf78dacb9a55d5688d7c",
+      "message": "test\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T09:20:04+00:00"
+    },
+    {
+      "sha": "862b3240b436809eebc79e98d24914a4cff97fcd",
+      "message": "pytest\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T09:48:14+00:00"
+    },
+    {
+      "sha": "18189c79203362bd7dd1f187d926a42a6de95aa1",
+      "message": "ruff\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T10:01:05+00:00"
+    },
+    {
+      "sha": "e90e53a1efa537e015ea080b377ae95a0c9729ca",
+      "message": "down_revision change\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T12:02:57+00:00"
+    },
+    {
+      "sha": "5f9d936739793dd623d3c250ee00aa439eb63765",
+      "message": "logg\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T12:08:28+00:00"
+    },
+    {
+      "sha": "64d7fc35486e581c425ef44afc3cefd62864f82a",
+      "message": "logg\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-27T12:09:37+00:00"
+    },
+    {
+      "sha": "f9b6b4123c2643ce6d5f9d02368b63977fbbaaad",
+      "message": "bandit alembic\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-28T05:56:37+00:00"
+    },
+    {
+      "sha": "19bea5f57213748cbe544a1adb334ad128eaa768",
+      "message": "remove extra logg\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-11-28T08:06:16+00:00"
+    },
+    {
+      "sha": "d2d5800abab0f2b96326f4dbba380a9255e5ea41",
+      "message": "updated down revision since rebased\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2025-12-01T10:24:35+00:00"
+    },
+    {
+      "sha": "4af1581b84e05ae8c60ea482578b07767b702981",
+      "message": "tag_service\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-12-01T12:17:12+00:00"
+    },
+    {
+      "sha": "3f9e8877af9a3f8232149acdf69e96a66de6333a",
+      "message": "docstring\n\nSigned-off-by: rakdutta <rakhibiswas@yahoo.com>",
+      "author": "rakdutta",
+      "date": "2025-12-01T12:34:31+00:00"
+    }
+  ],
+  "files_changed": 18,
+  "additions": 330,
+  "deletions": 85,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:21:04.921581",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:21:04.922843",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1516,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1516.json"
+  }
+}

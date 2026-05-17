@@ -1,0 +1,737 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2834,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2834"
+  },
+  "metadata": {
+    "title": "Phase 1: Embedding & Vector Search Infrastructure",
+    "state": "closed",
+    "created_at": "2026-02-11T08:39:10+00:00",
+    "updated_at": "2026-02-18T11:36:56+00:00",
+    "closed_at": "2026-02-17T09:51:02+00:00",
+    "merged_at": null,
+    "author": "AbdulR11",
+    "labels": [
+      "tcd",
+      "sweng-group-19"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #2229\r\n<img width=\"1967\" height=\"1341\" alt=\"Screenshot 2026-02-11 at 08 34 37\" src=\"https://github.com/user-attachments/assets/de61820a-1864-45da-96a8-e6b557eb3c14\" />\r\n\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR implements **Phase 1: Embedding & Vector Search Infrastructure** for semantic tool discovery in the MCP Gateway. This enables natural language queries to find relevant tools (e.g., \"database operations\" → returns DB-related tools).\r\n\r\n### Key Changes\r\n\r\n**Embedding Service** (`mcpgateway/services/embedding_service.py`)\r\n- Multi-provider support: OpenAI (text-embedding-3-small), Mistral, and local embeddings\r\n- Async embedding generation with configurable dimensions (1536 default)\r\n- Lazy initialization with provider factory pattern\r\n- Environment-based configuration via `.env`\r\n\r\n**Semantic Search Service** (`mcpgateway/services/semantic_search_service.py`)\r\n- Query normalization and preprocessing\r\n- Result caching with configurable TTL\r\n- Similarity threshold filtering\r\n- Batch embedding support for performance\r\n\r\n**Database Schema** (`mcpgateway/db.py`)\r\n- New `ToolEmbedding` table with pgvector support\r\n- `Vector(1536)` column for OpenAI embeddings\r\n- JSON fallback for SQLite compatibility\r\n- Cascade delete on tool removal\r\n- Alembic migration: `add_tool_embedding_table`\r\n\r\n**REST API Endpoint** (`mcpgateway/main.py`)\r\n- `GET /tools/semantic` with query, limit, threshold parameters\r\n- Returns ranked results with similarity scores\r\n- Integrated authentication and RBAC\r\n- Comprehensive error handling\r\n\r\n**Testing**\r\n- 50/51 tests passing in semantic search suite\r\n- Unit tests for embedding service, search service, and API endpoint\r\n\r\n### Architecture Decisions\r\n- **OpenAI as default**: Highest quality embeddings (text-embedding-3-small, 1536 dims)\r\n- **pgvector for PostgreSQL**: Production-grade vector similarity search with HNSW indexing\r\n- **JSON fallback for SQLite**: Development compatibility without native vector support\r\n- **Lazy initialization**: Embeddings only generated when needed, avoiding startup overhead\r\n- **Provider abstraction**: Easy to swap/add embedding models without changing business logic\r\n\r\n### Dependencies\r\n⚠️ **Note**: Vector similarity search query implementation (`search_similar_tools()`) is pending Team B's completion. Currently returns empty results until vector distance calculations are implemented (~20 lines in `vector_search_service.py`).\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Feature / Enhancement\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅ (50/51) |\r\n| Coverage ≥ 80%            | `make coverage` | ✅     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n**Testing the Feature**\r\n```bash\r\n# Start dev server\r\nsource .venv/bin/activate && make dev\r\n\r\n# Test semantic search endpoint (Swagger UI: http://localhost:8000/docs)\r\ncurl -X GET \"http://0.0.0.0:8000/tools/semantic?query=database_operations&limit=5\" \\\r\n  -H \"Authorization: Bearer YOUR_JWT_TOKEN\"",
+  "comments": [
+    {
+      "id": "2792061816",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:22+00:00",
+      "body": "The PostgreSQL vector index is created as `USING ivfflat (embedding)` but does not specify the pgvector operator class (e.g., `vector_cosine_ops` / `vector_l2_ops`). Without an explicit opclass you may get the default distance metric, which can make similarity search incorrect vs the intended cosine similarity in the PR description. Consider creating the index with the appropriate opclass (and ensure the chosen opclass matches the distance function used in queries).\n```suggestion\n            postgresql_with={'lists': 100},\n            postgresql_ops={'embedding': 'vector_cosine_ops'},\n```"
+    },
+    {
+      "id": "2792061863",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:22+00:00",
+      "body": "This README change replaces the project's existing documentation with a generic GitLab template, which appears unrelated to the PR’s stated purpose (embedding/vector search infrastructure) and removes important user/developer guidance. Unless this repository is intentionally being rebranded/migrated, revert this file change or move the GitLab onboarding content elsewhere."
+    },
+    {
+      "id": "2792061888",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:23+00:00",
+      "body": "This `.gitlab-ci.yml` disables all GitLab CI pipelines (`workflow.rules: when: never`), which has significant operational impact and is not mentioned in the PR description. If the intent is to keep CI enabled, remove these rules; if the intent is to disable CI, please document the rationale and ensure it aligns with the repo’s CI strategy."
+    },
+    {
+      "id": "2792061906",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:23+00:00",
+      "body": "`EmbeddingConfig.provider` is typed as `Literal[\"openai\"]`, but `settings.embedding_provider` is a free-form `str`. Passing a non-\"openai\" value will raise a validation error at runtime when `EmbeddingService` is instantiated. Either constrain the settings field to the supported literal(s), or expand `EmbeddingConfig`/`EmbeddingProviderFactory` to actually support the providers described in the PR (Mistral/local/etc)."
+    },
+    {
+      "id": "2792061925",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:23+00:00",
+      "body": "`search_similar_tools()` is currently a stub that always returns an empty list. Since this service is now wired into `/tools/semantic`, the endpoint will always return zero results even when embeddings exist, which can be misleading in production. Consider gating the endpoint behind a feature flag or raising a clear error (e.g., 503 / NotImplementedError) until the distance query is implemented.\n```suggestion\n\n        # Until vector search is implemented, fail explicitly to avoid\n        # silently returning misleading empty results from /tools/semantic.\n        logger.error(\n            \"VectorSearchService.search_similar_tools was called, but vector \"\n            \"search is not yet implemented. Configure pgvector and implement \"\n            \"the distance query before enabling semantic tool search.\"\n        )\n        raise NotImplementedError(\n            \"Vector tool search is not yet implemented. Please enable pgvector \"\n            \"and implement search_similar_tools before using /tools/semantic.\"\n        )\n```"
+    },
+    {
+      "id": "2792061945",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:24+00:00",
+      "body": "`ToolEmbedding.id` is defined as a UUID string in the ORM model, but this fixture constructs it with an `int` (`id=1`). Keeping test data aligned with the real model types helps catch serialization/validation issues earlier; consider using a UUID-like string for `id` here."
+    },
+    {
+      "id": "2792061968",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:24+00:00",
+      "body": "`init_db()` calls `text(...)` but `text` is not imported in this module (search found no `from sqlalchemy import text`), which will raise a `NameError` when running with the PostgreSQL backend. Also, the extension name for pgvector is `vector` (as used in the Alembic migration), not `pgvector`. Import `text` and use `CREATE EXTENSION IF NOT EXISTS vector` for consistency.\n```suggestion\n        # Enable pgvector (vector) extension for PostgreSQL\n        if backend == \"postgresql\":\n            with engine.connect() as conn:\n                try:\n                    conn.execute(text(\"CREATE EXTENSION IF NOT EXISTS vector\"))\n                    conn.commit()\n                except Exception as e:\n                    logger.warning(f\"Could not create vector extension: {e}\")\n```"
+    },
+    {
+      "id": "2792061983",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:24+00:00",
+      "body": "The new embedding configuration claims a “multi-provider” pattern, but `EmbeddingConfig.provider` is currently restricted to `Literal[\"openai\"]` and `EmbeddingProviderFactory` only maps `openai`. This diverges from the PR description (OpenAI + Mistral + local) and makes the config less future-proof. Either update the PR description to match current support, or extend the config/union + factory mapping to include the additional providers."
+    },
+    {
+      "id": "2792062000",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:25+00:00",
+      "body": "This test uses `time.sleep(...)` inside an async test (`@pytest.mark.anyio`), which blocks the event loop and can make the test suite slower/flakier under load. Prefer an async-friendly sleep (e.g., `anyio.sleep`/`asyncio.sleep`) so the event loop can continue processing."
+    },
+    {
+      "id": "2792062016",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:25+00:00",
+      "body": "Variable result is not used.\n```suggestion\n        \n        # Verify returned embedding\n        assert result is not None\n        assert result.tool_id == tool_id\n        assert result.embedding == embedding\n        assert result.model_name == model_name\n        \n```"
+    },
+    {
+      "id": "2792062031",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:25+00:00",
+      "body": "Variable result is not used.\n```suggestion\n        result = await service.embed_and_store_tool(mock_db_session, tool)\n        assert isinstance(result, ToolEmbedding)\n```"
+    },
+    {
+      "id": "2792062051",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:25+00:00",
+      "body": "Import of 'os' is not used.\n```suggestion\n\n```"
+    },
+    {
+      "id": "2792062070",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:26+00:00",
+      "body": "Import of 'Optional' is not used.\n```suggestion\nfrom typing import List, Dict, Any\n```"
+    },
+    {
+      "id": "2792062084",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:26+00:00",
+      "body": "Import of 'Optional' is not used.\nImport of 'List' is not used.\n```suggestion\n\n```"
+    },
+    {
+      "id": "2792062097",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:26+00:00",
+      "body": "Import of 'select' is not used.\n```suggestion\n\n```"
+    },
+    {
+      "id": "2792062114",
+      "author": "Copilot",
+      "created_at": "2026-02-11T08:46:26+00:00",
+      "body": "Import of 'Tool' is not used.\n```suggestion\nfrom mcpgateway.db import ToolEmbedding\n```"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3783514444",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-11T08:46:26+00:00",
+      "body": "## Pull request overview\n\nImplements the initial scaffolding for semantic tool discovery by adding embedding generation/storage, a semantic search orchestrator + API endpoint, and pgvector-backed persistence/migration support.\n\n**Changes:**\n- Added `EmbeddingService` for generating embeddings and persisting them to a new `tool_embeddings` table.\n- Added `SemanticSearchService` orchestration + `GET /tools/semantic` endpoint and response schemas.\n- Added pgvector infrastructure (dependency, Docker image/init scripts, Alembic migration) and extensive unit/integration tests.\n\n### Reviewed changes\n\nCopilot reviewed 19 out of 20 changed files in this pull request and generated 16 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `mcpgateway/services/embedding_service.py` | New embedding generation + storage/batch storage helpers. |\r\n| `mcpgateway/services/semantic_search_service.py` | New semantic search orchestration with Redis + in-memory caching. |\r\n| `mcpgateway/services/vector_search_service.py` | New vector-search service skeleton (currently stubbed for similarity search). |\r\n| `mcpgateway/services/mcp_client_chat_service.py` | Adds embedding provider config/factory (currently OpenAI-only). |\r\n| `mcpgateway/main.py` | Adds `GET /tools/semantic` endpoint returning ranked results. |\r\n| `mcpgateway/schemas.py` | Adds `ToolSearchResult` + `SemanticSearchResponse` schemas. |\r\n| `mcpgateway/db.py` | Adds `ToolEmbedding` ORM model + `Tool.embeddings` relationship; attempts pgvector extension init. |\r\n| `mcpgateway/config.py` | Adds embedding provider/model/api_key settings. |\r\n| `mcpgateway/alembic/versions/bab4694b3e90_add_tool_embedding_table.py` | Migration creating `tool_embeddings` with pgvector (Postgres) / JSON (SQLite) and indexes. |\r\n| `pyproject.toml` | Adds `pgvector` dependency. |\r\n| `pyrightconfig.json` | Minor formatting fix. |\r\n| `infra/postgres/Dockerfile` | Introduces pgvector-enabled Postgres image build. |\r\n| `infra/postgres/init-pgvector.sh` | Initializes `vector` extension on container startup. |\r\n| `docker-compose.yml` | Switches Postgres service to build/use the pgvector image. |\r\n| `tests/unit/mcpgateway/services/test_embedding_service.py` | Unit tests for embedding generation + storage APIs. |\r\n| `tests/unit/mcpgateway/services/test_vector_search_service.py` | Unit tests for embedding retrieval/deletion in vector search service. |\r\n| `tests/unit/mcpgateway/routers/test_semantic_search.py` | Endpoint tests + cache behavior tests for semantic search. |\r\n| `tests/integration/test_embedding_storage_integration.py` | Integration tests for embedding persistence flows using SQLite. |\r\n| `README.md` | Replaced with generic GitLab template content (appears unrelated to PR). |\r\n| `.gitlab-ci.yml` | Added config that disables all GitLab CI pipelines. |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3796021435",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T09:19:54+00:00",
+      "body": "Thanks for the work on this, @AbdulR11. Several issues need addressing before merge:\n\n**1. Alembic migration has wrong `down_revision` (blocker)**\n`mcpgateway/alembic/versions/bab4694b3e90_add_tool_embedding_table.py:16` sets `down_revision = 'b1b2b3b4b5b6'` — this is a placeholder, not the current head. This will create multiple heads and break all migrations.\n\n**2. Extension name mismatch**\n`db.py` init_db uses `CREATE EXTENSION IF NOT EXISTS pgvector` but the correct extension name is `vector` (as used in the migration file and `init-pgvector.sh`). The init_db call will silently fail.\n\n**3. `VectorSearchService.search_similar_tools()` is a stub returning `[]`**\nThe core search method always returns empty results. The `/tools/semantic` endpoint is wired up in `main.py` but will never return matches. Either implement it or don't expose the endpoint yet.\n\n**4. README replaced with GitLab boilerplate**\nThe entire project README.md was replaced with a default GitLab template referencing `gitlab.scss.tcd.ie`. This removes all project documentation — please revert this file.\n\n**5. `.gitlab-ci.yml` added**\nThis project uses GitHub Actions. The no-op GitLab CI file should not be included.\n\n**6. `pgvector` added as hard dependency**\n`pyproject.toml` adds `pgvector>=0.2.4` as required for all installs, but it's only needed for PostgreSQL with vector search. This adds a native dependency for SQLite-only users. Consider making it optional. The unconditional `from pgvector.sqlalchemy import Vector` at top of `db.py` will also break SQLite-only installs."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "a5d24a394ffd5971c8bd470bf2a38352862eb381",
+      "message": "Initial commit",
+      "author": "Anastasia O Donnell",
+      "date": "2026-01-23T12:01:25+00:00"
+    },
+    {
+      "sha": "e8daba1ca971f0d26814703cf59023cf8fda3486",
+      "message": "Sync upstream IBM/mcp-context-forge into GitLab repo",
+      "author": "AbdulR11",
+      "date": "2026-01-28T11:28:16+00:00"
+    },
+    {
+      "sha": "eed8ad29d62600484de7c29899726c76099a0b24",
+      "message": "Sync upstream IBM/mcp-context-forge into GitLab repo",
+      "author": "AbdulR11",
+      "date": "2026-02-01T18:11:05+00:00"
+    },
+    {
+      "sha": "db8ff6a1bcc8e5f65e0c486fc61147eb12f2d483",
+      "message": "feat(embedding): add initial embedding provider abstraction layer [WIP]\n\n- Add EmbeddingProvider abstract base class\n- Add DummyProvider for deterministic test embeddings\n- Add OpenAIProvider skeleton (not yet implemented)\n\nCloses #3\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nSigned-off-by: josephhegarty4 <hegartjo@tcd.ie>",
+      "author": "josephhegarty4",
+      "date": "2026-02-02T15:01:16+00:00"
+    },
+    {
+      "sha": "173a6f824f9f619a884c5220fb9992a2b5d070ff",
+      "message": "refactor(embedding): improve EmbeddingProvider base class interface\n\n- Add exception hierarchy (EmbeddingProviderError, EmbeddingRateLimitError, EmbeddingAPIError)\n- Add optional utility methods: get_max_batch_size(), is_available(), close()\n- Update type hints to Python 3.11+ native syntax (list[float] instead of List[float])\n- Remove trivial doctests that only verified method existence\n- Add error handling contract documentation\n- Remove hardcoded file location comments from docstrings\n- Export new exception classes from package __init__.py files\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nSigned-off-by: josephhegarty4 <hegartjo@tcd.ie>",
+      "author": "josephhegarty4",
+      "date": "2026-02-03T11:58:12+00:00"
+    },
+    {
+      "sha": "faf976ee2d9c2440220ab3d1a368c90889fb7a5c",
+      "message": "feat: add semantic search API endpoint for tool discovery",
+      "author": "AbdulR11",
+      "date": "2026-02-04T12:25:47+00:00"
+    },
+    {
+      "sha": "c772d0d948ddc1b6646de2a2f7a91ada0bb9206a",
+      "message": "refactor: align semantic search architecture with team responsibilities",
+      "author": "AbdulR11",
+      "date": "2026-02-04T16:14:45+00:00"
+    },
+    {
+      "sha": "dcc9c29088bc9616a4d0591c5aa91f1938893fa5",
+      "message": "Merge branch 'feature/add-semantic-endpoint' into 'main'\n\nFeature/add semantic endpoint\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!3",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-04T16:39:33+00:00"
+    },
+    {
+      "sha": "dc1b85f723ead6a10815b9c8e6e3636a74b1d6c1",
+      "message": "implement Embedding Service with validation layer, both files stored in correct folders with two correct functions embed_text and embed_texts, the test validates based on text length bathch size etc\n\nSigned-off-by: josephhegarty4 <hegartjo@tcd.ie>",
+      "author": "josephhegarty4",
+      "date": "2026-02-05T17:17:16+00:00"
+    },
+    {
+      "sha": "ef340c81b2fe2dd626e2e5b849a3dfed4fadd4c3",
+      "message": "Merge branch 'main' into 2_implement_embeddingService",
+      "author": "Joseph Hegarty",
+      "date": "2026-02-05T19:46:19+00:00"
+    },
+    {
+      "sha": "d5503a0250ffd34466afeb3662809a383c5a819e",
+      "message": "Extended existing llm factory to support vector embeddings",
+      "author": "TadhaKM",
+      "date": "2026-02-06T13:56:40+00:00"
+    },
+    {
+      "sha": "e345245e8ed611e880f317328b783d082b0cab68",
+      "message": "Merge branch '21-extend-existing-llm-factory-to-support-embedding' into 2_implement_embeddingService",
+      "author": "aodonne8",
+      "date": "2026-02-07T15:18:58+00:00"
+    },
+    {
+      "sha": "e2f13669780ab91ed69db8a9aa22e1b82e4f2fca",
+      "message": "refactored embedding service",
+      "author": "aodonne8",
+      "date": "2026-02-07T19:14:02+00:00"
+    },
+    {
+      "sha": "f1d5601b0adc4252181c6def6f723bbaaecff73d",
+      "message": "refactored embedding service tests",
+      "author": "aodonne8",
+      "date": "2026-02-08T11:16:24+00:00"
+    },
+    {
+      "sha": "bd9d600f4a4914731b6f884afb9fce513f4576b3",
+      "message": "add minimal embedding config fields",
+      "author": "aodonne8",
+      "date": "2026-02-08T11:18:04+00:00"
+    },
+    {
+      "sha": "9d644ce06c305da9aa964ab352ed862336d249ab",
+      "message": "add minimal embedding service implementation",
+      "author": "aodonne8",
+      "date": "2026-02-08T11:21:24+00:00"
+    },
+    {
+      "sha": "b3c6d83293f858b0327b80de7957ee625befbc04",
+      "message": "Merge branch '2_implement_embeddingService' into 'main'\n\nfeat(embedding): add initial embedding service implementation\n\nCloses #3\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!4",
+      "author": "Anastasia O Donnell",
+      "date": "2026-02-08T11:42:56+00:00"
+    },
+    {
+      "sha": "edb77c33a65462348863418270c60a5f973a945f",
+      "message": "Extended Postgres to support pgvector",
+      "author": "Colin Marshall",
+      "date": "2026-02-08T17:03:12+00:00"
+    },
+    {
+      "sha": "0a5365410401d8d97c56a30d6b2b190b631a9512",
+      "message": "Return ranked results with similarity scores",
+      "author": "Haojin",
+      "date": "2026-02-08T18:42:25+00:00"
+    },
+    {
+      "sha": "ac465abd5b31f8d59a3f3b74401ee25913c1773f",
+      "message": "Merge branch '30-pgvector-extension' into 'main'\n\nExtended Postgres to support pgvector\n\nCloses #30\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!5",
+      "author": "Zhao Johnston",
+      "date": "2026-02-08T19:29:26+00:00"
+    },
+    {
+      "sha": "9e3277d25717783e67c21afabc2655629a558084",
+      "message": "Testing the return of ranked results",
+      "author": "AbdulR11",
+      "date": "2026-02-08T20:09:19+00:00"
+    },
+    {
+      "sha": "84707290eac416e28211d57947ed4fba5acb829a",
+      "message": "Merge branch 'semantic-results' into 'main'\n\nReturn ranked results with similarity scores\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!6",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-08T20:12:20+00:00"
+    },
+    {
+      "sha": "9bf047891cb2173179a0d237ff0a080976d0081c",
+      "message": "Add Redis + memory caching for semantic search results with TTL",
+      "author": "yan-wa-lee",
+      "date": "2026-02-09T02:18:45+00:00"
+    },
+    {
+      "sha": "87c2c9fa8529bfe1bc5409caf877811d8a893d10",
+      "message": "Add Redis + memory caching for semantic search results with TTL",
+      "author": "yan-wa-lee",
+      "date": "2026-02-09T02:22:49+00:00"
+    },
+    {
+      "sha": "defc1c20b6fa6007af7b5d555b3664eabafe027c",
+      "message": "Merge branch 'main' into 'feature/semantic-cache'\n\n# Conflicts:\n#   mcpgateway/services/semantic_search_service.py",
+      "author": "Yan Wa Lee",
+      "date": "2026-02-09T02:32:20+00:00"
+    },
+    {
+      "sha": "8821a7c3dc7cf06f080c17a94e8cb884786ec489",
+      "message": "Add tests for the cache",
+      "author": "AbdulR11",
+      "date": "2026-02-09T14:25:14+00:00"
+    },
+    {
+      "sha": "1686e8a6ec5ad28b2759a7c2e9bffe4d6d90329a",
+      "message": "Merge branch 'feature/semantic-cache' into 'main'\n\nFeature/semantic cache\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!7",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-09T14:36:57+00:00"
+    },
+    {
+      "sha": "9cf94fa70bb046662001b901f0189406bd7d9626",
+      "message": "test(embeddings): add more unit tests for EmbeddingService",
+      "author": "aodonne8",
+      "date": "2026-02-09T20:49:56+00:00"
+    },
+    {
+      "sha": "d65299ee81f93a238cd33e00252db8612f9fe8ea",
+      "message": "Merge branch '33-enhance-EmbeddingService-test-coverage' into 'main'\n\ntest(embeddings): add more unit tests for EmbeddingService\n\nCloses #33\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!8",
+      "author": "Anastasia O Donnell",
+      "date": "2026-02-09T20:58:10+00:00"
+    },
+    {
+      "sha": "038fd393f571382dbd93865b0ee790d3b23d75cb",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-10T11:16:27+00:00"
+    },
+    {
+      "sha": "abaa7d327120f7172116295af72f53da3eb9794f",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-10T11:19:16+00:00"
+    },
+    {
+      "sha": "bfefc58c2439bd979ba3f3f68575f3d3f93445dc",
+      "message": "Update file pyproject.toml",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T19:07:01+00:00"
+    },
+    {
+      "sha": "f7cdc7dd741f10188eb42e2fed3448542b435646",
+      "message": "Update file db.py",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T19:09:18+00:00"
+    },
+    {
+      "sha": "115ba39623ba173e4c91078afa66a4e2957e7c20",
+      "message": "Merge branch '34-database-add-toolembeddings-model-with-conditional-column-types' into 'main'\n\nResolve \"Database - Add ToolEmbeddings Model(with conditional column types)\"\n\nCloses #34\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!9",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T19:14:36+00:00"
+    },
+    {
+      "sha": "d73ed03b5d4433e9d337eb7665830ba83d98227e",
+      "message": "Added Alembic Migration",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T19:20:15+00:00"
+    },
+    {
+      "sha": "80a614e4dc9af30caa748e91d897083c9ca10b70",
+      "message": "Merge branch '35-alembic-migration-add-tool_embeddings-table-with-alembic' into 'main'\n\nResolve 35-alembic-migration-add-tool_embeddings-table-with-alembic\n\nCloses #35\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!10",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T19:23:30+00:00"
+    },
+    {
+      "sha": "5175c588b43daf07087256b667639277dce4d1d0",
+      "message": "removing .gitlab-ci.yml file temporarily",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-10T19:43:11+00:00"
+    },
+    {
+      "sha": "55f88a467ffe11f6e292ceb5a5250d037ba4d4ac",
+      "message": "Update file embedding_service.py",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T19:49:47+00:00"
+    },
+    {
+      "sha": "c29e37f092afd0728d9c816139f217551e5f5418",
+      "message": "Update file test_embedding_service.py",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T19:53:12+00:00"
+    },
+    {
+      "sha": "b54e9254b41b11b0293bc8c6503873ac05f92a30",
+      "message": "Merge branch '36-service-add-embedding-storage-method-to-embedding-services-unit-test-for-embeddingservice' into 'main'\n\nResolve \"Service - Add Embedding storage method to Embedding Services, Unit test for EmbeddingService Storage methods\"\n\nCloses #36\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!11",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T19:54:24+00:00"
+    },
+    {
+      "sha": "e3f47481507e078253b629453d9d2f675f593953",
+      "message": "disabling pipeline temporarily",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-10T19:56:30+00:00"
+    },
+    {
+      "sha": "946449b35bb18c9cf538a8e12f8633740d3cea92",
+      "message": "Update file vector_search_service.py",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T19:57:34+00:00"
+    },
+    {
+      "sha": "51bc9a8c88cd959977c522cc2ca7dcf2c760c091",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-10T20:01:19+00:00"
+    },
+    {
+      "sha": "df2134b22b26adf4b597c8016a0eea8005c10153",
+      "message": "Upload New File",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T20:02:44+00:00"
+    },
+    {
+      "sha": "1a900d72907d5b0e8c1ec202af2aa90760656542",
+      "message": "Merge branch '37-service-add-retrieval-and-deletion-to-vector_search_service-unit-test-for-vector_serach_service' into 'main'\n\nResolve \"Service - Add retrieval and deletion to vector_search_service, Unit test for vector_serach_service\"\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!12",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T20:19:30+00:00"
+    },
+    {
+      "sha": "80860fc04e006d5067d4244cd8761445e5d681cf",
+      "message": "Current branch changes",
+      "author": "Johnstonjpg",
+      "date": "2026-02-10T20:38:11+00:00"
+    },
+    {
+      "sha": "037761a5d77b4a8ac0fffc02fc1a064fc465d62c",
+      "message": "Update file pyrightconfig.json",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T21:12:29+00:00"
+    },
+    {
+      "sha": "a8a538cc56264d95732338d743de00b41872646c",
+      "message": "Update file pyrightconfig.json",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T21:13:39+00:00"
+    },
+    {
+      "sha": "0c1f85b2caf90745becfcc1b87bf281760b31571",
+      "message": "Update file pyrightconfig.json",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T21:14:09+00:00"
+    },
+    {
+      "sha": "cc7d5bce2cd3b5e0f97aed10bdc8b38e823c587f",
+      "message": "Update file pyrightconfig.json",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T21:14:50+00:00"
+    },
+    {
+      "sha": "082204b12d47cf41b675d294f945668ffa311473",
+      "message": "Update file pyrightconfig.json",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T21:15:45+00:00"
+    },
+    {
+      "sha": "219628ee2bf1578ccbea6181bd496eeccd3de2e7",
+      "message": "Merge branch '38-test-add-integration-tests-for-embedding-storage' into 'main'\n\nResolve Test-add-integration-tests-for-embedding-storage\n\nCloses #38\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!13",
+      "author": "Zhao Johnston",
+      "date": "2026-02-10T21:16:54+00:00"
+    },
+    {
+      "sha": "d7d4ff2ddf93e21f243567f261388c3c3765e68b",
+      "message": "Added Ollama, Mistral, and LiteLLM embedding providers with tests",
+      "author": "TadhaKM",
+      "date": "2026-02-11T15:30:09+00:00"
+    },
+    {
+      "sha": "387f2d6af187bc85a72306b14c1b9bf412191451",
+      "message": "Implemented HNSW for fast semantic search -Colin M.",
+      "author": "Colin Marshall",
+      "date": "2026-02-12T20:18:18+00:00"
+    },
+    {
+      "sha": "e18ba296ae2f04ab18c80b93e93fe14f9b30d5c9",
+      "message": "feat: Add Meta-Server Type + Core Plumbing Layer\n\nwhat it does: Introduces a new \"meta\" server type that can expose cross-server tool discovery, search, and execution capabilities via 6 meta-tools, while optionally hiding underlying registered tools.\n\nimplementation:\n- Added ServerType enum (\"standard\" / \"meta\") and 4 new DB columns (server_type, hide_underlying_tools, meta_config, meta_scope)\n- Created MetaToolScope model for filtering which tools a meta-server can access (by tags, servers, visibility, teams, name patterns)\n- Created MetaConfig model for feature flags (semantic search, categories, similar tools) and limits\n- Defined 6 meta-tool request/response schema pairs (search, list, describe, execute, categories, similar)\n- Built MetaServerService with stub handlers for all 6 meta-tools\n- Integrated meta-server interception in streamablehttp transport (list_tools and call_tool)\n- Updated register_server, update_server, and convert_server_to_read in server_service.py\n- Added Alembic migration for new columns\n\nIncludes:\n- mcpgateway/meta_server/__init__.py\n- mcpgateway/meta_server/schemas.py\n- mcpgateway/meta_server/service.py\n- mcpgateway/alembic/versions/5126ced48fd0_add_meta_server_fields.py\n- Modified: mcpgateway/db.py, mcpgateway/schemas.py, mcpgateway/services/server_service.py, mcpgateway/transports/streamablehttp_transport.py\n\nTesting: 64 unit tests covering schemas, validation, service stubs, DB model, and API schema integration\n\nSigned-off-by: abdulR11 <abdulrehan985@gmail.com>",
+      "author": "AbdulR11",
+      "date": "2026-02-12T20:54:06+00:00"
+    },
+    {
+      "sha": "ec4e6d07a0f07f5db9fb1547a488cc04b17a8481",
+      "message": "Merge branch 'feature/add-meta-server-type' into 'main'\n\nfeat: Add Meta-Server Type + Core Plumbing Layer\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!14",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-12T21:07:51+00:00"
+    },
+    {
+      "sha": "44fb3415344886d7b6fbda3aa1b2cb829713ab41",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T09:00:31+00:00"
+    },
+    {
+      "sha": "de365cedffc12bcd27cf3ebb0d5c19435faad370",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T09:02:09+00:00"
+    },
+    {
+      "sha": "92164ec0d8f9541c724d45425839e24d8bfef190",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T09:04:17+00:00"
+    },
+    {
+      "sha": "fa89a772e67a73d904273e8e9027ee22f2b01ce8",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T09:05:45+00:00"
+    },
+    {
+      "sha": "d06b8b0e38e4354639cd12f5cb5692ce0acda311",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T09:07:01+00:00"
+    },
+    {
+      "sha": "a73d84aa4bb35f9550e598ec8a3343d3a349978f",
+      "message": "Merge branch '39-implement-hnsw-index-for-fast-similarity-search-on-tool-embeddings' into 'main'\n\nImplemented HNSW for fast semantic search -Colin M.\n\nCloses #39\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!15",
+      "author": "Zhao Johnston",
+      "date": "2026-02-13T14:29:32+00:00"
+    },
+    {
+      "sha": "f0fbbb2921886264fd4837197f7ffbd8867eeeee",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T14:40:22+00:00"
+    },
+    {
+      "sha": "9ea3d4fb7e1ea8db29305a44b83f9e2e088fb040",
+      "message": "style: apply black + isort formatting\n\nSigned-off-by: AbdulR11 <147985851+AbdulR11@users.noreply.github.com>",
+      "author": "AbdulR11",
+      "date": "2026-02-13T14:53:41+00:00"
+    },
+    {
+      "sha": "8060b85a5225e00c76c7f6b0eff646bbd5c65468",
+      "message": "Merge branch 'main' into 'fix-ci/cd'\n\n# Conflicts:\n#   .gitlab-ci.yml",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T15:09:59+00:00"
+    },
+    {
+      "sha": "4f5ce92e0a87eb3ae5e3ead64cbae64e83b92c6e",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T21:24:01+00:00"
+    },
+    {
+      "sha": "5e52485ede955d1d0b5277fef44484a764e76e22",
+      "message": "Merge branch 'main' into 'fix-ci/cd'\n\n# Conflicts:\n#   .gitlab-ci.yml",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T21:26:25+00:00"
+    },
+    {
+      "sha": "4851d358766c465de36b07d3b708b9a49872fae3",
+      "message": "Merge branch 'fix-ci/cd' into 'main'\n\nstyle: apply black + isort formatting\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!16",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T21:26:52+00:00"
+    },
+    {
+      "sha": "7d719b1c02fa576f0fbbe74fff0c57deaaa9bf82",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T21:30:16+00:00"
+    },
+    {
+      "sha": "edd2e93b7674b1d7c2c674ac12089bffcb4fa80d",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T21:31:46+00:00"
+    },
+    {
+      "sha": "5dc4788367fea6e631d60677d16bca1c2771fc3a",
+      "message": "fix: merge alembic migration heads and simplify CI pipeline",
+      "author": "AbdulR11",
+      "date": "2026-02-13T21:39:50+00:00"
+    },
+    {
+      "sha": "b7b3407b2b8127c93b78a5abecefba8979b8f6d6",
+      "message": "Merge branch 'ci/cd' into 'main'\n\nfix: merge alembic migration heads and simplify CI pipeline\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!17",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T21:42:45+00:00"
+    },
+    {
+      "sha": "280b9811ee3ceb8c46a1519e9b0cb89a0790b135",
+      "message": "fix: merge all alembic heads including HNSW index migration",
+      "author": "AbdulR11",
+      "date": "2026-02-13T21:55:43+00:00"
+    },
+    {
+      "sha": "7cfe65284aa50c9fee72f0182d1b30b9f6a9970b",
+      "message": "fix pipeline errors",
+      "author": "AbdulR11",
+      "date": "2026-02-13T21:58:17+00:00"
+    },
+    {
+      "sha": "e3e44ee673dcef80e9348d08a2344300ccb9c21b",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T22:07:06+00:00"
+    },
+    {
+      "sha": "76a97e9d972c589b26d56d6f18d8c7dccdebe4a1",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T22:23:31+00:00"
+    },
+    {
+      "sha": "d7c97cf978dd8d5dab020f59765f81b6647fe687",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-13T22:32:54+00:00"
+    },
+    {
+      "sha": "687bf6821534a1ce9bf7225e8f61a6713dab01e3",
+      "message": "Merge branch '21-extend-existing-llm-factory-to-support-embedding' into 'main'\n\nAdded Ollama, Mistral, and LiteLLM embedding providers with tests\n\nCloses #21\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!20",
+      "author": "Anastasia O Donnell",
+      "date": "2026-02-14T19:57:42+00:00"
+    },
+    {
+      "sha": "2c0d45e5bf237ba86bdead88b4fd33fff1dacee4",
+      "message": "feat: fix alembic migration blocker and postgresql extensions (Issue #46)\n\nFix critical migration issues and make pgvector an optional dependency\nas suggested by IBM mentors during code review.\n\nMigration fixes:\n- Correct down_revision in alembic migration to point to actual current head\n- Prevents multiple heads that would break all migrations\n- Creates merge head (631ae0b46de5) to resolve migration conflicts\n\nPostgreSQL extension consistency:\n- Fix extension name mismatch between db.py (pgvector) and migration/scripts (vector)\n- Update db.py's init_db() to use vector consistently across all files\n- Ensures CREATE EXTENSION IF NOT EXISTS works properly without silent failures\n\npgvector dependency optimization:\n- Make pgvector an optional dependency instead of hard requirement\n- Move unconditional Vector import from top of db.py to conditional import\n- Update pyproject.toml to only require pgvector for PostgreSQL installations\n- Fixes SQLite-only installations that were broken by hard dependency\n\nFiles changed:\n- alembic/versions/bab4694b3e90_add_tool_embedding_table.py: Fix down_revision\n- alembic/versions/631ae0b46de5_merge_heads.py: New merge migration\n- db.py: Fix extension name and make Vector import conditional\n- pyproject.toml: Make pgvector optional dependency\n- pyrightconfig.json: Update type checking config\n- typings/: Add type stubs for better type support\n\nTesting:\n- Verified migrations work with correct head\n- Confirmed PostgreSQL extension creation works with consistent naming\n- Tested SQLite installations without pgvector dependency\n- All existing functionality preserved\n\nRelated to:\n- Issue #46: Fix alembic migration blocker and PostgreSQL extensions\n- IBM mentor code review feedback\n\nSigned-off-by: johnston <johnstoz@tcd.ie>",
+      "author": "Johnstonjpg",
+      "date": "2026-02-14T21:36:42+00:00"
+    },
+    {
+      "sha": "20f0cf4ed52e74c5999ecda3caa32eaabb9c46ee",
+      "message": "Added vector search functionality, Colin M.",
+      "author": "Colin Marshall",
+      "date": "2026-02-14T03:58:32+00:00"
+    },
+    {
+      "sha": "1a8c4fa44ad8c992ffcb631e59c854e9c5c156b3",
+      "message": "Merge branch '40-add-vector-distance-functions-for-semantic-search' into 'main'\n\nAdded vector search functionality, Colin M.\n\nCloses #40\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!21",
+      "author": "Zhao Johnston",
+      "date": "2026-02-14T22:32:18+00:00"
+    },
+    {
+      "sha": "043de1ef39a6e44c5b55647b7b141f1eb99a36f0",
+      "message": "Temporary Commit",
+      "author": "Johnstonjpg",
+      "date": "2026-02-14T22:36:21+00:00"
+    },
+    {
+      "sha": "4cbca7b3be4211336a815f442c0806d4bb5529c3",
+      "message": "Update 11 files\n\n- /typings/pgvector/sqlalchemy/__init__.pyi\n- /typings/pgvector/sqlalchemy/bit.pyi\n- /typings/pgvector/sqlalchemy/functions.pyi\n- /typings/pgvector/sqlalchemy/halfvec.pyi\n- /typings/pgvector/sqlalchemy/sparsevec.pyi\n- /typings/pgvector/sqlalchemy/vector.pyi\n- /typings/pgvector/__init__.pyi\n- /typings/pgvector/bit.pyi\n- /typings/pgvector/halfvec.pyi\n- /typings/pgvector/sparsevec.pyi\n- /typings/pgvector/vector.pyi",
+      "author": "Zhao Johnston",
+      "date": "2026-02-14T23:39:23+00:00"
+    },
+    {
+      "sha": "5a4e848188c2754e7f8da00e41510799f7c4834d",
+      "message": "Pulling latest changes from Github",
+      "author": "AbdulR11",
+      "date": "2026-02-15T09:36:31+00:00"
+    },
+    {
+      "sha": "1df064239ca3051b92081cab2c0b2e993c42a893",
+      "message": "Resolving conflicts",
+      "author": "AbdulR11",
+      "date": "2026-02-15T09:49:06+00:00"
+    },
+    {
+      "sha": "41f1df319da7c26c252828816f47cfdff2078664",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-15T09:57:03+00:00"
+    },
+    {
+      "sha": "99f86192f37174f923115529a4219fcf2636b878",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-15T10:07:35+00:00"
+    },
+    {
+      "sha": "4063e4f1cb43b3a3b396c78521f4256608de006c",
+      "message": "Update .gitlab-ci.yml file",
+      "author": "Abdul Wadood Rehan",
+      "date": "2026-02-15T10:10:05+00:00"
+    },
+    {
+      "sha": "eb9d71e45bdbe927dfa80839b80fd0ac0dcd37b5",
+      "message": "Fixed Alembic Migration",
+      "author": "Johnstonjpg",
+      "date": "2026-02-15T12:35:12+00:00"
+    },
+    {
+      "sha": "41ee9e68ecbd2b05346cb1d74124223cce482971",
+      "message": "Merge branch '46-fix-alembic-migration-blocker-postgresql-extensions-name-mismatch-and-make-pgvector-dependency' of https://gitlab.scss.tcd.ie/aodonne8/sweng26_group19_ibm_mcp_conversational_gateway into 46-fix-alembic-migration-blocker-postgresql-extensions-name-mismatch-and-make-pgvector-dependency",
+      "author": "Johnstonjpg",
+      "date": "2026-02-15T12:35:41+00:00"
+    },
+    {
+      "sha": "ee084623a65688ad0e88ff1f1d7d8dd6390dad54",
+      "message": "Merge branch '46-fix-alembic-migration-blocker-postgresql-extensions-name-mismatch-and-make-pgvector-dependency' into 'main'\n\nfeat: fix alembic migration blocker and postgresql extensions (Issue #46)\n\nCloses #46\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!22",
+      "author": "Zhao Johnston",
+      "date": "2026-02-15T12:43:41+00:00"
+    },
+    {
+      "sha": "44e3c15ea21c6a317006190c57af681323e7e371",
+      "message": "Fix db.py remove conflict markers",
+      "author": "Johnstonjpg",
+      "date": "2026-02-15T13:03:21+00:00"
+    },
+    {
+      "sha": "83e1fcf67d22dadbd3d74aa7386756e9fcab630f",
+      "message": "Merge branch '47-fix-db.py-remove-conflict-markers' of https://gitlab.scss.tcd.ie/aodonne8/sweng26_group19_ibm_mcp_conversational_gateway into 47-fix-db.py-remove-conflict-markers",
+      "author": "Johnstonjpg",
+      "date": "2026-02-15T13:03:44+00:00"
+    },
+    {
+      "sha": "5b85a0b9ed04abe4aab0dfee730cc05ae93db9e1",
+      "message": "Merge branch '47-fix-db.py-remove-conflict-markers' into 'main'\n\nfeat: remove conflict markers and fix db.py migration (Issue #47)\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!23",
+      "author": "Zhao Johnston",
+      "date": "2026-02-15T13:06:45+00:00"
+    },
+    {
+      "sha": "b77f4049f52a22e9c0f79821ce33332748989b77",
+      "message": "feat: fix pyrightconfig.json configuration (Issue #48)\n\nFix pyright type checking configuration for better compatibility.\n\nChanges made:\n- Update pyrightconfig.json with correct type checking settings\n- Fix path configurations for type stubs\n- Ensure proper Python version compatibility\n- Update exclude patterns if needed\n\nFiles changed:\n- pyrightconfig.json: Fix configuration settings\n\nTesting:\n- Verified pyright runs without errors\n- Confirmed type checking works correctly\n- All existing functionality preserved\n\nRelated to:\n- Issue #48: Fix pyrightconfig.json\n\nSigned-off-by: johnston <johnstoz@tcd.ie>",
+      "author": "Johnstonjpg",
+      "date": "2026-02-15T13:12:51+00:00"
+    },
+    {
+      "sha": "9f901d6727ff4e05a677f051bd7848df04313005",
+      "message": "Merge branch '48-fix-pyrightconfig.json' of https://gitlab.scss.tcd.ie/aodonne8/sweng26_group19_ibm_mcp_conversational_gateway into 48-fix-pyrightconfig.json",
+      "author": "Johnstonjpg",
+      "date": "2026-02-15T13:13:16+00:00"
+    },
+    {
+      "sha": "75ed1cf52c736c46f38a7c1c6b8cae9ebfe90659",
+      "message": "Merge branch '48-fix-pyrightconfig.json' into 'main'\n\nfeat: fix pyrightconfig.json configuration (Issue #48)\n\nSee merge request aodonne8/sweng26_group19_ibm_mcp_conversational_gateway!24",
+      "author": "Zhao Johnston",
+      "date": "2026-02-15T13:14:39+00:00"
+    }
+  ],
+  "files_changed": 32,
+  "additions": 7917,
+  "deletions": 992,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:15:42.914491",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:15:42.916307",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2834,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2834.json"
+  }
+}

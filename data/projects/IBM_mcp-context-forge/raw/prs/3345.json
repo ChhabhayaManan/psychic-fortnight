@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3345,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3345"
+  },
+  "metadata": {
+    "title": "fix(security): team-scoped tokens now include public resources in listings",
+    "state": "closed",
+    "created_at": "2026-02-28T16:21:16+00:00",
+    "updated_at": "2026-02-28T18:14:56+00:00",
+    "closed_at": "2026-02-28T18:14:53+00:00",
+    "merged_at": "2026-02-28T18:14:53+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "security"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- **Fix team-scoped token visibility**: API tokens with `teams: [\"team-id\"]` were silently excluding all public resources from list endpoints, violating the documented \"Team + Public\" security model. Removed `team_id = team_id or token_team_id` auto-narrowing from all six list endpoints (servers, gateways, tools, resources, prompts, A2A agents) — the `token_teams` array already handles correct visibility scoping via `_apply_visibility_filter`.\n- **Fix token creation test race condition**: The Playwright `test_create_and_revoke_token` test timed out because the JS form submit handler is attached via a 300ms debounced `setTimeout` in `showTab()`. Added a wait for `data-setup` attribute before interacting with the form.\n\n## Details\n\n### Security fix (`mcpgateway/main.py`)\n\nWhen `request.state.team_id` was set (single-team API tokens), the list endpoints auto-narrowed via:\n```python\nteam_id = team_id or token_team_id\n```\nThis forced `_apply_visibility_filter` into the `if team_id:` branch, which scopes results strictly to `model.team_id == team_id` — excluding public resources where `team_id IS NULL`.\n\nThe `token_teams` list passed to each service already correctly handles the global listing path:\n```python\naccess_conditions = [model_cls.visibility == \"public\"]  # always included\nif token_teams:\n    access_conditions.append(model_cls.team_id.in_(token_teams) & model_cls.visibility.in_([\"team\", \"public\"]))\n```\n\nThe explicit `?team_id=` query param mismatch guard is preserved for all endpoints.\n\n### Test fix (`tests/playwright/pages/components/sidebar_component.py`)\n\nAdded `wait_for_selector('#create-token-form[data-setup=\"true\"]')` in `click_tokens_tab()` to wait for the JS submit handler before the test interacts with the form.\n\n## Verification\n\n- 12,846 unit tests pass (0 failures)\n- All 3 previously-failing Playwright tests now pass\n- Confirmed via direct API testing that team-scoped tokens see both public and team servers",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "f20beee15b48cd9467b37404efab78d753868c9d",
+      "message": "fix(security): team-scoped tokens now include public resources in listings\n\nTeam-scoped API tokens (teams: [\"team-id\"]) were only returning resources\nbelonging to their team, silently excluding all public resources. This\nviolated the documented security model where team-scoped tokens should see\n\"Team + Public\" resources.\n\nRoot cause: all six list endpoints (servers, gateways, tools, resources,\nprompts, A2A agents) contained `team_id = team_id or token_team_id` which\nauto-narrowed listings to the token's single team when no explicit\n?team_id= query param was provided. This forced _apply_visibility_filter\ninto the \"specific team\" branch, which requires team_id match — excluding\npublic resources with team_id IS NULL.\n\nFix: remove the auto-narrowing from list endpoints. The token_teams array\nalready passed to each service correctly handles visibility scoping via the\nglobal listing branch (public OR team-member OR owner conditions). The\nteam_id mismatch guard for explicit query params is preserved.\n\nAlso fixes a Playwright test race condition where the token creation form\nsubmitted as a plain HTML GET instead of a JS fetch POST, because the\nsubmit handler (attached via a 300ms debounced setTimeout in showTab) had\nnot yet fired when the test clicked submit.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-28T16:20:57+00:00"
+    },
+    {
+      "sha": "9a9111ec26d76479be7eb8f7fb9d94b5b0806b4c",
+      "message": "test(security): add differential tests for team-scoped list visibility fix\n\nAdd 8 endpoint-level regression tests that verify list endpoints do not\nauto-narrow team_id from token state. Uses an ASGI middleware injector to\nsimulate team-scoped request.state without running full auth middleware.\n\nTests cover all 6 affected list endpoints (servers, tools, resources,\nprompts, gateways, a2a-agents) plus explicit team_id passthrough and\nteam_id mismatch 403 scenarios.\n\nCloses #3332\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-28T17:36:45+00:00"
+    },
+    {
+      "sha": "085eba26a82bc33a79fec74afc8b5008a5ff1e72",
+      "message": "fix(ui): escape closing tags in JS string to fix htmlhint tag-pair warnings\n\nThe team selector retry button's innerHTML assignment contained literal\n</button></div> closing tags inside a JavaScript string within an Alpine.js\nx-data attribute. htmlhint parsed these as real HTML closing tags, which\nthrew off tag matching for the rest of the file (header, div).\n\nUse <\\/button><\\/div> escaping to prevent the HTML parser from seeing\nthem as structural closing tags.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-28T17:45:18+00:00"
+    },
+    {
+      "sha": "03eb1abda0aadb1f942f82874c8a39cc26b06cd3",
+      "message": "lint\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-28T17:45:34+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 179,
+  "deletions": 36,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:03.178016",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:03.179457",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3345,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3345.json"
+  }
+}

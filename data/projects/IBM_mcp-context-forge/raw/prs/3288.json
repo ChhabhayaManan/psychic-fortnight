@@ -1,0 +1,87 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3288,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3288"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Replace inline event handlers on Plugins page to survive innerHTML sanitizer",
+    "state": "closed",
+    "created_at": "2026-02-26T10:39:26+00:00",
+    "updated_at": "2026-03-09T01:52:17+00:00",
+    "closed_at": "2026-03-06T23:13:28+00:00",
+    "merged_at": "2026-03-06T23:13:28+00:00",
+    "author": "gcgoncalves",
+    "labels": [
+      "bug",
+      "frontend",
+      "javascript",
+      "ui",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nCloses #3271\r\n\r\n## 🔁 Reproduction Steps\r\n1. Open the Admin UI\r\n2. Navigate to the Plugins panel\r\n3. Edit the filters values or search by text for a plugin.\r\n\r\n## 🐞 Root Cause\r\nadmin.js globally patches Element.prototype.innerHTML via installInnerHtmlGuard() (admin.js:532) as a security measure. The patched setter calls sanitizeHtmlForInsertion() (admin.js:461–505)\r\nwhich strips every attribute beginning with \"on\" (line 485–488):\r\n\r\n```javascript\r\nif (attrName.startsWith(\"on\")) {\r\n    element.removeAttribute(attribute.name); // strips oninput, onchange, onclick, onkeydown…\r\n}\r\n```\r\n\r\nWhen the plugins tab is first clicked (admin.js:8266–8310), the handler fetches plugins_partial.html and injects it with:\r\n\r\n```javascript\r\npluginsPanel.innerHTML = html;   // line 8290 — triggers the guard\r\n```\r\n\r\nThis silently strips every inline event handler in plugins_partial.html before any user interaction:\r\n\r\n|                   Attribute stripped.                |                            Element                         |                               Effect                   |\r\n|---------------------------------------|---------------------------------------|-----------------------------------|\r\n| oninput=\"filterPlugins()\"                        | Search input                                            | Typing does nothing                        |\r\n| onchange=\"filterPlugins()\" (×5)            | Mode/Status/Hook/Tag/Author selects | Changing dropdown does nothing |\r\n| onclick=\"filterByHook/Tag/Author(...)\" | Statistics badges                                    | Clicking does nothing                      |\r\n| onclick=\"showPluginDetails(...)\"           | \"View Details\" buttons                           | Modal never opens                          |\r\n| onkeydown=\"handleKeydown(...)\"        | All interactive items                                | Keyboard navigation broken           | \r\n\r\n`window.filterPlugins` and the other related functions are defined by `initializePluginFunctions()` (called right after), but there are no events bound to the DOM elements, so nothing calls them.\r\n\r\n## 💡 Fix Description\r\nUse two container-level event listeners in initializePluginFunctions():\r\n\r\n1. One input+change listener on the filter section — catches events from all child <input> and <select> elements via event bubbling. Calls filterPlugins() automatically for any filter interaction. Replaces the 6 stripped oninput/onchange inline attributes.\r\n2. One delegated click listener on #plugins-panel — handles badge clicks (hook/tag/author), \"View Details\", and modal close. It reads filter values from data-* attributes on the clicked element and replaces all stripped onclick inline attributes.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3902221157",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-06T08:28:13+00:00",
+      "body": "Good approach to use data attributes in this case!\n\nManually tested, and it works as expected.\n\nLGTM 🚀 \n\n"
+    },
+    {
+      "id": "3902366431",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-06T08:54:54+00:00",
+      "body": ""
+    },
+    {
+      "id": "3906474937",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-06T22:58:21+00:00",
+      "body": "Approved. The event delegation approach is correct, consistent with existing patterns (token panel, tool-ops panel), and more CSP-friendly than inline handlers. Fixed the keydown regression where Space/Enter was swallowed in form controls. All 805 JS tests pass."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "428ce0e01f292cc167374ca15bff3a9d4d2f834e",
+      "message": "Add event listener for plugin filters\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-02-26T09:57:18+00:00"
+    },
+    {
+      "sha": "e5119263a78f1a3ef77ee54ee6db92c5f6348e45",
+      "message": "fix(tests): clean up plugin filter tests — lint fixes and scrollIntoView polyfill\n\n- Remove unused imports (beforeEach) and destructured variables (card1, card2, hookFilter)\n- Add HTMLElement.prototype.scrollIntoView polyfill for JSDOM environment\n- Revert unrelated package-lock.json changes\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T22:11:25+00:00"
+    },
+    {
+      "sha": "3ba975c569115231b51cc0b2725c229da893d74b",
+      "message": "fix(ui): prevent keydown handler from swallowing Space/Enter in form controls\n\nThe delegated keydown listener on #plugins-panel was calling\npreventDefault() unconditionally for Enter and Space before checking\nwhether the target was actually an actionable element (badge, button).\nThis blocked typing spaces in the search box and pressing Enter on\nselect dropdowns.\n\nFix: dispatchPluginAction() now returns a boolean indicating whether\nit matched an action. The keydown handler only calls preventDefault()\nwhen an action was actually dispatched.\n\nAdd regression tests: Space in #plugin-search and Enter on\n#plugin-mode-filter must not have defaultPrevented set.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-06T22:57:08+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 602,
+  "deletions": 23,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:39.325238",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:39.326637",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3288,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3288.json"
+  }
+}

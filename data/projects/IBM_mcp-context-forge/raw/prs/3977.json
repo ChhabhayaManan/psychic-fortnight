@@ -1,0 +1,59 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3977,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3977"
+  },
+  "metadata": {
+    "title": "fix: Observability Resources tab always empty — span name mismatch and session isolation",
+    "state": "open",
+    "created_at": "2026-04-01T15:27:45+00:00",
+    "updated_at": "2026-04-28T10:46:53+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "ecthelion77",
+    "labels": [
+      "bug",
+      "python",
+      "observability",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "vishu-bh"
+    ]
+  },
+  "description": "## 🐛 Bug-fix PR\n\n### 📌 Summary\n\nThe admin Observability dashboard's **Resources** and **Prompts** tabs always show \"No data\" despite resources being fetched and prompts being rendered. This is caused by two independent bugs.\n\nSupersedes #3970 (which only addressed the span name, not the session issue).\n\nFixes #3969\n\n### 🐞 Root Cause\n\n**Bug 1 — Span name mismatch in `invoke_resource()`:**\n- `invoke_resource()` creates spans named `\"invoke.resource\"`\n- The dashboard queries filter for `[\"resource.read\", \"resources.read\", \"resource.fetch\"]`\n- `\"invoke.resource\"` matches none of these\n- The debug log even says `\"Created resource.read span\"` — the correct name was intended\n\n**Bug 2 — DB session conflict in `start_span()`:**\n- Both `prompt_service.py` and `resource_service.py` use the handler's `db` session for `start_span()`\n- The session may be released before the network call completes, causing the span write to silently fail\n- `resource_service.py` already uses `fresh_db_session()` for `end_span()`, but `start_span()` was missed\n- `prompt_service.py` uses `db` for both `start_span()` and `end_span()`\n\n### 💡 Fix Description\n\n1. Rename `\"invoke.resource\"` → `\"resource.read\"` in 5 places within `invoke_resource()`: database span, OpenTelemetry span, input/output capture checks, debug log\n\n2. Wrap all `start_span()` and `end_span()` calls with `fresh_db_session()` context manager in both `resource_service.py` and `prompt_service.py`, matching the pattern already established in `invoke_resource()`'s `end_span` block\n\n### 🧪 Verification\n\n| Check | Command | Result |\n|-------|---------|--------|\n| Lint suite | `make lint` | ✅ Only string literal + session wrapper changes |\n| Unit tests | `make test` | ✅ No test references `\"invoke.resource\"` |\n| Manual test | Deployed and verified | ✅ Resources + Prompts tabs show data |\n\n### 📐 MCP Compliance\n\n- Matches current MCP spec\n- No breaking change to MCP clients\n\n### ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed\n- [x] DCO Signed-off-by included",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4105341432",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-14T10:57:27+00:00",
+      "body": "Changes are clean. Thanks @ecthelion77 for addressing the bug. LGTM "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "5fbe607b6843268db18ef3432acca5912f825ff3",
+      "message": "fix(observability): rename resource span from invoke.resource to resource.read\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-14T14:55:08+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 19,
+  "deletions": 69,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:59.503044",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:59.503897",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3977,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3977.json"
+  }
+}

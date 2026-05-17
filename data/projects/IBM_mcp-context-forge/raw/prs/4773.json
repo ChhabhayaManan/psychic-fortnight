@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4773,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4773"
+  },
+  "metadata": {
+    "title": "fix(visibility): globally-public items hidden when team filter is active in Admin UI",
+    "state": "open",
+    "created_at": "2026-05-15T06:03:34+00:00",
+    "updated_at": "2026-05-15T08:49:07+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "shoummu1",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "marekdano"
+    ]
+  },
+  "description": "## 📌 Summary\r\nWhen the Admin UI team switcher selects a team, it appends `?team_id=X` to every entity list request. The `_apply_visibility_filter` method in `BaseService` was restricting results to rows where `team_id == X`, which silently excluded globally-public items registered under any other team. Since `visibility = 'public'` is documented as platform-wide visibility, these items should always be returned regardless of which team filter is active. This PR fixes the SQL predicate so the `public` condition is unconditional, aligning behaviour with the documented intent.\r\n\r\n> **Note:** This fix is applied at the API/service layer. The `?team_id=` parameter now means \"items belonging to team X **plus** all globally-public items from any team\" instead of \"items strictly belonging to team X\". Any client relying on `?team_id=` as a strict single-team isolation filter will receive more rows than before. Strict data isolation remains the responsibility of `token_teams` (Layer 1 token scoping), not this UI routing hint.\r\n\r\n## 🔗 Related Issue\r\nCloses: #4732\r\n\r\n## 🔁 Reproduction Steps\r\nSee https://github.com/IBM/mcp-context-forge/issues/4732\r\n\r\n1. Register an A2A agent with `visibility: public` under **team A**.\r\n2. Sign in as a user who belongs only to **team B**.\r\n3. In the Admin UI, select **team B** in the team switcher.\r\n4. Navigate to the **A2A Agents** tab — the public agent from team A is missing.\r\n5. Direct `GET /a2a` (no `?team_id=`) correctly returns it, confirming the narrowing is caused by the `?team_id=` query parameter appended by the UI.\r\n\r\n## 🐞 Root Cause\r\n`_apply_visibility_filter` in `mcpgateway/services/base_service.py` built the `WHERE` clause for the `team_id` branch as:\r\n\r\n```python\r\naccess_conditions = [\r\n    and_(model_cls.team_id == team_id, model_cls.visibility.in_([\"team\", \"public\"]))\r\n]\r\n```\r\n\r\nThe `public` condition was gated on `team_id == X`, so public items belonging to any other team were excluded. This affects every entity type that inherits `BaseService` (tools, resources, prompts, gateways, servers, A2A agents).\r\n\r\n## 💡 Fix Description\r\nAdded a second, standalone condition to the OR list in `_apply_visibility_filter`:\r\n\r\n```python\r\naccess_conditions = [\r\n    and_(model_cls.team_id == team_id, model_cls.visibility.in_([\"team\", \"public\"])),\r\n    model_cls.visibility == \"public\",  # globally public items from any team are always visible\r\n]\r\n```\r\n\r\nThe generated SQL for a `team_id`-scoped query becomes:\r\n\r\n```sql\r\nWHERE (team_id = :x AND visibility IN ('team','public'))\r\n   OR (visibility = 'public')\r\n```\r\n\r\nGlobal-public items are now always returned regardless of the team filter, matching the documented intent of `visibility = 'public'`. Private items from other teams remain excluded — the private-owner condition stays gated on `team_id == X AND owner_email == user`. The `token_teams` membership guard (`if team_id not in token_teams: return where(False)`) is unchanged. The docstring was updated to reflect that `public` is always included even when `team_id` is set.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                             | Command                                                                  | Status |\r\n|-----------------------------------|--------------------------------------------------------------------------|--------|\r\n| Lint suite                        | `make lint`                                                              |        |\r\n| Unit tests                        | `make test`                                                              |        |\r\n| Coverage ≥ 90 %                   | `make coverage`                                                          |        |\r\n| Manual regression no longer fails | Select team B → A2A tab → public agent from team A now appears           |        |\r\n\r\nNew and updated tests in `tests/unit/mcpgateway/services/test_base_service.py`:\r\n\r\n- `test_team_scoped_always_includes_globally_public_items` — asserts the standalone `visibility = 'public'` condition is present in the compiled SQL (not gated on `team_id`)\r\n- `test_team_scoped_in_token_teams` — updated to also assert the global-public condition\r\n- `test_team_scoped_in_token_teams_no_email` — updated to also assert the global-public condition\r\n\r\nIntegration-verified against an in-memory SQLite DB: public items from other teams are returned; team-visibility items from other teams and private items from other users remain hidden.\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4296745306",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-05-15T08:49:07+00:00",
+      "body": "Two minor notes for consideration — neither is blocking:\n1. `test_team_scoped_always_includes_globally_public_items` appears to duplicate `test_team_scoped_in_token_teams_no_email` (same args, same assertions). Worth either removing it or strengthening it to use `team_id=\"team-2\"` to explicitly prove cross-team public visibility.\n2. The `'public'` in the first condition's IN `('team', 'public')` is now a subset of the standalone `visibility = 'public'` clause — a future cleanup could simplify that to `visibility = 'team'` only.\n\nLGTM 🚀 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "fc5fb5fc8c56ce036732f442185b9d1b60bb81ac",
+      "message": "fix(visibility): always OR global-public condition when team_id filter is applied (#4732)\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-05-13T08:08:54+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 21,
+  "deletions": 4,
+  "merged": false,
+  "mergeable": true,
+  "ingested_at": "2026-05-17T15:04:47.167599",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:47.168102",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4773,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4773.json"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4527,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4527"
+  },
+  "metadata": {
+    "title": "fix(auth): cache get_token_revocation / is_token_revoked to eliminate hot-path DB queries",
+    "state": "open",
+    "created_at": "2026-04-29T14:30:47+00:00",
+    "updated_at": "2026-05-07T08:46:09+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "msureshkumar88",
+    "labels": [
+      "bug",
+      "python",
+      "performance"
+    ],
+    "milestone": null,
+    "assignees": [
+      "msureshkumar88",
+      "ja8zyjits"
+    ]
+  },
+  "description": "Closes #4526\n\n## Summary\n\n- `TokenCatalogService.is_token_revoked()` and `get_token_revocation()` hit the database unconditionally on every request; `auth_cache` was unused on the read path despite already being the source of truth for revocations.\n- Added `set_not_revoked(jti)` to `auth_cache` to cache negative results with a TTL, guarded against overwriting confirmed revocations.\n- Both service methods now check the cache first and fall back to DB only on a miss; they call `set_not_revoked()` to warm the cache after a DB non-revocation result.\n- All paths fall through to DB on cache errors (fail-closed).\n\n## Files Changed\n\n| File | Change |\n|------|--------|\n| `mcpgateway/cache/auth_cache.py` | Add `set_not_revoked(jti)` |\n| `mcpgateway/services/token_catalog_service.py` | Cache-first logic in `is_token_revoked` and `get_token_revocation` |\n| `tests/unit/mcpgateway/cache/test_auth_cache_l1_l2.py` | 4 new tests for `set_not_revoked` |\n| `tests/unit/mcpgateway/test_token_catalog_service_cache.py` | 11 new tests covering cache-hit, cache-miss, and error-fallback paths |",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "6ae6e2398c8d46721c9e6df0016e85e0bf620b67",
+      "message": "fix(auth): cache get_token_revocation via auth_cache to eliminate hot-path DB queries\n\nWire auth_cache.is_token_revoked() into TokenCatalogService.is_token_revoked()\nand get_token_revocation() so confirmed-revoked and confirmed-not-revoked tokens\nskip the DB round-trip on repeat calls.\n\nAdd set_not_revoked() to AuthCache for negative result caching (TTL-bounded by\nrevocation_ttl, default 30 s). invalidate_revocation() already evicts these\nentries atomically on revocation, so no token can bypass enforcement via a stale\nFalse entry. Both service methods remain fail-closed: cache errors fall through\nto the DB.\n\nCloses #2692\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-29T13:43:05+00:00"
+    },
+    {
+      "sha": "235afedaa894db497fb86b34bfb73cb29ac21134",
+      "message": "test(auth): cover silenced set_not_revoked exception paths in token catalog service\n\nAdd two tests that raise from auth_cache.set_not_revoked() after a DB miss,\ncovering the bare except/pass branches at lines 941 and 1175 in\nTokenCatalogService.is_token_revoked() and get_token_revocation().\n\nSigned-off-by: Suresh Kumar Moharajan <suresh.kumar.m@ibm.com>",
+      "author": "Suresh Kumar Moharajan",
+      "date": "2026-04-29T14:25:20+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 331,
+  "deletions": 3,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T17:17:11.495577",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:17:11.496569",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4527,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\prs\\4527.json"
+  }
+}

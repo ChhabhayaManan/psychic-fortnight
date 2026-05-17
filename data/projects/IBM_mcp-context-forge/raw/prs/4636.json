@@ -1,0 +1,110 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4636,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4636"
+  },
+  "metadata": {
+    "title": "fix(rbac): add unique constraints for role/user_role race (#4482)  ",
+    "state": "open",
+    "created_at": "2026-05-07T06:57:21+00:00",
+    "updated_at": "2026-05-08T05:13:50+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "rakdutta",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "closes #4482 - Adds database-level unique constraints to prevent duplicate RBAC roles and role assignments during concurrent bootstrap.    \r\n## Problem                                                                                                                                                                                                                                        \r\n                             \r\n  Multiple workers can create duplicate system roles (`platform_admin`, etc.) and role assignments when bootstrapping concurrently, causing `MultipleResultsFound` exceptions → 500 errors.                                                         \r\n   \r\n  ## Solution                                                                                                                                                                                                                                       \r\n                             \r\n  **Two-layer defense:**                                                                                                                                                                                                                            \r\n  1. **Database constraints** - Partial unique indexes on `roles(name, scope)` and `user_roles` (split for NULL/NOT NULL `scope_id`)\r\n  2. **App handling** - Savepoint pattern catches `IntegrityError`, refetches existing row, returns transparently                                                                                                                                   \r\n                                                                                                                                                                                                                                                    \r\n  ## Changes                                                                                                                                                                                                                                        \r\n                                                                                                                                                                                                                                                    \r\n  - **Migration `d21698ae4a19`** - Deduplicates existing duplicates, adds partial unique indexes (PostgreSQL + SQLite)                                                                                                                              \r\n  - **`role_service.py`** - Updated `create_role()` and `assign_role_to_user()` with savepoint + IntegrityError handling\r\n  \r\n    ## Related                                                                                                                                                                                                                                        \r\n                                                                                                                                                                                                                                                    \r\n  - Issue #4482                                                                                                                                                                                                                                     \r\n  - PR #4444 (bootstrap fast-path)\r\n                                     \r\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "ff6fd8438e25b8766bd542ea4d18ea109454f34b",
+      "message": "initial commit\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-06T07:13:33+00:00"
+    },
+    {
+      "sha": "c09e1529ff35f9726823822272d2ce5c8409b035",
+      "message": "fix\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-06T07:24:37+00:00"
+    },
+    {
+      "sha": "701b6e58cd7fbecaaa23e58b43edbc3b7a4586c3",
+      "message": "down revivion\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-07T09:42:52+00:00"
+    },
+    {
+      "sha": "9d2039f32d28db8abd3628cac40e9cdb71efca28",
+      "message": "chore: remove review documentation files\n\nRemove review-only documentation that should not be in the main codebase.\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-07T09:47:55+00:00"
+    },
+    {
+      "sha": "0190f8f7db7749b050f37b5f969b1c7906dc5cba",
+      "message": "style(migration): remove unused sqlalchemy import in d21698ae4a19\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-07T10:04:17+00:00"
+    },
+    {
+      "sha": "ff43005ac7052edd4165e90071177461054b2c60",
+      "message": "add pragma: allowlist secret\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-07T10:30:05+00:00"
+    },
+    {
+      "sha": "1e3eb8e2441d05c5c3617a7e98d7a8012ed71d44",
+      "message": "test: add coverage for IntegrityError race condition handling in role service\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-07T11:03:58+00:00"
+    },
+    {
+      "sha": "514b3999de22da87dbeae68192f2243f7d97c472",
+      "message": "feat: add unique constraints to RBAC models for test database schema\n\nAdd partial unique indexes to Role and UserRole ORM models via __table_args__\nto ensure test databases created with create_all() have the same constraints\nas production databases created through Alembic migrations.\n\nThis fixes integration test coverage by allowing IntegrityError race condition\nhandling tests to trigger real constraint violations.\n\nChanges:\n- Role: Add uq_roles_name_scope_active index (one active role per name+scope)\n- UserRole: Add two indexes for NULL and non-NULL scope_id cases\n- Simplify test mocks to use natural IntegrityError from database\n\nCoverage: 100% on role_service.py changed lines (previously 62%)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-07T12:00:02+00:00"
+    },
+    {
+      "sha": "b37f4b7e5d781571e5390ae08c34db116b005b2c",
+      "message": "ci: add --with-integration flag to pytest workflows to enable integration tests\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-07T12:23:57+00:00"
+    },
+    {
+      "sha": "883fcf73c5f9d55f28d3ca8b6b166e4022a65da9",
+      "message": "  test: add unit tests for role service IntegrityError race condition handling\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-07T12:46:32+00:00"
+    },
+    {
+      "sha": "b1f2b6ca7b44ec20eb800a2e2eff46bdc1ea4ee3",
+      "message": "revert: remove --with-integration flag from workflow files",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-07T12:54:39+00:00"
+    },
+    {
+      "sha": "a0499ac2b509eb839e81624e013e6d2952c10698",
+      "message": "fix: update alembic down_revision to w7x8y9z0a1b2 to prevent multiple heads\n\n- Changes down_revision from 9fb98535724d to w7x8y9z0a1b2\n- Ensures proper migration chain after rebase with main\n\nSigned-off-by: Rakhi Dutta <rakhidutta@users.noreply.github.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-05-08T04:53:21+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 998,
+  "deletions": 26,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:02.007585",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:02.008451",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4636,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4636.json"
+  }
+}

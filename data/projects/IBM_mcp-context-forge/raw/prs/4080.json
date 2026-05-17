@@ -1,0 +1,84 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4080,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4080"
+  },
+  "metadata": {
+    "title": "fix(sso): SSO users with platform_admin role can now access teams in admin UI",
+    "state": "closed",
+    "created_at": "2026-04-08T08:14:21+00:00",
+    "updated_at": "2026-05-10T11:41:24+00:00",
+    "closed_at": "2026-05-10T11:41:22+00:00",
+    "merged_at": "2026-05-10T11:41:22+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "rbac",
+      "MUST",
+      "api"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "marekdano"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4070\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixed a bug where SSO-authenticated users with `platform_admin` RBAC role could not edit gateways or virtual servers in the admin UI, receiving \"invalid team name\" errors despite having `[\"*\"]` (wildcard) effective permissions.\r\n\r\n**Root Cause:** The `GET /teams` endpoint incorrectly checked only the database `is_admin` flag instead of RBAC permissions. SSO users have the correct RBAC role (`platform_admin` with `[\"*\"]` permissions) but lack the database flag (`is_admin=False`), causing them to be treated as regular users.\r\n\r\n**Solution:** Updated the `list_teams` endpoint to check both the legacy `is_admin` flag AND RBAC permissions (`[\"*\"]` or `[\"teams.*\"]`), aligning with ContextForge's two-layer security model.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ Pass |\r\n| Unit tests                | `make test`     | ✅ Pass |\r\n| Coverage ≥ 80%            | `make coverage` | ✅ Pass |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [] Tests added/updated for changes\r\n- [] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n\r\n### Changes Made\r\n\r\n**1. `mcpgateway/routers/teams.py` (Primary Fix)**\r\n```python\r\n# Before (buggy):\r\nif current_user_ctx.get(\"is_admin\"):\r\n    # Only checked database flag\r\n\r\n# After (fixed):\r\nhas_admin_team_access = (\r\n    current_user_ctx.get(\"is_admin\") or\r\n    \"*\" in current_user_ctx.get(\"permissions\", []) or\r\n    \"teams.*\" in current_user_ctx.get(\"permissions\", [])\r\n)\r\nif has_admin_team_access:\r\n    # Now checks RBAC permissions too\r\n```\r\n\r\n**2. `mcpgateway/observability.py` (Linting Fix)**\r\n- Added missing `message` parameter documentation to fix flake8 DAR101 error\r\n\r\n### Impact\r\n\r\n**Before:**\r\n- ❌ SSO users with `platform_admin` role: blocked from editing in admin UI\r\n- ✅ Local admins with `is_admin=True`: worked correctly\r\n- ✅ REST API: worked for both (uses RBAC)\r\n\r\n**After:**\r\n- ✅ SSO users with `platform_admin` role: can now edit in admin UI\r\n- ✅ Local admins with `is_admin=True`: continue to work\r\n- ✅ REST API: unchanged (already working)\r\n\r\n### Why This Matters\r\n\r\nContextForge has two separate concepts:\r\n- **`is_admin` flag** - Legacy database field (`EmailUser.is_admin`)\r\n- **`platform_admin` role** - Modern RBAC role with `[\"*\"]` permissions\r\n\r\nSSO users get the RBAC role but not the database flag. The fix ensures both mechanisms are checked, maintaining backward compatibility while supporting SSO properly.\r\n\r\n### Code Quality Fix\r\n\r\nAdded missing docstring parameter documentation for flake8 compliance.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4098072938",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-13T10:42:30+00:00",
+      "body": "@bogdanmariusc10 - thanks for the contribution!\r\n\r\n### Summary\r\n\r\nThe PR attempts to fix SSO users with platform_admin RBAC role being blocked from the `GET /teams` endpoint. The diagnosis in the issue is correct, but the implementation is broken: the permissions key checked in `current_user_ctx` is never set by `get_current_user_with_permissions`, so the RBAC branch of the fix is dead code and the endpoint's behavior is unchanged from before.\r\n\r\n  ---\r\n  ### Findings\r\n\r\n  #### Blocking\r\n\r\n  `mcpgateway/routers/teams.py:178-184` — The fix is a no-op\r\n\r\n`get_current_user_with_permissions` (`middleware/rbac.py:401-414`) never populates a permissions key in the returned dict. The dict contains: `email, full_name, is_admin, ip_address, user_agent, db, auth_method, request_id, team_id, token_teams, token_use, plugin_context_table, plugin_global_context` — and nothing else. Both `\"*\"` in `current_user_ctx.get(\"permissions\", [])` and \"teams.*\" in `current_user_ctx.get(\"permissions\", [])` will always evaluate to False, leaving the only active branch identical to the original `is_admin` check. SSO users with `platform_admin` are still blocked in production.\r\n\r\nThe correct fix is to call `PermissionService.check_admin_permission()` directly inside `list_teams`, mirroring exactly what the require_admin decorator already does at `rbac.py:854-860`:\r\n\r\n```bash\r\n  from mcpgateway.services.permission_service import PermissionService\r\n  from mcpgateway.db import fresh_db_session\r\n\r\n  # Inside list_teams:\r\n  with fresh_db_session() as db_perm:\r\n      permission_service = PermissionService(db_perm)\r\n      has_admin_team_access = await permission_service.check_admin_permission(\r\n          current_user_ctx[\"email\"],\r\n          token_teams=current_user_ctx.get(\"token_teams\"),\r\n      )\r\n```\r\n\r\n`check_admin_permission` already handles both `is_admin=True` (DB flag) and wildcard RBAC permissions (*, admin.*) via `_is_user_admin + get_user_permissions`, so no additional branching is needed.\r\n\r\n  ---\r\n  `tests/unit/mcpgateway/routers/test_teams.py:69,79` — Test fixtures mask the bug (Test coverage)\r\n\r\nThe mock context dicts inject a \"permissions\" key (e.g., \"permissions\": [\"*\"]) that does not exist in the real production context. This causes the tests to validate behavior that can never occur at runtime — the fix appears to pass tests while silently failing in production. The fixtures should be corrected to match the actual structure returned by `get_current_user_with_permissions`, and a dedicated test case should be added: an SSO user with `is_admin=False` but platform_admin RBAC role in the DB should receive the full team list from `list_teams`, with `PermissionService.check_admin_permission` mocked to return True.\r\n\r\n  ---\r\n  `mcpgateway/routers/teams.py:99,364` — Same SSO gap in adjacent endpoints\r\n\r\nTwo other endpoints in the same file have the same root problem. create_team (line 99) uses `is_admin` to decide whether to bypass `allow_team_creation` and `skip_limits`. `update_team` (line 364) uses is_admin for `skip_limits`. Both will still misclassify SSO platform_admin users as non-admins. The same `check_admin_permission` pattern should be applied to both.\r\n\r\n Please resolve conflicts in `observability.py` and add extra unit tests to cover the changes."
+    },
+    {
+      "id": "4111862355",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-15T08:13:05+00:00",
+      "body": "Fixes a real bug where SSO/Entra ID users with `platform_admin` RBAC role were blocked from viewing teams in the admin UI because `GET /teams` checked the legacy `is_admin` DB flag rather than RBAC permissions. The three affected endpoints (`create_team, list_teams, update_team`) now call `PermissionService.check_admin_permission()` which correctly handles both the legacy flag and RBAC.\n\nLGTM 🚀 "
+    },
+    {
+      "id": "4162582336",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-23T13:06:11+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "4e627805fb89f8224baf732b7722d77cd5e69a3f",
+      "message": "fix: SSO users with platform_admin role can now access teams in admin UI\n\n- Fixed list_teams endpoint to check RBAC permissions in addition to is_admin flag\n- SSO users with platform_admin role now correctly see all teams\n- Maintains backward compatibility with local admins using is_admin flag\n- Added missing docstring parameter for flake8 compliance\n\nCloses #4070\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-08T08:09:55+00:00"
+    },
+    {
+      "sha": "4bfd3242a83f2e2bb5d305ab5bbc5d8b1ca07429",
+      "message": "fix: use PermissionService.check_admin_permission for SSO platform_admin RBAC\n\nReplace broken permissions key checks with proper PermissionService.check_admin_permission()\ncalls in create_team, list_teams, and update_team endpoints. This fixes SSO users with\nplatform_admin RBAC role (is_admin=False in DB) being blocked from team management.\n\n- Use fresh_db_session() and PermissionService for admin checks in 3 endpoints\n- Fix test fixtures to remove non-existent permissions key\n- Add mock_permission_check helper for consistent test mocking\n- Add 3 SSO platform_admin test cases\n- Fix 50+ tests to properly mock PermissionService and fresh_db_session\n\nCloses #4070\nRelated to #4080\n\nSigned-off-by: Bogdan-Marius-Catanus <bogdan-marius.catanus@ibm.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-04-15T07:04:32+00:00"
+    },
+    {
+      "sha": "61f55ebcc07eb737f5ff3d274f205a79b954e1a6",
+      "message": "fix(security): address council PR review findings for SSO platform_admin team access\n\n- Replace fresh_db_session() with PermissionService(db) for efficiency\n- Add check_platform_admin_permission() to narrow admin bypass\n- Apply platform_admin checks to get_team, delete_team, update_team\n- Update tests to mock check_platform_admin_permission\n\nSigned-off-by: AI Assistant <assistant@example.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-05-10T11:30:17+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 444,
+  "deletions": 125,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:33.448738",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:33.449169",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4080,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4080.json"
+  }
+}

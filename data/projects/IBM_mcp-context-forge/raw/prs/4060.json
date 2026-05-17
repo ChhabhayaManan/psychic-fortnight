@@ -1,0 +1,108 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4060,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4060"
+  },
+  "metadata": {
+    "title": "feat(ui): Overflow menu",
+    "state": "closed",
+    "created_at": "2026-04-07T10:06:12+00:00",
+    "updated_at": "2026-04-12T07:49:51+00:00",
+    "closed_at": "2026-04-12T07:49:49+00:00",
+    "merged_at": "2026-04-12T07:49:49+00:00",
+    "author": "gcgoncalves",
+    "labels": [
+      "enhancement",
+      "frontend",
+      "javascript",
+      "ui",
+      "COULD",
+      "release-fix",
+      "merge-queue",
+      "design-high"
+    ],
+    "milestone": null,
+    "assignees": [
+      "jonpspri"
+    ]
+  },
+  "description": "# ✨ Feature / Enhancement PR\r\n\r\n## 🔗 Epic / Issue\r\n\r\nCloses #3519\r\n\r\n---\r\n\r\n## 🚀 Summary\r\n\r\nReplaces per-row action buttons across all admin tables with a fixed-positioned overflow menu (first introduced on the Gateways table, then rolled out to Tools, Servers, Resources, Prompts, Agents, and Roots) and extracts the shared Alpine state and scroll-lock logic into a reusable `Admin.overflowMenu()` factory component.\r\n\r\n---\r\n\r\n## 🧪 Checks\r\n\r\n- [X] `make lint` passes\r\n- [X] `make test` passes\r\n- [X] CHANGELOG updated (if user-facing)\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n- New file: `mcpgateway/admin_ui/components/overflow-menu.js`.\r\n- All seven templates (roots table in `admin.html` + six partials) use `x-data=\"Admin.overflowMenu('…-table-wrapper')\"` instead of ~20 lines of duplicated inline JS.\r\n- The `components/` directory is set up to house future Alpine components.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4067424206",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-07T10:31:37+00:00",
+      "body": "Thanks for the cleanup here. Extracting the repeated overflow-menu behavior into a shared Alpine component is a good direction, and the admin table markup is noticeably easier to follow after this refactor. I did spot a few regressions that look worth addressing before merge:\n\n1. `mcpgateway/templates/agents_partial.html:70`\nThe new A2A “View” action calls `Admin.viewAgent(...)`, but the JS bundle exposes `Admin.viewA2AAgent` in `mcpgateway/admin_ui/admin.js`. As written, clicking “View” looks like it will throw on the client instead of opening the agent details modal.\n\n2. `mcpgateway/templates/tools_partial.html:86`\n`mcpgateway/templates/prompts_partial.html:80`\n`mcpgateway/templates/servers_partial.html:103`\n`mcpgateway/templates/agents_partial.html:82`\nSeveral migrated activate/deactivate forms now call bare `handleToggleSubmit(...)` instead of `Admin.handleToggleSubmit(...)`. Since the handler is attached to `Admin`, these submits appear to be broken for the affected tables and will likely fail with a `ReferenceError`.\n\n3. `tests/unit/js/overflow-menu.test.js`\nThe new unit coverage is useful for the shared component itself, but it doesn’t currently cover the template-to-handler wiring where the regressions above were introduced. A small integration-style JS test or a Playwright assertion that actually executes one of these row actions would make this refactor safer."
+    },
+    {
+      "id": "4081759321",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-09T11:09:08+00:00",
+      "body": "Thanks @gcgoncalves for addressing the comments. Changes looks good to me, there a behavior I observed when clicking the menu item in table, scroll gets locked. So when overflow-menu is visible you cannon scroll the screen. \n\nI think it should be worth looking into it. Rest all looks good to me. "
+    },
+    {
+      "id": "4081764463",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-09T11:09:51+00:00",
+      "body": ""
+    },
+    {
+      "id": "4082333620",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-09T12:39:48+00:00",
+      "body": "LGTM 👍 "
+    }
+  ],
+  "commits": [
+    {
+      "sha": "4c1b52a0da7422b178dcae23824b1e698cdc5a82",
+      "message": "feat(ui): Make the overflow-menu pattern global\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-02T10:51:27+00:00"
+    },
+    {
+      "sha": "2841c23feb72d7a1b661927361f2e84f3cf845c0",
+      "message": "feat(ui):Replace table actions with overflow menus\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-02T15:28:11+00:00"
+    },
+    {
+      "sha": "0a2330657e963845cc5463eec0a102a3776632d9",
+      "message": "feat(ui): Overflow menu\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-08T10:15:23+00:00"
+    },
+    {
+      "sha": "b2ea010e4f9da96a9166499c784b10ee89cc2aaf",
+      "message": "Address reviews\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-08T14:58:28+00:00"
+    },
+    {
+      "sha": "0f93017cc4baad38aeb2f57247d2819634e60df7",
+      "message": "fix(ui): harden overflow menu — correctness, security, and test coverage\n\n- Replace broken runtime Tailwind class interpolation with :style binding\n  across tools, servers, resources, prompts, and roots templates\n- Forward wrapperId through Alpine.data registration in events.js\n- Add destroy() hook to clear scroll-lock on HTMX swap / row removal\n- Add ref guards with console.warn for missing $refs.trigger / $refs.menu\n- Add ARIA attributes (aria-haspopup, aria-label, aria-orientation)\n- Simplify multi-menu coordination to module-level currentlyOpen variable\n- Add x-cloak + CSS rule to prevent pre-Alpine menu flash\n- Close overflow menu on form-submit via @submit=\"menuOpen = false\"\n- Restore testTool/testPrompt re-entry guards with data-test-*-id hooks\n  and escapeAttrValue() defensive CSS selector escaping\n- Cap oversized menus with max-height + internal scroll when taller than\n  viewport\n- Rename _open_action_dropdown to public open_action_dropdown with alias\n- Update all Playwright tests to open overflow menu before asserting\n  row-action visibility (extended, integration, regression, HTMX tests)\n- Add 49 overflow-menu unit tests (destroy, coordination, ref guards,\n  tall-menu fallback, zero-rect guard)\n\nCloses #3519\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-12T07:14:08+00:00"
+    }
+  ],
+  "files_changed": 34,
+  "additions": 1654,
+  "deletions": 451,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:24.412152",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:24.412785",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4060,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4060.json"
+  }
+}

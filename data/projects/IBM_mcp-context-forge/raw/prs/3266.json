@@ -1,0 +1,87 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3266,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3266"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Fix edit-server modal selection bugs",
+    "state": "closed",
+    "created_at": "2026-02-26T03:15:46+00:00",
+    "updated_at": "2026-02-26T21:47:09+00:00",
+    "closed_at": "2026-02-26T21:47:07+00:00",
+    "merged_at": "2026-02-26T21:47:07+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\n\n## 📌 Summary\nFixes three related bugs in the edit-server modal's selection management in `admin.js`:\n- **#3257**: Select All + search drops off-screen selections\n- **#3259**: Cancel button crashes and fails to close modal\n- **#3260**: Keyword search wipes previously made selections\n\n## 🔁 Reproduction Steps\n- #3257: Edit server → Select All → search → clear search → off-screen selections lost\n- #3259: Edit server → Cancel → modal fails to close, console error\n- #3260: Edit server → check a tool → keyword search → clear → selection gone\n\n## 🐞 Root Cause\n- **#3257**: Select All stored IDs only in hidden DOM inputs (`allToolIds`), not in the in-memory `editServerSelections` store. The hidden input gets destroyed by `container.innerHTML = ...` during search.\n- **#3259**: `closeModal` had all cleanup in one try block, so any error in type-specific cleanup (e.g. `resetEditSelections`) aborted `modal.classList.add(\"hidden\")` and `AppState.setModalInactive`.\n- **#3260**: The flush code before search used `sel.delete(value)` for unchecked checkboxes, which removed selections for tools that appeared in search results but weren't auto-checked (due to UUID/name mismatch). Direct user unchecks are already handled by `ensureEditStoreListeners()`.\n\n## 💡 Fix Description\n- **#3257**: After storing IDs in `allIdsInput`, also populate `getEditSelections(selectId)` so selections survive innerHTML replacement.\n- **#3259**: Wrapped type-specific cleanup in its own inner `try/catch` so modal always hides even if cleanup throws.\n- **#3260**: Changed flush from add/delete to add-only in all three search functions (`serverSideEditToolSearch`, `serverSideEditPromptsSearch`, `serverSideEditResourcesSearch`). Safe because `ensureEditStoreListeners()` already handles real user unchecks via event delegation.\n\n## 🧪 Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Unit tests                            | `uv run pytest`      | ✅      |\n| Manual: Select All + search + clear   | browser              | 🔲      |\n| Manual: Cancel closes modal cleanly   | browser              | 🔲      |\n| Manual: Search preserves selections   | browser              | 🔲      |\n\n## 📐 MCP Compliance (if relevant)\n- N/A — UI-only changes, no MCP protocol impact\n\n## ✅ Checklist\n- [x] Code formatted\n- [x] No secrets/credentials committed\n- [x] Single file change (`mcpgateway/static/admin.js`)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3863397157",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-26T20:32:22+00:00",
+      "body": ""
+    },
+    {
+      "id": "3863644647",
+      "author": "crivetimihai",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-26T21:29:44+00:00",
+      "body": "Approved. All three original fixes are correct. Added differential unit tests (Vitest), E2E regression tests (Playwright), and fixed an additional gap where resources/prompts Select All was missing the same in-memory store hydration that tools received."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d4ceff2a3c76c8bf5c65b9883d15de7300f78303",
+      "message": "[FIX][UI]: Fix edit-server modal selection bugs (#3257, #3259, #3260)\n\n- Select All now populates in-memory store so selections survive innerHTML replacement during search\n- closeModal wraps type-specific cleanup in inner try/catch so modal always hides\n- Search flush changed to add-only to prevent unchecked search results from wiping stored selections\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-02-26T03:06:18+00:00"
+    },
+    {
+      "sha": "882a84c863ce3a675ce0f95082cf754587fecff9",
+      "message": "[TESTING][UI]: Add differential tests for edit-server modal selection bug fixes (#3257, #3259, #3260)\n\n- Test closeModal hides modal and deactivates AppState even when cleanup throws\n- Test add-only flush preserves prior selections across tool/prompt/resource search\n- Test Select All populates in-memory store via paginated fetch path\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T19:53:37+00:00"
+    },
+    {
+      "sha": "4340df5b997fb88e7991f5e5a0bd2f3eaa5f771e",
+      "message": "[TESTING][UI]: Add Playwright E2E regression tests for edit-server selection bugs (#3257, #3259, #3260)\n\n- Add edit-modal locators and helpers to ServersPage page object\n- Test cancel closes modal cleanly without JS errors (#3259)\n- Test tool search preserves prior selections (#3260)\n- Test Select All + search + clear preserves all selections in-memory (#3257)\n- Test resource/prompt search preserves selections (#3260)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T21:21:42+00:00"
+    },
+    {
+      "sha": "1518f50c9e4db659b270565a869aead0c0076ac5",
+      "message": "[FIX][UI]: Hydrate in-memory store on Select All for resources and prompts (#3257)\n\nThe original #3257 fix only hydrated editServerSelections for tools.\nResources and prompts Select All still only wrote hidden DOM fields\n(allResourceIds/allPromptIds) which get destroyed by innerHTML\nreplacement during search. Apply the same fix to initResourceSelect\nand initPromptSelect so off-screen Select All IDs survive search.\n\nAlso replace brittle fixed-sleep in Vitest with a polling loop.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T21:25:57+00:00"
+    },
+    {
+      "sha": "14482efbe42962ed19b5be46f185d714618b055e",
+      "message": "[TESTING][UI]: Add E2E coverage for resource/prompt Select All persistence (#3257)\n\nReplace the no-op test_resource_and_prompt_search_preserves_selections\n(which created servers without resources/prompts and silently skipped\nall assertions) with two targeted tests that:\n- Click Select All resources/prompts in the edit modal\n- Verify the in-memory store is populated\n- Search + clear\n- Assert store size is unchanged\n\nAlso add edit_select_all_resources_btn, edit_select_all_prompts_btn\nlocators and store-size helpers to ServersPage.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-26T21:38:58+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 673,
+  "deletions": 28,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:33.207377",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:33.208812",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3266,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3266.json"
+  }
+}

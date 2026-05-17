@@ -1,0 +1,211 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2011,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2011"
+  },
+  "metadata": {
+    "title": "feat: replace Synchronous HTTP Calls with Asynchronous in OPA plugin",
+    "state": "closed",
+    "created_at": "2026-01-09T18:17:03+00:00",
+    "updated_at": "2026-01-11T18:45:05+00:00",
+    "closed_at": "2026-01-11T18:45:05+00:00",
+    "merged_at": "2026-01-11T18:45:05+00:00",
+    "author": "monshri",
+    "labels": [
+      "enhancement",
+      "performance",
+      "plugins"
+    ],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai",
+      "monshri"
+    ]
+  },
+  "description": "# 📝 This PR addresses the following:\r\n\r\nFix #1931 \r\n\r\nPrevious implementation of OPA plugin had the following issue:\r\nWhen the OPA plugin is enabled and evaluates policies, each policy check blocks the entire async worker until the HTTP request completes, which caused latency across all concurrent requests, etc.\r\n\r\n**Fix:**\r\n\r\nKey improvements:\r\n\r\n- Replaced all synchronous HTTP calls with asynchronous equivalents.\r\n- Added retry logic with exponential backoff for transient connection failures.\r\n- Introduced request timeout configuration to prevent indefinite hangs.\r\n- Enhanced logging to capture retry attempts and HTTP status errors.\r\n\r\n```\r\n        for attempt in range(max_retries):\r\n            try:\r\n                response = await client.post(url, json=payload, timeout=seconds)\r\n                response.raise_for_status()\r\n                logger.info(f\"OPA POST succeeded on attempt {attempt + 1}\")\r\n                return response\r\n            except (httpx.TimeoutException, httpx.RequestError, httpx.ConnectError):\r\n                logger.warning(f\"Retry attempt to connect to OPA server {attempt + 1}\")\r\n                if attempt == max_retries - 1:\r\n                    raise\r\n                await asyncio.sleep(2**attempt)\r\n            except httpx.HTTPStatusError as e:\r\n                logger.error(f\"OPA POST HTTP error (attempt {attempt + 1}, status {e.response.status_code}): \r\n{e.response.text[:200]}\")\r\n```\r\n\r\n2. Added configurable timeout and maximum retry attempts as part of plugin configuration `config.yaml`\r\n\r\n```\r\n    config:\r\n      # Plugin config dict passed to the plugin constructor\r\n      opa_base_url: \"http://127.0.0.1:8181/v1/data/\"\r\n      opa_client_retries: 3\r\n      opa_client_timeout: 30s\r\n```\r\n",
+  "comments": [
+    {
+      "id": "2677301022",
+      "author": "terylt",
+      "created_at": "2026-01-09T18:57:23+00:00",
+      "body": "Is this something that could be done once in the init function of the Plugin? This would save processing."
+    },
+    {
+      "id": "2677482953",
+      "author": "araujof",
+      "created_at": "2026-01-09T20:06:21+00:00",
+      "body": "A new httpx.AsyncClient() is created and destroyed for every OPA policy evaluation. This means:\n  - Connection establishment overhead on every request\n  - No connection reuse/pooling\n  - TCP handshake + TLS negotiation repeated for each policy check\n  - Under high load with many plugin invocations, this becomes a severe bottleneck\n\nRecommendation:\n```Python\n  # In __init__:\n  self._http_client = httpx.AsyncClient(\n      timeout=httpx.Timeout(self._timeout_seconds),\n      limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),\n      http2=True  # Optional: enable HTTP/2 for better performance\n  )\n\n  # Add cleanup method:\n  async def cleanup(self):\n      await self._http_client.aclose()\n```"
+    },
+    {
+      "id": "2677487742",
+      "author": "araujof",
+      "created_at": "2026-01-09T20:08:23+00:00",
+      "body": "e.g., \n```Python\n# Parse once in __init__:\n  def __init__(self, config: PluginConfig):\n      ...\n      # Parse timeout once\n      match = re.match(r\"(\\d+)s\", self.opa_config.opa_client_timeout.strip())\n      self._timeout_seconds = float(match.group(1)) if match else 30.0\n```"
+    },
+    {
+      "id": "2677489509",
+      "author": "monshri",
+      "created_at": "2026-01-09T20:09:13+00:00",
+      "body": "yes that's a good point. I will make that change"
+    },
+    {
+      "id": "2677491518",
+      "author": "araujof",
+      "created_at": "2026-01-09T20:10:13+00:00",
+      "body": "`await asyncio.sleep(2**attempt)` grows exponentially without limit:\n  - Attempt 0: 1 second\n  - Attempt 1: 2 seconds\n  - Attempt 2: 4 seconds\n  - Attempt 3: 8 seconds (if max_retries increased)\n\nThis could cause excessive delays if max_retries is increased.\n\nRecommendation:\n```\n  # Add jitter and cap max delay\n  import random\n  delay = min(2**attempt, 10) + random.uniform(0, 1)\n  await asyncio.sleep(delay)\n```"
+    },
+    {
+      "id": "2677528608",
+      "author": "monshri",
+      "created_at": "2026-01-09T20:26:03+00:00",
+      "body": "Sure, makes sense. Will make that change"
+    },
+    {
+      "id": "2677609505",
+      "author": "araujof",
+      "created_at": "2026-01-09T20:59:33+00:00",
+      "body": "Maybe set a default (those are max numbers) and allows for configuration, I think."
+    },
+    {
+      "id": "2677734101",
+      "author": "monshri",
+      "created_at": "2026-01-09T21:58:37+00:00",
+      "body": "Done"
+    },
+    {
+      "id": "2677734647",
+      "author": "monshri",
+      "created_at": "2026-01-09T21:58:45+00:00",
+      "body": "Done"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3645216772",
+      "author": "terylt",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-09T18:57:23+00:00",
+      "body": ""
+    },
+    {
+      "id": "3645428371",
+      "author": "monshri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-09T20:09:13+00:00",
+      "body": ""
+    },
+    {
+      "id": "3645421548",
+      "author": "araujof",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-01-09T20:13:10+00:00",
+      "body": "Hi Shriti, please look into the recommendations we made. "
+    },
+    {
+      "id": "3645469675",
+      "author": "monshri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-09T20:26:03+00:00",
+      "body": ""
+    },
+    {
+      "id": "3645557710",
+      "author": "araujof",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-09T20:59:33+00:00",
+      "body": ""
+    },
+    {
+      "id": "3645687033",
+      "author": "monshri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-09T21:58:37+00:00",
+      "body": ""
+    },
+    {
+      "id": "3645687449",
+      "author": "monshri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-09T21:58:45+00:00",
+      "body": ""
+    },
+    {
+      "id": "3646115767",
+      "author": "araujof",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-10T01:15:34+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c06cbdf8fdcf1549c8b91a0396be762fc2c5229b",
+      "message": "OPA plugin performance optimization by replace sync with async calls to opa\n\nSigned-off-by: Shriti Priya <shritip@ibm.com>",
+      "author": "Shriti Priya",
+      "date": "2026-01-08T21:39:35+00:00"
+    },
+    {
+      "sha": "4d0d33e346efde493db527507cfd9f48eb7a40c5",
+      "message": "Adding asynchornous calls to opa with retry and timeout logic\n\nSigned-off-by: Shriti Priya <shritip@ibm.com>",
+      "author": "Shriti Priya",
+      "date": "2026-01-08T22:03:50+00:00"
+    },
+    {
+      "sha": "fc56de0d9aebd1e85eda0094545ee838b120778f",
+      "message": "error handling with asynchornous http request to opa\n\nSigned-off-by: Shriti Priya <shritip@ibm.com>",
+      "author": "Shriti Priya",
+      "date": "2026-01-09T18:02:26+00:00"
+    },
+    {
+      "sha": "fee163e936780b4f7cfdae5e497d468c6c9d1a98",
+      "message": "Updating main branch in pyproject\n\nSigned-off-by: Shriti Priya <shritip@ibm.com>",
+      "author": "Shriti Priya",
+      "date": "2026-01-09T18:47:43+00:00"
+    },
+    {
+      "sha": "5618f46c8e76206a74297328b9dddd9c0e900796",
+      "message": "Making opa client a plugin variable, retry delays logic and pooling\n\nSigned-off-by: Shriti Priya <shritip@ibm.com>",
+      "author": "Shriti Priya",
+      "date": "2026-01-09T21:57:47+00:00"
+    },
+    {
+      "sha": "28dae62edeaa9cb464d008b6b938a026638d8f0f",
+      "message": "a single compilation for regex\n\nSigned-off-by: Shriti Priya <shritip@ibm.com>",
+      "author": "Shriti Priya",
+      "date": "2026-01-09T22:05:43+00:00"
+    },
+    {
+      "sha": "ace14e34ddd82a29c914716673e4f46711fb699c",
+      "message": "fix(opa): correct lifecycle method and config key names\n\n- Rename cleanup() to shutdown() to match plugin framework interface\n- Fix config key from opa_client_max_retries to opa_client_retries\n\nThe plugin framework calls shutdown() for cleanup, not cleanup().\nThe config.yaml key must match the schema field name.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T17:35:13+00:00"
+    },
+    {
+      "sha": "fe69b8b58a5f3aef6db7d4c80869f69837e54c4d",
+      "message": "fix(opa): apply keepalive_expiry and validate config fields\n\n- Pass keepalive_expiry to httpx.Limits (was parsed but unused)\n- Add Pydantic Field validation for retries >= 1 (prevents 0/negative)\n- Add validation for max_keepalive and max_connections >= 1\n\nAddresses review feedback about config knobs having no effect\nand retries=0 causing silent failures.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T18:08:32+00:00"
+    },
+    {
+      "sha": "bd1158a526a3f3689cc1176a4cff4399749dcd25",
+      "message": "fix(opa): add httpx dependency and clarify retries semantics\n\n- Add httpx>=0.28.0 to pyproject.toml dependencies (was missing)\n- Clarify retries field: 1=single attempt, 3=up to 3 attempts\n\nThe httpx library is now explicitly declared since the plugin\nswitched from requests to httpx for async HTTP calls.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-11T18:26:59+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 114,
+  "deletions": 38,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:11.131566",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:11.132805",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2011,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2011.json"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4475,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4475"
+  },
+  "metadata": {
+    "title": "[BUG]: fix OAuth audience-learning regressions introduced by #4404",
+    "state": "closed",
+    "created_at": "2026-04-27T16:56:43+00:00",
+    "updated_at": "2026-04-27T19:59:18+00:00",
+    "closed_at": "2026-04-27T19:59:15+00:00",
+    "merged_at": "2026-04-27T19:59:15+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nThree correctness fixes for the OAuth auto-learn audience flow merged in #4404 (issue #4384).  Without these, the merged code has a real production regression and a security gap.\n\n**Note**: PR #4404 was merged today (2026-04-27).  This PR addresses gaps identified in a post-merge review of the implementation.  Issue #4384 was auto-closed by the merge but most of its acceptance criteria remain open; those are addressed in follow-up PRs (see \"Stack\" below).\n\n## Fixes (in dependency order)\n\n### 1. B1 — Refresh path strips opaque audience identifiers (regression — urgent)\n\n`mcpgateway/services/token_storage_service.py:normalize_resource()` previously dropped any non-URL `resource` value as \"invalid\".  After #4404 auto-learns an opaque audience (e.g. ServiceNow / Authentik return ``aud=client_id``), the refresh path silently nukes it on the first refresh, regressing validation back to the unfixed-bug state.\n\n**Fix**: treat scheme-less values as opaque audience identifiers and pass them through verbatim during normalization.  RFC 8707 §2 explicitly permits the AS to map ``resource`` to an abstract identifier.\n\n### 2. B2 — First-write-only persistence (security correctness)\n\n`_persist_learned_audience` originally overwrote ``oauth_config[\"resource\"]`` on every callback.  The OAuth callback path enforces gateway access (read-equivalent) but **not** ``gateways.update``, so on a public/shared gateway any authenticated user with gateway access could mutate global config on behalf of all other users (last-user-wins).\n\n**Fix**: write only when ``oauth_config[\"resource\"]`` is currently unset.  An admin must clear the field via the gateway update API (which does enforce ``gateways.update``) to trigger re-learning.  Persistence log promoted INFO so the privileged mutation is visible.\n\n### 3. B2 follow-up — falsy resource counts as unset\n\nThe first-write-only check used ``is not None`` and treated empty strings, empty lists, etc. as \"already set\", blocking re-learning forever.\n\n**Fix**: use Python truthiness so an admin clearing the field to ``\"\"`` or ``[]`` triggers re-learning naturally.\n\n## Stack\n\nThis is the first of a 3-PR follow-up to the original (#4404):\n\n1. **This PR** — bugfix corrections (3 commits, 5 files, +160/-79).\n2. **#4476** (`feat/oauth-aud-resource-hybrid`) — implements the maintainer's recommended Option-2 hybrid: UI Resource (Audience) field, origin-extraction fallback, softened validation for auto-derived audience, plus issuer pinning, shape validation, and diagnostic logs.\n3. **#4477** (`docs/oauth-audience-handling`) — documentation completing #4384's acceptance criteria.\n\n## Verification\n\n- 443 affected unit tests pass\n- 17 doctests pass\n- ``ruff check`` clean on changed files\n- Manual trace of refresh, validation, and authorize/callback paths against current ``main``\n\n## Authors\n\n- @madhav165 contributed the original PR #4404 (auto-learn).  His work is already in main via the squash merge.  This stack builds on top of it.\n- Hardening corrections in this PR are by me.\n",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "18258c75fc24b520c4faafa565f25b8bad4c29e6",
+      "message": "fix(oauth): preserve opaque audience identifiers during token refresh\n\nThe refresh path's normalize_resource() previously dropped any non-URL\nresource value as 'invalid', which discarded audiences learned at OAuth\ncallback time from IdPs that do not honor RFC 8707 (ServiceNow, Authentik,\netc. set aud=client_id rather than the requested resource URL).  This\ncaused validation to regress to the unfixed-bug state on the first token\nrefresh after callback, defeating the audience-learning fix.\n\nTreat values lacking a URL scheme as opaque audience identifiers and pass\nthem through verbatim so they round-trip through refresh.  RFC 8707 §2\nexplicitly permits the AS to map resource to an abstract identifier.\n\nUpdate existing 'invalid_resource' tests to assert the new pass-through\nbehavior on the wire, and rename them to reflect the corrected semantics.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T18:22:27+00:00"
+    },
+    {
+      "sha": "8f9092b88adc35c463d1b85ab58c19db23e9979b",
+      "message": "fix(oauth): restrict learned-audience persistence to first-write only\n\nThe /oauth/callback handler runs _persist_learned_audience() after every\nsuccessful authorization-code exchange, mutating gateway.oauth_config to\nrecord the IdP's audience claim.  However, the route only enforces\ngateway access (read-equivalent), not gateways.update -- so any user with\ngateway access could silently overwrite shared global configuration on\nbehalf of all other users on every callback.  On a public/shared gateway\nthis is a 'last user to OAuth wins' shared-state mutation.\n\nRestrict persistence to first-write-only semantics: the learned audience\nis now written only when oauth_config['resource'] is currently unset.\nTo re-learn after an IdP change, an admin must clear the resource field\nvia the gateway update API, which does enforce gateways.update.\n\nPromote the persistence log line to INFO so the privileged mutation is\nvisible in production logs.\n\nTests:\n- Rename test_skips_when_resource_already_matches to ..._set_to_same_value\n  to clarify the new semantics (skip on any set value, not just match).\n- Add test_skips_when_resource_already_set_to_different_value as a\n  regression guard for the authorization gap closure.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T18:23:03+00:00"
+    },
+    {
+      "sha": "3a1ed4b64c9f07ad7b78791a104dca4e79ada054",
+      "message": "fix(oauth): treat falsy persisted resource as unset for re-learning\n\n_persist_learned_audience compared the existing resource with 'is not None',\nwhich treated empty strings and empty lists as 'already set' and blocked\nre-learning forever.  Use Python truthiness so an empty string or empty\nlist counts as unset, allowing an admin to clear the field via the gateway\nupdate API and trigger re-learning on the next callback (recovery path\nafter stale config or IdP migration).\n\nAdds a parametrized regression test for empty string and empty list as\npersisted-resource values.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-04-26T20:24:59+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 195,
+  "deletions": 28,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:20.496737",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:20.497756",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4475,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4475.json"
+  }
+}

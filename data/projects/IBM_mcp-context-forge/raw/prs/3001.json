@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3001,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3001"
+  },
+  "metadata": {
+    "title": "Fix Orphaned Gateway Registration Bug along with Isolating Structured log Session and Handling Flush Errors",
+    "state": "closed",
+    "created_at": "2026-02-17T12:42:12+00:00",
+    "updated_at": "2026-02-17T15:06:30+00:00",
+    "closed_at": "2026-02-17T15:06:28+00:00",
+    "merged_at": "2026-02-17T15:06:28+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "wxo"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2987\r\n\r\n## 📌 Summary\r\nFixes a bug where gateway registration failures (e.g., tool schema validation errors) leave orphaned gateway records in the database, blocking subsequent registration attempts with the same name. \r\n\r\nThe root cause is missing db.rollback() calls in exception handlers, along with two other contributing issues: \r\n\r\n  - the structured logger committing the caller's dirty session.\r\n  - the before_commit_handler silently swallowing flush exceptions.\r\n\r\nKey changes:\r\n  - Added db.rollback() to 13 exception handlers across 4 methods in gateway_service.py\r\n  - IMPORTANT ONE: Isolated structured logger DB persistence using fresh_db_session()\r\n  - Made before_commit_handler propagate flush exceptions instead of swallowing them\r\n  - Updated all affected tests to match new behavior\r\n\r\n## 🔁 Reproduction Steps\r\n  1. Register a gateway with a tool that has an invalid schema (e.g., missing required inputSchema field)\r\n  2. Registration fails with a validation error (expected)\r\n  3. Attempt to register the same gateway name again\r\n  4. Bug: Second registration fails with \"Gateway name already exists\" even though the first registration failed\r\n  5. The orphaned gateway record has no tools associated with it\r\n\r\n## 🐞 Root Cause\r\nThree issues combine to cause the bug:\r\n\r\n1. **Primary cause**: Missing `db.rollback()` in exception handlers: \r\nIn `register_gateway()`, after `db.add(db_gateway)` and `db.flush()` succeed (persisting the gateway row), tool validation fails during `db.flush()` of tool records. The except* handlers catch the error but never call `db.rollback()`, leaving the gateway object in the session's dirty state.\r\n\r\n2. **Contributing factor 1:** `before_commit_handler` swallows exceptions: \r\ndb.py's `before_commit_handler` wraps `session.flush()` in a bare except Exception: pass, silently discarding any flush failure during commit. This means even when `db.commit()` is eventually called, the failed flush doesn't cause the commit to fail.\r\n\r\n3. **Contributing factor 2**: Structured logger commits caller's session: \r\n`structured_logger._persist_to_database()` was called with the caller's db session and called `db.add(log_entry)` + `db.commit()` on it. This inadvertently committed the orphaned gateway record along with the log entry.\r\n\r\nThe chain: `db.flush()` fails on tools -> exception handler skips rollback -> `structured_logger.log(db=db)` calls `db.commit()` on same session -> before_commit_handler swallows re-flush failure -> gateway record persisted without tools -> name permanently reserved.\r\n\r\n## 💡 Fix Description\r\n\r\n1. Added `db.rollback()` to all exception handlers (`gateway_service.py`)    \r\n    Added explicit `db.rollback()` calls before any logging or re-raising in all exception handlers across 4 methods:    \r\n    - register_gateway - 7 except* handlers (validation errors, integrity errors, connection errors, timeout errors, general exceptions)   \r\n    - `update_gateway` - 3 exception handlers (name conflict, not found, integrity error)   \r\n    - `set_gateway_state` - 1 exception handler (permission error)   \r\n    - `fetch_tools_after_oauth` - 2 exception handlers (connection error, general exception)    \r\n    `db.rollback()` is always safe to call - it's a no-op on a clean session with no pending changes.    \r\n\r\n2. Isolated structured logger persistence (structured_logger.py)    \r\n    Changed `_persist_to_database()` to use `fresh_db_session()` instead of the caller's session. This ensures:   \r\n    - Log persistence can never accidentally commit the caller's dirty state   \r\n    - Logs are persisted even when the business transaction fails   \r\n    - A broken caller session doesn't prevent log persistence   \r\n    - Complete session lifecycle isolation (`fresh_db_session` handles commit/rollback/close)    \r\n\r\n3. Propagate flush exceptions in before_commit_handler (db.py)    \r\n    Removed the bare except Exception: pass from before_commit_handler. The handler now simply calls `session.flush()` without catching exceptions, so flush failures properly cause the commit to fail, triggering rollback in `get_db()`.    \r\n\r\n4. Updated tests    \r\n    - `test_structured_logger.py` - Updated 7 tests to mock fresh_db_session instead of mock_db; replaced 2 tests with fresh-session-aware equivalents   \r\n    - `test_logging_service_comprehensive.py` - Updated 2 tests for fresh_db_session pattern   \r\n    - `test_db.py` - Updated before_commit_handler test to verify exception propagation instead of swallowing\r\n\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3814334469",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-17T14:38:13+00:00",
+      "body": "## Review: Approved\n\nThe core fix is correct and well-reasoned. The root cause chain — missing `db.rollback()` → structured logger committing caller's dirty session → `before_commit_handler` swallowing flush errors — is accurately identified and all three links are properly addressed.\n\n### Changes made during rebase\n\nSquashed the 4 original commits into a single clean commit preserving original author, and applied the following fixes:\n\n**1. Completed `db=db` cleanup (12 remaining call sites)**\n\nThe original PR removed `db=db` from `structured_logger.log()` callers in several files but missed 12 call sites across 5 files. Since `log()` now accepts `**kwargs`, leftover `db=db` would leak a SQLAlchemy Session object into the log entry dict via `entry.update(kwargs)`. Removed from:\n\n- `mcpgateway/admin.py` — 3 calls (plugin marketplace error handlers)\n- `mcpgateway/services/gateway_service.py` — 4 calls (`get_gateway`, `delete_gateway` success + exception handlers)\n- `mcpgateway/services/prompt_service.py` — 2 calls (bulk registration, `get_prompt`)\n- `mcpgateway/services/resource_service.py` — 2 calls (bulk registration, `get_resource`)\n- `mcpgateway/services/tool_service.py` — 1 call (`get_tool`)\n\nVerified zero remaining via AST scan.\n\n**2. Fixed stale rollback test + added missing rollback assertions**\n\n- `test_register_gateway_exception_rollback`: Updated stale comment (\"method doesn't actually call rollback\") and changed `assert_called()` → `assert_called_once()` for strictness.\n- Added `test_db.rollback = Mock()` setup and `test_db.rollback.assert_called_once()` assertions to `test_register_gateway_value_error`, `test_register_gateway_runtime_error`, and `test_register_gateway_integrity_error` — these exercise the core bug fix paths.\n\n**3. Removed vacuous test assertions**\n\nTwo tests (`test_logging_service_comprehensive.py`, `test_structured_logger.py`) created `caller_db = MagicMock()` but never passed it to `_persist_to_database()`, making `caller_db.add.assert_not_called()` always-true. Replaced with `mock_fresh.assert_called_once()` to validate fresh session usage.\n\n### What was verified\n\n- All 482+ affected tests pass (gateway_service, structured_logger, logging_service_comprehensive, test_db)\n- AST scan confirms zero `structured_logger` calls with `db=db` remain\n- `fresh_db_session()` correctly auto-commits via `get_db()` context manager — no explicit `commit()` needed\n- `before_commit_handler` exception propagation is safe — `get_db()` has proper nested try/except/finally with rollback + invalidate fallback"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "5c48bb6bcae94828fac77fe1c216a17e1693aede",
+      "message": "fix(auth): prevent orphaned gateway records and isolate structured logger session\n\n- Add db.rollback() to exception handlers in gateway_service.py to\n  prevent orphaned gateway records when registration fails after flush\n- Isolate structured logger DB persistence using fresh_db_session() to\n  avoid accidentally committing caller's dirty session state\n- Propagate flush exceptions in before_commit_handler instead of\n  swallowing them so commit failures trigger proper rollback\n- Remove db parameter from structured_logger.log() signature since\n  the logger now manages its own independent session\n- Update tests to verify new session isolation and exception propagation\n\nCloses #2987\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-17T14:34:53+00:00"
+    }
+  ],
+  "files_changed": 12,
+  "additions": 211,
+  "deletions": 269,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:14:04.106668",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:14:04.109164",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3001,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3001.json"
+  }
+}

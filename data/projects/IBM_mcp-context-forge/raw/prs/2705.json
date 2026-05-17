@@ -1,0 +1,74 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2705,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2705"
+  },
+  "metadata": {
+    "title": "fix(admin): correct HTMX event name for team list refresh",
+    "state": "closed",
+    "created_at": "2026-02-04T18:02:28+00:00",
+    "updated_at": "2026-02-06T21:44:22+00:00",
+    "closed_at": "2026-02-06T21:44:22+00:00",
+    "merged_at": "2026-02-06T21:44:22+00:00",
+    "author": "settler-av",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n\r\n## 🔗 Related Issue\r\nCloses #2691\r\n\r\n---\r\n\r\n## 📝 Summary\r\nUpdates the HTMX event trigger in the Team Edit modal to ensure the teams list refreshes correctly after an update. Previously, the UI would not update the table view because it was listening for a disparate event name.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🔁 Reproduction Steps\r\n1. Log in to the Admin UI as a user with team management permissions.\r\n2. Navigate to the Teams tab.\r\n3. Click \"Edit\" on an existing team.\r\n4. Modify the team name or description and click \"Update\".\r\n5. Observe: The modal closes, but the list behind it does not refresh to show the new values until a manual page reload.\r\n\r\n## 🐞 Root Cause\r\nThe Python backend `admin_update_team` was sending an HTMX trigger header named `refreshTeamsList`, but the frontend (HTMX/Alpine.js) is listening for `refreshUnifiedTeamsList`. This mismatch caused the refresh event to be ignored.\r\n\r\n## 💡 Fix Description\r\nUpdated `admin.py` to send the correct event name:\r\n```\r\n# Before\r\n\"adminTeamAction\": {\"closeTeamEditModal\": True, \"refreshTeamsList\": True, ...}\r\n\r\n# After\r\n\"adminTeamAction\": {\"closeTeamEditModal\": True, \"refreshUnifiedTeamsList\": True, ...}\r\n```\r\nThis aligns the backend trigger with the frontend event listener.\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    ✅   |\r\n| Unit tests                | `make test`     |     ✅    |\r\n| Coverage ≥ 80%            | `make coverage` |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |   ✅   |\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets or credentials committed\r\n",
+  "comments": [
+    {
+      "id": "2770242213",
+      "author": "gcgoncalves",
+      "created_at": "2026-02-05T17:09:55+00:00",
+      "body": "I think this event name is used on this chunk of the `admin.js` file:\n\nhttps://github.com/IBM/mcp-context-forge/blob/4bbb15e91bee5415edb8582382e0155ea1e6f66a/mcpgateway/static/admin.js#L21585-L21590\n\n```javascript\n        if (detail.refreshTeamsList) {\n            const teamsList = safeGetElement(\"teams-list\");\n            if (teamsList && window.htmx) {\n                window.htmx.trigger(teamsList, \"load\");\n            }\n        }\n```\n\n`refreshUnifiedTeamsList` is used on the segment below:\n\nhttps://github.com/IBM/mcp-context-forge/blob/4bbb15e91bee5415edb8582382e0155ea1e6f66a/mcpgateway/static/admin.js#L21591-L21619\n\n```javascript\n        if (detail.refreshUnifiedTeamsList && window.htmx) {\n            const unifiedList = document.getElementById(\"unified-teams-list\");\n            if (unifiedList) {\n                // Preserve current pagination/filter state on refresh\n                const params = new URLSearchParams();\n                params.set(\"page\", \"1\"); // Reset to first page on action\n                if (typeof getTeamsPerPage === \"function\") {\n                    params.set(\"per_page\", getTeamsPerPage().toString());\n                }\n                // Preserve search query from input field\n                const searchInput = document.getElementById(\"team-search\");\n                if (searchInput && searchInput.value.trim()) {\n                    params.set(\"q\", searchInput.value.trim());\n                }\n                // Preserve relationship filter\n                if (\n                    typeof currentTeamRelationshipFilter !== \"undefined\" &&\n                    currentTeamRelationshipFilter &&\n                    currentTeamRelationshipFilter !== \"all\"\n                ) {\n                    params.set(\"relationship\", currentTeamRelationshipFilter);\n                }\n                const url = `${window.ROOT_PATH || \"\"}/admin/teams/partial?${params.toString()}`;\n                window.htmx.ajax(\"GET\", url, {\n                    target: \"#unified-teams-list\",\n                    swap: \"innerHTML\",\n                });\n            }\n        }\n``` \n\nIf the `refreshTeamsList` event won't be needed, we can remove it from the `admin.js` file. "
+    },
+    {
+      "id": "2773544250",
+      "author": "settler-av",
+      "created_at": "2026-02-06T10:58:07+00:00",
+      "body": "Thanks @gcgoncalves, let me check the dependency and I will make the change. "
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3758363338",
+      "author": "gcgoncalves",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-05T17:12:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "3762381912",
+      "author": "settler-av",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-06T10:58:07+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "71bcfcaadd79f25201e8a7886313009f17374ccb",
+      "message": "fix(admin): correct HTMX event name for team list refresh\n\nUpdates the HX-Trigger in admin_update_team to use 'refreshUnifiedTeamsList'\ninstead of 'refreshTeamsList', ensuring the UI updates correctly after\nediting a team.\n\nSigned-off-by: Adnan Vahora <adnan.vahora1@motorolasolutions.com>",
+      "author": "Adnan Vahora",
+      "date": "2026-02-04T17:52:18+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 1,
+  "deletions": 7,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:10.791786",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:10.795459",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2705,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2705.json"
+  }
+}

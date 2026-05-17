@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3377,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3377"
+  },
+  "metadata": {
+    "title": "fix(security): redact sensitive query parameters from httpx log messages",
+    "state": "closed",
+    "created_at": "2026-03-02T09:09:12+00:00",
+    "updated_at": "2026-03-03T00:59:20+00:00",
+    "closed_at": "2026-03-03T00:59:18+00:00",
+    "merged_at": "2026-03-03T00:59:18+00:00",
+    "author": "marekdano",
+    "labels": [
+      "bug",
+      "python",
+      "security",
+      "MUST",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\n - Installed a logging.Filter on the httpx and httpcore loggers to redact sensitive query parameters (e.g., api_key, token, secret) from log messages before they reach any handler\r\n  - Reuses the existing sanitize_exception_message() from mcpgateway/utils/url_auth.py to find and redact URLs embedded in log text\r\n  - Filter is installed during LoggingService.initialize(), consistent with the existing _SuppressClosedResourceErrorFilter pattern\r\n  - Extend the pytests to get 100% coverage\r\n\r\n\r\n## Root Cause\r\n\r\nThe application correctly sanitizes URLs in its own logging via sanitize_url_for_logging(), but httpx's internal logger (logging.getLogger(\"httpx\")) logs the full request URL at INFO level, bypassing all application-level sanitization.\r\n\r\n## Fix\r\n\r\nA `logging.Filter` attached to the httpx and httpcore loggers intercepts every log record, finds embedded URLs via regex, and replaces query parameter values with REDACTED:\r\n\r\n```\r\n{\"name\": \"httpx\", \"message\": \"HTTP Request: GET http://localhost:9000/sse?api_key=REDACTED \\\"HTTP/1.1 200 OK\\\"\"}\r\n```\r\n\r\n## Files changed\r\n\r\n  - `mcpgateway/services/logging_service.py` — Added _install_httpx_url_sanitize_filter() and its invocation in initialize()\r\n  - `tests/unit/mcpgateway/services/test_logging_service.py` — Added TestHttpxUrlSanitizeFilter (6 tests)\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |   ✅     |\r\n| Unit tests                            | `make test`          |     ✅   |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅    |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3877075213",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-02T15:55:49+00:00",
+      "body": "Rebased onto main (clean, no conflicts) and reviewed.\n\n**Design**: Sound approach — installs a `logging.Filter` on `httpx` and `httpcore` loggers to intercept URL-bearing log records before they reach handlers. Reuses the existing `sanitize_exception_message()` from `mcpgateway/utils/url_auth.py`, which is the right function for extracting and redacting URLs embedded in arbitrary text.\n\n**Security**: No new vulnerabilities. Filter never suppresses records (always returns `True`), fails gracefully on exceptions, and leverages the established `STATIC_SENSITIVE_PARAMS` frozenset used across 6+ other services.\n\n**Performance**: No concerns — filter only fires on `httpx`/`httpcore` loggers, uses pre-compiled regex, and skips mutation when nothing changes.\n\n**Correctness**: The `record.getMessage()` → sanitize → `record.msg = sanitized; record.args = None` pattern is the standard Python logging idiom for mutating log records in filters. Setting `args = None` correctly prevents double-formatting.\n\n**Consistency**: Follows the existing `_SuppressClosedResourceErrorFilter` pattern closely.\n\n**Tests**: 7 tests covering all branches with 100% differential coverage confirmed."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "02039aadf32c838633e50725227acdbc5cad98ca",
+      "message": "fix: INFO logging leaks query parameter auth secrets\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-02T08:59:36+00:00"
+    },
+    {
+      "sha": "2cfa6bfacfd406dd9b2f6e5864b2687040597e84",
+      "message": "chore: extend pytest for logging_service.py to get 100% coverage\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-03-02T11:53:37+00:00"
+    },
+    {
+      "sha": "41ad199bab738ee91e0837596c228c3424ca3bda",
+      "message": "Merge branch 'main' into 41-fix-auth-secrets-leaking-in-logging",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T00:59:08+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 441,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:10.180757",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:10.181779",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3377,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3377.json"
+  }
+}

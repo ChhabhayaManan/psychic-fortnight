@@ -1,0 +1,65 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3370,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3370"
+  },
+  "metadata": {
+    "title": "fix(testing): eliminate Playwright agents modal test flake (#3333)",
+    "state": "closed",
+    "created_at": "2026-03-02T01:26:16+00:00",
+    "updated_at": "2026-03-11T21:57:08+00:00",
+    "closed_at": "2026-03-11T21:57:07+00:00",
+    "merged_at": "2026-03-11T21:57:07+00:00",
+    "author": "omorros",
+    "labels": [
+      "bug",
+      "testing",
+      "ui",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "  ## 🔗 Related Issue\r\nCloses #3333\r\n                                                                                                             \r\n  ---\r\n\r\n  ## 📝 Summary\r\n  Fixes intermittent timeout in `test_view_modal_different_agents_show_different_data` caused by a selector  \r\n  race between the HTMX-loaded agents table and a hidden legacy table in `admin.html`. Removes the dead      \r\n  legacy table (159 lines), targets the HTMX table by its specific `#agents-table` / `#agents-table-body`    \r\n  IDs, and adds a wait for the HTMX partial to be attached before interacting with agent rows.\r\n\r\n  ---\r\n\r\n  ## 🏷️ Type of Change\r\n  - [x] Bug fix\r\n  - [ ] Feature / Enhancement\r\n  - [ ] Documentation\r\n  - [ ] Refactor\r\n  - [ ] Chore (deps, CI, tooling)\r\n  - [ ] Other (describe below)\r\n\r\n  ---\r\n\r\n  ## 🧪 Verification\r\n\r\n  | Check                     | Command         | Status |\r\n  |---------------------------|-----------------|--------|\r\n  | Lint suite                | `make lint`     | ✅     |\r\n  | Unit tests                | `make test`     | ✅     |\r\n  | Coverage ≥ 80%            | `make coverage` | N/A (test-only + template change) |\r\n\r\n  Target test ran 5/5 times with no flakes against a live gateway.\r\n\r\n  ---\r\n\r\n  ## ✅ Checklist\r\n  - [x] Code formatted (`make black isort pre-commit`)\r\n  - [x] Tests added/updated for changes\r\n  - [ ] Documentation updated (if applicable)\r\n  - [x] No secrets or credentials committed\r\n\r\n  ---\r\n\r\n  ## 📓 Notes (optional)\r\n  **Root cause:** `agents_table` used `self.agents_panel.locator(\"table\")` which matched both the HTMX table \r\n  and a hidden legacy table (`style=\"display: none\"`). When HTMX hadn't finished loading, Playwright resolved\r\n   against the hidden table first, finding View buttons that existed but were not actionable.\r\n\r\n  **Changes:**\r\n  - Removed the `<!-- Old table for reference (hidden) -->` block from `admin.html` (lines 6916-7073) — dead \r\n  code causing selector ambiguity\r\n  - Changed `agents_table` / `agents_table_body` selectors to target `#agents-table` and `#agents-table-body`\r\n   directly\r\n  - Added `wait_for_selector(\"#agents-table-body\", state=\"attached\")` in `wait_for_agents_panel_loaded()` to \r\n  ensure the HTMX partial has loaded before tests proceed (using `attached` instead of `visible` because an  \r\n  empty tbody has zero height)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3928648570",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-11T10:47:54+00:00",
+      "body": " Summary\n   This PR resolves flaky Playwright tests for the A2A Agents modal by removing a legacy hidden table and using more precise HTMX selectors.\n\n   Changes Analysis\n\n   1. mcpgateway/templates/admin.html (-165 lines)\n   What Changed:\n    - Removed entire legacy agents table that was hidden with style=\"display: none;\"\n    - This table was a duplicate of the HTMX-loaded active table\n\n   Why This Fixes the Flake:\n    - Eliminates selector ambiguity - Playwright could accidentally target the hidden table\n    - Removes race conditions between two similar DOM structures\n    - Reduces technical debt\n\n   Assessment: ✅ Excellent cleanup - removes dead code that was causing test instability\n\n   2. tests/playwright/pages/agents_page.py (+3 lines, -1 line)\n   What Changed:\n    1 # Before:\n    2 def agents_table_body(self) -> Locator:\n    3     return self.agents_table.locator(\"tbody\")\n    4\n    5 # After:\n    6 def agents_table_body(self) -> Locator:\n    7     return self.page.locator(\"#agents-table-body\")\n\n   Why This Fixes the Flake:\n    - Uses direct ID selector instead of chaining through parent\n    - More precise targeting of the HTMX-loaded table body\n    - Added explicit wait for #agents-table-body to be attached before proceeding\n\n   Assessment: ✅ Proper fix - follows best practices for HTMX content waiting\n\n   Test Coverage\n   The test file test_agents_extended.py shows comprehensive coverage:\n    - ✅ 60+ test cases for agent modals (view/edit/test)\n    - ✅ Proper helper functions with API response interception\n    - ✅ Explicit waits for modal visibility\n    - ✅ Tests for all OAuth grant types and auth methods\n\n   Recommendations\n\n   ✅ Approve with Confidence\n    1. Root cause properly addressed: Removes selector ambiguity\n    2. No breaking changes: Only removes hidden/unused HTML\n    3. Follows HTMX best practices: Direct ID selectors + explicit waits\n    4. Well-tested: Comprehensive test coverage already exists\n\n   LGTM 🚀\n  "
+    },
+    {
+      "id": "3932668977",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-11T21:35:33+00:00",
+      "body": "Rebased onto main and resolved one conflict in `tests/playwright/pages/agents_page.py` (chose `self.page.locator(\"#agents-table\")` to match the consistent pattern used by all other page objects).\n\n**Review findings:**\n\n- **Root cause is correct**: the hidden legacy `<table>` in the agents panel caused Playwright selector ambiguity when HTMX hadn't finished loading — this is confirmed dead HTML with no JS references, no feature flags, and no code paths to unhide it.\n- **Fix is sound**: removing the 159-line dead table eliminates the ambiguity, and the new `wait_for_selector(\"#agents-table-body\", state=\"attached\")` ensures the HTMX partial has loaded before tests interact with rows. Using `attached` over `visible` is correct since an empty `<tbody>` has zero height.\n- **Consistency**: all three selector changes (`agents_table`, `agents_table_body`, `wait_for_agents_panel_loaded`) now match the pattern used across all other page objects (tools, servers, gateways, prompts, resources).\n- **No security or performance concerns** — dead code removal + test infrastructure fix only.\n- **Manual Playwright verification** passed: View/Edit/Test modals, search, clear, tab navigation, HTMX table reload all work correctly.\n- **Automated test**: the originally flaky `test_view_modal_different_agents_show_different_data` passed 5/5 consecutive runs."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "79b2bffa05c059ee673b0c17cf0653aca4f9d2ec",
+      "message": "fix: remove legacy hidden agents table and use precise HTMX selectors to eliminate Playwright modal test flake\n\nSigned-off-by: Oriol Morros Vilaseca <OM368@student.aru.ac.uk>",
+      "author": "Oriol Morros Vilaseca",
+      "date": "2026-03-02T01:21:43+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 5,
+  "deletions": 162,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:07.200407",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:07.201601",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3370,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3370.json"
+  }
+}

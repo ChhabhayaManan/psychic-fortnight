@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2086,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2086"
+  },
+  "metadata": {
+    "title": "fix: Handle None message in session registry and missing tool_runs tracking",
+    "state": "closed",
+    "created_at": "2026-01-13T19:33:55+00:00",
+    "updated_at": "2026-01-15T02:14:18+00:00",
+    "closed_at": "2026-01-15T02:14:18+00:00",
+    "merged_at": "2026-01-15T02:14:17+00:00",
+    "author": "sreeharsha1902",
+    "labels": [],
+    "milestone": "Release 1.0.0-BETA-2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Bug-fix : Session Registry & Tool Runs Tracking\r\n\r\n###  Summary\r\n\r\nFixed two critical bugs in core session and agent services that cause runtime crashes:\r\n\r\n1. **Session Registry AttributeError** - Crashes when session message content is None\r\n2. **Tool Execution KeyError** - Crashes during async agent tool execution with race condition\r\n\r\nBoth bugs have high impact on production reliability.\r\n\r\n###  Root Cause\r\n\r\n**Bug #1** (session_registry.py:866)\r\n- Code called `orjson.loads(self._session_message.get(\"message\"))` without null check\r\n- If dict key \"message\" had None value, `orjson.loads(None)` crashes with AttributeError\r\n- Test file documented this as known bug\r\n\r\n**Bug #2** (mcp_client_chat_service.py:2740)\r\n- Code checked `if run_id in tool_runs:` but then accessed `tool_runs[run_id][\"output\"]` unconditionally after the if block\r\n- LangChain event streaming can deliver events out of order (on_tool_end before on_tool_start)\r\n- Causes KeyError when trying to access untracked run_id\r\n\r\n### 💡 Fix Description\r\n\r\n**Fix #1: Session Registry** (session_registry.py:863-875)\r\n- Extract message content to variable\r\n- Add explicit null check before `orjson.loads()`\r\n- Log warning instead of crashing\r\n\r\n**Fix #2: Tool Runs Tracking** (mcp_client_chat_service.py:2723-2745)\r\n- Move all `tool_runs[run_id]` accesses inside the guard clause\r\n- Use safe `.get()` accessor instead of direct bracket access\r\n- Add else clause to handle out-of-order events gracefully\r\n\r\n###  Verification\r\n\r\n| Check | Command | Status |\r\n|-------|---------|--------|\r\n| Flake8 linting | flake8 mcpgateway/{cache/session_registry.py,services/mcp_client_chat_service.py} | Pass |\r\n| Unit tests | pytest tests/unit/mcpgateway/cache/test_session_registry.py | 55/55 Pass |\r\n| Python syntax | python -m py_compile |  Valid |\r\n\r\n### Checklist\r\n- Code formatted (Black, isort)\r\n- Linting passes (flake8)\r\n- Tests pass (55/55)\r\n- No secrets committed\r\n-  Signed commit (DCO)\r\n- Conventional commit format",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3663598354",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-15T02:05:58+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "9f821aa02c39fa485ac72b0f21f50078d59b70a7",
+      "message": "fix: Handle None message in session registry and missing tool_runs tracking\n\nFix two critical bugs in core session and agent services:\n\n1. Session Registry (session_registry.py)\n   - Added null check for message content before passing to orjson.loads()\n   - Prevents crash when _session_message contains None value\n   - Logs warning instead of raising exception on edge case\n\n2. Tool Execution (mcp_client_chat_service.py)\n   - Fixed race condition where on_tool_end event arrives before on_tool_start\n   - Implemented buffering for out-of-order tool events with TTL (30s) and cap (100)\n   - Out-of-order events are buffered and reconciled when start event arrives\n   - Tracks dropped tool ends (TTL-expired or buffer-full) with cap (200)\n   - Later on_tool_start or on_tool_error clears from dropped set (prevents false orphans)\n   - Emits aggregated tool_error at stream end for all orphan/dropped ends (de-duplicated)\n   - on_tool_error clears buffered ends to avoid emitting both error and end\n   - Uses UUID for aggregated error ID to avoid run_id collisions\n   - Refactored output extraction into helper function\n\nTests added:\n- test_respond_memory_backend_with_none_message_content: Tests None message handling\n- test_chat_events_reconciles_out_of_order_tool_events: Tests event reconciliation\n- test_chat_events_emits_error_for_orphan_tool_ends: Tests orphan error emission\n- test_chat_events_tool_error_clears_buffered_end: Tests error/buffer consistency\n- test_chat_events_buffer_full_drops_included_in_error: Tests buffer overflow tracking\n- test_chat_events_ttl_expiry_included_in_error: Tests TTL expiry tracking\n- test_chat_events_dropped_then_start_clears_from_dropped: Tests false orphan prevention\n- test_chat_events_dropped_then_error_clears_from_dropped: Tests error clears dropped\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-13T19:31:45+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 646,
+  "deletions": 23,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:33.697816",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:33.699458",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2086,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2086.json"
+  }
+}

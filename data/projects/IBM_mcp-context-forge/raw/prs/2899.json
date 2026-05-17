@@ -1,0 +1,115 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2899,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2899"
+  },
+  "metadata": {
+    "title": "fix: enhance OAuth callback handling for error responses and missing authorization code",
+    "state": "closed",
+    "created_at": "2026-02-13T07:14:11+00:00",
+    "updated_at": "2026-02-17T12:23:41+00:00",
+    "closed_at": "2026-02-17T12:23:41+00:00",
+    "merged_at": "2026-02-17T12:23:41+00:00",
+    "author": "ankit-gajera-merck",
+    "labels": [
+      "client-green"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "jonpspri",
+      "crivetimihai"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\nCloses #2881\r\n\r\n---\r\n\r\n## 📝 Summary\r\nThis PR fixes Microsoft Entra ID v2 OAuth authorization failures (`AADSTS9010010`) caused by sending `resource` together with v2 `scope`, and fixes callback handling when providers return OAuth errors without an authorization code.\r\n\r\nKey changes:\r\n- Added provider-aware logic in OAuth manager to omit `resource` for Entra v2 scope-based flows (`https://login.microsoftonline.com/.../oauth2/v2.0/...`).\r\n- Added explicit `omit_resource` support in `oauth_config` to disable `resource` injection when needed.\r\n- Applied the same resource omission logic consistently across:\r\n  - authorization URL construction\r\n  - authorization code token exchange\r\n  - refresh token flow\r\n- Updated `/oauth/callback` to:\r\n  - accept optional `error` and `error_description`\r\n  - make `code` optional\r\n  - return a user-friendly OAuth failure page when provider returns an error\r\n  - return a clear error page when callback has no `code`\r\n\r\nAlso added/updated unit tests for both the Entra v2 `resource` behavior and callback error handling paths.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ⚪ Not run (targeted Ruff checks passed) |\r\n| Unit tests                | `make test`     | ⚪ Not run (targeted OAuth unit tests passed) |\r\n| Coverage ≥ 80%            | `make coverage` | ⚪ Not run |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\nTargeted local verification executed:\r\n- `uv run ruff check mcpgateway/services/oauth_manager.py mcpgateway/routers/oauth_router.py tests/unit/mcpgateway/services/test_oauth_manager.py tests/unit/mcpgateway/routers/test_oauth_router.py` ✅\r\n- `uv run pytest -q tests/unit/mcpgateway/services/test_oauth_manager.py tests/unit/mcpgateway/routers/test_oauth_router.py` ✅",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3796261982",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T09:57:03+00:00",
+      "body": "Thanks for this PR, @ankit-gajera-merck. The error handling follows RFC 6749 Section 4.1.2.1 correctly, and the Microsoft Entra v2 resource-parameter logic is well-thought-out. The test coverage is thorough. A couple of items:\n\n**XSS vector via `root_path` in error HTML**\n`oauth_router.py:310,326`: `root_path` from `request.scope` is injected into the `<a href=\"{root_path}/admin#gateways\">` tag without escaping. While `root_path` is typically set by the ASGI server (not user-controlled), a reverse proxy misconfiguration could inject malicious content. Apply `escape()` to `root_path` the same way you did for `error` and `error_description`.\n\n**`_should_include_resource_parameter` double-checks after caller already checks**\nIn `_create_authorization_url_with_pkce` (line 1030): `if self._should_include_resource_parameter(credentials, scopes) and resource:` — the method already returns `False` when `credentials.get(\"resource\")` is falsy, so the trailing `and resource` is redundant. Minor, but simplifying to just the method call would be cleaner.\n\n**Good:** `_is_microsoft_entra_v2_endpoint` correctly normalizes case and checks both host and path. The `omit_resource` flag provides an escape hatch for non-Entra providers. Tests cover both the auto-detection and the explicit flag."
+    },
+    {
+      "id": "3805847597",
+      "author": "jonpspri",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-15T23:50:24+00:00",
+      "body": "## Open Questions / Assumptions\n\n  1. mcpgateway/services/oauth_manager.py:968 assumes Entra v2 host matching on login.microsoftonline.com; national cloud hosts are likely out of scope for\n     this change.\n  2. mcpgateway/routers/oauth_router.py:289 now surfaces provider error_description to users (escaped). This is safe from XSS, but still intentionally exposes\n     provider text to the UI.\n\n## Overall Assessment\n\n  - PR quality is good, changes are internally consistent, security posture improves, and performance impact is minimal.\n  - Recommended to merge, with only the non-blocking coverage caveat on Entra national cloud hostname variants."
+    },
+    {
+      "id": "3813440352",
+      "author": "MohanLaksh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-17T11:29:07+00:00",
+      "body": "## Review:\n\nThis PR enhances OAuth callback error handling to properly manage provider error responses and missing authorization codes, specifically addressing Microsoft Entra ID v2 OAuth flow issues (error `AADSTS9010010`).\n\nTechnical Analysis:\nRFC Compliance: Properly implements RFC 6749 Section 4.1.2.1 error callback handling\nSecurity: XSS protection via html.escape() on all user-facing error messages\nBackward Compatibility: Only affects Entra v2 endpoints; other providers unaffected\nFlexibility: Supports manual override via omit_resource flag in OAuth config\nUser Experience: Clear, actionable error messages with links back to admin panel\nTest Coverage: Comprehensive unit and E2E tests covering all scenarios\n\nObservations:\nEntra v1 vs v2 Detection: The detection logic is robust and specific to Microsoft's endpoint patterns\nResource Parameter Logic: Correctly handles both single resource strings and resource lists (RFC 8707)\nError Handling: Graceful degradation - logs warnings but continues operation when possible\nState Management: Maintains existing PKCE and state validation security measures\n\n\nVerdict:\n# ✅ APPROVED - Ready to Merge\n\nThis PR successfully addresses the Microsoft Entra ID v2 OAuth flow issues while maintaining backward compatibility and adding robust error handling. The implementation is well-tested, follows RFC standards, and includes comprehensive documentation.\n\nKey Benefits:\n\nFixes AADSTS9010010 error for Entra ID v2 users\nImproves user experience with clear error messages\nMaintains security with proper XSS protection\nAdds extensive test coverage for future maintenance\n\n## No blocking issues identified."
+    },
+    {
+      "id": "3813585257",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-17T11:57:16+00:00",
+      "body": ""
+    },
+    {
+      "id": "3813598895",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-17T12:00:49+00:00",
+      "body": "## Review\n\nReviewed the full diff (oauth_router.py, oauth_manager.py, sso_service.py, unit tests, e2e tests, docs).\n\n**The PR looks good — the logic is correct, the fix is applied consistently, and the tests are thorough.** Thanks @ankit-gajera-merck for the contribution and @jonpspri for the review hardening.\n\nHighlights:\n\n- **Entra v2 resource omission**: `_should_include_resource_parameter()` correctly centralizes the decision and is applied consistently across all three call sites (auth URL construction, token exchange, refresh). The `frozenset` host matching prevents lookalike domain attacks (e.g. `login.microsoftonline.evil.com`).\n- **OAuth error callback handling**: properly implements RFC 6749 Section 4.1.2.1 with HTML-escaped output.\n- **XSS hardening**: `escape()` applied to all user-controlled values in HTML responses, including a fix for two pre-existing templates that used `{root_path}` inside non-f-strings (rendered as literal text before this PR).\n- **`sso_service.py`** `exc_info=True` addition is a good diagnostic improvement.\n\nOne minor note — the `error` and `error_description` query params are logged raw at line 294, which allows log injection via URL-encoded newlines (`%0A`). This is a codebase-wide pattern rather than something specific to this PR, so I've opened a separate issue for it: #3000.\n\nNo changes requested."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "5b27a1922be717e3ece6b32e4922c7e9cef764b5",
+      "message": "fix: enhance OAuth callback handling for error responses and missing authorization code\n\nSigned-off-by: Ankit Gajera <ankit.gajera@merckgroup.com>",
+      "author": "Ankit Gajera",
+      "date": "2026-02-13T07:06:13+00:00"
+    },
+    {
+      "sha": "e3a20c6ce51676773be999d5e180f2b81f877ee9",
+      "message": "fix: sanitize root path in OAuth callback responses and remove unnecessary resource checks\n\nSigned-off-by: Ankit Gajera <ankit.gajera@merckgroup.com>",
+      "author": "Ankit Gajera",
+      "date": "2026-02-13T10:50:25+00:00"
+    },
+    {
+      "sha": "f304fbfa1ff77a8023de1657a370abf43b4495d6",
+      "message": "feat(tests): add Microsoft Entra ID E2E integration tests\n\nAdd comprehensive end-to-end tests for Microsoft Entra ID SSO integration\nthat validate group-based admin role assignment against real Azure infrastructure.\n\nTests included (15 total):\n- Admin role assignment based on Entra ID group membership\n- Non-admin user handling\n- Dynamic role promotion on re-login\n- Case-insensitive group ID matching\n- Real ROPC token acquisition and validation\n- Multiple admin groups configuration\n- Admin role retention behavior (by design - see #2331)\n- Token validation (expired, invalid audience/issuer)\n- Sync disabled behavior\n\nThe tests are fully self-contained: they create test users and groups in\nAzure AD before tests and clean them up afterward.\n\nAlso includes comprehensive documentation in docs/docs/testing/entra-id-e2e.md\ncovering setup, configuration, and test scenarios.\n\nRelates to: #2331\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-01-22T17:41:32+00:00"
+    },
+    {
+      "sha": "9607b21593bba92e5b60ab39bd7160f14772ecab",
+      "message": "Linting fixes\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-15T22:41:36+00:00"
+    },
+    {
+      "sha": "963616e794cc3b2093a4c2105c0bb163f950ca2c",
+      "message": "fix(tests): prevent Entra ID e2e test from poisoning RBAC decorators under xdist\n\nModule-level noop patching of RBAC decorators in test_entra_id_integration.py\npolluted sys.modules when sharing xdist workers with unit tests, causing 45\nfailures (missing __wrapped__ and decorators not raising HTTPException).\n\nReplace module-level noop patching with a fixture-scoped PermissionService\nmock and add missing default_admin_role to all mock_settings blocks to\nprevent MagicMock objects from reaching SQL queries.\n\nSigned-off-by: Jon Spriggs <github@sprig.gs>\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-17T10:52:50+00:00"
+    },
+    {
+      "sha": "859e2619b2aae226cc77c4506c2ae21b654f593c",
+      "message": "fix: harden Entra v2 host matching and escape gateway_id in OAuth callback JS\n\nUse explicit frozenset of known Entra hosts (global + sovereign clouds)\ninstead of startswith to prevent lookalike domain matching. Escape\ngateway_id in the JS fetch URL. Add sovereign cloud and negative tests.\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-02-17T11:32:02+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 2679,
+  "deletions": 21,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:10.190008",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:10.191039",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2899,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2899.json"
+  }
+}

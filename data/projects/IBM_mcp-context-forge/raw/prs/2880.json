@@ -1,0 +1,62 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2880,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2880"
+  },
+  "metadata": {
+    "title": "Fix invoke_tool crash on duplicate tool names across teams",
+    "state": "closed",
+    "created_at": "2026-02-12T12:34:45+00:00",
+    "updated_at": "2026-02-13T15:42:51+00:00",
+    "closed_at": "2026-02-13T15:42:49+00:00",
+    "merged_at": "2026-02-13T15:42:48+00:00",
+    "author": "kevalmahajan",
+    "labels": [
+      "wxo"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nCloses #2863\r\n\r\n## 📌 Summary\r\nFixed a bug where invoke_tool crashed with MultipleResultsFound when multiple tools existed with the same name (even if they belonged to different teams or owners). The lookup logic now correctly handles duplicate names by filtering based on user visibility and prioritizing the most relevant tool.\r\n\r\n\r\n\r\n## 🔁 Reproduction Steps\r\n1. Register a mcp server with name `gitmcp` in one Team A\r\n2. Register same mcp server with same name `gitmcp` but in different team named Team B\r\n3. As a user in Team A or Team B, invoke any tool in gitmcp server:\r\nBefore: The system attempts to fetch weather solely by name, finds two records, and crashes with sqlalchemy.exc.MultipleResultsFound.\r\nAfter: The system detects both tools, filters for the one accessible to the user (Team B's gitmcp tool), and successfully invokes it.\r\n\r\n## 🐞 Root Cause\r\nThe invoke_tool method used a naive database query:\r\n\r\n```python\r\ntool = db.execute(select(DbTool).where(DbTool.name == name)).scalar_one_or_none()\r\n```\r\nThis query enforced global uniqueness of tool names, which contradicted the system design that allows tools to be \"shadowed\" or duplicated across different scopes (Private, Team, Public). When a collision occurred, SQLAlchemy raised an exception because it found multiple rows when it expected at most one.\r\n\r\n## 💡 Fix Description\r\n\r\nUpdated invoke_tool in `mcpgateway/services/tool_service.py` to handle potential name collisions:\r\n\r\n1. Fetch All Matches: Changed the query to fetch `scalars().all()` instead of `scalar_one_or_none()`.\r\n\r\n2. Optimized Fast Path: If only one tool is found (the common case), it is returned immediately, preserving existing performance constraints.\r\n\r\n3. Context-Aware Resolution: If multiple tools are found, we resolve the ambiguity by:\r\nFiltering: Excluding tools not visible to the user (e.g., Private tools of others, Team tools of non-member teams).\r\nPrioritizing: Sorting accessible tools by scope precedence:\r\n\r\n- Team Tool \r\n- Private/Personal Tool\r\n- Public Tool \r\n\r\n4. Ambiguity Guard: If multiple tools exist at the same priority level (unlikely given constraints but possible), explicit error handling is now in place to return a clear error instead of a crash.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [ ] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3797910811",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-13T15:29:48+00:00",
+      "body": "Good catch on the `MultipleResultsFound` crash — this is a real bug when the same MCP server is registered across multiple teams.\n\nRebased onto main, squashed the 7 commits into 2 clean ones, and applied the following fixes:\n\n**Security fix:** Replaced the hand-rolled visibility filtering with `_check_tool_access()` to ensure consistent access control. The original filtering was missing the `is_public_only_token` check, which meant a public-only token (`token_teams=[]`) could access private tools if the `owner_email` matched.\n\n**Cache fix:** Added a `multiple_found` flag to skip caching when multiple tools share a name. Without this, the first user to invoke the tool would cache their resolved result, causing false \"not found\" errors for users who should resolve to a different tool.\n\n**Other fixes:**\n- Removed duplicate comment block\n- Fixed priority comment to match code (`team > private > public`)\n- Renamed misleading test (`test_lookup_prioritizes_private_over_team` → `test_lookup_prioritizes_team_over_private`)\n- Added tests for cache-skip behavior and public-only token filtering\n\nAll 4446 service tests pass. New code has 100% line coverage."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "3cb8cb71c1ef93096881a3420b4481ba1bc712d1",
+      "message": "fix: handle duplicate tool names across teams in invoke_tool\n\nChange scalar_one_or_none() to scalars().all() to prevent\nMultipleResultsFound crash when the same tool name exists in\nmultiple teams. Filter candidates through _check_tool_access\nand prioritize by visibility (team > private > public).\n\nCloses #2863\n\nSigned-off-by: Keval Mahajan <mahajankeval23@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Keval Mahajan",
+      "date": "2026-02-13T15:07:57+00:00"
+    },
+    {
+      "sha": "ddb936207ea3c052dfa547cf873ba75a41b9123f",
+      "message": "fix: reuse _check_tool_access for multi-tool filtering, skip cache on duplicates\n\n- Replace hand-rolled visibility filtering with _check_tool_access\n  to ensure consistent access control (is_public_only_token, admin\n  bypass, team DB fallback)\n- Skip cache when multiple tools share a name since resolution is\n  user-dependent\n- Fix duplicate comment block and misleading test names\n- Add tests for cache-skip behavior and public-only token filtering\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-13T15:08:13+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 607,
+  "deletions": 271,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:03.600238",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:03.601240",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2880,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2880.json"
+  }
+}

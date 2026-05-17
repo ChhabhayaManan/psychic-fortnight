@@ -1,0 +1,113 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3650,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3650"
+  },
+  "metadata": {
+    "title": "fix(ui): set MAX_MEMBERS_PER_TEAM in team forms",
+    "state": "closed",
+    "created_at": "2026-03-12T11:42:23+00:00",
+    "updated_at": "2026-03-24T14:46:34+00:00",
+    "closed_at": "2026-03-24T14:46:31+00:00",
+    "merged_at": "2026-03-24T14:46:31+00:00",
+    "author": "gcgoncalves",
+    "labels": [
+      "bug",
+      "wxo",
+      "ui",
+      "MUST",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nThe \"Maximum Members\" field in the **Create Team** and **Edit Team** modals has `max=\"1000\"` hardcoded in the HTML. The `MAX_MEMBERS_PER_TEAM` environment variable (default: `100`) is correctly read by the backend but is never surfaced to the admin UI, so:\r\n\r\n- When `MAX_MEMBERS_PER_TEAM > 1000`: the form rejects values above 1000, preventing creation of teams larger than 1000 even though the backend allows it.\r\n- When `MAX_MEMBERS_PER_TEAM < 1000`: the form allows values up to 1000, so a non-admin user can set `max_members` well above the configured limit.\r\n\r\nCloses #3589\r\n\r\n## 🔁 Reproduction Steps\r\n1. Set `MAX_MEMBERS_PER_TEAM=30` in `.env`.\r\n2. Start the app (`make dev`).\r\n3. Log in to the Admin UI as a non-admin user.\r\n4. Navigate to the **Teams** tab → **Create new team**.\r\n5. Set **Maximum Members** to `500` (above the env setting but below 1000).\r\n6. Click **Save**.\r\n\r\n**Observed:** Team is created with `max_members=500` — the env cap of `30` is silently bypassed by the UI.\r\n\r\n**Alternative path (`MAX_MEMBERS_PER_TEAM > 1000`):**\r\n\r\n1. Set `MAX_MEMBERS_PER_TEAM=2000`.\r\n2. Try to set **Maximum Members** to `1500`.\r\n3. Browser rejects the input: \"Value must be ≤ 1000\".\r\n\r\n---\r\n\r\n## Acceptance Criteria\r\n\r\n- [ ] For **admin users**, the \"Maximum Members\" input in the Create Team modal has no `max` attribute.\r\n- [ ] For **non-admin users**, the input has `max` set to `MAX_MEMBERS_PER_TEAM`.\r\n- [ ] The same admin/non-admin distinction applies in the **Edit Team** modal.\r\n- [ ] The default `value` in the Create modal is `min(50, MAX_MEMBERS_PER_TEAM)`.\r\n- [ ] Helper text accurately reflects the limit:\r\n  - Admin: e.g. `\"Optional. Admins can set any limit.\"`\r\n  - Non-admin: e.g. `\"Optional, defaults to {MAX_MEMBERS_PER_TEAM}.\"`\r\n- [ ] Changing `MAX_MEMBERS_PER_TEAM` in the env and restarting reflects the new value without code changes.\r\n- [ ] `min=\"1\"` is preserved on all inputs (regression guard).\r\n\r\n\r\n## 🐞 Root Cause\r\nTwo locations have `max=\"1000\"` hardcoded instead of reading from `settings.max_members_per_team`:\r\n\r\n| File | Context |\r\n|------|---------|\r\n| `mcpgateway/templates/admin.html` | Create Team modal — `<input type=\"number\" name=\"max_members\" min=\"1\" max=\"1000\" ...>` |\r\n| `mcpgateway/admin.py` | Edit Team modal — Python f-string: `<input type=\"number\" name=\"max_members\" min=\"1\" max=\"1000\" ...>` |\r\n\r\nAdditionally, `max_members_per_team` is never passed to the admin template context in `admin.py` (main page render at ~line 3628), so Jinja2 cannot reference it.\r\n\r\n\r\n## 💡 Fix Description\r\nThe \"Maximum Members\" input in the Create Team and Edit Team modals had max=\"1000\" hardcoded, causing two problems:\r\n- non-admin users could set max_members above `MAX_MEMBERS_PER_TEAM`\r\n- when `MAX_MEMBERS_PER_TEAM` > 1000, the browser rejected valid values\r\n\r\nFix by surfacing the setting to the UI with role-aware behaviour:\r\n- admins: no max attribute (no browser-side cap, matching `max_members` in the backend)\r\n- non-admins: max attribute set to `MAX_MEMBERS_PER_TEAM` (default 100)\r\n\r\nThe default value in the Create modal is min(50, `MAX_MEMBERS_PER_TEAM`)\r\nso tighter operator-configured limits are respected out of the box.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n\r\n## ✅ Checklist\r\n- [ ] Code formatted (`make black isort pre-commit`)\r\n- [ ] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3944295729",
+      "author": "vishu-bh",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-13T14:08:24+00:00",
+      "body": "Thanks @gcgoncalves to address this issue. The UI change is heading in the right direction and does improve the form behavior, but I found one important gap that still leaves the underlying problem unresolved.\n\n  - High: The current change only fixes the browser-side constraint, not the server-side enforcement. Non-admin users can still bypass the new max attribute by submitting a crafted POST request with a larger max_members value, and the backend\n    will accept it. That means the original issue is still present from a security/policy perspective.\n    Suggested solution: add backend validation in the create/update team handlers or service layer to enforce settings.max_members_per_team for non-admin users, and only allow values above that limit for admins if that is the intended behavior.\n    This should be enforced server-side regardless of what the UI renders.\n  - Medium: The PR does not include tests covering the new admin vs non-admin behavior or the original bug scenario. That makes it hard to verify the acceptance criteria and would likely allow regressions later.\n    Suggested solution: add tests for both create and edit flows that verify:\n      1. non-admin users cannot submit max_members above MAX_MEMBERS_PER_TEAM\n      2. admin users can submit higher values if that is expected\n      3. the rendered form shows the correct max attribute and helper text for both roles\n  - Low: The PR description mentions that the admin UI behavior matches the backend via skip_limits, but in the current implementation that backend flag appears to relate to team-count limits rather than max_members limits. That makes the\n    current explanation a bit misleading.\n    Suggested solution: update the implementation or the PR description so they are aligned. If admins are meant to bypass MAX_MEMBERS_PER_TEAM, that logic should exist explicitly in the backend; otherwise the description should avoid implying\n    that it already does.\n\n  Overall, the UI part looks good, but I think this needs server-side enforcement plus a small test pass before it fully closes the issue."
+    },
+    {
+      "id": "3944995587",
+      "author": "vishu-bh",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-13T15:38:55+00:00",
+      "body": "this is a solid iteration: the UI fix is good, the role-aware behavior is clearer, and adding server-side checks plus tests is the right direction.\n\nLGTM 🚀 \n\nOnce the CI check passes it can be approved"
+    },
+    {
+      "id": "3997969877",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-24T10:23:32+00:00",
+      "body": ""
+    },
+    {
+      "id": "3998169663",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-24T10:53:31+00:00",
+      "body": "LGTM 🚀 "
+    },
+    {
+      "id": "3999658889",
+      "author": "marekdano",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-24T14:26:06+00:00",
+      "body": "LGTM 🚀 "
+    },
+    {
+      "id": "3999832542",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-24T14:46:08+00:00",
+      "body": "Good fix — the hardcoded `max=\"1000\"` was a real bug affecting both directions (non-admins bypassing the cap, admins blocked above 1000).\n\nI rebased onto main (clean, no conflicts) and added three commits on top:\n\n1. **`fix(teams): use extracted is_admin var in update_team, add boundary test`** — `update_team` was re-evaluating `bool(current_user.get(\"is_admin\"))` for `skip_limits` instead of using the `is_admin` variable already extracted two lines above. Also added the missing boundary test for non-admin update at exactly the configured limit (the create path had it, update didn't).\n\n2. **`fix(ui): handle over-limit max_members in non-admin team edit form`** — Edge case: if an admin previously set a team's `max_members` above the configured cap (e.g. 500 when limit is 100), a non-admin opening the edit modal would see `<input max=\"100\" value=\"500\">`, which causes browser validation failure and blocks form submission entirely (can't even edit the team name). Fixed by rendering an empty field with a hint showing the current value and allowed limit. Submitting empty preserves the existing value server-side. Added two regression tests (admin vs non-admin over-limit edit).\n\n3. **`fix(docs): add missing docstring sections in passthrough_headers`** — Unrelated flake8 DAR fixes for `_loopback_skip_set`, `safe_extract_headers_for_loopback`, and `safe_extract_and_filter_for_loopback`.\n\nAll tests pass (67 router tests + 3 new admin tests)."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "8f331c0be45b4bf171c0f67928c0decc76fdfbbd",
+      "message": "fix(ui): set MAX_MEMBERS_PER_TEAM in team forms\n\nThe \"Maximum Members\" input in the Create Team and Edit Team modals\nhad max=\"1000\" hardcoded, causing two problems:\n- non-admin users could set max_members above MAX_MEMBERS_PER_TEAM\n- when MAX_MEMBERS_PER_TEAM > 1000, the browser rejected valid values\n\nFix by surfacing the setting to the UI with role-aware behaviour:\n- admins: no max attribute (no browser-side cap, matching skip_limits in the backend)\n- non-admins: max attribute set to MAX_MEMBERS_PER_TEAM (default 100)\n\nThe default value in the Create modal is min(50, MAX_MEMBERS_PER_TEAM)\nso tighter operator-configured limits are respected out of the box.\n\nCloses #3589\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-03-12T11:26:03+00:00"
+    },
+    {
+      "sha": "22a14d09acd48139c2a3eb65f455768b87ad5e96",
+      "message": "fix(teams): use extracted is_admin var in update_team, add boundary test\n\nUse the already-extracted `is_admin` variable for `skip_limits` in\nupdate_team instead of re-evaluating `bool(current_user.get(\"is_admin\"))`.\n\nAdd missing boundary test for non-admin update at exactly the configured\nmax_members_per_team limit, matching the create-path coverage.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-24T13:04:52+00:00"
+    },
+    {
+      "sha": "b642613b6ccd5726027185a57e63f4554952ccc3",
+      "message": "fix(ui): handle over-limit max_members in non-admin team edit form\n\nWhen a non-admin user edits a team whose max_members already exceeds the\nconfigured MAX_MEMBERS_PER_TEAM (e.g. set by an admin), the HTML form\nwould render value > max, causing browser validation to block submission.\n\nFix by showing an empty field with a hint displaying the current value\nand the allowed limit. Submitting empty preserves the existing value\nserver-side. Admins continue to see the actual value with no cap.\n\nAdd regression tests for both admin and non-admin over-limit edit cases.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-24T13:43:54+00:00"
+    },
+    {
+      "sha": "e5b37f3302bf3b7f66feb3673daaecf71732921f",
+      "message": "fix(docs): add missing docstring sections in passthrough_headers\n\nAdd missing Args and Returns to _loopback_skip_set,\nsafe_extract_headers_for_loopback, and\nsafe_extract_and_filter_for_loopback to satisfy flake8 DAR checks.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-24T13:44:00+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 217,
+  "deletions": 14,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:09:17.233210",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:09:17.234467",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3650,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3650.json"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4286,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4286"
+  },
+  "metadata": {
+    "title": "feat: Remove plugin enum, plugin config schema validation and fix tool binding key lookup",
+    "state": "closed",
+    "created_at": "2026-04-17T17:29:36+00:00",
+    "updated_at": "2026-04-20T11:00:18+00:00",
+    "closed_at": "2026-04-20T11:00:16+00:00",
+    "merged_at": "2026-04-20T11:00:16+00:00",
+    "author": "madhu-mohan-jaishankar",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #4289 #4253\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nThis PR fixes a correctness bug in plugin binding resolution and removes architectural coupling between CF and the plugin framework.\r\n\r\n**Bug fix — binding key was wrong**\r\n\r\nWhen a tool was invoked, CF looked up plugin bindings using `original_name` (e.g. `read_file`) as the key. The problem is that `original_name` is only unique per gateway — two gateways in the same team can both expose a tool named `read_file`. This meant a binding intended for one tool could match the wrong tool depending on which gateway was invoked first. The fix uses `name` (e.g. `mac-fs-read-file`), which is the gateway-prefixed identifier enforced unique per team by DB constraint `uq_team_owner_email_name_tool`. This applies to both `prepare_rust_mcp_tool_execution` and `invoke_tool`.\r\n\r\n**Refactor — CF does not own plugin contracts**\r\n\r\nThe original design had CF maintaining a `PluginId` enum (`OUTPUT_LENGTH_GUARD`, `RATE_LIMITER`, `SECRETS_DETECTION`), a mapping from those enum values to plugin class names, full Pydantic config schemas for each plugin (`OutputLengthGuardConfig`, `RateLimiterConfig`, `SecretsDetectionConfig`), and a validator that checked every config field against those schemas at binding creation time.\r\n\r\nThis was wrong for three reasons:\r\n1. Plugins live in a separate repo (cpex). Every new plugin required a CF PR just to be stored and routed — before it could even be used.\r\n2. Config schemas in CF would drift from the authoritative definitions in cpex over time.\r\n3. Field-level config validation belongs in the plugin at execution time, not in the gateway at binding creation time.\r\n\r\nThe refactor removes all of this in stages. First, the `PluginId` enum is replaced with plain strings — plugin class names are stored directly in the DB as-is. Then the config schema classes and registry machinery are removed entirely. Finally, even the simplified name allowlist (`_KNOWN_PLUGIN_NAMES` frozenset) is removed, because CF has no business knowing which plugins exist at all.\r\n\r\nThe end state: `plugin_id` is a plain stored string. CF persists whatever WXO sends verbatim. The plugin framework in cpex resolves it at execution time and ignores names it doesn't recognise. New plugins in cpex require zero CF changes.\r\n\r\nA regression guard test (`test_unknown_plugin_id_passed_through` in `test_gateway_plugin_manager.py`) is retained to ensure CF never accidentally re-introduces filtering of unknown plugin names.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [x] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅     |\r\n| Unit tests                | `make test`     | ✅     |\r\n| Coverage ≥ 80%            | `make coverage` | ✅     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4138746617",
+      "author": "cafalchio",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-20T09:21:00+00:00",
+      "body": "Thanks for the change, approved"
+    },
+    {
+      "id": "4139339541",
+      "author": "msureshkumar88",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-20T10:56:20+00:00",
+      "body": "# GitHub PR Approval Comment for #4286\n\n## ✅ Approved\n\nGreat work on this PR! The changes successfully address the binding key bug and improve the architecture.\n\n### Key Improvements\n- **Bug Fix**: Correctly changes tool binding lookup from `original_name` to `name`, preventing cross-gateway collisions\n- **Clean Refactoring**: Removes 653 lines of stale validation code while maintaining functionality\n- **Architectural Improvement**: Properly delegates plugin validation to cpex, enabling zero-CF-change plugin additions\n- **Good Test Coverage**: Includes regression guard `test_unknown_plugin_id_passed_through` and comprehensive binding key tests\n\n### Implementation Quality\n- Follows SOLID principles with clean separation of concerns\n- Matches PR description perfectly\n- No breaking changes to existing functionality\n- Well-tested with existing test suite\n\nThe refactoring is well-executed and the bug fix is critical for multi-gateway deployments. Nice job! 🚀\n\n**Approved for merge.**\n"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ad2ed0380920622f5c36bc49bfb871706c2238d3",
+      "message": "refactor: replace PluginId enum with direct plugin names, drop CF config validation\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-17T17:26:36+00:00"
+    },
+    {
+      "sha": "540a6c630dfccf7e7cca6fed22f1bb0cf3036aa0",
+      "message": "refactor: remove plugin config schemas and name allowlist from CF\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-20T00:40:13+00:00"
+    },
+    {
+      "sha": "046de1b6bed9b671f2099f7b595d9d649460a675",
+      "message": "fix: remove unused ValidationError import from schemas.py\n\nSigned-off-by: Madhu Mohan Jaishankar <madhu.mohan.jaishankar@ibm.com>",
+      "author": "Madhu Mohan Jaishankar",
+      "date": "2026-04-20T01:09:27+00:00"
+    }
+  ],
+  "files_changed": 8,
+  "additions": 199,
+  "deletions": 653,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:28.904437",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:28.905253",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4286,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4286.json"
+  }
+}

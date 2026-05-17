@@ -1,0 +1,714 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4053,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4053"
+  },
+  "metadata": {
+    "title": "feat(helm): preliminary experimental OCP deployment with managed PGO and MCP benchmark",
+    "state": "closed",
+    "created_at": "2026-04-06T20:40:36+00:00",
+    "updated_at": "2026-04-15T16:44:28+00:00",
+    "closed_at": "2026-04-15T16:44:25+00:00",
+    "merged_at": "2026-04-15T16:44:25+00:00",
+    "author": "gandhipratik203",
+    "labels": [
+      "enhancement",
+      "testing",
+      "devops"
+    ],
+    "milestone": null,
+    "assignees": [
+      "gandhipratik203",
+      "brian-hussey"
+    ]
+  },
+  "description": "## Summary\n\nAdds OpenShift (OCP) deployment support using an externally managed PostgreSQL operator (CrunchyData PGO). The standard Helm chart assumes root container access and Helm-managed Postgres/PgBouncer, which are blocked by OpenShift's restricted-v2 SCC. This PR makes the chart OCP-compatible with backwards-compatible template changes and provides a tested OCP values file with MCP benchmark results.\n\nAll template changes are gated by values that default to off — non-OCP deployments are unaffected.\n\nDeployment is automated via Ansible playbooks (`ansible/ocp/playbooks/`), with Make targets as thin wrappers for a simpler interface. The full deployment and benchmark flow is:\n\n```bash\n# One-time cluster setup\nmake ocp-install-operator OCP_CLUSTER=<api-url>  # install CrunchyData PGO operator (cluster-wide)\n\n# Per-namespace deployment\nmake ocp-setup OCP_NS=<namespace>           # namespace + PostgresCluster + schema privileges\nmake ocp-deploy OCP_NS=<namespace>          # helm install (migration runs as pre-install hook)\nmake ocp-benchmark-setup OCP_NS=<namespace> # enable Locust, fetch server ID\nmake ocp-benchmark OCP_NS=<namespace>       # trigger benchmark (default 125 users)\n```\n\nThe deployment was validated on a 3-worker OCP 4.20 cluster with 3 gateway replicas, 3 NGINX proxies, CrunchyData-managed PostgreSQL with PgBouncer, and Redis. The MCP benchmark achieved up to **669 RPS with 0% failures** (750 users) using the Python MCP core with session pooling enabled.\n\nFull deployment guide: [`docs/docs/deployment/openshift-pgo.md`](https://github.com/IBM/mcp-context-forge/blob/ocp-mcp-benchmark-python/docs/docs/deployment/openshift-pgo.md)\n\n---\n\n## Gaps closed\n\n**Gap 1 (HIGH)** — NGINX default image requires root (port 80, pid file): Pod fails to start under restricted-v2 SCC. Fixed by making `containerPort` configurable (defaults to 80) and adding `pid /tmp/nginx.pid;` to the NGINX ConfigMap template. OCP deployments set `containerPort: 8080` via values.\n\n**Gap 2 (HIGH)** — No support for externally managed Postgres: Can't connect to operator-provided Postgres via existing secret. Fixed by using `postgres.external.enabled` with configurable secret key mappings (`hostKey`, `portKey`, `databaseKey`, `userKey`, `passwordKey`) that read from the CrunchyData PGO-generated secret.\n\n**Gap 3 (HIGH)** — No OpenShift Route for external access: OCP doesn't use Ingress by default. Fixed by adding `templates/platform/ocp/route.yaml` with support for both edge and re-encrypt TLS termination. Gated by `route.enabled` (default: false). In re-encrypt mode, OCP's Service CA auto-generates and rotates TLS certificates via the `serving-cert-secret-name` annotation — no manual certificate management needed.\n\n**Gap 4 (MEDIUM)** — No TLS support on NGINX proxy: Re-encrypt termination requires NGINX to accept TLS connections. Fixed by adding a TLS server block to the NGINX ConfigMap, TLS volume mounts in the deployment, and HTTPS port in the service — all gated by `nginxProxy.tls.enabled` (default: false).\n\n**Gap 5 (MEDIUM)** — Redis inline comments break config parser: Redis `save` directives had inline comments (`save 900 1 # comment`) which Redis silently ignores, causing RDB persistence to not work. Fixed by removing the inline comments.\n\n**Gap 6 (MEDIUM)** — No OCP performance baseline: No benchmark results to measure against. Fixed with documented results showing 371 RPS / 0% failures with Python MCP core and session pooling.\n\n---\n\n## Architecture\n\n### OCP deployment topology\n\n```text\n                         ┌─────────────┐\n                         │   Client     │\n                         │  (laptop /   │\n                         │   browser)   │\n                         └──────┬───────┘\n                                │ HTTPS\n                                ▼\n┌──────────────────────────────────────────────────────────────────────────┐\n│  OCP Cluster                                                              │\n│                                                                           │\n│  ┌─────────────────────────────────────────────────────────────────────┐  │\n│  │  OCP Router (HAProxy)                                                │  │\n│  │  TLS termination: edge (simple) or re-encrypt (encrypted in cluster)│  │\n│  │  Certs auto-managed by OCP Service CA in re-encrypt mode            │  │\n│  └────────────────────────────────┬────────────────────────────────────┘  │\n│                                   │ HTTP (:80) or HTTPS (:8443)           │\n│                                   ▼                                       │\n│  ┌─────────────────────────────────────────────────────────────────────┐  │\n│  │  NGINX Proxy                                                         │  │\n│  │  3 pods × 4 CPU  |  Port 8080 (HTTP), 8443 (TLS)  |  32K conns     │  │\n│  └────────────────────────────────┬────────────────────────────────────┘  │\n│                                   │ HTTP (K8s Service, round-robin)        │\n│                                   ▼                                       │\n│  ┌─────────────────────────────────────────────────────────────────────┐  │\n│  │  ContextForge Gateway                                                │  │\n│  │  3 pods × 8 CPU  |  Gunicorn 8 workers  |  Python MCP core          │  │\n│  │  Session pool enabled  |  Cache TTLs 300s  |  7 plugins (permissive) │  │\n│  └───┬──────────┬──────────────────┬──────────────────┬────────────────┘  │\n│      │          │                  │                   │                   │\n│      │          ▼                          ▼                               │\n│      │  ┌────────────────────┐  ┌────────────────────┐                    │\n│      │  │  fast-time server   │  │  fast-time server   │                    │\n│      │  │  Go, :80            │  │  Go, :80 (replica)  │                    │\n│      │  │  get-time,          │  │                      │                    │\n│      │  │  convert-time       │  │                      │                    │\n│      │  └────────────────────┘  └────────────────────┘                    │\n│      │                                                                    │\n│      │  Gateway also connects to:                                         │\n│      │                                                                    │\n│      ├──────────────────────────────────┐                                 │\n│      │                                  │                                 │\n│      ▼                                  ▼                                 │\n│  ┌──────────────────────────────────┐  ┌────────────────────────────┐    │\n│  │  CrunchyData PGO                 │  │  Redis                      │    │\n│  │                                  │  │  2 CPU, 2Gi                 │    │\n│  │  PostgreSQL        PgBouncer     │  │                             │    │\n│  │  4 CPU, 8Gi        pool: 600    │  │  Auth cache, tool cache,    │    │\n│  │  shared_buf 512MB  max DB: 700   │  │  session pool, registry     │    │\n│  │  sync_commit: off  max cli: 5000 │  │                             │    │\n│  │                                  │  │  (Gateway reads/writes      │    │\n│  │  (users, tools, servers,         │  │   on every request for      │    │\n│  │   sessions, migrations)          │  │   auth + tool resolution)   │    │\n│  └──────────────────────────────────┘  └────────────────────────────┘    │\n│                                                                           │\n└──────────────────────────────────────────────────────────────────────────┘\n```\n\n<details>\n<summary>MCP benchmark test setup</summary>\n\n```text\n┌──────────────────────────────────────────────────────────────────────────┐\n│  OCP Cluster                                                              │\n│                                                                           │\n│  ┌─────────────────────────────────────────────────────────────────────┐  │\n│  │  Locust (benchmark)                                                  │  │\n│  │  Master (4 CPU, 2Gi)  +  3 Workers (2 CPU each)                     │  │\n│  │  125 concurrent users, distributed mode                              │  │\n│  └────────────────────────────────┬────────────────────────────────────┘  │\n│                                   │ HTTP (port 80, plain text)             │\n│                                   ▼                                       │\n│  ┌─────────────────────────────────────────────────────────────────────┐  │\n│  │  NGINX Proxy                                                         │  │\n│  │  3 pods × 4 CPU  |  Port 8080  |  32K worker connections            │  │\n│  └────────────────────────────────┬────────────────────────────────────┘  │\n│                                   │ HTTP (K8s Service, round-robin)        │\n│                                   ▼                                       │\n│  ┌─────────────────────────────────────────────────────────────────────┐  │\n│  │  ContextForge Gateway                                                │  │\n│  │  3 pods × 8 CPU  |  Gunicorn 8 workers  |  Python MCP core          │  │\n│  │  Session pool enabled  |  Cache TTLs 300s  |  7 plugins (permissive) │  │\n│  └───┬──────────┬──────────────────┬──────────────────┬────────────────┘  │\n│      │          │                  │                   │                   │\n│      │          ▼                          ▼                               │\n│      │  ┌────────────────────┐  ┌────────────────────┐                    │\n│      │  │  fast-time server   │  │  fast-time server   │                    │\n│      │  │  Go, :80            │  │  Go, :80 (replica)  │                    │\n│      │  │  get-time,          │  │                      │                    │\n│      │  │  convert-time       │  │                      │                    │\n│      │  └────────────────────┘  └────────────────────┘                    │\n│      │                                                                    │\n│      │  Gateway also connects to:                                         │\n│      │                                                                    │\n│      ├──────────────────────────────────┐                                 │\n│      │                                  │                                 │\n│      ▼                                  ▼                                 │\n│  ┌──────────────────────────────────┐  ┌────────────────────────────┐    │\n│  │  CrunchyData PGO                 │  │  Redis                      │    │\n│  │                                  │  │  2 CPU, 2Gi                 │    │\n│  │  PostgreSQL        PgBouncer     │  │                             │    │\n│  │  4 CPU, 8Gi        pool: 600    │  │  Auth cache, tool cache,    │    │\n│  │  shared_buf 512MB  max DB: 700   │  │  session pool, registry     │    │\n│  │  sync_commit: off  max cli: 5000 │  │                             │    │\n│  │                                  │  │  (Gateway reads/writes      │    │\n│  │  (users, tools, servers,         │  │   on every request for      │    │\n│  │   sessions, migrations)          │  │   auth + tool resolution)   │    │\n│  └──────────────────────────────────┘  └────────────────────────────┘    │\n│                                                                           │\n└──────────────────────────────────────────────────────────────────────────┘\n```\n\n</details>\n\n---\n\n## Test results\n\n<details>\n<summary>OCP environment setup</summary>\n\n**Prerequisites:**\n- OCP cluster with CrunchyData PGO operator installed\n- `nfs-client` StorageClass available (dynamic NFS provisioner)\n- Local secrets override file created (`profiles/ocp/values-pgo-secrets.yaml`, gitignored — see values file header for expected keys)\n\n**Deploy via Make commands:**\n```bash\nmake ocp-setup OCP_NS=<namespace>           # namespace + PostgresCluster CR + schema privileges\nmake ocp-deploy OCP_NS=<namespace>          # helm install (migration runs as pre-install hook)\n```\n\nThis deploys 3 gateway pods, 3 NGINX pods, Redis, and fast-time-server. PVCs are dynamically provisioned via `nfs-client`. Migration runs as a `pre-install` hook directly to Postgres (bypasses PgBouncer). Registration hooks auto-register the fast-time server and create a virtual server.\n\nFor detailed steps including CrunchyData PGO setup, see [`docs/docs/deployment/openshift-pgo.md`](https://github.com/IBM/mcp-context-forge/blob/ocp-mcp-benchmark-python/docs/docs/deployment/openshift-pgo.md).\n\n</details>\n\n<details>\n<summary>MCP benchmark — in-cluster (Locust, 125 users, 60s)</summary>\n\n**Test setup:**\n```bash\nmake ocp-benchmark-setup OCP_NS=<namespace>   # enables Locust, fetches server ID, waits for workers\nmake ocp-benchmark OCP_NS=<namespace>          # triggers the benchmark\n```\n\nThe Helm chart deploys the OCP-patched locustfile from `charts/mcp-stack/files/ocp/locustfile_mcp_protocol.py`, configures ZeroMQ ports in the Locust Service, and injects MCP_SERVER_ID — all automatically via values. No manual patching needed.\n\n**Results:**\n\n| Metric | Value |\n|--------|-------|\n| Total requests | ~19,200 |\n| **RPS** | **372** |\n| Avg response | 261ms |\n| **Failures** | **0%** |\n\nConfiguration: 3 gateway pods (8 CPU, Gunicorn 8 workers), 3 NGINX pods, CrunchyData Postgres, Redis, Locust (1 master + 3 workers), all MCP protocol user classes.\n\nPath: Locust → HTTP (port 80) → NGINX → Gateway → MCP servers\n\n</details>\n\n<details>\n<summary>MCP benchmark — external from laptop (HTTPS via OCP Route, 125 users, 60s)</summary>\n\nSame MCP benchmark running from a laptop over VPN. Tests the full external access path including TLS.\n\n**Test setup:**\n```bash\n# Prerequisites: Locust and pyjwt installed locally\npip install locust pyjwt\n\n# Get the Route URL and virtual server ID\nROUTE_HOST=$(oc -n <namespace> get route <release>-mcp-stack -o jsonpath='{.spec.host}')\nSERVER_ID=$(curl -sk https://$ROUTE_HOST/servers \\\n  -H \"Authorization: Bearer <token>\" | python3 -c \"import json,sys; print(json.load(sys.stdin)[0]['id'])\")\n```\n\n**Run:**\n```bash\nMCP_SERVER_ID=$SERVER_ID \\\nJWT_SECRET_KEY=<your-jwt-key> \\\nlocust -f tests/loadtest/locustfile_mcp_protocol.py \\\n  --host=https://$ROUTE_HOST \\\n  --users=125 --spawn-rate=30 --run-time=60s \\\n  --headless --only-summary\n```\n\n**Results:**\n\n| TLS Mode | Total Requests | RPS | Avg | p50 | p95 | p99 | Failures |\n|----------|---------------|-----|-----|-----|-----|-----|----------|\n| Re-encrypt | 11,627 | **194** | 179ms | 170ms | 210ms | 610ms | **0%** |\n| Edge | 11,529 | **193** | 187ms | 170ms | 260ms | 620ms | **0%** |\n\nPath: Laptop → HTTPS → OCP Router (TLS termination) → NGINX → Gateway → MCP servers\n\n</details>\n\n<details>\n<summary>In-cluster vs External comparison</summary>\n\n| Source | RPS | p50 Latency | Path | Failures |\n|--------|-----|-------------|------|----------|\n| In-cluster (Locust) | **357** | 94ms | HTTP → NGINX → Gateway | 0% |\n| Laptop (external) | **194** | 170ms | HTTPS → OCP Router → NGINX → Gateway | 0% |\n\nThe ~80ms latency difference is VPN + internet network distance. Both edge and re-encrypt TLS modes perform identically from the laptop — the network latency dominates over the extra TLS hop.\n\n**Both paths: 0% failures, fully functional end-to-end.**\n\n</details>\n\n<details>\n<summary>Rate limiter correctness test (enforce mode, 3 gateway pods)</summary>\n\nValidates that the RateLimiterPlugin correctly enforces per-user limits across multiple gateway pods using Redis as a shared backend.\n\n**Configuration:**\n\n| Setting | Value |\n|---------|-------|\n| Algorithm | `fixed_window` (default) |\n| Backend | `redis` (shared across 3 pods) |\n| Limit | `by_user: \"30/m\"` (30 requests per minute per user) |\n| Mode | `enforce` (patched from default `permissive`) |\n\n**Test setup:**\n\nRequires `pluginConfig.enabled: true` and a redeploy. Then patch the RateLimiterPlugin to enforce mode:\n\n```bash\n# Patch plugin ConfigMap — change RateLimiterPlugin mode to enforce\noc -n <namespace> get cm <release>-mcp-stack-gateway-plugins -o json > /tmp/plugins.json\n# Edit: change \"mode\": \"permissive\" to \"mode\": \"enforce\" for RateLimiterPlugin\noc apply -f /tmp/plugins.json\noc -n <namespace> delete pods -l app=<release>-mcp-stack-mcpgateway\n\n# Verify\noc -n <namespace> logs deploy/<release>-mcp-stack-mcpgateway | grep \"RateLimiter.*mode\"\n# Expect: Loaded plugin: RateLimiterPlugin (mode: PluginMode.ENFORCE)\n```\n\nDeploy rate limiter locustfile (needs OCP patches — see [deployment guide](https://github.com/IBM/mcp-context-forge/blob/ocp-mcp-benchmark-python/docs/docs/deployment/openshift-pgo.md)):\n\n```bash\noc -n <namespace> create configmap <release>-mcp-stack-locust-script \\\n  --from-file=locustfile.py=tests/loadtest/locustfile_rate_limiter_backend_correctness.py \\\n  --dry-run=client -o yaml | oc replace -f -\n\noc -n <namespace> set env deploy/<release>-mcp-stack-locust \\\n  JWT_SECRET_KEY=<your-jwt-key> MCP_SERVER_ID=<virtual-server-uuid>\noc -n <namespace> set env deploy/<release>-mcp-stack-locust-worker \\\n  JWT_SECRET_KEY=<your-jwt-key> MCP_SERVER_ID=<virtual-server-uuid>\n\noc -n <namespace> delete pods -l app=<release>-mcp-stack-locust\noc -n <namespace> delete pods -l app=<release>-mcp-stack-locust-worker\n```\n\n**Run:** 1 user at 1 req/s (60 req/min = 2x the 30/min limit) for 2 minutes:\n```bash\ncurl -X POST http://locust:8089/swarm \\\n  -d 'user_count=1&spawn_rate=1&run_time=120s'\n```\n\n**Results:**\n\n| Endpoint | Requests | Description |\n|----------|----------|-------------|\n| MCP tools/call [allowed] | **60** | Requests within the rate limit |\n| MCP tools/call [rate-limited] | **60** | Requests blocked by rate limiter |\n| MCP initialize | 1 | Session setup |\n\n**Result: 50/50 split — Redis backend correctly enforcing shared rate limits across all 3 gateway pods.** 0% infrastructure failures.\n\n</details>\n\n<details>\n<summary>Rate limiter Redis capacity test (100 users, prompt pre-fetch path)</summary>\n\nTests the Redis rate limiter hot path throughput under concurrent load. 100 users hitting the prompt pre-fetch path at 0.25 req/s each, avoiding downstream MCP tool invocation to isolate the rate limiter path.\n\n**Configuration:**\n\n| Setting | Value |\n|---------|-------|\n| Algorithm | `fixed_window` (default) |\n| Backend | `redis` (shared across 3 pods) |\n| Limit | `by_user: \"30/m\"` (30 requests per minute per user) |\n| Mode | `enforce` (patched from default `permissive`) |\n\n**Test setup:**\n\nRequires `pluginConfig.enabled: true` and RateLimiterPlugin in enforce mode (same as correctness test above). Deploy the capacity locustfile:\n\n```bash\n# Deploy capacity locustfile (needs OCP patches — see deployment guide)\noc -n <namespace> create configmap <release>-mcp-stack-locust-script \\\n  --from-file=locustfile.py=tests/loadtest/locustfile_rate_limiter_redis_capacity.py \\\n  --dry-run=client -o yaml | oc replace -f -\n\noc -n <namespace> set env deploy/<release>-mcp-stack-locust \\\n  JWT_SECRET_KEY=<your-jwt-key> MCP_SERVER_ID=<virtual-server-uuid>\noc -n <namespace> set env deploy/<release>-mcp-stack-locust-worker \\\n  JWT_SECRET_KEY=<your-jwt-key> MCP_SERVER_ID=<virtual-server-uuid>\n\noc -n <namespace> delete pods -l app=<release>-mcp-stack-locust\noc -n <namespace> delete pods -l app=<release>-mcp-stack-locust-worker\n```\n\n**Run:** 100 users, 0.25 req/s each, 2 minutes:\n```bash\ncurl -X POST http://locust:8089/swarm \\\n  -d 'user_count=100&spawn_rate=10&run_time=120s'\n```\n\n**Results:**\n\n| Endpoint | Requests | % | Avg Latency | RPS |\n|----------|----------|---|-------------|-----|\n| Prompt execute [rate-limited] | 1,640 | 96.5% | 185ms | 18.6 |\n| Prompt execute [allowed] | 60 | 3.5% | 604ms | 1.4 |\n| **Total** | **1,700** | **0% failures** | **200ms** | **20.0** |\n\n**Result: Rate limiter correctly enforces per-user limits at scale. Redis backend sustained 20 RPS with 200ms average latency under 100 concurrent users.**\n\n</details>\n\n<details>\n<summary>Rate limiter algorithm scale test (100 unique users, 3 algorithms)</summary>\n\n100 unique users, each with their own rate limit key in Redis, sending tools/call at 1 req/s. Tests correctness across all three algorithms: `fixed_window`, `sliding_window`, `token_bucket`.\n\n**Configuration:**\n\n| Setting | Value |\n|---------|-------|\n| Algorithm | `fixed_window` / `sliding_window` / `token_bucket` (one per run) |\n| Backend | `redis` (shared across 3 pods) |\n| Limit | `by_user: \"30/m\"` (30 requests per minute per user) |\n| Mode | `enforce` |\n\n**Test setup:**\n\nRequires `pluginConfig.enabled: true` and RateLimiterPlugin in enforce mode (same as correctness test above). Deploy the scale locustfile:\n\n```bash\n# Deploy scale locustfile (needs OCP patches — see deployment guide)\noc -n <namespace> create configmap <release>-mcp-stack-locust-script \\\n  --from-file=locustfile.py=tests/loadtest/locustfile_rate_limiter_scale.py \\\n  --dry-run=client -o yaml | oc replace -f -\n\noc -n <namespace> set env deploy/<release>-mcp-stack-locust \\\n  JWT_SECRET_KEY=<your-jwt-key> MCP_SERVER_ID=<virtual-server-uuid>\noc -n <namespace> set env deploy/<release>-mcp-stack-locust-worker \\\n  JWT_SECRET_KEY=<your-jwt-key> MCP_SERVER_ID=<virtual-server-uuid>\n\noc -n <namespace> delete pods -l app=<release>-mcp-stack-locust\noc -n <namespace> delete pods -l app=<release>-mcp-stack-locust-worker\n```\n\nBetween algorithm runs, flush Redis rate limit keys and patch the algorithm:\n```bash\n# Flush rate limit keys\noc -n <namespace> exec deploy/<release>-mcp-stack-redis -- \\\n  redis-cli -a <redis-password> EVAL \"local keys = redis.call('keys', 'rl:*'); for i=1,#keys do redis.call('del', keys[i]) end; return #keys\" 0\n\n# Patch algorithm in plugin ConfigMap\noc -n <namespace> get cm <release>-mcp-stack-gateway-plugins -o json > /tmp/plugins.json\n# Edit: change algorithm: \"fixed_window\" to \"sliding_window\" (or \"token_bucket\")\noc apply -f /tmp/plugins.json\noc -n <namespace> delete pods -l app=<release>-mcp-stack-mcpgateway\n```\n\n**Run:** 100 users, 1 req/s each, 2 minutes:\n```bash\ncurl -X POST http://locust:8089/swarm \\\n  -d 'user_count=100&spawn_rate=20&run_time=120s'\n```\n\n**Results:**\n\n| Algorithm | Allowed | Rate-limited | Total | RPS | Avg Latency | Failures |\n|-----------|---------|-------------|-------|-----|-------------|----------|\n| fixed_window | 3,029 (70%) | 1,189 (28%) | 4,318 | 80.6 | 897ms | 0% |\n| sliding_window | 3,429 (78%) | 860 (20%) | 4,389 | 90.8 | 999ms | 0% |\n| token_bucket | 1,735 (54%) | 1,424 (44%) | 3,209 | 48.4 | 260ms | 0% |\n\n**Result: All three algorithms pass with 0% infrastructure failures.** `token_bucket` is the strictest (44% blocked), `sliding_window` the most permissive (20% blocked), `fixed_window` in the middle (28% blocked).\n\n</details>\n\n<details>\n<summary>MCP benchmark — with plugins enforced (3 gateway pods, 125 users, 60s)</summary>\n\n**Plugin configuration:**\n\nRateLimiterPlugin (enforce)\n- `by_user`: 10,000/m (~167 req/s per user)\n- `by_tenant`: 100,000/m\n- `backend`: Redis (shared across 3 pods)\n- `algorithm`: fixed_window (default)\n\nOutputLengthGuardPlugin (enforce)\n- `max_chars`: 15,000\n- `min_chars`: 0\n- `strategy`: truncate\n- `ellipsis`: \"...\"\n\nSecretsDetectionPlugin (enforce)\n- `block_on_detection`: true\n- `min_findings_to_block`: 1\n- Detects: AWS keys, Google API keys, Slack tokens, private key blocks, JWTs, hex secrets\n- `redact`: false\n\nOther plugins (PIIFilterPlugin, RetryWithBackoffPlugin, EncodedExfilDetector, UnifiedPDPPlugin) disabled.\n\nRate limit is set high (10,000/m per user) to measure plugin pipeline overhead without triggering rate limiting on benchmark traffic.\n\n**Test setup:**\n\n```bash\n# Patch plugin ConfigMap — set 3 plugins to enforce, disable the rest\noc -n <namespace> get cm <release>-mcp-stack-gateway-plugins -o json > /tmp/plugins.json\n# Edit: set RateLimiterPlugin, OutputLengthGuardPlugin, SecretsDetection mode to \"enforce\"\n# Edit: set RateLimiterPlugin by_user to \"10000/m\", by_tenant to \"100000/m\"\n# Edit: set PIIFilterPlugin, RetryWithBackoffPlugin, EncodedExfilDetector, UnifiedPDPPlugin mode to \"disabled\"\noc apply -f /tmp/plugins.json\n\n# Restart gateway pods to pick up new config\noc -n <namespace> delete pods -l app=<release>-mcp-stack-mcpgateway\n\n# Verify only 3 plugins loaded\noc -n <namespace> logs deploy/<release>-mcp-stack-mcpgateway | grep \"Loaded plugin\"\n# Expect: RateLimiterPlugin (ENFORCE), OutputLengthGuardPlugin (ENFORCE), SecretsDetection (ENFORCE)\n```\n\n**Run:**\n```bash\ncurl -X POST http://locust:8089/swarm \\\n  -d 'user_count=125&spawn_rate=30&run_time=60s'\n```\n\n**Results:**\n\n| Endpoint | Requests | Failures | Avg | Med |\n|----------|----------|----------|-----|-----|\n| MCP tools/list | 4,137 | 0 (0%) | 66ms | 52ms |\n| MCP initialize [churn] | 2,495 | 0 (0%) | 37ms | 24ms |\n| MCP tools/list [churn] | 2,494 | 0 (0%) | 45ms | 35ms |\n| MCP prompts/list | 2,268 | 0 (0%) | 63ms | 49ms |\n| MCP resources/list | 2,239 | 0 (0%) | 60ms | 46ms |\n| MCP tools/list [rapid] | 1,274 | 0 (0%) | 63ms | 51ms |\n| MCP resources/templates/list | 776 | 0 (0%) | 61ms | 46ms |\n| MCP ping | 530 | 0 (0%) | 50ms | 37ms |\n| MCP tools/list [stress] | 400 | 0 (0%) | 69ms | 53ms |\n| MCP ping [stress] | 133 | 0 (0%) | 54ms | 36ms |\n| MCP initialize | 113 | 0 (0%) | 127ms | 110ms |\n| **TOTAL** | **16,859** | **0 (0%)** | **57ms** | **44ms** |\n\n**288 RPS, 0% failures, 57ms avg latency**\n\nConfiguration: 3 gateway pods (8 CPU, Gunicorn 8 workers), 1 NGINX pod, CrunchyData Postgres + PgBouncer, Redis, Locust 1 master + 1 worker.\n\n</details>\n\n<details>\n<summary>Plugin overhead comparison</summary>\n\n| Config | Plugins Loaded | RPS | Avg Latency | Med Latency | Failures |\n|--------|---------------|-----|-------------|-------------|----------|\n| No plugins (all disabled) | 0 | 292 | 59ms | 44ms | 0% |\n| 3 enforce only (others disabled) | 3 | 288 | 57ms | 44ms | 0% |\n\nRateLimiter, OutputLengthGuard, and SecretsDetection in enforce mode add no meaningful overhead — **292 vs 288 RPS, identical median latency, 0% failures in both configurations.**\n\n</details>\n\n<details>\n<summary>RPS scaling with user count (125–750 users, 3 gateway pods)</summary>\n\nThe benchmark supports configurable user count via `BENCH_USERS`, `BENCH_SPAWN`, and `BENCH_RUNTIME`:\n\n```bash\n# Default (125 users, 30/s spawn, 60s)\nmake ocp-benchmark OCP_NS=<namespace>\n\n# Medium load (300 users)\nmake ocp-benchmark OCP_NS=<namespace> BENCH_USERS=300 BENCH_SPAWN=30\n\n# Heavy load (500 users)\nmake ocp-benchmark OCP_NS=<namespace> BENCH_USERS=500 BENCH_SPAWN=50\n\n# Max throughput (750 users)\nmake ocp-benchmark OCP_NS=<namespace> BENCH_USERS=750 BENCH_SPAWN=75\n```\n\n**Scaling results (3 gateway pods, 3 NGINX, PGO Postgres, 1 Locust master + 3 workers):**\n\n| Users | Spawn Rate | RPS | Avg Latency | Med Latency | Failures | Command |\n|-------|-----------|-----|-------------|-------------|----------|---------|\n| 125 | 30/s | 331 | 242ms | 110ms | 0% | `make ocp-benchmark OCP_NS=<ns>` |\n| 300 | 30/s | 522 | 449ms | 210ms | 0% | `make ocp-benchmark OCP_NS=<ns> BENCH_USERS=300 BENCH_SPAWN=30` |\n| 500 | 50/s | 601 | 657ms | 320ms | 0% | `make ocp-benchmark OCP_NS=<ns> BENCH_USERS=500 BENCH_SPAWN=50` |\n| 750 | 75/s | 669 | 1,029ms | 480ms | 0% | `make ocp-benchmark OCP_NS=<ns> BENCH_USERS=750 BENCH_SPAWN=75` |\n\nThe gateway saturates around 670 RPS with the current 3-pod configuration. 500 users is the best balance of throughput (601 RPS) and latency (320ms median) with 0% failures.\n\n</details>\n\n---\n\n## Limitations\n\n1. **Database migration** — the migration step runs as a `pre-install` hook directly to Postgres (bypasses PgBouncer) so that schema creation and advisory locks work correctly on fresh databases. Once migration completes, all gateway traffic flows through PgBouncer as normal. Requires Postgres to be running before `helm install`, which is handled by `make ocp-setup`.\n\n2. **Pod-to-pod network overhead** — MCP benchmark shows 371 RPS on OCP vs 512 RPS on Colima (Python). The gap is from K8s Service routing across multiple pod hops — inherent to distributed deployments on Kubernetes. Further optimizations and fine-tuning (NGINX keepalive, TCP settings, worker scaling) may improve these numbers.\n\n3. **Rust MCP runtime** — This PR validates the Python MCP core. Rust MCP runtime (`RUST_MCP_MODE=full`) with multi-pod session affinity will be addressed in a separate PR.\n\nCloses #4052\n",
+  "comments": [
+    {
+      "id": "3045969304",
+      "author": "brian-hussey",
+      "created_at": "2026-04-07T15:09:21+00:00",
+      "body": "I think here the comments are useful, worth considering again about removing them. "
+    },
+    {
+      "id": "3046003825",
+      "author": "brian-hussey",
+      "created_at": "2026-04-07T15:15:17+00:00",
+      "body": "Is this only to be applied as once off with `oc apply` or will it render as part of the helm chart with certain configurations?\nI think we'll need overarching documentation of what to run to set up the environment including steps to install the CrunchyData Operator if needs be.\n"
+    },
+    {
+      "id": "3046012013",
+      "author": "brian-hussey",
+      "created_at": "2026-04-07T15:16:45+00:00",
+      "body": "I'd say include where the client for these tests was deployed as well for the complete understanding (was it next to OCP was it at a distance etc)."
+    },
+    {
+      "id": "3046040250",
+      "author": "brian-hussey",
+      "created_at": "2026-04-07T15:21:33+00:00",
+      "body": "This file shouldn't be internal to the mcp-stack helm chart, but it makes me wonder about the structure for all of this PR.\nI'm thinking unless there is changes to the generic parts of the helm chart for this configuration, we should probably to a \"charts/performance-test/ocp/*\" or similar with individual config, extra files/configurations and documentation to describe exactly what the use case is for this particular configuration. So that it never gets confused with the standard deployment via helm."
+    },
+    {
+      "id": "3046047962",
+      "author": "brian-hussey",
+      "created_at": "2026-04-07T15:22:54+00:00",
+      "body": "Similar to above, query on the placement of this file within the helm chart - will it render even when we don't want it to?"
+    },
+    {
+      "id": "3046050458",
+      "author": "brian-hussey",
+      "created_at": "2026-04-07T15:23:20+00:00",
+      "body": "This shouldn't expose any internal servers we have."
+    },
+    {
+      "id": "3046100446",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-07T15:31:10+00:00",
+      "body": "Good point — the comments are useful context. I've moved them to their own lines above each directive instead of removing them entirely:\n\n```\n# Save after 900 sec if at least 1 key changed\nsave 900 1\n# Save after 300 sec if at least 10 keys changed\nsave 300 10\n# Save after 60 sec if at least 10000 keys changed\nsave 60 10000\n```\n\nThe reason for removing the inline form (`save 900 1  # comment`) is that Redis's config parser does not support inline comments. The `#` character is only treated as a comment when it appears at the beginning of a line. When it appears after a directive value, Redis tries to parse the entire string including the `#` and everything after it as part of the directive's arguments.\n\nFor `save` directives specifically, this causes Redis to either reject the line with a config parse error or silently fall back to default save settings — meaning the custom RDB snapshot intervals wouldn't actually be applied.\n\nThis is a long-standing Redis design decision (not a bug or version-specific behavior). The Redis team intentionally does not support inline comments so that `CONFIG REWRITE` can preserve comments in the config file using simple line-based logic. Reference: https://github.com/redis/redis/issues/521"
+    },
+    {
+      "id": "3046162955",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-07T15:41:37+00:00",
+      "body": "You're right — this file was kept temporarily during development so results were visible alongside the config. The benchmark results are already documented in the PR description (under Test Results), which is a better place for them.\n\nI'll remove this file from the PR."
+    },
+    {
+      "id": "3046229314",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-07T15:52:02+00:00",
+      "body": "On the broader structure question — I considered a few approaches:\n\n1. **Separate chart (`charts/mcp-stack-ocp-pgo/`)** — fully standalone with its own templates, values, and docs. Clean separation but duplicates ~20 templates from `mcp-stack/` and requires manual syncing when the base chart evolves.\n\n2. **Separate directory (`charts/performance-test/ocp/`)** — OCP config and results live outside `mcp-stack/`. But the values file (`values-ocp-pgo.yaml`) is a Helm values override for `mcp-stack` — it needs to live where `helm install -f` can reference it relative to the chart. Moving it to a different directory tree breaks the standard Helm workflow.\n\n3. **Current approach: values override + conditional template changes** — OCP-specific config lives in `values-ocp-pgo.yaml` (a Helm values override, same pattern as `values.yaml` + `docker-compose.override.yml`). Template changes are gated by values that default to off:\n   - `route.enabled: false` → Route template is skipped entirely\n   - `nginxProxy.tls.enabled: false` → TLS blocks are skipped\n   - `nginxProxy.containerPort: 80` → default port unchanged\n   - `pid /tmp/nginx.pid` → harmless on all platforms\n\n   Non-OCP deployments using the base `values.yaml` get identical behavior to before this PR.\n\nWe went with option 3 for this PR because it avoids template duplication while maintaining zero impact on existing deployments. The `crunchydata-postgres-cr.yaml` is the only truly OCP-specific file — it's a reference CR, not a Helm template. We can evolve the folder structure over time as the OCP deployment matures and the needs become clearer."
+    },
+    {
+      "id": "3046247813",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-07T15:55:30+00:00",
+      "body": "This was a temporary file and is now removed. The architecture section in the PR description has an **MCP benchmark test setup** diagram that shows the full setup including where Locust was deployed."
+    },
+    {
+      "id": "3046279854",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-07T16:00:46+00:00",
+      "body": "No, this won't render automatically — it's a values override file that only takes effect when explicitly passed with `-f`:\n\n```bash\nhelm install -f charts/mcp-stack/values-ocp-pgo.yaml\n```\n\nWithout that flag, Helm uses only the default `values.yaml` and this file is ignored. Same pattern as having `values-dev.yaml` or `values-prod.yaml` alongside the chart for different environments."
+    },
+    {
+      "id": "3046297716",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-07T16:03:07+00:00",
+      "body": "Agreed — replaced with a generic placeholder. It was left from the development setup."
+    },
+    {
+      "id": "3046333592",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-07T16:08:07+00:00",
+      "body": "This is a one-off `oc apply` — the file is in the chart root, not in `templates/`, so Helm doesn't render or manage it. The CrunchyData PGO operator needs to be installed separately from OperatorHub first, then this CR is applied manually.\n\nThe full setup steps are currently documented in the PR description under **Test setup and reproduction steps**. As this matures, I'll add a proper section to the root README alongside the existing deployment instructions (similar to how Kubernetes/Kustomize deployment steps are documented there)."
+    },
+    {
+      "id": "3046342506",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-07T16:09:30+00:00",
+      "body": "<img width=\"1029\" height=\"195\" alt=\"image\" src=\"https://github.com/user-attachments/assets/14579278-dbc3-4444-a88a-ba82fb20db69\" />\r\n"
+    },
+    {
+      "id": "3046351974",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-07T16:11:17+00:00",
+      "body": "<img width=\"1030\" height=\"956\" alt=\"image\" src=\"https://github.com/user-attachments/assets/734293c3-7fed-4bda-a9dd-bc22a38a955e\" />\r\n"
+    },
+    {
+      "id": "3049728387",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-08T07:13:06+00:00",
+      "body": "Also worth noting — this follows the same pattern as `values-minikube.yaml` which already exists in the chart:\n\n```\ncharts/mcp-stack/\n  values.yaml              ← base defaults\n  values-minikube.yaml     ← Minikube overrides (existing)\n  values-ocp-pgo.yaml      ← OCP + PGO overrides (this PR)\n```\n\nBoth are environment-specific values files used with `helm install -f`. Neither renders automatically — Helm ignores them unless explicitly passed."
+    },
+    {
+      "id": "3049752390",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-08T07:18:50+00:00",
+      "body": "On the documentation front — there's an existing deployment docs section at `docs/docs/deployment/` with guides for various platforms (Kubernetes, Minikube, AWS, Azure, etc.). I've added a dedicated deployment guide there:\r\n\r\n**[`docs/docs/deployment/openshift-pgo.md`](https://github.com/IBM/mcp-context-forge/blob/ocp-mcp-benchmark-python/docs/docs/deployment/openshift-pgo.md)**\r\n\r\nIt covers the full setup end-to-end: prerequisites, CrunchyData PGO operator install, PostgresCluster CR, two-step Helm install, post-install steps, MCP benchmark setup with architecture diagrams, plugin configuration, and a troubleshooting table for all the issues we encountered.\r\n\r\nThe diagrams explaining the deployment topology and mcp benchmark setup area in collapsables. Let me know if you think they can get easily missed by the reader and I can make them in normal expanded format."
+    },
+    {
+      "id": "3052422820",
+      "author": "brian-hussey",
+      "created_at": "2026-04-08T15:29:26+00:00",
+      "body": "Following discussion, you're right, the current approach is the best bet for the moment. We may revisit this at some point in the future.\r\nOne thing as discussed is to make sure the link to the `docs/docs/deployment/openshift-pgo.md` gets added to the `docs/docs/deployment/index.md` file."
+    },
+    {
+      "id": "3052430430",
+      "author": "brian-hussey",
+      "created_at": "2026-04-08T15:30:38+00:00",
+      "body": "Make sure this gets added to the docs/docs/deployment/index.md file as well so we have a trail to follow."
+    },
+    {
+      "id": "3052434709",
+      "author": "brian-hussey",
+      "created_at": "2026-04-08T15:31:18+00:00",
+      "body": "Add something here to describe why we might want the CrunchyData operator to handle posgres and pgbouncer."
+    },
+    {
+      "id": "3052443132",
+      "author": "brian-hussey",
+      "created_at": "2026-04-08T15:32:35+00:00",
+      "body": "I've said this in a request change on the review so I'll resolve this conversation here."
+    },
+    {
+      "id": "3056290048",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-09T07:52:37+00:00",
+      "body": "Added a \"Why use the CrunchyData PGO operator?\" section in ef70e00 — covers HA with automatic failover, pgBackRest automated backups, managed PgBouncer, rolling updates, and Prometheus metrics. Also points readers to the standalone approach for simpler use cases."
+    },
+    {
+      "id": "3059987116",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:16+00:00",
+      "body": "`nginxProxy.tls.enabled` is accessed, but `nginxProxy.tls` is not defined in the chart’s default `values.yaml`. If an existing user enables `nginxProxy.enabled: true` without also defining a `tls:` map, Helm rendering will fail (nil map dereference). Add a default `nginxProxy.tls.enabled: false` (and default port) in `values.yaml` and/or guard accesses with `and .Values.nginxProxy.tls .Values.nginxProxy.tls.enabled` / `dig`."
+    },
+    {
+      "id": "3059987164",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:16+00:00",
+      "body": "`nginxProxy.tls.enabled` is accessed directly. Since `nginxProxy.tls` isn’t present in the default values, enabling `nginxProxy.enabled: true` without defining a `tls:` block will cause Helm template rendering to error. Provide a default `nginxProxy.tls.enabled: false` in `values.yaml` and/or use a nil-safe guard (`and .Values.nginxProxy.tls ...` or `dig`)."
+    },
+    {
+      "id": "3059987196",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:16+00:00",
+      "body": "The `testing.locust.script.file` branch renders the file content with an extra leading space before the template action (and `nindent` already prefixes a newline). This typically produces a block scalar whose least-indented line is 1 space, causing the embedded Python locustfile to be indented and likely fail with `IndentationError`. Remove the leading space and render with the usual pattern `key: |\\n{{ ... | nindent 4 }}` (no preceding literal whitespace).\n```suggestion\n{{- if .Values.testing.locust.script.file }}\n  {{ .Values.testing.locust.script.key }}: |\n{{ .Files.Get .Values.testing.locust.script.file | nindent 4 }}\n{{- else }}\n  {{ .Values.testing.locust.script.key }}: |\n{{ .Values.testing.locust.script.inline | nindent 4 }}\n{{- end }}\n{{- end }}\n```"
+    },
+    {
+      "id": "3059987259",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:17+00:00",
+      "body": "`route.tls.*` is dereferenced without checking that `.Values.route.tls` exists. Users enabling `route.enabled: true` but omitting a `tls:` map will hit a nil dereference during rendering. Add default `route.tls` fields to `values.yaml` (with `termination: edge`, etc.) and/or guard accesses with `dig`/nil-safe conditionals."
+    },
+    {
+      "id": "3059987284",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:17+00:00",
+      "body": "`termination: reencrypt` requires the backend Service port to be TLS. Currently `targetPort` switches to `https` only when `nginxProxy.tls.enabled` is true, but there’s no validation tying this to `route.tls.termination`. Add a template-time check that fails when `route.tls.termination` is `reencrypt` but `nginxProxy.tls.enabled` is not true, to prevent silently creating a broken Route."
+    },
+    {
+      "id": "3059987310",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:17+00:00",
+      "body": "This section says scaling NGINX is a manual post-install step because the template hardcodes replicas to 1. In this PR, the NGINX deployment template is updated to use `nginxProxy.replicaCount`, and `values-ocp-pgo.yaml` sets it to 3. Update the guide to remove/adjust this manual step to avoid confusing users."
+    },
+    {
+      "id": "3059987337",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:17+00:00",
+      "body": "The guide instructs patching `tests/loadtest/locustfile_mcp_protocol.py` for OCP and creating a ConfigMap from it. This PR adds `charts/mcp-stack/tests/locustfile_mcp_protocol_ocp.py` and the values file points `testing.locust.script.file` to it, so the manual patch + `oc create configmap ...` step appears outdated. Align the documentation with the new in-chart locustfile workflow (or explain when the manual patch is still needed).\n```suggestion\n**2. Use the chart's OCP-compatible MCP protocol locustfile:**\n\nNo manual patching or `oc create configmap ...` step is required in the default Helm workflow.\n\nThe OCP PGO values file already points `testing.locust.script.file` at the in-chart OCP-specific locustfile:\n\n- `charts/mcp-stack/tests/locustfile_mcp_protocol_ocp.py`\n\nThat script includes the OpenShift-specific adjustments needed for the Locust container environment, including:\n- safer `.env` loading behavior when restricted SCC prevents access to `Path.home()/.env`\n- stdlib-based JWT generation instead of relying on `pyjwt` in the Locust image\n\nYou only need to create/update the Locust script ConfigMap manually if you are intentionally overriding the chart-managed script with your own custom locustfile.\n```"
+    },
+    {
+      "id": "3059987369",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:18+00:00",
+      "body": "`redis_url` in the committed OCP values file hardcodes a release-specific Service name (`gp-context-forge-mcp-stack-redis`). This makes the example non-portable and will break for users who install with a different Helm release name/namespace. Use a placeholder value, document how to derive it, or (preferably) avoid embedding release-derived service names in the plugin config snippet.\n```suggestion\n            redis_url: \"redis://:change-me-redis@<redis-service-name>:6379/0\"  # Replace <redis-service-name> with your Redis Service DNS name for this Helm release/namespace\n```"
+    },
+    {
+      "id": "3059987402",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:18+00:00",
+      "body": "The Make target assumes Helm release name == namespace (it uses `$(OCP_NS)` for both and execs `deploy/$(OCP_NS)-mcp-stack-locust`). That won’t work for common setups where release and namespace differ. Consider splitting into `OCP_NAMESPACE` and `OCP_RELEASE` (defaulting release to namespace) and using release for resource names.\n```suggestion\nOCP_NAMESPACE ?= $(OCP_NS)\nOCP_RELEASE ?= $(OCP_NAMESPACE)\nbenchmark-ocp:                               ## Run MCP benchmark on OCP (requires OCP_NAMESPACE=<namespace> [OCP_RELEASE=<release>])\n\t@if [ -z \"$(OCP_NAMESPACE)\" ]; then echo \"Usage: make benchmark-ocp OCP_NAMESPACE=<namespace> [OCP_RELEASE=<release>]\"; exit 1; fi\n\t@echo \"Starting MCP benchmark on OCP...\"\n\t@echo \"   Namespace: $(OCP_NAMESPACE)\"\n\t@echo \"   Release:   $(OCP_RELEASE)\"\n\t@echo \"   Config:    125 users, 30/s spawn, 60s\"\n\t@oc -n $(OCP_NAMESPACE) exec deploy/$(OCP_RELEASE)-mcp-stack-locust -- \\\n\t\tpython3 -c \"import urllib.request,urllib.parse; \\\n\t\turllib.request.urlopen(urllib.request.Request('http://localhost:8089/swarm', \\\n\t\turllib.parse.urlencode({'user_count':125,'spawn_rate':30,'run_time':'60s', \\\n\t\t'host':'http://$(OCP_RELEASE)-mcp-stack-nginx'}).encode(), method='POST'))\"\n```"
+    },
+    {
+      "id": "3059987430",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:18+00:00",
+      "body": "The header comments hardcode the `gp-context-forge` namespace, but the deployment guide and values file examples use `contextforge`. This mismatch is likely to confuse copy/paste users; either make the namespace generic in comments or align it with the documented namespace.\n```suggestion\n# CrunchyData PostgresCluster CR\n# Tuned to match VM benchmark Postgres configuration\n# Apply with: oc apply -n <namespace> -f charts/mcp-stack/crunchydata-postgres-cr.yaml\n```"
+    },
+    {
+      "id": "3059987457",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:18+00:00",
+      "body": "The PVC `selector.matchLabels` in the example PostgresCluster and pgBackRest repo claims forces binding only to pre-labeled PVs (e.g., `role=postgres,type=nfs`) and will not work with most dynamic provisioners. Since prerequisites mention dynamic StorageClass support, consider removing the selector (or making it optional and documenting the required PV labeling) and using `storageClassName` when needed."
+    },
+    {
+      "id": "3059987476",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:19+00:00",
+      "body": "The header “Key decisions” list is out of sync with the actual values below (e.g., it says single gateway replica and NGINX proxy disabled, but `mcpContextForge.replicaCount` is 3 and `nginxProxy.enabled` is true). Update the header bullets to match the current intended configuration to avoid misleading users.\n```suggestion\n#   - Three gateway replicas to match the benchmarked deployment sizing\n#   - HPA disabled to keep replica count stable during initial setup\n#   - Chart-managed Postgres disabled; using external CrunchyData PGO-managed Postgres\n#   - Chart-managed PgBouncer disabled; connecting via CrunchyData PGO-provided endpoint\n#   - NGINX proxy enabled in this configuration\n```"
+    },
+    {
+      "id": "3059987505",
+      "author": "Copilot",
+      "created_at": "2026-04-09T18:46:19+00:00",
+      "body": "The guide references a `values-ocp.yaml` file for using the chart’s built-in Postgres, but there doesn’t appear to be a `charts/mcp-stack/values-ocp.yaml` in this repo. Update the reference to an existing values file (or add the missing file) so users can follow the non-PGO path."
+    },
+    {
+      "id": "3068584791",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T20:48:48+00:00",
+      "body": "Fixed in 40884219b — added `nginxProxy.tls` defaults (`enabled: false`, `containerPort: 8443`) to `values.yaml`. Users enabling `nginxProxy.enabled: true` without a custom `tls` block now render cleanly."
+    },
+    {
+      "id": "3068584929",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T20:48:55+00:00",
+      "body": "Fixed in 40884219b — same root cause as the service template. Adding `nginxProxy.tls` defaults to `values.yaml` resolves both at once."
+    },
+    {
+      "id": "3068585097",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T20:49:05+00:00",
+      "body": "Fixed in 40884219b — added a `route` block with full `tls` sub-block defaults to `values.yaml`. Users enabling `route.enabled: true` without a custom `tls` block now render without nil dereferences."
+    },
+    {
+      "id": "3068585236",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T20:49:13+00:00",
+      "body": "Fixed in 40884219b — added a template-time `fail` check at the top of `route.yaml` that aborts rendering if `route.tls.termination=reencrypt` is set without `nginxProxy.tls.enabled=true`. Misconfiguration now produces a clear error at install time instead of silent 503s."
+    },
+    {
+      "id": "3068585377",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T20:49:21+00:00",
+      "body": "Already addressed in an earlier commit — the manual NGINX scaling step was removed when `nginxProxy.replicaCount` was made configurable in the values file. The OCP values file sets it to 3, no manual `oc scale` needed."
+    },
+    {
+      "id": "3068585608",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T20:49:30+00:00",
+      "body": "Already addressed in an earlier commit — the manual locustfile patching + `oc create configmap` step was removed when the OCP-patched locustfile was added to the chart at `charts/mcp-stack/tests/locustfile_mcp_protocol_ocp.py` and referenced from values via `testing.locust.script.file`."
+    },
+    {
+      "id": "3068585729",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T20:49:39+00:00",
+      "body": "Fixed in 40884219b. Wrapped the plugin ConfigMap with Helm's `tpl` function in `templates/configmap-gateway-plugin.yaml`, then changed the values file to use `{{ .Release.Name }}-mcp-stack-redis` instead of the hardcoded service name. The Redis URL now adapts automatically to whatever release name the user picks. Verified by rendering with two different release names."
+    },
+    {
+      "id": "3068625483",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T21:31:53+00:00",
+      "body": "Documented in fe972abd3. Added a single-line comment next to the `OCP_NS` variable definition explaining that we currently use the same value for both the namespace and the Helm release name for simplicity. This can be extended to a separate `OCP_RELEASE` variable later if needed."
+    },
+    {
+      "id": "3068625659",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T21:32:05+00:00",
+      "body": "Fixed in fe972abd3. Replaced the hardcoded namespace in the header comment with `<namespace>` so the file isn't tied to a specific deployment."
+    },
+    {
+      "id": "3068625799",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T21:32:16+00:00",
+      "body": "Fixed in fe972abd3. Updated the bullet list to match the current configuration: 3 gateway replicas, NGINX enabled with TLS, PGO external, Locust deferred to `ocp-benchmark-setup`, named PVs for Postgres data and Redis."
+    },
+    {
+      "id": "3068625944",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T21:32:24+00:00",
+      "body": "Fixed in fe972abd3. Removed the broken reference. The standalone (non-PGO) path lives on a separate branch and isn't part of this PR."
+    },
+    {
+      "id": "3068629690",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-11T21:36:31+00:00",
+      "body": "Verified working empirically — multiple benchmark runs (380+ RPS, 0% failures) on OCP have rendered the locustfile via this branch and Python parses it without issue. Inspecting the deployed ConfigMap (`oc get cm <release>-mcp-stack-locust-script -o yaml`) shows the rendered content is correctly indented under `locustfile.py: |` with consistent 4-space indentation, which Python tolerates fine. Closing as a false positive in this case; we'll revisit if we ever see an actual `IndentationError` from a Locust worker."
+    },
+    {
+      "id": "3069306439",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-12T10:07:06+00:00",
+      "body": "Done — added to `docs/docs/deployment/index.md` in ef70e00."
+    },
+    {
+      "id": "3069306561",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-12T10:07:15+00:00",
+      "body": "Fully addressed in e61797812. Removed the PVC selectors entirely and switched to dynamic provisioning via `storageClassName: nfs-client` in the PostgresCluster CR. PVCs are now dynamically provisioned by the nfs-subdir-external-provisioner — no manual PV creation or label matching needed."
+    },
+    {
+      "id": "3073351704",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T13:37:35+00:00",
+      "body": "Make it clear here that this is experimental ansible scripts for deployment."
+    },
+    {
+      "id": "3073358180",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T13:38:35+00:00",
+      "body": "Similarly here, in the description state that this is currently experimental, possibly like:\n\n```suggestion\n| [OpenShift (OCP)](ocp/) | `ansible/ocp/` | [Experimental] Deploy with CrunchyData PGO, dynamic NFS provisioning, MCP benchmark |\n```"
+    },
+    {
+      "id": "3073383130",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T13:42:47+00:00",
+      "body": "Do we need to check for other pre-reqs at this point or will the ansible code itself check for helm, oc, kubernetes.core, etc?\n"
+    },
+    {
+      "id": "3073592741",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-13T14:16:48+00:00",
+      "body": "The Makefile checks for `ansible-playbook`. The Ansible playbooks check for the PGO operator (CRD lookup in `setup.yml`). If `helm`, `oc`, or `kubernetes.core` are missing, Ansible fails immediately on the first task that needs them with a clear error."
+    },
+    {
+      "id": "3073594747",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-13T14:17:06+00:00",
+      "body": "Added `[Experimental]` to the description line."
+    },
+    {
+      "id": "3073594912",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-13T14:17:07+00:00",
+      "body": "Done — updated the table row with `[Experimental]` as suggested."
+    },
+    {
+      "id": "3073600139",
+      "author": "brian-hussey",
+      "created_at": "2026-04-13T14:17:58+00:00",
+      "body": "Perfect, thank you."
+    },
+    {
+      "id": "3080896974",
+      "author": "brian-hussey",
+      "created_at": "2026-04-14T16:15:28+00:00",
+      "body": "Exclude these files instead of including them in the package."
+    },
+    {
+      "id": "3084403546",
+      "author": "gandhipratik203",
+      "created_at": "2026-04-15T06:26:01+00:00",
+      "body": "Done — replaced the `recursive-include ansible` with `prune ansible` so the playbooks are excluded from the Python package. They're still available in the repo for anyone cloning and using the make targets."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4069183702",
+      "author": "brian-hussey",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T15:09:21+00:00",
+      "body": ""
+    },
+    {
+      "id": "4069220928",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-07T15:24:09+00:00",
+      "body": "A few queries on the structure of this one. I'll ping you on the side as well.\n"
+    },
+    {
+      "id": "4069326423",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T15:31:10+00:00",
+      "body": ""
+    },
+    {
+      "id": "4069396370",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T15:41:37+00:00",
+      "body": ""
+    },
+    {
+      "id": "4069469022",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T15:52:02+00:00",
+      "body": ""
+    },
+    {
+      "id": "4069488556",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T15:55:30+00:00",
+      "body": ""
+    },
+    {
+      "id": "4069522647",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T16:00:46+00:00",
+      "body": ""
+    },
+    {
+      "id": "4069543616",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T16:03:07+00:00",
+      "body": ""
+    },
+    {
+      "id": "4069585222",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T16:08:07+00:00",
+      "body": ""
+    },
+    {
+      "id": "4069595190",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T16:09:31+00:00",
+      "body": ""
+    },
+    {
+      "id": "4069605365",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-07T16:11:17+00:00",
+      "body": ""
+    },
+    {
+      "id": "4073353362",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-08T07:13:06+00:00",
+      "body": ""
+    },
+    {
+      "id": "4073379819",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-08T07:18:50+00:00",
+      "body": ""
+    },
+    {
+      "id": "4076286164",
+      "author": "brian-hussey",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-08T15:29:26+00:00",
+      "body": ""
+    },
+    {
+      "id": "4076296158",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-08T15:31:58+00:00",
+      "body": ""
+    },
+    {
+      "id": "4076311023",
+      "author": "brian-hussey",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-08T15:32:35+00:00",
+      "body": ""
+    },
+    {
+      "id": "4080621110",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-09T07:52:37+00:00",
+      "body": ""
+    },
+    {
+      "id": "4084680090",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-09T18:46:19+00:00",
+      "body": "## Pull request overview\n\nAdds Helm chart support and documentation for deploying ContextForge on OpenShift (OCP) using an externally managed CrunchyData PGO PostgreSQL + PgBouncer setup, including an OCP-specific values file and an MCP protocol benchmark configuration via Locust.\n\n**Changes:**\n- Add OCP Route support, NGINX unprivileged port support, and optional NGINX TLS (for re-encrypt Routes) in Helm templates (all value-gated).\n- Add OCP-focused deployment/benchmark docs and an OCP-specific values override file.\n- Add an OCP-ready MCP protocol locustfile and wiring to load it from chart files; add a Makefile helper target to trigger a benchmark run.\n\n### Reviewed changes\n\nCopilot reviewed 14 out of 15 changed files in this pull request and generated 13 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| Makefile | Adds `benchmark-ocp` target to trigger a Locust swarm run in-cluster. |\r\n| docs/docs/deployment/openshift-pgo.md | New end-to-end OpenShift + CrunchyData PGO deployment and benchmark guide. |\r\n| docs/docs/deployment/index.md | Links the new OpenShift + PGO guide from the deployment index. |\r\n| charts/mcp-stack/values.yaml | Adds Locust `mcpServerID` and script `file` selection options. |\r\n| charts/mcp-stack/values-ocp-pgo.yaml | Adds a tested OCP override values file (PGO external Postgres, Route, NGINX tuning/TLS, Locust settings). |\r\n| charts/mcp-stack/tests/locustfile_mcp_protocol_ocp.py | Adds an OCP-specific MCP protocol Locust script (no pyjwt, handles restricted FS). |\r\n| charts/mcp-stack/templates/testing-stack.yaml | Allows Locust script to be sourced from a chart file; passes MCP_SERVER_ID; exposes ZMQ ports. |\r\n| charts/mcp-stack/templates/service-nginx-proxy.yaml | Makes NGINX targetPort configurable; adds serving-cert annotation and HTTPS service port when TLS enabled. |\r\n| charts/mcp-stack/templates/route-ocp.yaml | Adds an OpenShift Route template (edge/reencrypt) gated by values. |\r\n| charts/mcp-stack/templates/deployment-nginx-proxy.yaml | Makes NGINX replicas configurable; supports configurable container ports and TLS volume mount. |\r\n| charts/mcp-stack/templates/configmap-redis.yaml | Fixes Redis config by removing inline comments on `save` directives. |\r\n| charts/mcp-stack/templates/configmap-nginx-proxy.yaml | Adds `/tmp` pid file and optional TLS server block for NGINX. |\r\n| charts/mcp-stack/crunchydata-postgres-cr.yaml | Adds an example tuned PostgresCluster CR for CrunchyData PGO. |\r\n| .secrets.baseline | Updates secret scanner baseline for the new values file. |\r\n| .gitignore | Ignores `*-secrets.yaml` to prevent committing OCP secret overrides. |\n</details>\n\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "4094226020",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T20:48:48+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094226092",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T20:48:55+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094226231",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T20:49:05+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094226333",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T20:49:13+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094226436",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T20:49:21+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094226566",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T20:49:30+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094226645",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T20:49:39+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094254639",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T21:31:53+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094254766",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T21:32:05+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094254896",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T21:32:16+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094254997",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T21:32:24+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094258023",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-11T21:36:31+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094896050",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-12T10:07:06+00:00",
+      "body": ""
+    },
+    {
+      "id": "4094896144",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-12T10:07:15+00:00",
+      "body": ""
+    },
+    {
+      "id": "4099080568",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-13T13:43:41+00:00",
+      "body": "Only a couple of small things to query on the layout at the moment, otherwise this is looking good."
+    },
+    {
+      "id": "4099346750",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-13T14:16:48+00:00",
+      "body": ""
+    },
+    {
+      "id": "4099348873",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-13T14:17:06+00:00",
+      "body": ""
+    },
+    {
+      "id": "4099349015",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-13T14:17:07+00:00",
+      "body": ""
+    },
+    {
+      "id": "4099354490",
+      "author": "brian-hussey",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-13T14:17:59+00:00",
+      "body": ""
+    },
+    {
+      "id": "4107378044",
+      "author": "claudia-gray",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-14T15:56:09+00:00",
+      "body": "# OpenShift Deployment Workflow Approval\r\n#### Summary\r\nI have tested and validated the OpenShift deployment workflow (make ocp-setup, make ocp-deploy, make ocp-uninstall) on a test cluster of medium size and confirm that the automation works correctly with minor issues addressed. (Retested + Validated with Large size and found same successes + all 3 gateway pods running)\r\n\r\nOpenShift Version: 4.21\r\nDeployment Method: Ansible playbooks via Makefile targets\r\n## Validation Steps Performed\r\n### 1. Initial Setup (make ocp-setup)\r\n\r\n:white_check_mark: Successfully created namespace\r\n:white_check_mark: Verified CrunchyData PGO operator presence\r\n:white_check_mark: Applied PostgresCluster CR\r\n:white_check_mark: Postgres pods reached Running state (4/4)\r\n:white_check_mark: Schema privileges granted correctly\r\n### 2. Deployment (make ocp-deploy)\r\n\r\n:white_check_mark: Helm chart installed successfully\r\n:white_check_mark: All core services deployed:\r\n- Gateway pods: 1/3 running (2 pending due to resource constraints - expected)\r\n- 3/3 running for Large size cluster.\r\n- Redis: 1/1 running\r\n- NGINX: 3/3 running\r\n- Fast-time servers: 2/2 running\r\n- Postgres: 4/4 running\r\n\r\n:white_check_mark: Helm release status: deployed\r\n:white_check_mark: Services accessible via OpenShift Routes\r\n\r\n### 3. Uninstall (make ocp-uninstall)\r\n\r\n:white_check_mark: Helm release removed successfully\r\n:white_check_mark: Application pods terminated\r\n:white_check_mark: Postgres pods preserved (managed by PGO operator - expected behavior)\r\n:white_check_mark: Namespace and secrets preserved for redeployment\r\n\r\n### 4. Redeployment\r\n\r\n:white_check_mark: Successfully redeployed to existing namespace\r\n:white_check_mark: Reused existing Postgres instance\r\n:white_check_mark: All services came back up correctly\r\n\r\n\r\n#### Issue Encountered and Resolved\r\nIssue 1: Docker Hub Image Pull Authentication\r\n\r\nProblem: Redis pod failed with ImagePullBackOff due to Docker Hub rate limits.\r\nRoot Cause: Missing image pull secret for Docker Hub authentication.\r\nResolution: Created dockerhub-pull secret using local Docker credentials:\r\n`oc create secret generic dockerhub-pull \\\r\n    --from-file=.dockerconfigjson=$HOME/.docker/config.json \\\r\n    --type=kubernetes.io/dockerconfigjson \\\r\n    -n <namespace>`\r\n\r\nStatus: :white_check_mark: Resolved. Redis pod successfully pulled image and started.\r\nFix: Document this prerequisite step in deployment guide or automate secret creation in the playbook.\r\n:white_check_mark: Resolved with documentation updated by Pratik.\r\n\r\n### Conclusion\r\nThe OpenShift deployment workflow is approved for use with the following notes:\r\n:white_check_mark: Working Correctly\r\n- Namespace and Postgres setup\r\n- Helm chart deployment\r\n- Service health and accessibility\r\n- Redeployment to existing namespace\r\n- PGO operator integration\r\n### Known Limitations\r\n- Requires nfs provisioning set up beforehand (one-time per cluster)\r\n- Requires manual Docker Hub secret creation (one-time per namespace)\r\n- Resource-constrained clusters may not run all replicas (expected)"
+    },
+    {
+      "id": "4107509683",
+      "author": "brian-hussey",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-14T16:15:59+00:00",
+      "body": "Thanks for putting this together @gandhipratik203.\nOne change to make, otherwise all good."
+    },
+    {
+      "id": "4107693877",
+      "author": "Yosiefeyob",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-14T16:45:54+00:00",
+      "body": "**OpenShift Deployment Review**\r\n\r\n**Summary**\r\nTested and validated the full OCP deployment workflow on a Large cluster. All steps completed successfully.\r\n\r\n**Validation Steps Performed**\r\n\r\n1. Pre-requisite and Cluster Setup\r\nVerified oc CLI, Helm, and Ansible were in place. NFS provisioner configured and nfs-client StorageClass confirmed available. Installed the CrunchyData PGO operator cluster-wide via make ocp-install-operator before proceeding.\r\n\r\n2. Setup and Deployment (make ocp-setup + make ocp-deploy)\r\nNamespace created, PostgresCluster CR applied, and all services came up cleanly — 3 gateway pods, 3 NGINX, 1 Redis, 2 fast-time servers, PgBouncer (2/2), Postgres instance (4/4), and repo host (2/2). Services accessible via OpenShift Routes.\r\n\r\n3. Benchmark (make ocp-benchmark-setup + make ocp-benchmark)\r\nLocust master and all 3 workers scheduled and running. Benchmark completed successfully.\r\n\r\n4. Uninstall and Redeployment\r\nHelm release removed cleanly. Postgres preserved as expected. Redeployment reused the existing Postgres instance and all services came back up without issue.\r\n\r\n**Conclusion**\r\n\r\nDeployment workflow approved. The guide is clear and the Make targets work exactly as documented. LGTM"
+    },
+    {
+      "id": "4111283882",
+      "author": "gandhipratik203",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-15T06:26:01+00:00",
+      "body": ""
+    },
+    {
+      "id": "4114376098",
+      "author": "claudia-gray",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-15T14:24:34+00:00",
+      "body": "https://github.com/IBM/mcp-context-forge/pull/4053#pullrequestreview-4107378044\nRe-reviewing since commits happened after the review above. LGTM!"
+    },
+    {
+      "id": "4114434946",
+      "author": "brian-hussey",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-15T14:32:51+00:00",
+      "body": "LGTM"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "472d026b8feab89ae472900aa8e917afe7e56c36",
+      "message": "[EXPERIMENTAL][DEVOPS] feat(helm): OCP deployment with CrunchyData PGO, Ansible automation, and MCP benchmark\n\nAdds OpenShift (OCP) deployment support using an externally managed PostgreSQL\noperator (CrunchyData PGO). Includes OCP-specific Helm values, Ansible playbooks\nfor automated setup/deploy/benchmark, and documented MCP benchmark results.\n\nKey changes:\n- OCP values profile with PGO-managed Postgres, NGINX TLS, OpenShift Route\n- Ansible playbooks: setup, deploy, benchmark-setup, benchmark, uninstall, install-operator\n- Make targets: ocp-setup, ocp-deploy, ocp-benchmark-setup, ocp-benchmark, ocp-uninstall, ocp-install-operator\n- NGINX template fixes for restricted-v2 SCC (configurable port, pid path)\n- External Postgres support with configurable secret key mappings\n- OpenShift Route template with edge/re-encrypt TLS termination\n- Redis inline comment fix for config parser compatibility\n- Deployment guide: docs/docs/deployment/openshift-pgo.md\n- Benchmark results: 262-331 RPS at 125 users, 0% failures across clusters\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-15T06:30:25+00:00"
+    },
+    {
+      "sha": "22ad2677f77eaa9d02bb027d439a2b7bd91d56f1",
+      "message": "fix(ansible,security): JWT from pod env var, templatize Redis plugin URL\n\n- Generate JWT token using pod's own $JWT_SECRET_KEY env var — secret never leaves the pod\n- RateLimiterPlugin redis_url uses Jinja2 env.REDIS_PASSWORD resolved at runtime — eliminates password drift\n- Update secrets baseline\n\nSigned-off-by: Pratik Gandhi <gandhipratik203@gmail.com>",
+      "author": "Pratik Gandhi",
+      "date": "2026-04-15T14:05:17+00:00"
+    },
+    {
+      "sha": "710381b5426efd183d77067f351a44681f4103a7",
+      "message": "Update secrets baseline\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-04-15T16:34:36+00:00"
+    }
+  ],
+  "files_changed": 29,
+  "additions": 3310,
+  "deletions": 25,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:22.313892",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:22.314948",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4053,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4053.json"
+  }
+}

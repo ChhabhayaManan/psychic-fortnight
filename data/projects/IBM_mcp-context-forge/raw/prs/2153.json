@@ -1,0 +1,79 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2153,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2153"
+  },
+  "metadata": {
+    "title": "fix: Enable CORS preflight for /servers/{id}/mcp endpoints",
+    "state": "closed",
+    "created_at": "2026-01-18T06:31:01+00:00",
+    "updated_at": "2026-01-21T03:11:31+00:00",
+    "closed_at": "2026-01-18T22:29:48+00:00",
+    "merged_at": "2026-01-18T22:29:48+00:00",
+    "author": "bradmcnew",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nBrowser-based MCP clients cannot connect to the gateway due to CORS preflight failures on `/servers/{id}/mcp` endpoints. The preflight OPTIONS request was being blocked by auth and not reaching CORSMiddleware.\r\n\r\n## 🔁 Reproduction Steps\r\nFixes #2152\r\nCloses #2160\r\n\r\n1. Start gateway with browser-accessible origins configured\r\n2. Open browser-based MCP client (e.g., mcp-use inspector at localhost:3000)\r\n3. Attempt to connect to `http://localhost:4444/servers/{id}/mcp`\r\n4. Browser sends CORS preflight (OPTIONS + Origin + Access-Control-Request-Method)\r\n5. Request fails - no CORS headers returned\r\n\r\n## 🐞 Root Cause\r\nTwo issues:\r\n1. `streamable_http_auth` required auth for all requests including OPTIONS preflight (which cannot carry Authorization headers)\r\n2. `MCPPathRewriteMiddleware` called handler directly, bypassing CORSMiddleware\r\n\r\n## 💡 Fix Description\r\n1. Detect CORS preflight in `streamable_http_auth` and allow through without auth\r\n2. Route `/mcp` paths through `self.application` instead of calling handler directly, letting CORSMiddleware intercept preflight\r\n\r\nThis follows Starlette best practices - CORSMiddleware handles preflight rather than hand-rolling CORS responses.\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|-------|---------|--------|\r\n| Lint suite | `ruff check` | ✅ |\r\n| Unit tests | `pytest tests/unit/` | ✅ 65 pass |\r\n| Security tests | `pytest tests/security/test_security_headers.py` | ✅ 20 pass |\r\n| Doctests | `python -m doctest` | ✅ 180 pass |\r\n| Manual test | Browser inspector connects to gateway | ✅ |\r\n\r\n## 📐 MCP Compliance\r\n- [x] Matches current MCP spec (no protocol changes)\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted\r\n- [x] No secrets/credentials committed\r\n- [x] Added integration test for preflight (`test_cors_preflight_on_mcp_endpoints`)\r\n\r\nSigned-off-by: Brad McNew <mcnewbrad@gmail.com>",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3675273808",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-18T06:36:42+00:00",
+      "body": "## Pull request overview\n\nThis PR fixes CORS preflight failures on `/servers/{id}/mcp` endpoints that prevented browser-based MCP clients from connecting to the gateway. The issue occurred because OPTIONS preflight requests were being blocked by authentication middleware before reaching CORSMiddleware.\n\n**Changes:**\n- Modified auth middleware to detect and allow CORS preflight requests (OPTIONS with Origin and Access-Control-Request-Method headers) without authentication\n- Changed MCPPathRewriteMiddleware to route through the middleware stack instead of calling the handler directly, allowing CORSMiddleware to intercept preflight requests\n- Added comprehensive unit and integration tests for CORS preflight handling\n\n### Reviewed changes\n\nCopilot reviewed 4 out of 4 changed files in this pull request and generated no comments.\n\n| File | Description |\n| ---- | ----------- |\n| mcpgateway/transports/streamablehttp_transport.py | Added CORS preflight detection in auth middleware to bypass authentication for legitimate preflight requests |\n| mcpgateway/main.py | Updated path rewriting to route through middleware stack, allowing CORSMiddleware to handle preflight; updated documentation and doctests |\n| tests/unit/mcpgateway/transports/test_streamablehttp_transport.py | Added unit tests for CORS preflight auth bypass and updated test helper to support method parameter |\n| tests/security/test_security_headers.py | Added integration test to verify CORS preflight works end-to-end on MCP endpoints |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3675803195",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-18T22:20:01+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "03148cf282b04a8b9b5e7acba17892da58e3178a",
+      "message": "fix: Enable CORS preflight for /servers/{id}/mcp endpoints (#2152)\n\nAllow browser-based MCP clients to connect by:\n- Bypassing auth for CORS preflight (OPTIONS + Origin + Access-Control-Request-Method)\n- Routing /mcp paths through middleware stack so CORSMiddleware handles preflight\n\nCloses #2152\n\nSigned-off-by: Brad McNew <mcnewbrad@gmail.com>",
+      "author": "Brad McNew",
+      "date": "2026-01-18T06:29:04+00:00"
+    },
+    {
+      "sha": "779af845d397e5789269a6bffb8052112a42e5b5",
+      "message": "fix: Remove duplicate test_call_tool_success function\n\nRemove duplicate function definition that was causing ruff F811 error.\nKeep the better implementation using @asynccontextmanager pattern.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-18T14:10:33+00:00"
+    },
+    {
+      "sha": "2f31fd8b97b6d59167927475303a3ff03f57a04e",
+      "message": "fix: Address review findings for CORS preflight PR\n\n- Add SSE-aware compression middleware to skip compression for /mcp\n  paths when json_response_enabled=False (SSE mode). This prevents\n  buffering/breaking of streaming responses while still compressing\n  JSON responses in the default mode.\n- Fix CORS test to properly validate against actual CORSMiddleware\n  config instead of patching settings after app startup. Add test\n  for disallowed origin rejection.\n- Update MCPPathRewriteMiddleware docstring to reflect actual behavior\n  (rewrites to /mcp/ with trailing slash, not /mcp).\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-18T14:50:33+00:00"
+    },
+    {
+      "sha": "ad177d0bf02b56f4f2764179f18be5a3602d8013",
+      "message": "fix: Prevent double token scoping for /mcp requests\n\nUse request.state flag to track if scoping has already been done.\nThis is more robust than checking modified_path because:\n- request.state persists across all middleware invocations\n- The flag is set before any scoping work is done\n\nThe previous approach using modified_path didn't work because\nthe scope[\"modified_path\"] check couldn't reliably detect the\nsecond pass through the middleware stack.\n\nCloses #2160\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-18T21:52:08+00:00"
+    }
+  ],
+  "files_changed": 7,
+  "additions": 314,
+  "deletions": 56,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:39.697288",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:39.698115",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2153,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2153.json"
+  }
+}

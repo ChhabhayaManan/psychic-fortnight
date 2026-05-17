@@ -1,0 +1,48 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3771,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3771"
+  },
+  "metadata": {
+    "title": "feat: policy templates library plugin (closes #2242)",
+    "state": "open",
+    "created_at": "2026-03-20T16:59:20+00:00",
+    "updated_at": "2026-04-09T21:23:38+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "kcostell06",
+    "labels": [
+      "enhancement",
+      "plugins",
+      "COULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "## Summary\n\nImplements a comprehensive **Policy Templates Library** plugin (`plugins/policy_templates/`) providing pre-built, compliance-ready policy templates for common use cases — accelerating secure deployments and ensuring best-practice policy configurations.\n\nCloses #2242\nPart of Epic #2222\n\n## What's included\n\n### Plugin modules\n\n| File | Purpose |\n|------|---------|\n| `models.py` | Pydantic v2 models — `PolicyTemplate`, `TemplateParameter`, `InstantiatedPolicy`, `TestReport`, `GapAnalysis`, etc. |\n| `registry.py` | `PolicyTemplateRegistry` — loads YAML templates from disk, supports search by name, category, compliance framework, and engine |\n| `instantiator.py` | `TemplateInstantiator` — validates parameters, merges defaults, renders templates via `str.format_map()` |\n| `test_runner.py` | `TemplateTestRunner` — evaluates built-in test cases using a mock Cedar/OPA evaluator (no external sidecar required) |\n| `recommender.py` | `TemplateRecommender` — scores templates against a `RequirementsSpec` and performs gap analysis against current policies |\n| `policy_templates.py` | `PolicyTemplateLibraryPlugin` — plugin entry point with `startup` hook; exposes `get_registry()`, `get_instantiator()`, `get_test_runner()`, `get_recommender()` |\n\n### Built-in templates (22 total)\n\n| Category | Templates |\n|----------|-----------|\n| `compliance/hipaa` | `phi-protection` (Cedar), `audit-logging` (OPA), `data-access-controls` (Cedar) |\n| `compliance/pci-dss` | `cardholder-data` (OPA), `network-segmentation` (OPA) |\n| `compliance/sox` | `financial-controls` (Cedar), `separation-of-duties` (Cedar) |\n| `compliance/gdpr` | `data-subject-rights` (Cedar), `consent-management` (OPA) |\n| `rbac` | `basic-roles` (Cedar), `hierarchical-roles` (Cedar), `dynamic-roles` (OPA) |\n| `abac` | `attribute-based` (Cedar), `time-based-access` (OPA), `location-based` (Cedar) |\n| `mcp-specific` | `tool-access-tiers` (Cedar), `server-isolation` (OPA), `agent-permissions` (Cedar), `resource-quotas` (OPA) |\n| `industry/healthcare` | `clinical-access` (Cedar) |\n| `industry/finance` | `trading-controls` (Cedar) |\n| `industry/government` | `clearance-based-access` (Cedar) |\n\nEach template includes: metadata, compliance framework mappings, typed parameters with defaults, a policy body with `{param}` substitution slots, validation rules, and at least 5 test cases.\n\n### Template schema\n\n```yaml\napiVersion: contextforge.io/v1\nkind: PolicyTemplate\nmetadata:\n  name: hipaa-phi-protection\n  version: 1.0.0\n  category: compliance/hipaa\n  compliance_frameworks: [HIPAA, HITECH]\n  risk_level: high\nspec:\n  engine: cedar\n  parameters:\n    - name: healthcare_roles\n      type: list\n      default: [\"physician\", \"nurse\", \"admin\"]\n      required: true\n  template: |\n    permit(\n      principal in [Role::\"physician\"],\n      action in [Action::\"read_phi\"],\n      resource matches Resource::\"{phi_resource_pattern}\"\n    ) when { principal.has_hipaa_training == true };\n  tests:\n    - name: \"Trained physician can read PHI\"\n      given: { principal: { role: physician, has_hipaa_training: true }, action: read_phi, resource: phi-patient-123 }\n      expect: allow\n```\n\n### Configuration\n\n`plugins/config.yaml` updated with the `PolicyTemplateLibrary` entry (disabled by default):\n\n```yaml\n- name: \"PolicyTemplateLibrary\"\n  kind: \"plugins.policy_templates.policy_templates.PolicyTemplateLibraryPlugin\"\n  hooks: [\"startup\"]\n  mode: \"disabled\"\n  config:\n    template_dirs:\n      - \"plugins/policy_templates/templates\"\n    validate_on_instantiate: true\n```\n\n## Acceptance criteria coverage\n\n- [x] 20+ built-in templates covering major compliance frameworks (22 delivered)\n- [x] Template search by category, compliance framework, and engine\n- [x] Parameter validation on instantiation\n- [x] Built-in test cases for each template (5+ per template)\n- [x] Template versioning (version field + last_reviewed in metadata)\n- [x] Recommendation engine based on requirements spec\n- [x] Gap analysis comparing current policies to templates\n- [x] Both Cedar and OPA template engines supported\n- [ ] Community template registry (Phase 4 — out of scope for this PR)\n- [ ] Template signing / integrity verification (Phase 4)\n- [ ] REST API endpoints (can be layered on in a follow-up)\n\n## Design decisions\n\n- **No external dependencies** beyond `pydantic`, `pathlib`, and `PyYAML` — the mock test evaluator works without an OPA/Cedar sidecar, making the plugin testable in isolation.\n- **`str.format_map()` with `_SafeFormatMap`** tolerates unreferenced `{slots}` in template bodies, allowing partial instantiation.\n- **Startup-only hook** — the library is a registry, not a gateway filter; it does not hook into `tool_pre_invoke`.\n- **Restricted `eval()` for validation rules** — runs inside a namespace limited to safe builtins to prevent injection.",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "5b78133d419dc73f3f2a0d3fcec5a7bbb1a86f65",
+      "message": "feat: implement policy templates library plugin (closes #2242)\n\nAdd PolicyTemplateLibrary plugin providing 22 pre-built, compliance-ready\npolicy templates accelerating secure deployments for HIPAA, PCI-DSS, SOX,\nGDPR, RBAC, ABAC, MCP-specific, and industry use cases.\n\nComponents:\n- models.py: Pydantic v2 models for templates, parameters, tests, recommendations\n- registry.py: PolicyTemplateRegistry with search/filter by category, compliance, engine\n- instantiator.py: TemplateInstantiator with parameter validation and str.format_map substitution\n- test_runner.py: TemplateTestRunner with mock Cedar/OPA evaluator for built-in test cases\n- recommender.py: TemplateRecommender with gap analysis against compliance requirements\n- policy_templates.py: PolicyTemplateLibraryPlugin entry point with startup hook\n\nTemplates (22 total):\n- compliance/hipaa: phi-protection, audit-logging, data-access-controls (Cedar)\n- compliance/pci-dss: cardholder-data, network-segmentation (OPA/Cedar)\n- compliance/sox: financial-controls, separation-of-duties (Cedar)\n- compliance/gdpr: data-subject-rights, consent-management (Cedar/OPA)\n- rbac: basic-roles, hierarchical-roles, dynamic-roles\n- abac: attribute-based, time-based-access, location-based\n- mcp-specific: tool-access-tiers, server-isolation, agent-permissions, resource-quotas\n- industry: healthcare/clinical-access, finance/trading-controls, government/clearance-based-access\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>\nSigned-off-by: Kelly Costello <kcostell@tcd.ie>",
+      "author": "Kelly Costello",
+      "date": "2026-03-20T16:58:39+00:00"
+    }
+  ],
+  "files_changed": 32,
+  "additions": 5255,
+  "deletions": 45,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:58.019268",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:58.020780",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3771,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3771.json"
+  }
+}

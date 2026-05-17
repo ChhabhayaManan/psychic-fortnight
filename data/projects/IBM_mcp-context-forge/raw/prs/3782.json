@@ -1,0 +1,116 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3782,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3782"
+  },
+  "metadata": {
+    "title": "feat: add semantic auto filtering",
+    "state": "open",
+    "created_at": "2026-03-21T18:29:16+00:00",
+    "updated_at": "2026-04-09T21:26:38+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "AbdulR11",
+    "labels": [
+      "enhancement",
+      "COULD"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": []
+  },
+  "description": "## 🔗 Feature\r\nSemantic Auto-Filtering of MCP Tools\r\nCloses issue - #182 \r\n---\r\n\r\n## 📝 Implementation Summary\r\n\r\nThis repository already implements semantic auto-filtering via a CRT-based semantic tool router.\r\n\r\n### What it does\r\n- Accepts user prompt meaning (`prompt`) when listing server tools.\r\n- Semantically ranks tools against the prompt using embeddings.\r\n- Returns only relevant tools using top-k (`k`) and/or relevance threshold (`threshold`).\r\n- Excludes irrelevant tools from the tool list provided to the model.\r\n\r\n### Request path\r\n1. `GET /servers/{server_id}/tools?router=crt&prompt=...&k=...&threshold=...`\r\n2. Main router calls `CRTRouterPlugin.rank_tools(...)`.\r\n3. Plugin computes prompt embedding, ranks tools, filters by relevance.\r\n4. Response includes only selected tools (and optional `crt_scores`).\r\n\r\n### Core behavior mapped to acceptance criteria\r\n- **Filter tools based on prompt meaning**: implemented by embedding + semantic ranking.\r\n- **Avoid irrelevant tools**: implemented by threshold filtering and top-k truncation.\r\n- **Improve model context clarity**: only filtered tools are returned to the caller.\r\n\r\n---\r\n\r\n## 🧩 Functions Implemented for Semantic Auto-Filtering\r\n\r\n### API Integration / Gateway\r\n- `mcpgateway/main.py`\r\n  - `server_get_tools(...)` (CRT query params + filtering path)\r\n  - `router_health(...)` (router health endpoint)\r\n\r\n### CRT Plugin Layer\r\n- `plugins/crt_router/crt_router.py`\r\n  - `CRTRouterPlugin.__init__(...)`\r\n  - `CRTRouterPlugin.initialize(...)`\r\n  - `CRTRouterPlugin.shutdown(...)`\r\n  - `CRTRouterPlugin._ensure_embedding_service(...)`\r\n  - `CRTRouterPlugin.rank_tools(...)`\r\n  - `CRTRouterPlugin.get_health(...)`\r\n  - `CRTRouterPlugin.tool_pre_invoke(...)`\r\n\r\n### Semantic Routing Engine\r\n- `plugins/crt_router/semantic_router.py`\r\n  - `CRTRouter.__init__(...)`\r\n  - `CRTRouter.from_json(...)`\r\n  - `CRTRouter.from_tool_embeddings(...)`\r\n  - `CRTRouter.rank_tools(...)`\r\n  - `CRTRouter._compute_residues(...)`\r\n  - `CRTRouter._compute_crt_score(...)`\r\n  - `CRTRouter._cosine_similarity(...)`\r\n  - `CRTRouter._classify_difficulty(...)`\r\n  - `CRTRouter._fuse_posteriors(...)`\r\n  - `CRTRouter.save_json(...)`\r\n  - `CRTRouter.calibration` (property)\r\n  - `CRTRouter.tool_names` (property)\r\n  - `CRTRouter.__repr__(...)`\r\n\r\n### Embeddings Support\r\n- `mcpgateway/services/embedding_service.py`\r\n  - `EmbeddingService.__init__(...)`\r\n  - `EmbeddingService.initialize(...)`\r\n  - `EmbeddingService.embed_query(...)`\r\n  - `EmbeddingService.embed_tool(...)`\r\n  - `EmbeddingService.embed_tool_from_db(...)`\r\n  - `EmbeddingService.prepare_tool_text(...)`\r\n  - `EmbeddingService.embed_text(...)`\r\n  - `EmbeddingService.batch_embed_tools(...)`\r\n  - `EmbeddingService.batch_embed_texts(...)`\r\n  - `EmbeddingService.get_provider_info(...)`\r\n  - `EmbeddingService.store_tool_embedding(...)`\r\n  - `EmbeddingService.batch_store_tool_embeddings(...)`\r\n  - `EmbeddingService.embed_and_store_tool(...)`\r\n  - `EmbeddingService.embed_and_store_tools_batch(...)`\r\n  - `index_tool_fire_and_forget(...)`\r\n  - `reindex_all_tools(...)`\r\n\r\n---\r\n\r\n## 📂 Files Related to This Feature (Added/Modified)\r\n\r\n### Core Runtime\r\n- `mcpgateway/main.py`\r\n- `mcpgateway/config.py`\r\n- `mcpgateway/schemas.py`\r\n- `mcpgateway/services/embedding_service.py`\r\n\r\n### Plugin Implementation\r\n- `plugins/crt_router/__init__.py`\r\n- `plugins/crt_router/crt_router.py`\r\n- `plugins/crt_router/semantic_router.py`\r\n- `plugins/crt_router/models.py`\r\n- `plugins/crt_router/plugin-manifest.yaml`\r\n- `plugins/crt_router/README.md`\r\n\r\n### Tests\r\n- `tests/integration/test_crt_router_integration.py`\r\n- `tests/unit/mcpgateway/services/test_crt_router.py`\r\n- `tests/unit/mcpgateway/plugins/crt_router/__init__.py`\r\n- `tests/unit/mcpgateway/plugins/crt_router/test_crt_router.py`\r\n- `tests/unit/mcpgateway/plugins/plugins/crt_router/conftest.py`\r\n- `tests/unit/mcpgateway/plugins/plugins/crt_router/test_plugin_configuration.py`\r\n- `tests/unit/mcpgateway/plugins/plugins/crt_router/test_plugin_registration.py`\r\n\r\n### Related Documentation Mentions\r\n- `docs/docs/best-practices/mcp-architecture-patterns.md`\r\n- `docs/docs/architecture/roadmap.md`\r\n\r\n---\r\n\r\n## ✅ Quick Verification Endpoints\r\n\r\n- List tools with semantic filtering:\r\n  - `GET /servers/{server_id}/tools?router=crt&prompt=weather+forecast&k=10&threshold=0.5`\r\n- Check router health:\r\n  - `GET /router/health`\r\n\r\n",
+  "comments": [
+    {
+      "id": "2969946572",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:33:06+00:00",
+      "body": "In tool_pre_invoke(), when the calibration file is missing initialize() builds an empty CRTRouter. rank_tools() then returns an empty list, and the current logic blocks every tool invocation (continue_processing=False) because payload.name is never in tool_names. Treat the “no calibrated tools / empty ranking” case as degraded and allow invocation (fail-safe), or keep _router=None when calibration is missing so this hook exits early."
+    },
+    {
+      "id": "2969946580",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:33:07+00:00",
+      "body": "rank_tools() only falls back when self._router is None, but initialize() sets self._router to an empty router when the calibration file is missing. That leads to returning an empty ranked list (and thus an empty /tools response when router=crt&prompt=...) instead of a safe pass-through. Consider detecting an empty calibration (e.g., not self._router.calibration.tools) or missing calibration and returning the unfiltered tool list with neutral scores."
+    },
+    {
+      "id": "2969946585",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:33:07+00:00",
+      "body": "ToolPreInvokePayload (mcpgateway.plugins.framework.hooks.tools.ToolPreInvokePayload) defines fields `name` and `args`. This fixture constructs it with `tool_name` and `arguments`, which will raise a Pydantic validation error. Update the fixture to use the correct field names (or aliases if the model is intended to support them).\n```suggestion\n        name=\"test_tool\",\n        args={\"arg1\": \"value1\", \"arg2\": 42}\n```"
+    },
+    {
+      "id": "2969946596",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:33:07+00:00",
+      "body": "This changes the default auth policy for /mcp endpoints to unauthenticated (`mcp_require_auth` default False). That’s a security-sensitive behavior change and appears unrelated to “semantic auto filtering”. If this is intentional, it should be gated behind an explicit opt-in or default to inheriting AUTH_REQUIRED as before, and be called out in the PR description/changelog."
+    },
+    {
+      "id": "2969946602",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:33:08+00:00",
+      "body": "ToolCreate.validate_description() now always raises on forbidden patterns and no longer respects the `settings.validation_strict` flag (and no longer logs-and-continue in lenient mode). This is a breaking behavior change for tool registration payloads (e.g., Markdown or shell-like text in descriptions) and seems unrelated to CRT routing. Either restore the strict/lenient behavior or document the breaking change and update callers/tests accordingly.\n```suggestion\n                if settings.validation_strict:\n                    # In strict mode, reject descriptions containing clearly unsafe patterns\n                    raise ValueError(f\"Description contains unsafe characters: '{pat}'\")\n                # In lenient mode, log and continue to allow backward-compatible payloads\n                logger.warning(\n                    \"Description contains potentially unsafe characters '%s', but \"\n                    \"validation_strict is disabled; allowing description.\",\n                    pat,\n                )\n                # Avoid logging multiple times for different patterns; continue with sanitization\n                break\n```"
+    },
+    {
+      "id": "2969946609",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:33:08+00:00",
+      "body": "The README’s example plugin `kind` doesn’t match the actual implementation path in this repo (code/tests use `plugins.crt_router.crt_router.CRTRouterPlugin`). Using the wrong import path will prevent plugin loading from config.yaml. Update the docs to the correct fully-qualified kind."
+    },
+    {
+      "id": "2969946616",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:33:08+00:00",
+      "body": "This assertion is effectively unconditional: `len(caplog.records) >= 0` is always true, so the test will pass even if initialize() emits no warning. Tighten it to assert a warning record exists and/or assert on a specific warning message substring.\n```suggestion\n        assert caplog.records, \"Expected at least one warning log record when calibration file is missing.\"\n        assert \"not found\" in caplog.text or \"missing\" in caplog.text.lower()\n```"
+    },
+    {
+      "id": "2969946624",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:33:08+00:00",
+      "body": "These fields use `Annotated[..., NoDecode()]`, but elsewhere in the same file (e.g., allowed_origins) the marker is used as `NoDecode` without calling it. If `NoDecode` is a marker class (as in pydantic-settings), calling it can break env parsing/typing. Make the usage consistent (likely `Annotated[list[str], NoDecode]`)."
+    },
+    {
+      "id": "2969946635",
+      "author": "Copilot",
+      "created_at": "2026-03-21T18:33:09+00:00",
+      "body": "SSRF protection defaults are being relaxed here (allow localhost, allow private networks, and DNS fail-open). That materially increases blast radius if a tool/gateway URL can be influenced by an attacker. Consider keeping secure defaults (block localhost/private by default, DNS fail-closed) and allowing opt-in relaxation via explicit env vars for development-only deployments."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3986391225",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-03-21T18:33:09+00:00",
+      "body": "## Pull request overview\n\nThis PR introduces a CRT-based semantic router plugin and API/query-parameter integration to automatically filter MCP tool lists based on prompt meaning, along with extensive unit/integration test coverage and supporting embedding/config/schema updates.\n\n**Changes:**\n- Adds `plugins/crt_router` implementation (calibration models + deterministic CRT semantic ranking + plugin wrapper + manifest/docs).\n- Extends gateway behavior (and tests) to support `router=crt&prompt=...&k=...&threshold=...` tool listing and `/router/health`.\n- Introduces/updates embedding service utilities plus broad configuration/schema changes related to embeddings, security, and API schemas.\n\n### Reviewed changes\n\nCopilot reviewed 15 out of 17 changed files in this pull request and generated 9 comments.\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| `plugins/crt_router/crt_router.py` | Implements the CRT router plugin entrypoints (`rank_tools`, `tool_pre_invoke`, `get_health`). |\r\n| `plugins/crt_router/semantic_router.py` | Adds the deterministic CRT inference engine and ranking logic. |\r\n| `plugins/crt_router/models.py` | Defines Pydantic models for calibration artifacts and ranking results. |\r\n| `plugins/crt_router/__init__.py` | Exposes CRT router plugin symbols at package level. |\r\n| `plugins/crt_router/plugin-manifest.yaml` | Declares plugin hooks and default configuration. |\r\n| `plugins/crt_router/README.md` | Documents plugin usage and configuration. |\r\n| `mcpgateway/services/embedding_service.py` | Implements async embedding initialization, single/batch embedding, and DB storage utilities. |\r\n| `mcpgateway/schemas.py` | Adds `crt_scores` to `ToolRead` and includes multiple schema/validation adjustments. |\r\n| `mcpgateway/config.py` | Adds embedding + CRT router settings and includes substantial security/auth default changes. |\r\n| `tests/integration/test_crt_router_integration.py` | Adds integration tests for CRT-filtered tool listing and router health endpoint. |\r\n| `tests/unit/mcpgateway/services/test_crt_router.py` | Adds unit tests for CRT router plugin behaviors (init/health/rank_tools). |\r\n| `tests/unit/mcpgateway/plugins/crt_router/test_crt_router.py` | Adds comprehensive unit tests for models and CRT inference engine. |\r\n| `tests/unit/mcpgateway/plugins/plugins/crt_router/conftest.py` | Adds fixtures for CRT plugin tests (calibration data/files/config/context/payloads). |\r\n| `tests/unit/mcpgateway/plugins/plugins/crt_router/test_plugin_configuration.py` | Adds tests around CRTRouterConfig validation and config wiring. |\r\n| `tests/unit/mcpgateway/plugins/plugins/crt_router/test_plugin_registration.py` | Adds tests for plugin import/instantiation/registration expectations. |\r\n| `tests/unit/mcpgateway/plugins/crt_router/__init__.py` | Test package marker for CRT router unit tests. |\n</details>\n\n\n\n<details>\n<summary>Comments suppressed due to low confidence (1)</summary>\n\n**mcpgateway/config.py:1003**\n* get_security_status() compares a SecretStr (jwt_secret_key) directly to a plain string. This will not reliably detect the default value (and can report secure_secrets=True even when the default secret is in use). Unwrap via get_secret_value() (or hasattr/get_secret_value pattern used elsewhere in the codebase) before comparing.\n```\n        return {\n            \"secure_secrets\": self.jwt_secret_key != \"my-test-key\",  # nosec B105 - checking for default value\n            \"auth_enabled\": self.auth_required,\n            \"ssl_verification\": not self.skip_ssl_verify,\n            \"debug_disabled\": not self.debug,\n            \"cors_restricted\": \"*\" not in self.allowed_origins if self.cors_enabled else True,\n            \"ui_protected\": not self.mcpgateway_ui_enabled or self.auth_required,\n            \"warnings\": self.get_security_warnings(),\n            \"security_score\": security_score,\n        }\n```\n</details>\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main?filename=.github/instructions/*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "4bf02c3a65c0360e59f4bd2ff1b5b4579975bc7a",
+      "message": "feat: add semantic auto filtering\n\nSigned-off-by: AbdulR11 <147985851+AbdulR11@users.noreply.github.com>",
+      "author": "AbdulR11",
+      "date": "2026-03-21T18:27:32+00:00"
+    },
+    {
+      "sha": "795bf0ae644b6236a3122a4a36f7ee299ed0bc0f",
+      "message": "Merge branch 'main' into semantic-auto-filtering",
+      "author": "AbdulR11",
+      "date": "2026-03-31T15:15:23+00:00"
+    }
+  ],
+  "files_changed": 17,
+  "additions": 5957,
+  "deletions": 4109,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:01.344832",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:01.348353",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3782,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3782.json"
+  }
+}

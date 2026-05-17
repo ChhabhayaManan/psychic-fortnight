@@ -1,0 +1,60 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4039,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4039"
+  },
+  "metadata": {
+    "title": "Updates to pre-commit for cyclical secret detection issue",
+    "state": "closed",
+    "created_at": "2026-04-03T19:02:52+00:00",
+    "updated_at": "2026-04-04T17:09:43+00:00",
+    "closed_at": "2026-04-04T17:09:41+00:00",
+    "merged_at": "2026-04-04T17:09:41+00:00",
+    "author": "brian-hussey",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\nCloses #4038 4038\r\nBefore opening this PR please:\r\n\r\n1. `make lint`            - passes `ruff`, `mypy`, `pylint`\r\n2. `make test`            - all unit + integration tests green\r\n3. `make coverage`        - ≥ 80 %\r\n4. `make docker docker-run-ssl` or `make podman podman-run-ssl`\r\n5. Update relevant documentation.\r\n6. Tested with sqlite and postgres + redis.\r\n7. Manual regression no longer fails. Ensure the UI and /version work correctly.\r\n\r\n---\r\n\r\n## 📌 Summary\r\nThere is a problem with a cyclical change to the .secrets.baseline file while our development and CI workflows are executed.\r\n\r\nThe problem arises from the fact that in the pre-commit cycle we have linters (to check the code) and formatters to edit the code in place. Detect-secrets runs before any of the formatters execute - which updates the .secrets.baseline file with references to line numbers and others in the existing structure, then the formatters change that structure, usually impacting the line numbers of identified potential secrets.\r\n\r\n## 🔁 Reproduction Steps\r\n1. Add extra blank lines file tests/loadtest/locustfile.py at the top\r\n   1. This will cause line number of existing potential secrets to change\r\n1. With pre-commit installed (`pre-commit install`)\r\n   1. As you execute `git commit -s -m 'Update 1'` it will execute \r\n      1. detect-secrets first - fails - generates new .secrets.baseline changes that need to be committed\r\n      1. `flake8` will fail on linting issue\r\n      1. `black` will fail - generates a new tests/loadtest/locustfile.py that will need to be staged (not this is different from what detect-secrets scanned)\r\n1. git add .secrets.baseline\r\n1. git add tests/loadtest/locustfile.py\r\n1. git commit -s -m 'Update 2'\r\n1. This triggers scans again\r\n    1. detect secrets fails - generates update .secrets.baseline file\r\n    1. Black/flake8 pass\r\n1. Stage new .secrets.baseline file\r\n    1. `git add .secrets.baseline`\r\n1. Commit it (and let pre-commit run again)\r\n    1. This time everything passes\r\n\r\n## 🐞 Root Cause\r\nPre-commit has detect secrets which is sensitive to line changes where potential secrest are identified, black is a formatter which can cause the line numbers that detect-secrets cares about to change after detect secrets has already executes with previously known line numbers.\r\n\r\n## 💡 Fix Description\r\n1. Change the order of the pre-commits so that detect-secrets runs after all other checks so that any file changes will already be present.\r\n2. Change the pre-commit settings to fail fast - so if a particular tool fails the pre-commit workflow will stop there instead of trying to execute everything.\r\n\r\nNow:\r\n1. lint failure (flake8)\r\n   1. add blank lines, add, commit change - pre-commit fails on flake8 and stops\r\n2. current code when black is run is reformatted over multiple lines (commit: 772d81a7a9f5be099e8eb0c1ecf15284d03a34ca)\r\n   1. detect-secrets fails - generates a new .secrets.baseline \r\n   2. git add .secrets.baseline, git commit - pre-commit checks pass as expected - safe to push to remote\r\n3. Introduce a secret/fake-secrets\r\n   1. Add a line to same file: `test_secret = \"Th1s_is_4_f4k3_s3cr3t!\"`\r\n   2. git add, git commit - pre-commit executes detect-secrets fails with message:\r\n   \r\n```\r\n\r\nPotential secrets about to be committed to git repo! Please rectify.\r\n\r\nSecret Type: Secret Keyword\r\nLocation:    tests/loadtest/locustfile.py:59\r\n\r\nPossible mitigations:\r\n\r\n  - Mark false positives with an inline `pragma: allowlist secret`\r\n    comment\r\n  - Commit with `--no-verify` if this is a one-time false positive\r\n\r\nIf a secret has already been committed, visit\r\nhttps://help.github.com/articles/removing-sensitive-data-from-a-\r\nrepository\r\n```\r\n\r\n4. User must run `make detect-secrets-scan && make detect-secrets-audit` to audit and correct findings - either change secret or confirm it is a false positive. Then commit changes and changes to .secrets.baseline file.\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |        |\r\n| Unit tests                            | `make test`          |        |\r\n| Coverage ≥ 80 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [ ] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4058664564",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-04T16:53:07+00:00",
+      "body": "Good fix, Brian. The root cause analysis is correct — detect-secrets was recording line numbers before formatters shifted them, causing the cyclical `.secrets.baseline` churn. Moving it to the end of the chain is the right solution.\n\nI rebased onto main (resolved a trivial `generated_at` timestamp conflict in `.secrets.baseline`) and added one fixup commit:\n\n- **Missing trailing newlines**: Both YAML files ended without `\\n`, which would trip the `end-of-file-fixer` hook on every run — ironically the same kind of cycle this PR fixes.\n- **Section header alignment**: Renamed the top section in `.pre-commit-config.yaml` from \"Security and Secret Detection Hooks\" to \"Security - Detect Private Keys\" to match the lite file, since detect-secrets now has its own section at the end.\n\nA couple of observations (not blocking):\n\n1. **`fail_fast` + last-position interaction**: With `fail_fast: true` and detect-secrets at the end, any earlier hook failure means secret scanning is skipped for that invocation. The old config had the cycle problem but detect-secrets always ran. This is an acceptable trade-off (you fix the earlier failure and re-commit, so detect-secrets runs next time), but worth being aware of.\n\n2. **`types: [text]` narrows scan scope**: The original hook didn't filter by type, so it technically ran on all changed files. Adding `types: [text]` skips binaries — which is sensible since detect-secrets pattern-matches text anyway — but it's a minor coverage reduction worth noting explicitly.\n\nNeither of these is a blocker. The fix is sound and both configs are properly aligned. Approved."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "3070741fcaf16adfb575f89c0cfcb54eb2719827",
+      "message": "Updates to pre-commit for cyclical secret detection issue\n\nSigned-off-by: Brian Hussey <brian.hussey@ie.ibm.com>",
+      "author": "Brian Hussey",
+      "date": "2026-04-03T18:22:51+00:00"
+    },
+    {
+      "sha": "fcbdbbc3f7c3357931c96789460bbb3dabd16c7f",
+      "message": "fix: add trailing newlines and align section header in pre-commit configs\n\n- Both YAML files were missing trailing newlines (would trip the\n  end-of-file-fixer hook)\n- Rename top section header in .pre-commit-config.yaml to match\n  .pre-commit-lite.yaml (\"Security - Detect Private Keys\") since\n  detect-secrets moved to its own section at the end\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-04T16:17:13+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 34,
+  "deletions": 18,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:18.015875",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:18.020303",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4039,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4039.json"
+  }
+}

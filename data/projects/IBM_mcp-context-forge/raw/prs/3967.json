@@ -1,0 +1,70 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3967,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3967"
+  },
+  "metadata": {
+    "title": "fix: resolve Alpine.js MutationObserver race condition in observability sub-views",
+    "state": "closed",
+    "created_at": "2026-04-01T07:59:57+00:00",
+    "updated_at": "2026-04-05T11:20:28+00:00",
+    "closed_at": "2026-04-05T11:20:28+00:00",
+    "merged_at": "2026-04-05T11:20:28+00:00",
+    "author": "ecthelion77",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\n\nBefore opening this PR please:\n\n1. `make lint`            - N/A (HTML template change only, no Python modified)\n2. `make test`            - N/A (no unit tests for frontend templates)\n3. `make coverage`        - N/A\n4. `make docker docker-run-ssl` or `make podman podman-run-ssl` - ✅ Tested with Docker\n5. Update relevant documentation. - N/A (no doc changes needed)\n6. Tested with sqlite and postgres + redis. - ✅ Tested with PostgreSQL + Redis\n7. Manual regression no longer fails. Ensure the UI and /version work correctly. - ✅ Verified\n\n---\n\n## 📌 Summary\n\nFixes the observability dashboard sub-views (MCP Tools, Advanced Metrics, Prompts, Resources) which fail to load with `createToolsController is not defined` / `createMetricsController is not defined` errors. The Traces tab (server-rendered via HTMX) is unaffected.\n\n## 🔁 Reproduction Steps\n\nFixes #3966\n\n1. Enable observability (`OBSERVABILITY_ENABLED=true`, `OTEL_ENABLE_OBSERVABILITY=true`)\n2. Generate trace data (invoke tools via MCP)\n3. Navigate to **Admin → Observability**\n4. Click **MCP Tools** or **Advanced Metrics** tab\n5. Sub-view is empty; browser console shows `createToolsController is not defined`\n\n## 🐞 Root Cause\n\nWhen `loadToolsView()` fetches a sub-partial (e.g. `observability_tools.html`), the response contains:\n1. A `<script>` block defining `window.createToolsController` (~600 lines)\n2. A `<div x-data=\"createToolsController()\" x-init=\"init()\">` element\n\nThe code inserts HTML via `container.innerHTML`. Alpine.js's global `MutationObserver` detects the new `x-data` attribute and **immediately** calls `createToolsController()` — but `innerHTML` does not execute `<script>` tags, so the function is undefined.\n\n## 💡 Fix Description\n\nMove script extraction to a **native `<script>` block** in `observability_partial.html` (browser-executed, not Alpine's `new Function()` evaluator):\n\n1. **`window.__obsExecAndStrip(html)`**: extracts `<script>` blocks from raw HTML via regex (`new RegExp` with string concatenation to avoid `</script>` literal breaking HTML parsing)\n2. **Execution**: `document.createElement('script').text = code; document.head.appendChild(s)` — jQuery's globalEval pattern, synchronous in global scope\n3. **DOM insertion**: clean (script-free) HTML inserted inside `Alpine.mutateDom()` to suppress MutationObserver, then `Alpine.initTree()` called explicitly\n\nThis ensures controller functions are defined **before** Alpine sees the `x-data` attributes.\n\n## 🧪 Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Lint suite                            | `make lint`          | N/A — HTML template only |\n| Unit tests                            | `make test`          | N/A — no frontend tests |\n| Coverage ≥ 80 %                       | `make coverage`      | N/A |\n| Manual regression no longer fails     | Tested in browser    | ✅ All 4 sub-views load correctly |\n\n**Manual verification**: After deploying, all 4 observability sub-views (Tools, Metrics, Prompts, Resources) load their charts and data correctly. No console errors. Tested on Chrome and Firefox.\n\n## 📐 MCP Compliance (if relevant)\n- [x] Matches current MCP spec\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted (`make black isort pre-commit`) — N/A (HTML only)\n- [x] No secrets/credentials committed\n- [x] DCO Signed-off-by included\n\n## 📓 Notes\n\nOnly `mcpgateway/templates/observability_partial.html` is modified. The change is -69/+51 lines — it simplifies the 4 loader functions by extracting the shared script-execution logic into a single `window.__obsExecAndStrip()` helper.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4059371005",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-05T11:03:25+00:00",
+      "body": "Looks good. The race condition fix is correct — scripts execute synchronously before Alpine sees the DOM, and mutateDom suppresses the MutationObserver during insertion. Rebased, hardened, tested, and live-validated. Approving."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "85ebbe80fd31121b7b152b31d10d16162723e583",
+      "message": "fix: resolve Alpine.js MutationObserver race condition in observability sub-views\n\nWhen observability sub-partials (Tools, Metrics, Prompts, Resources) are\ndynamically loaded via fetch(), Alpine.js's MutationObserver auto-initializes\nx-data components before the inline <script> tags defining their controllers\nhave executed, causing 'createToolsController is not defined' errors.\n\nMove script extraction logic to a native <script> block (browser-executed,\nnot Alpine's new Function() evaluator):\n- Extract <script> blocks from raw HTML via regex (new RegExp with string\n  concatenation avoids </script> literal breaking HTML parsing)\n- Execute via document.createElement('script').text + appendChild\n  (jQuery globalEval pattern — synchronous, global scope)\n- Insert clean (script-free) HTML inside Alpine.mutateDom() to suppress\n  MutationObserver, then call Alpine.initTree() explicitly\n\nFixes #3966\n\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-01T07:59:11+00:00"
+    },
+    {
+      "sha": "5148ec662f2732b09f92007406281db90c151a70",
+      "message": "test(ui): add unit tests for observability __obsExecAndStrip helper\n\nAdd vitest/jsdom tests covering the script extraction, execution,\nand Alpine.mutateDom + initTree injection pattern introduced in\nthe observability dashboard race condition fix.\n\nCovers: script ordering, attribute handling, error recovery, cleanup,\ncontroller factory simulation, and Alpine fallback paths.\n\nRef: #3967\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-05T09:42:09+00:00"
+    },
+    {
+      "sha": "3bf27cd39a917fec441c722beb43d1561acbdad1",
+      "message": "fix(ui): harden Alpine guard and warn on unsupported external scripts\n\nAddress review feedback on the observability race-condition fix:\n\n- Harden Alpine.js guard to check typeof mutateDom/initTree === 'function'\n  before calling, consistent with initialization.js pattern (L956, L1505).\n- Detect and warn on <script src=\"...\"> in dynamic partials instead of\n  silently dropping them. No sub-partials currently use external scripts.\n- Update __obsExecAndStrip regex to capture attributes separately for\n  the src detection.\n- Add 5 new tests: external script warning, partial Alpine API fallback\n  (mutateDom missing, initTree missing, non-function values).\n- Add drift-risk note to test file header.\n\nRef: #3967\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-05T10:44:32+00:00"
+    },
+    {
+      "sha": "575692d4daba0494f72b04754b5fb35441582e74",
+      "message": "fix(ui): prevent false-positive src detection on data-src attributes\n\nThe \\bsrc\\s*= regex matched data-src= because - is a word boundary,\ncausing inline scripts with data-src attributes to be silently skipped.\n\nUse (?:^|\\s)src\\s*= to require whitespace before src, avoiding\nfalse positives on data-src, ng-src, or similar hyphenated attributes.\n\nAdd regression test for data-src false-positive case.\n\nRef: #3967\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-05T10:48:43+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 433,
+  "deletions": 77,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:55.348220",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:55.349088",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3967,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3967.json"
+  }
+}

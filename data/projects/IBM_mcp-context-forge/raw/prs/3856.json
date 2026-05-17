@@ -1,0 +1,68 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3856,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3856"
+  },
+  "metadata": {
+    "title": "fix(sso): SSO Team Membership Stale Revocation",
+    "state": "closed",
+    "created_at": "2026-03-25T11:55:55+00:00",
+    "updated_at": "2026-03-28T21:51:29+00:00",
+    "closed_at": "2026-03-28T21:51:27+00:00",
+    "merged_at": "2026-03-28T21:51:27+00:00",
+    "author": "bogdanmariusc10",
+    "labels": [
+      "security",
+      "api",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": [
+      "jonpspri"
+    ]
+  },
+  "description": "<!--\r\nFor specialized templates, append to your PR URL:\r\n  ?template=bug_fix.md   - Bug fixes\r\n  ?template=feature.md   - New features\r\n  ?template=docs.md      - Documentation\r\n  ?template=plugin.md    - New plugins\r\n\r\nExample: https://github.com/IBM/mcp-context-forge/compare/main...your-branch?expand=1&template=bug_fix.md\r\n-->\r\n\r\n## 🔗 Related Issue\r\n\r\nCloses #3821\r\n\r\n---\r\n\r\n## 📝 Summary\r\n\r\nFixes SSO team membership stale revocation bug where team memberships granted via SSO group mapping persisted indefinitely after the identity provider revoked the group.\r\n\r\n**Problem:** `_apply_team_mapping()` in `sso_service.py` only added users to teams when their Keycloak/OIDC groups matched a `team_mapping` entry. It never removed them when they left the corresponding group, violating least-privilege and breaking Layer 1 (data visibility) scoping.\r\n\r\n**Solution:** Added `grant_source` tracking to `EmailTeamMember` and implemented removal pass in `_apply_team_mapping()` to mirror the correct pattern in `_sync_user_roles()`.\r\n\r\n**Security Impact:**\r\n- Fixes Layer 1 (visibility) violation - users can no longer see resources after IdP revokes group membership\r\n- Enables audit trail to distinguish SSO-granted vs manual memberships\r\n\r\n**Changes:**\r\n- Add `grant_source` column to `email_team_members` table (Alembic migration)\r\n- Update `EmailTeamMember` model with `grant_source` field\r\n- Add `grant_source` parameter to `TeamManagementService.add_member_to_team()`\r\n- Rewrite `_apply_team_mapping()` to:\r\n  * Query current SSO-granted memberships (`grant_source=\"sso\"`)\r\n  * Build desired team set from current groups + team_mapping\r\n  * **Remove** memberships where `grant_source=\"sso\"` AND team not in desired set\r\n  * Grant new memberships with `grant_source=\"sso\"`\r\n- Update `TeamMemberResponse` schema to expose `grant_source` field\r\n- Fix 6 failing tests to handle new `grant_source` field\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [x] Bug fix\r\n- [ ] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |    ✅ Pass    |\r\n| Unit tests                | `make test`     |    ✅ 215 passed, 51 skipped    |\r\n| Coverage ≥ 80%            | `make coverage` |    ✅ Pass     |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\n### Before Fix\r\n```\r\n# _apply_team_mapping() - OLD BEHAVIOR\r\nif not groups:\r\n    return  # Early exit, no removal\r\n\r\nfor group in groups:\r\n    add_member_to_team(...)  # Only adds, never removes\r\n```\r\n\r\nResult: Team memberships persisted forever after group removal.\r\n\r\n### After Fix\r\n```\r\n# _apply_team_mapping() - NEW BEHAVIOR\r\n# 1. Query current SSO memberships (grant_source=\"sso\")\r\ncurrent_sso_memberships = query(EmailTeamMember).filter(grant_source=\"sso\")\r\n\r\n# 2. Build desired teams from current groups\r\ndesired_teams = {team_id for group in groups if group in mapping}\r\n\r\n# 3. REMOVE stale SSO memberships\r\nfor membership in current_sso_memberships:\r\n    if membership.team_id not in desired_teams:\r\n        remove_member_from_team(...)  # NEW: Removes stale memberships\r\n\r\n# 4. Grant new SSO memberships\r\nfor group in groups:\r\n    add_member_to_team(..., grant_source=\"sso\")\r\n```\r\n\r\nResult: Team memberships are reconciled on each login - stale ones are removed.\r\n\r\n### Migration Notes\r\nThe Alembic migration is idempotent and safe to run on existing databases. Existing team memberships will have `grant_source=NULL` (treated as manual grants and preserved).\r\n\r\n### Test Coverage\r\n5 comprehensive tests added (in `tests/unit/mcpgateway/services/test_sso_service.py`):\r\n\r\n- `test_apply_team_mapping_removes_stale_sso_memberships` - Verifies removal when groups are revoked\r\n- `test_apply_team_mapping_preserves_current_sso_memberships` - Ensures current memberships aren't touched\r\n- `test_apply_team_mapping_removes_all_when_groups_empty` - Tests empty groups edge case\r\n- `test_apply_team_mapping_handles_removal_errors_gracefully` - Error handling verification\r\n- `test_apply_team_mapping_queries_sso_memberships_correctly` - DB query validation\r\n\r\n\r\n### Files Changed\r\n`mcpgateway/db.py` - Add `grant_source` field to `EmailTeamMember` model\r\n`mcpgateway/schemas.py` - Add `grant_source` to `TeamMemberResponse` schema\r\n`mcpgateway/services/sso_service.py` - Rewrite `_apply_team_mapping()` with removal pass\r\n`mcpgateway/services/team_management_service.py` - Add `grant_source` parameter\r\n`mcpgateway/alembic/versions/225bde88217e_add_grant_source_to_team_members.py` - New migration\r\n`tests/unit/mcpgateway/routers/test_teams.py` - Fix mock to include `grant_source`\r\n`tests/unit/mcpgateway/routers/test_teams_v2.py` - Fix mocks to include `grant_source`\r\n`tests/unit/mcpgateway/services/test_sso_service.py` - Update assertions for new parameter",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "5c6527d1f0250d20f7dd5e39814535bb9a4b30c4",
+      "message": "fix(sso): reconcile team memberships on SSO login to remove stale grants\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-03-25T11:30:00+00:00"
+    },
+    {
+      "sha": "df8e8b813e60743aefef74e9d9a5b3d84e58c979",
+      "message": "fix: address CI test failures and linting issues\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Bogdan-Marius-Catanus",
+      "date": "2026-03-25T12:43:39+00:00"
+    },
+    {
+      "sha": "6dcf1d71d58cdf547336ec64cc7f90adb38852cb",
+      "message": "fix(sso): update grant_source on reactivation, strengthen tests, fix formatting\n\n- Update reactivation path in add_member_to_team to set grant_source\n  when provided, preventing SSO-reactivated memberships from escaping\n  reconciliation on subsequent logins\n- Strengthen test_apply_team_mapping_queries_sso_memberships_correctly\n  to compile the SQLAlchemy statement and verify filter clauses\n- Add test coverage for whitespace-only team_mapping keys (sso_service)\n  and grant_source update on membership reactivation (team_management)\n- Fix black formatting in Alembic migration and test files\n- Add missing docstrings to _Unset.__repr__ and _Unset.__bool__\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-28T19:23:59+00:00"
+    },
+    {
+      "sha": "c1049b1b05a8435c49904fc99a4fa710a2701f09",
+      "message": "refactor: extract helpers from sso_service and team_management_service to reduce duplication\n\nsso_service.py:\n- Extract _extract_groups_and_roles and _build_normalized_user_info from\n  _normalize_user_info, eliminating 4x duplicated group extraction and 7x\n  duplicated dict construction\n- Extract _enrich_user_data_from_claims from _get_user_info, separating\n  provider-specific claim enrichment from the HTTP fetch/normalize flow\n- Extract _check_pending_approval and _reset_pending_approval, flattening\n  5-level nested approval dispatch to early-return style\n- Extract _should_sync_roles, eliminating duplicated sync logic in both\n  the existing-user and new-user paths\n- Remove redundant guard in Entra id_token_claims check\n- Use set lookups instead of list-in-list O(n^2) checks in\n  _should_user_be_admin\n- Use typed _Unset sentinel enum for _build_normalized_user_info overrides\n  so callers can explicitly pass None\n\nteam_management_service.py:\n- Extract _assign_team_rbac_role from add_member_to_team and\n  approve_join_request\n- Extract _invalidate_membership_caches from 3 membership-change methods\n- Extract _apply_team_list_filters from list_teams, get_all_team_ids, and\n  get_teams_count, fixing filter divergence\n- Add personal_owner_email parameter to get_teams_count for consistency\n- Extract _check_user_team_limit for the max-teams-per-user guard\n- Fix print() to logger.error in verify_team_for_user\n\ntest_sso_service.py:\n- Add 44 new tests for extracted helpers\n- Reorganize test classes by method under test\n\nSigned-off-by: Jonathan Springer <jps@s390x.com>",
+      "author": "Jonathan Springer",
+      "date": "2026-03-28T20:55:10+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 2201,
+  "deletions": 1399,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:25.040652",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:25.042441",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3856,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3856.json"
+  }
+}

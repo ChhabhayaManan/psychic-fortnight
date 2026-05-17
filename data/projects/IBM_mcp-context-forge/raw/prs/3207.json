@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3207,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3207"
+  },
+  "metadata": {
+    "title": "fix(auth): correct RFC 8414 well-known URL construction for path-based issuers",
+    "state": "closed",
+    "created_at": "2026-02-24T10:13:54+00:00",
+    "updated_at": "2026-03-07T09:33:53+00:00",
+    "closed_at": "2026-03-07T09:33:51+00:00",
+    "merged_at": "2026-03-07T09:33:51+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "security",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3089 due to repository maintenance. Your code and branch are intact. @sumant-pangotra please verify everything looks good.\n\n# 🐛 Bug-fix PR\r\n\r\n---\r\n\r\n## 📌 Summary\r\nFixed incorrect RFC 8414 `.well-known` discovery URL construction in `DcrService`. When an OAuth issuer URL includes a path (common in multi-tenant environments), the service was previously appending the well-known segment to the end of the URL instead of inserting it after the host as required by the spec. This caused errors during Dynamic Client Registration (DCR).\r\nCloses #3088\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Configure an issuer with a path: `https://auth.example.com/tenant-1`.\r\n2. Observe `discover_as_metadata` attempting to fetch: `https://auth.example.com/tenant-1/.well-known/oauth-authorization-server`.\r\n3. Expected URL per RFC 8414 Section 3.1: `https://auth.example.com/.well-known/oauth-authorization-server/tenant-1`.\r\n\r\n## 🐞 Root Cause\r\nThe logic inside `discover_as_metadata` used string concatenation/stripping that didn't account for URL path components.\r\n\r\n## 💡 Fix Description\r\n1. **URL Re-construction**: Switched to `urllib.parse.urlparse` to robustly decompose and reconstruct the discovery URL.\r\n2. **Insertion Logic**: Implemented logic to insert the `/.well-known/oauth-authorization-server` suffix between the `netloc` and the `path`.\r\n3. **Normalization**: Enhanced stripping of trailing slashes at the start of the service method to ensure internal consistency and cache hits regardless of whether the input issuer has a trailing slash.\r\n4. **New Test Case**: Added `test_discover_as_metadata_rfc8414_path_construction` to [tests/unit/mcpgateway/services/test_dcr_service.py:L248](./tests/unit/mcpgateway/services/test_dcr_service.py#L248) to verify correct URL construction for path-based issuers and prevent regressions.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          | Pass   |\r\n| Unit tests                            | `make test`          | Pass   |\r\n| Coverage ≥ 80 %                       | `make coverage`      | Pass   |\r\n| Manual regression no longer fails     | Unit tests for paths | Pass   |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3859819196",
+      "author": "gcgoncalves",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-26T09:58:30+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "26285de604eadba9a8fd0a6299fbf754c70c8df0",
+      "message": "[FIX] | Fix RFC 8414 discovery URL construction\n\n    Ensure the well-known URI suffix /.well-known/oauth-authorization-server is correctly inserted between the host and path components of the issuer identifier, as required by RFC 8414 Section 3.1. This enables proper discovery for multi-tenant issuer configurations where the issuer URL contains a path.\nCloses #3088\n\nSigned-off-by: Sumant Pangotra <sumantpangotra@gmail.com>",
+      "author": "Sumant Pangotra",
+      "date": "2026-02-21T04:00:37+00:00"
+    },
+    {
+      "sha": "362e75f951c71d32d34222f810b5db7d0987edfe",
+      "message": "fix(auth): update docstring and add multi-level path test for RFC 8414\n\n- Fix misleading docstring in discover_as_metadata that described the old\n  URL construction behavior\n- Add test for multi-level path issuers (e.g. /tenant1/realm1)\n- Apply isort/black formatting to test file\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T08:51:37+00:00"
+    },
+    {
+      "sha": "ae4ceb67e836f4afa20ba189d4e76faea7dad02f",
+      "message": "fix(auth): use urlsplit instead of urlparse to preserve path params\n\nurlparse() strips semicolon path parameters (;params) from the last\npath segment into a separate attribute, losing data for issuers like\nhttps://as.example.com/tenant;v=1. urlsplit() preserves the full path.\n\nAlso adds tests for:\n- Semicolon path parameter preservation\n- OIDC fallback URL construction for path-based issuers (append vs insert)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-07T09:12:59+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 188,
+  "deletions": 14,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:13:22.893494",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:13:22.894996",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3207,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3207.json"
+  }
+}

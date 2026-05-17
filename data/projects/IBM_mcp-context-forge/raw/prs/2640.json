@@ -1,0 +1,111 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2640,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2640"
+  },
+  "metadata": {
+    "title": "feat: unified PDP plugin — closes #2223",
+    "state": "closed",
+    "created_at": "2026-02-01T22:46:28+00:00",
+    "updated_at": "2026-02-02T01:35:20+00:00",
+    "closed_at": "2026-02-02T01:31:59+00:00",
+    "merged_at": "2026-02-02T01:31:59+00:00",
+    "author": "yiannis2804",
+    "labels": [
+      "plugins",
+      "tcd"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #2223\r\n\r\nThis feature was developed as part of the SWENG Group 5 project (Trinity College Dublin).\r\n---\r\n\r\n## 📝 Summary\r\nAdds a unified Policy Decision Point plugin that orchestrates access-control decisions across multiple policy engines (Native RBAC, MAC, OPA, Cedar) through a single gateway hook interface. The plugin hooks into `tool_pre_invoke` and `resource_pre_fetch`, evaluates the request against enabled engines, and either passes through or blocks with a `PluginViolation`.\r\n\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     | ✅ 10/10 |\r\n| Unit tests                | `make test`     | ✅ 46 passed |\r\n| Coverage ≥ 90%            | `make coverage` | ⬜ 86% (OPA/Cedar require sidecars) |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [x] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n- Plugin ships as `mode: disabled` — safe default, no behaviour change until explicitly enabled.\r\n- Native RBAC and MAC engines work out of the box (pure Python, no sidecars).\r\n- OPA and Cedar engines require their respective sidecars to be running — see `plugins/unified_pdp/README.md`.\r\n- Combination modes supported: `all_must_allow` | `any_allow` | `first_match`.\r\n- Admin UI (#2226), REST API (#2227), audit trail (#2225), compliance reporting (#2224), and GitOps (#2238) are tracked as separate issues.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3736937329",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-02T01:01:38+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "eb8d4e88adaa77c71fae2fd43fba6fc3c8184dc1",
+      "message": "feat: unified PDP plugin for issue #2223\n\nAdds a single plugin entry point that orchestrates access-control\ndecisions across multiple policy engines (Native RBAC, MAC, OPA, Cedar).\n\n- plugins/unified_pdp/unified_pdp.py  — Plugin class, hooks into\n  tool_pre_invoke and resource_pre_fetch\n- plugins/unified_pdp/pdp.py          — PolicyDecisionPoint orchestrator\n- plugins/unified_pdp/pdp_models.py   — Pydantic models (Subject, Resource,\n  Context, AccessDecision, config types)\n- plugins/unified_pdp/adapter.py      — Abstract engine adapter base class\n- plugins/unified_pdp/cache.py        — TTL-aware decision cache\n- plugins/unified_pdp/engines/        — Four engine adapters: native_engine,\n  mac_engine, opa_engine, cedar_engine\n- plugins/unified_pdp/default_rules.json — Starter RBAC ruleset\n- tests/unit/plugins/test_unified_pdp.py — 46 unit tests\n- plugins/config.yaml                 — Plugin registration (mode: disabled)\n- MANIFEST.in                         — Added recursive-include plugins *.json\n\nCombination modes: all_must_allow | any_allow | first_match\nNative RBAC and MAC work out of the box. OPA and Cedar require their\nrespective sidecars (see README).\n\nCloses #2223\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-01T22:16:56+00:00"
+    },
+    {
+      "sha": "1418936a9c3f292fd34fb5b25d16a3be4efc158d",
+      "message": "test: add plugin class unit tests, coverage 86%\n\n13 tests covering UnifiedPDPPlugin hook methods (tool_pre_invoke,\nresource_pre_fetch), subject extraction (dict/string/None user),\naction string formatting, resource type mapping, and _build_pdp.\n\nunified_pdp.py now at 100% coverage. Remaining gaps are in OPA and\nCedar engine adapters which require external sidecars to test.\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-01T22:32:26+00:00"
+    },
+    {
+      "sha": "c075964112d5ce55cf64d18107f0b2a494a3dadb",
+      "message": "docs: add detailed README for unified PDP plugin\n\nSigned-off-by: yiannis2804 <yiannis2804@gmail.com>",
+      "author": "yiannis2804",
+      "date": "2026-02-01T22:40:40+00:00"
+    },
+    {
+      "sha": "e0e420461203ae669df2e8573aa55a29ce1c14e7",
+      "message": "fix(unified-pdp): fix bugs and improve tests\n\n- Fix undefined variable eng_type in pdp.py:get_effective_permissions()\n- Add shutdown() lifecycle method to UnifiedPDPPlugin to properly close\n  HTTP clients for OPA/Cedar engines\n- Convert tests from respx to pytest-httpx (project standard)\n- Add test for shutdown() method\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-01T23:37:51+00:00"
+    },
+    {
+      "sha": "dc4449754b6247396d940f20784559a7b709b423",
+      "message": "chore(unified-pdp): fix linting issues\n\n- Remove unused import List from mac_engine.py\n- Remove unused variable first_deny from pdp.py\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-01T23:38:32+00:00"
+    },
+    {
+      "sha": "e254571a5442d41708156cb831c53c4b668ebd47",
+      "message": "fix(unified-pdp): address review findings from additional security review\n\n- Cache key now includes user_agent and context.extra to prevent incorrect\n  cached decisions when policies depend on these fields (MAC operation\n  override, OPA/Cedar context-based rules)\n- Plugin now extracts IP and user_agent from HTTP headers and passes to\n  PDP context for policy evaluation\n- Plugin passes tool args to context.extra and resource metadata to\n  resource.annotations for fine-grained policy checks\n- Exception handling in _evaluate_parallel/_evaluate_sequential now\n  catches all exceptions (not just TimeoutError/PolicyEvaluationError)\n  to prevent crashing the whole request on unexpected errors\n- Native RBAC docstring corrected: only JSON files are supported (not YAML)\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-02T00:06:25+00:00"
+    },
+    {
+      "sha": "f397ff1dacfbf6e45daab5ac974a0740d6273b15",
+      "message": "fix(unified-pdp): extract classification_level for MAC engine\n\nExtract classification_level from tool args and resource metadata\nso MAC engine can make proper Bell-LaPadula decisions instead of\nalways denying due to missing classification.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-02T00:12:47+00:00"
+    },
+    {
+      "sha": "9719d6ddf9c9d30c087cc5223a54f2920f0fba90",
+      "message": "docs: add docstrings for 100% interrogate coverage\n\nAdd missing docstrings to all public functions and methods in the\nunified_pdp plugin to satisfy the project's 100% docstring coverage\nrequirement enforced by interrogate.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-02T00:49:28+00:00"
+    },
+    {
+      "sha": "6172dbdd5c5387dc9623f90bf141ceada8faae09",
+      "message": "docs: add comprehensive Google-style docstrings to unified_pdp\n\nAdd complete Args, Returns, Raises, and Attributes documentation to all\npublic functions and methods in the unified_pdp plugin, matching the\nproject's docstring style with full parameter descriptions.\n\nFiles updated:\n- adapter.py: PolicyEvaluationError, PolicyEngineAdapter methods\n- cache.py: _build_cache_key, _CacheEntry, DecisionCache methods\n- pdp.py: PolicyDecisionPoint and all evaluation/combination methods\n- engines/cedar_engine.py: CedarEngineAdapter and all methods\n- engines/mac_engine.py: MACEngineAdapter and all methods\n- engines/native_engine.py: NativeRBACAdapter and all methods\n- engines/opa_engine.py: OPAEngineAdapter and all methods\n- unified_pdp.py: shutdown lifecycle method\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-02T00:59:05+00:00"
+    },
+    {
+      "sha": "3c0dbfb2e2c4c483cae87d1fef9180435d593523",
+      "message": "docs: add __init__ docstring to PolicyEvaluationError\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-02-02T01:14:50+00:00"
+    }
+  ],
+  "files_changed": 17,
+  "additions": 4570,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:16:50.479245",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:16:50.480580",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2640,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2640.json"
+  }
+}

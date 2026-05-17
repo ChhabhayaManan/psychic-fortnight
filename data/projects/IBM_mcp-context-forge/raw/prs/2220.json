@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2220,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2220"
+  },
+  "metadata": {
+    "title": "Fix serviceAccountName re-creating (wiping) existing DB",
+    "state": "closed",
+    "created_at": "2026-01-20T12:02:31+00:00",
+    "updated_at": "2026-01-21T00:40:52+00:00",
+    "closed_at": "2026-01-21T00:40:50+00:00",
+    "merged_at": "2026-01-21T00:40:50+00:00",
+    "author": "ChrisPC-39",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nFix critical data loss issue in Helm chart caused by unconditional `serviceAccountName` addition to postgres deployment. The change in commit [5b7888d9](https://github.com/IBM/mcp-context-forge/commit/5b7888d9) triggers postgres pod recreation.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Deploy mcp-stack chart\r\n2. Populate database with data\r\n3. Upgrade to chart version containing commit 5b7888d9 or later (after Jan 14, 2026)\r\n4. Observe postgres pod recreation due to pod template spec change\r\n5. **Result**: All database data is lost due to new db being triggered\r\n\r\n## 🐞 Root Cause\r\n\r\nPR #1718 added `serviceAccountName: {{ include \"mcp-stack.serviceAccountName\" . }}` unconditionally to all deployments (`deployment-postgres.yaml` - line 49).\r\n\r\n**The problem:**\r\n- Adding a new field to pod template spec triggers a rolling update\r\n- Rolling update recreates the pod\r\n- Pod recreation wipes storage → **complete data loss**\r\n\r\n**Why this is a breaking change:**\r\n- The default `serviceAccount.create: false` means the helper returns `\"default\"`\r\n- Even though the value is `\"default\"`, adding the field itself changes the pod spec\r\n- Kubernetes treats this as a configuration change requiring pod recreation\r\n- This affects ALL existing deployments, not just those using ServiceAccount features\r\n\r\n## 💡 Fix Description\r\n\r\nMake `serviceAccountName` conditional - only add it when `serviceAccount.create: true`:\r\n\r\n```yaml\r\n# Before (unconditional - BREAKS existing deployments)\r\nserviceAccountName: {{ include \"mcp-stack.serviceAccountName\" . }}\r\n\r\n# After (conditional - backward compatible)\r\n{{- if .Values.serviceAccount.create }}\r\nserviceAccountName: {{ include \"mcp-stack.serviceAccountName\" . }}\r\n{{- end }}\r\n```\r\n\r\n**Benefits:**\r\n1. **Backward compatible**: Existing deployments with `create: false` (default) won't have field added\r\n2. **No pod recreation**: Without field change, Kubernetes doesn't trigger rolling update\r\n3. **Preserves data**: Ephemeral storage not wiped for users without persistence\r\n4. **Opt-in behavior**: Users who need ServiceAccount must explicitly enable it\r\n5. **Still functional**: ServiceAccount support works when explicitly enabled\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Existing deployment upgrades without pod recreation | Tested on live cluster | ✅ |\r\n| Data persists after upgrade           | Verified database contents | ✅ |\r\n\r\n**Manual Testing:**\r\n1. Deployed chart with `persistence.enabled: false` and `serviceAccount.create: false`\r\n2. Populated database with test data\r\n3. Upgraded to patched chart version\r\n4. Verified postgres pod was NOT recreated\r\n5. Confirmed database data intact\r\n\r\n## ✅ Checklist\r\n- [x] Backward compatible with existing deployments\r\n- [x] Verified no database pod recreation for default configuration\r\n\r\n## 🔗 Related Issues\r\n\r\nFixes data loss regression introduced in #1718 ",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3684866544",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-21T00:40:45+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ebdc8a2a29ca49719ad21c1883ce35433610e259",
+      "message": "Fix serviceAccountName re-creating (wiping) existing DB\n\nSigned-off-by: Chris PC <chrispc@li-4dc2bf4c-325d-11b2-a85c-b68e8b1fc307.ibm.com>",
+      "author": "Chris PC",
+      "date": "2026-01-20T11:41:29+00:00"
+    }
+  ],
+  "files_changed": 11,
+  "additions": 22,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:57.083722",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:57.084572",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2220,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2220.json"
+  }
+}

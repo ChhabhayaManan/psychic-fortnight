@@ -1,0 +1,40 @@
+{
+  "id": "667f473d-a712-482d-ac92-e64836d6b33d",
+  "title": "[EXPERIMENTAL][ADR-044] feat(grpc-uds): pure tonic handlers — eliminate Axum dispatch overhead",
+  "summary": "## Summary",
+  "reasoning": "HTTP/JSON IPC still leads\n\nThe remaining gap is structural to gRPC — protobuf serialization on Python ingress and Rust egress is unavoidable. The value of this transport is the typed contract, language-neutral codegen, and native streaming RPC — not raw single-request throughput. ADR-044 explicitly acknowledges this trade-off.\n\n<details>\n<summary>Flow diagrams: HTTP/JSON IPC vs gRPC-UDS pure tonic</summary>\n\n---\n\n**HTTP/JSON IPC**\n\n```\nPython gateway                  Unix socket              Rust sidecar\n─────────────────────────────────────────────────────────────────────\n\n  [incoming MCP request]\n        │\n        │  Build HTTP request\n        │  (headers already exist,\n        │   body already bytes)\n        │\n        ▼\n  ┌─────────────┐\n  │  httpx      │ ──── raw HTTP bytes ──────────────────► Axum router\n  │  AsyncClient│                                              │\n  └─────────────┘                                              │\n                                                         (Axum speaks\n                                                          HTTP natively,\n        ◄──────────── raw HTTP response bytes ───────────  no conversion)\n        │\n  [send response to client]\n```\n\n---\n\n**gRPC-UDS IPC (pure tonic — this PR)**\n\n```\nPython gateway                  Unix socket              Rust sidecar\n─────────────────────────────────────────────────────────────────────\n\n  [incoming MCP request]\n        │\n        │  1. Serialize to protobuf          ← still needed\n        │     (headers map, body bytes,\n        │      auth context, session id...)\n        │\n        ▼\n  ┌─────────────┐\n  │  grpc.aio   │ ──── protobuf bytes ──────────────────► tonic server\n  │  stub       │                                              │\n  └─────────────┘                                    2. Deserialize protobuf\n                                                        into HeaderMap\n                                                        + Uri + Bytes\n                                                              │\n                                                              │  ← no http::Request\n                                                              │  ← no Tower dispatch\n                                                              │  ← no router.clone()\n                                                              │\n                                                              ▼\n                                                         rpc_inner()\n                                                         directly\n                                                              │\n                                                     3. Serialize response\n                                                        headers + body\n                                                        to protobuf\n                                                              │\n        ◄──────────────── protobuf bytes ─────────────────────\n        │\n  4. Deserialize protobuf                             ← still needed\n        │\n  [send response to client]\n```\n\nOld gRPC path had 6 steps with overhead. This has 4. Removed: `http::Request` construction, Tower `oneshot` dispatch, `router.clone()` per call.\n\n</details>",
+  "confidence": 0.75,
+  "related_services": [],
+  "contributors": [
+    "gandhipratik203"
+  ],
+  "tags": [
+    "mcp-protocol",
+    "experimental",
+    "COULD",
+    "rust",
+    "decision",
+    "grpc",
+    "performance"
+  ],
+  "source_refs": [
+    {
+      "id": "83ebda4d-3b42-492f-9d9f-03f062521c77",
+      "source_type": "pr",
+      "source_id": "3729",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/3729",
+      "contributor": "gandhipratik203",
+      "timestamp": "2026-03-18T19:28:50Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3729.json"
+    }
+  ],
+  "timestamp": "2026-03-18T19:28:50Z",
+  "created_at": "2026-05-17T17:23:09.323375",
+  "updated_at": "2026-05-17T17:23:09.323377",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:23:09.323710",
+    "artifact_type": "decisions",
+    "artifact_id": "667f473d-a712-482d-ac92-e64836d6b33d"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4676,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4676"
+  },
+  "metadata": {
+    "title": "fix: Alpine.js CSP build — eliminate unsafe-eval from script-src",
+    "state": "open",
+    "created_at": "2026-05-08T15:13:27+00:00",
+    "updated_at": "2026-05-11T13:52:55+00:00",
+    "closed_at": null,
+    "merged_at": null,
+    "author": "marekdano",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "marekdano"
+    ]
+  },
+  "description": " Closes #4653\r\n\r\n ### Problem\r\n\r\n  The admin UI used the standard `Alpine.js` build, which requires `unsafe-eval` in the `Content-Security-Policy` `script-src` directive. This blocks deployment in hardened environments and is a security anti-pattern.\r\n\r\n###  Root causes identified\r\n\r\n  1. Standard Alpine build loaded instead of @alpinejs/csp\r\n  2. Template literal `:style` bindings — `:style=\"`top: ${menuTop}px`\"` uses backtick/interpolation, which the CSP evaluator rejects\r\n  3. Multi-statement `@click / @keydown` handlers — semicolon-separated expressions (e.g. `@keydown.escape=\"menuOpen = false; $refs.trigger.focus()\")` are not supported by the CSP parser\r\n  4. Custom `Alpine.magic(\"Admin\", ...)` — $Admin.xxx() calls in templates are blocked by checkForDangerousValues in the CSP build; only built-in Alpine magics are permitted\r\n  5. `hx-vals=\"js:{...}\"` — HTMX's JS expression syntax requires eval at request time\r\n\r\n### How to Test with `make serve` or `make compose-up`\r\n\r\n  After starting, hard-reload the browser (Cmd+Shift+R / Ctrl+Shift+R) to clear any cached bundle.\r\n\r\n  1. Verify the CSP build is loaded\r\n  Open DevTools → Network → reload → find cdn.min.js — it should say @alpinejs/csp in the URL, not alpinejs.\r\n\r\n  2. Verify unsafe-eval is gone from CSP\r\n  DevTools → Network → any HTML response → Response Headers → Content-Security-Policy — confirm script-src does not contain 'unsafe-eval'.\r\n\r\n  3. No CSP errors in console\r\n  DevTools → Console — after loading the admin page, there should be zero Content Security Policy violation messages.\r\n\r\n  4. Check Overflow, Pagination, LLM Settings, Inactive toggle, Dark mode and other actions\r\n  No Alpine.js error should be in the console\r\n\r\n ### Changes\r\n\r\n  `mcpgateway/templates/admin.html` and all 6 table partials (tools_partial.html, servers_partial.html, resources_partial.html, prompts_partial.html, gateways_partial.html, agents_partial.html):\r\n  - Replaced all 7 :style template literals with object syntax: :style=\"{ top: menuTop + 'px', left: menuLeft + 'px', display: menuOpen ? 'block' : 'none' }\"\r\n  - Replaced all @keydown.escape=\"menuOpen = false; $refs.trigger.focus()\" with @keydown.escape=\"closeMenu()\"\r\n  - Added @click=\"menuOpen = false\" on dropdown containers (event bubbling closes menu on any item click, removing the need for per-item menuOpen = false; prefixes)\r\n  - Replaced all @click=\"$Admin.xxx(arg)\" (22 instances) with @click=\"dispatch('xxx', arg)\"\r\n  - Fixed multi-statement @click handlers in team selector and observability panel by extracting to named methods\r\n\r\n  `mcpgateway/admin_ui/components/overflow-menu.js`:\r\n  - Added closeMenu() method — sets menuOpen = false and focuses trigger\r\n  - Added dispatch(action, ...args) method — routes to window.Admin[action] via fn.apply(window.Admin, args), keeping Admin calls out of Alpine's CSP expression evaluator\r\n\r\n  `mcpgateway/admin_ui/events.js`:\r\n  - Removed Alpine.magic(\"Admin\", () => window.Admin) (dead code after $Admin removal)\r\n  - Replaced hx-vals=\"js:{...}\" on show-inactive checkboxes with a htmx:configRequest document listener that reads data-hx-vals-per-page, data-hx-vals-search, data-hx-vals-tags attributes and injects parameters directly — no eval required\r\n  - Replaced hx-on:htmx:before-request inline attributes with a htmx:beforeRequest document listener (shows user-edit-modal, sets mcp-register-btn loading state)\r\n  - Replaced hx-on:htmx:response-error inline attribute with a htmx:responseError document listener (resets mcp-register-btn to error state)\r\n  - Replaced hx-on:htmx:after-swap inline attributes with a htmx:afterSwap document listener backed by a SELECTOR_SWAP_MAP\r\n\r\n ` mcpgateway/templates/observability_partial.html`:\r\n  - Replaced arrow function callbacks in $watch with method references ($watch('timeRange', applyFilters))\r\n  - Moved document.addEventListener from x-init to an Alpine event binding\r\n  - Extracted multi-statement @click handlers into refreshAll(), setViewMode(), and clearFilters() methods on the inline x-data component\r\n\r\n  ### Tests\r\n\r\n  tests/unit/js/overflow-menu.test.js:\r\n  - Added closeMenu tests: sets menuOpen false, focuses trigger, handles absent/null trigger\r\n  - Added dispatch tests: routes to correct Admin method, passes args, uses Admin as this, handles undefined/null Admin, missing method, non-function property\r\n  - Removed \"Admin namespace wiring\" block (6 tautological tests that called mock functions directly — replaced by the real dispatch() tests above)\r\n\r\n  tests/unit/js/events.test.js:\r\n  - Added HTMX configRequest tests: injects include_inactive, per_page, q, tags from data attributes; ignores non-toggle elements; handles missing elements with correct defaults\r\n  - Added HTMX beforeRequest tests: shows user-edit-modal, sets mcp-register-btn loading state, handles null elt\r\n  - Added HTMX responseError tests: resets mcp-register-btn to error state, re-enables button, ignores unrelated elements\r\n\r\n ### Result\r\n\r\n  All 45 test files pass (2140 tests). No unsafe-eval usage remains in Alpine expressions or HTMX bindings. The CSP script-src directive no longer requires unsafe-eval.\r\n\r\n### Related Work\r\n\r\n- **PR #4424**: Implemented nonce-based CSP foundation\r\n- **Issue #4655**: 165 inline event handlers in admin.html blocked under strict CSP\r\n- **Issue #4330**: Original pentesting report identifying CSP gaps",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "929e8aa1c34b3546f40a346e657c847a28c3ba06",
+      "message": "fix: Alpine.js CSP build — eliminate unsafe-eval from script-src\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-08T14:58:26+00:00"
+    },
+    {
+      "sha": "3f3e4bb7c792220508b5890822588543e376a5e4",
+      "message": "fix: pylint issue\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-08T15:55:29+00:00"
+    },
+    {
+      "sha": "57511a44a57fd4ad89ae3fa4ab2e39b1e7e0a2fe",
+      "message": "fix: resolve conflicts in admin.html\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-11T12:51:29+00:00"
+    },
+    {
+      "sha": "7e2e2df8be98881706bedb8a1353f3966a1f4c93",
+      "message": "fix: package-lock.json file\n\nSigned-off-by: Marek Dano <Marek.Dano@ibm.com>",
+      "author": "Marek Dano",
+      "date": "2026-05-11T13:52:48+00:00"
+    }
+  ],
+  "files_changed": 29,
+  "additions": 1386,
+  "deletions": 788,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:04:15.118411",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:04:15.118974",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4676,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4676.json"
+  }
+}

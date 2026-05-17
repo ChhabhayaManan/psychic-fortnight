@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2549,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2549"
+  },
+  "metadata": {
+    "title": "Fix/issue 2340 - eliminate RBAC middleware session accumulation under high load",
+    "state": "closed",
+    "created_at": "2026-01-28T18:26:14+00:00",
+    "updated_at": "2026-02-02T00:14:59+00:00",
+    "closed_at": "2026-02-02T00:14:58+00:00",
+    "merged_at": "2026-02-02T00:14:58+00:00",
+    "author": "Lang-Akshay",
+    "labels": [
+      "performance"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "### Problem\r\n\r\nThe RBAC middleware held database sessions open for the entire request duration via `Depends(get_db)`, causing critical performance degradation under high load:\r\n\r\n**Load test results (4000 concurrent users, 10 workers):**\r\n\r\n| Time     | RPS  | idle_in_tx (max age) | Notes                         |\r\n| -------- | ---- | -------------------- | ----------------------------- |\r\n| 22:51:43 | 2180 | 54 (3s)              | System starts healthy         |\r\n| 22:52:17 | 462  | 54 (37s)             | RPS drops 79%, sessions aging |\r\n| 22:52:51 | 251  | 51 (72s)             | RPS drops 88%, sessions stuck |\r\n| 22:53:01 | 302  | 51 (81s)             | System severely degraded      |\r\n\r\n**Root cause:**\r\n`get_current_user_with_permissions()` opened a session at request start and kept it open until response completion, even though database access was only needed briefly for user lookup. Under high load, sessions accumulated faster than they could be released.\r\n\r\n**Impact:**\r\nAll 346 authenticated endpoints were affected.\r\n\r\n---\r\n\r\n## Solution\r\n\r\nRemove long-lived database sessions from RBAC middleware and use `fresh_db_session()` context manager for short-lived, on-demand database access:\r\n\r\n**Before:**\r\n\r\n```python\r\nasync def get_current_user_with_permissions(\r\n    request: Request,\r\n    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),\r\n    jwt_token: Optional[str] = Cookie(default=None),\r\n    db: Session = Depends(get_db)  # ← Held for entire request\r\n):\r\n    user = db.execute(select(EmailUser).where(...))  # Brief DB use\r\n    db.commit()\r\n    db.close()  # Manual cleanup (ineffective with Depends)\r\n    return {\"email\": user.email, \"db\": db, ...}  # Passes session downstream\r\n```\r\n\r\n**After:**\r\n\r\n```python\r\nasync def get_current_user_with_permissions(\r\n    request: Request,\r\n    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),\r\n    jwt_token: Optional[str] = Cookie(default=None)\r\n    # ← No db parameter\r\n):\r\n    with fresh_db_session() as db:  # ← Short-lived, auto-cleanup\r\n        user = db.execute(select(EmailUser).where(...))\r\n    return {\"email\": user.email, ...}  # ← No db in context\r\n```\r\n\r\n---\r\n\r\n## Changes Made\r\n\r\n1. **mcpgateway/middleware/rbac.py**\r\n\r\n   - ✅ Removed `db: Session = Depends(get_db)` parameter from `get_current_user_with_permissions()`\r\n   - ✅ Replaced with `fresh_db_session()` context manager for EmailUser lookup\r\n   - ✅ Removed `\"db\": None` from all user context return dictionaries\r\n   - ✅ Removed manual `db.commit()` and `db.close()` calls (context manager handles this)\r\n   - ✅ Updated all permission decorators (`require_permission`, `require_admin_permission`, `require_any_permission`) to use `fresh_db_session()` when no endpoint session exists\r\n   - ✅ Updated `PermissionChecker` class to use `fresh_db_session()` pattern\r\n   - ✅ Added deprecation warnings to `get_db()` and `get_permission_service()` functions\r\n2. **Test Files Updated**\r\n\r\n   - Updated all test mocks to match new function signature (removed db parameter):\r\n     - ✅ `tests/unit/mcpgateway/middleware/test_rbac.py`\r\n     - ✅ `tests/unit/mcpgateway/middleware/test_auth_method_propagation.py`\r\n     - ✅ `tests/unit/mcpgateway/utils/test_proxy_auth.py` (8 test methods)\r\n     - ✅ `tests/unit/mcpgateway/test_main.py`\r\n     - ✅ `tests/unit/mcpgateway/test_main_extended.py`\r\n     - ✅ `tests/unit/mcpgateway/test_admin_catalog_htmx.py`\r\n\r\n---\r\n\r\n## Benefits\r\n\r\n1. No session accumulation: Sessions created only when needed, closed immediately after use\r\n2. Better performance under load: Prevents idle-in-transaction bottleneck\r\n3. Reduced connection pool pressure: Sessions released 100-1000x faster (milliseconds vs seconds)\r\n4. Backward compatible: Existing endpoints continue to work; decorators fall back to `fresh_db_session()` automatically\r\n5. Cleaner code: Context manager pattern is more explicit and less error-prone than manual cleanup\r\n\r\n---\r\n\r\n## Expected Impact\r\n\r\nAfter this fix, under 4000 concurrent users:\r\n\r\n- ✅ idle_in_tx count should stay < 50 with max age < 5s\r\n- ✅ RPS should remain stable over time (no degradation)\r\n- ✅ No session accumulation pattern\r\n- ✅ Query execution times stay consistent\r\n\r\n---\r\n\r\n## Related Issues\r\n\r\n- Closes #2340\r\n- Part of #2334 - Parent issue for endpoint handler session lifetime\r\n- Related to #2335 - admin.py session lifetime (135 endpoints)\r\n- Related to #2336 - main.py REST session lifetime (52 endpoints)\r\n\r\n---\r\n\r\n## Testing\r\n\r\nRun the test suite to verify all RBAC tests pass with new session management:\r\n\r\n```bash\r\nmake test\r\n```",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3736792577",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-02-01T23:04:53+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "317b6de85c9f91772de3471dbdc1ad65d17e54e0",
+      "message": "fix(rbac): eliminate session accumulation under high load (#2340)\n\nReplace long-lived database sessions in RBAC middleware with\nfresh_db_session() context manager to prevent session accumulation\nunder high concurrent load.\n\nChanges:\n- Remove db parameter from get_current_user_with_permissions()\n- Use fresh_db_session() context manager for short-lived DB access\n- Keep \"db\": None in user context for backward compatibility\n- Add deprecation warnings to get_db() and get_permission_service()\n- Update all permission decorators to use fresh_db_session() fallback\n- Update PermissionChecker to use fresh_db_session() pattern\n- Simplify db.py by reusing get_db() generator for fresh_db_session\n\nSecurity fixes:\n- Use named kwargs (user, _user, current_user, current_user_ctx) for\n  user context extraction instead of scanning all dicts for \"email\"\n  to prevent request body injection attacks\n\nPerformance fixes:\n- PermissionChecker.has_any_permission now uses single session for\n  all permission checks instead of opening N sessions\n\nThis prevents idle-in-transaction bottlenecks where sessions were\nheld for entire request duration instead of milliseconds.\n\nCloses #2340\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Akshay Shinde",
+      "date": "2026-02-01T22:47:33+00:00"
+    }
+  ],
+  "files_changed": 10,
+  "additions": 206,
+  "deletions": 201,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:36.560341",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:36.562480",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2549,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2549.json"
+  }
+}

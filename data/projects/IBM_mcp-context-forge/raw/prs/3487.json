@@ -1,0 +1,70 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3487,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3487"
+  },
+  "metadata": {
+    "title": "fix(ui): pass max_members from admin UI team create/edit forms",
+    "state": "closed",
+    "created_at": "2026-03-05T06:08:44+00:00",
+    "updated_at": "2026-03-10T22:39:41+00:00",
+    "closed_at": "2026-03-10T22:39:40+00:00",
+    "merged_at": "2026-03-10T22:39:40+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "ui",
+      "SHOULD"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nThe `max_members` limit set on a team via the admin UI was silently ignored, members could be added beyond the declared cap. This fixes #3459 by wiring the `max_members` form field through both the create and update team admin handlers.\r\n\r\n## 🔗  Related Issue\r\nCloses #3459.\r\n\r\n## 🔁 Reproduction Steps\r\n1. Start the gateway (`make dev`).\r\n2. Navigate to **Admin UI → Teams**.\r\n3. Create a team with **Max Members = 2**.\r\n4. Add three members via **Manage Members** - all three succeed; the limit is never enforced.\r\n\r\n## 🐞 Root Cause\r\n`admin_create_team` and `admin_update_team` in `mcpgateway/admin.py` read `name`, `description`, `visibility`, etc. from the HTML form but **never read `max_members`**. Consequently `max_members` is stored as `NULL` in the database. The guard in `team_management_service.add_member_to_team()`:\r\n\r\n```python\r\nif team.max_members:   # NULL is falsy → guard never runs\r\n    if current_member_count >= team.max_members:\r\n        raise TeamMemberLimitExceededError(...)\r\n```\r\n\r\nevaluates to `False` for `NULL`, so the limit check is permanently bypassed for teams created or updated through the admin UI. The REST API path (`POST /teams/`, `PATCH /teams/{id}`) was unaffected - it correctly forwards `max_members`.\r\n\r\n## 💡 Fix Description\r\nIn both `admin_create_team` and `admin_update_team`:\r\n\r\n1. Read `max_members` from the multipart form (`form.get(\"max_members\")`), coercing to `Optional[int]` (empty/non-numeric → `None`).\r\n2. Pass the value to `TeamCreateRequest` / `update_team()` so it propagates to the database.\r\n\r\nNo schema, service, or migration changes are required - the field already exists in `TeamCreateRequest`, the column already exists in the DB, and the service-layer guard is already correct.\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|---|---|---|\r\n| Lint suite | `make lint` | Pass |\r\n| Unit tests | `make test` | Pass |\r\n| Coverage ≥ 90 % | `make coverage` | Pass |\r\n| Manual regression no longer fails | Create team (max=2) via UI → add 3rd member → expect 400/error toast | Pass |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3925822370",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T22:29:04+00:00",
+      "body": "Rebased onto current main, resolved two merge conflicts, and added a fix commit.\n\n**Review findings addressed:**\n\n1. **Missing edit form field (bug):** The update handler wired `max_members` but the edit team modal HTML had no `max_members` input — making the update path dead code. Added the input field to the edit modal, pre-populated with the team's current value, consistent with the create form.\n\n2. **Rebase conflict resolution:** Merged the PR's `max_members` parameter with main's new `update_team` return-value error handling (personal team rejection). Fixed the update test mock to return `True` instead of `None` to match the new `bool` return type.\n\n3. **Existing test fix:** `test_admin_get_team_edit_success` was missing `max_members` on the mock team object, which would crash with the new template field.\n\n4. **Edge-case test coverage:** Added 4 tests for empty and non-numeric `max_members` inputs (both create and update paths), plus a test verifying the edit form renders `max_members` pre-populated. Total: 6 max_members tests, all 1016 admin tests pass.\n\n**No security or performance concerns.** The `isdigit()` coercion pattern is consistent with the codebase, input goes through the ORM (no injection risk), and the HTML enforces `min=1 max=1000`.\n\nLGTM — approving with the fix commit included."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "b8f44e09aeaf92bb4fd6ebee26ec3d19d4fbf507",
+      "message": "pass max_members from form in create/update team handlers\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-05T06:00:47+00:00"
+    },
+    {
+      "sha": "f6a8e1e0cf1d93fc6695e041e85012c0b27ef17d",
+      "message": "add tests for coverage\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-05T06:21:32+00:00"
+    },
+    {
+      "sha": "c5a641cfd38312aeecd49537b85c0001c6993053",
+      "message": "fix(ui): add max_members input to edit team modal and improve test coverage\n\nThe PR handler code read max_members from the update form but the edit\nteam modal template was missing the input field, making the update path\ndead code. Add the max_members number input to the edit form with the\ncurrent value pre-populated.\n\nAlso fix test_admin_get_team_edit_success to include max_members in the\nmock team object, and add tests for edge cases: empty and non-numeric\nmax_members values in both create and update handlers, plus a test\nverifying the edit form renders the max_members field.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-10T22:12:00+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 132,
+  "deletions": 4,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:10:33.606387",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:10:33.607689",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3487,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3487.json"
+  }
+}

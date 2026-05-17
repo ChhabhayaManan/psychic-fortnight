@@ -1,0 +1,35 @@
+{
+  "id": "4eb4654d-8598-4ffa-8165-20f1dd59968b",
+  "title": "Migrate OAuth/DCR Services from aiohttp to httpx with Connection Pooling",
+  "summary": "# Migrate OAuth/DCR Services from aiohttp to httpx with Connection Pooling\r\n\r\n## Overview\r\nFixes #1929 - Eliminates unnecessary TCP + TLS handshake overhead (10-50ms per request) by migrating from aiohttp to httpx with connection pooling for OAuth and DCR operations.\r\n\r\n## Problem\r\nThe `dcr_service.py` and `oauth_manager.py` modules were creating new `aiohttp.ClientSession()` instances for every HTTP request, causing:\r\n- Repeated TCP handshakes\r\n- Repeated TLS handshakes\r\n- 10-50ms latency overhead per request\r\n- Inefficient resource usage\r\n\r\n## Solution\r\nMigrated to `httpx.AsyncClient` with connection pooling:\r\n- Single shared HTTP client instance per service\r\n- Connection reuse across requests\r\n- Configurable connection limits (20 keepalive, 100 max connections)\r\n- HTTP/2 support enabled by default\r\n\r\n## Changes\r\n\r\n### Production Code (3 files)\r\n1. **`mcpgateway/services/dcr_service.py`**\r\n   - Added `_get_client()` method with connection pooling\r\n   - Added `close()` method for cleanup\r\n   - Replaced all `aiohttp.ClientSession` usage with `httpx.AsyncClient`\r\n\r\n2. **`mcpgateway/services/oauth_manager.py`**\r\n   - Added `_get_client()` method with connection pooling\r\n   - Added `close()` method for cleanup\r\n   - Updated 6 methods: `_client_credentials_flow`, `_exchange_code_for_tokens`, `exchange_code_for_token`, `refresh_token`\r\n\r\n3. **`mcpgateway/cli_export_import.py`**\r\n   - Updated HTTP client usage to httpx\r\n\r\n### Test Code (2 files)\r\n1. **`tests/unit/mcpgateway/services/test_dcr_service.py`**\r\n   - Migrated 5 test methods to httpx mocking patterns\r\n\r\n2. **`tests/unit/mcpgateway/test_oauth_manager.py`**\r\n   - Migrated 42+ test methods to httpx mocking patterns\r\n   - Updated imports and exception types\r\n   - Simplified mocking approach using `patch.object(manager, \"_get_client\")`\r\n\r\n## Key Improvements\r\n- ✅ **Performance**: Eliminates 10-50ms overhead per request through connection reuse\r\n- ✅ **HTTP/2**: Enabled by default for better performance\r\n- ✅ **Resource Efficiency**: Single client instance instead of creating new sessions\r\n- ✅ **Cleaner API**: Simpler httpx API (`response.status_code`, synchronous `response.json()`)\r\n- ✅ **Backward Compatible**: No breaking changes to public APIs\r\n\r\n## Testing\r\n- All aiohttp references removed from codebase\r\n- Test mocking patterns updated to work with httpx\r\n- Maintains full test coverage\r\n\r\n## Performance Impact\r\nExpected improvements:\r\n- **OAuth token requests**: 10-50ms faster per request\r\n- **DCR operations**: 10-50ms faster per request\r\n- **High-volume scenarios**: Significant cumulative savings\r\n\r\n## Migration Notes\r\n- Connection pooling configured with sensible defaults (20 keepalive, 100 max)\r\n- HTTP/2 enabled for modern protocol support\r\n- Proper cleanup via `close()` methods\r\n- No changes required to calling code",
+  "reasoning": "# Migrate OAuth/DCR Services from aiohttp to httpx with Connection Pooling\r\n\r\n## Overview\r\nFixes #1929 - Eliminates unnecessary TCP + TLS handshake overhead (10-50ms per request) by migrating from aiohttp to httpx with connection pooling for OAuth and DCR operations.\r\n\r\n## Problem\r\nThe `dcr_service.py` and `oauth_manager.py` modules were creating new `aiohttp.ClientSession()` instances for every HTTP request, causing:\r\n- Repeated TCP handshakes\r\n- Repeated TLS handshakes\r\n- 10-50ms latency overhead per request\r\n- Inefficient resource usage\r\n\r\n## Solution\r\nMigrated to `httpx.AsyncClient` with connection pooling:\r\n- Single shared HTTP client instance per service\r\n- Connection reuse across requests\r\n- Configurable connection limits (20 keepalive, 100 max connections)\r\n- HTTP/2 support enabled by default\r\n\r\n## Changes\r\n\r\n### Production Code (3 files)\r\n1. **`mcpgateway/services/dcr_service.py`**\r\n   - Added `_get_client()` method with connection pooling\r\n   - Added `close()` method for clea",
+  "confidence": 0.6000000000000001,
+  "related_services": [],
+  "contributors": [
+    "MohanLaksh",
+    "crivetimihai"
+  ],
+  "tags": [
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "789c6500-1935-43c9-9a0d-dc81f871ca88",
+      "source_type": "pr",
+      "source_id": "1972",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/1972",
+      "contributor": "MohanLaksh",
+      "timestamp": "2026-01-08T11:33:56Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1972.json"
+    }
+  ],
+  "timestamp": "2026-01-08T11:33:56Z",
+  "created_at": "2026-05-17T17:24:37.435678",
+  "updated_at": "2026-05-17T17:24:37.435680",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:24:37.435996",
+    "artifact_type": "decisions",
+    "artifact_id": "4eb4654d-8598-4ffa-8165-20f1dd59968b"
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1921,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1921"
+  },
+  "metadata": {
+    "title": "fix: consolidate Docker workflow for reliable multiplatform builds",
+    "state": "closed",
+    "created_at": "2026-01-05T17:45:07+00:00",
+    "updated_at": "2026-02-28T06:25:18+00:00",
+    "closed_at": "2026-01-06T15:57:02+00:00",
+    "merged_at": "2026-01-06T15:57:02+00:00",
+    "author": "jonpspri",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\r\n\r\n- Remove `docker-image.yml` which was a single-arch workflow that overwrote multiplatform images with amd64-only builds, breaking ARM64 support\r\n- Modify `docker-multiplatform.yml` to build and push platform-specific images (amd64, arm64, s390x) only on push events\r\n- Create `docker-scan.yml` for security scanning that builds locally without pushing:\r\n  - Dockerfile linting with Hadolint\r\n  - Image linting with Dockle\r\n  - SBOM generation with Syft\r\n  - Vulnerability scanning with Trivy and Grype\r\n  - Runs on both PRs and pushes to catch issues early\r\n- Add SBOM attestation via Cosign alongside image signing\r\n- Only tag as `:latest` on push to main (not PRs)\r\n\r\nCloses #1913, #1581",
+  "comments": [
+    {
+      "id": "2662329856",
+      "author": "Copilot",
+      "created_at": "2026-01-05T17:50:25+00:00",
+      "body": "Setting push to true unconditionally will cause authentication failures on pull requests since the GHCR login step (line 126 in the full file) only runs when the event is not a pull request. Either the login step should always run, or the push parameter should remain conditional.\n```suggestion\n          push: ${{ github.event_name != 'pull_request' }}\n```"
+    },
+    {
+      "id": "2662329896",
+      "author": "Copilot",
+      "created_at": "2026-01-05T17:50:26+00:00",
+      "body": "The DOCKLE_EXIT environment variable will always be 0 because of the \"exit 0\" at the end of the step (line 264). The actual exit code from dockle should be captured before the exit 0. Consider capturing it with: DOCKLE_EXIT=$?; echo \"DOCKLE_EXIT=$DOCKLE_EXIT\" >> \"$GITHUB_ENV\"; exit 0"
+    },
+    {
+      "id": "2662329910",
+      "author": "Copilot",
+      "created_at": "2026-01-05T17:50:26+00:00",
+      "body": "The enforcement gate checks if DOCKLE_EXIT is not equal to '0' (as a string comparison), but due to the bug where DOCKLE_EXIT will always be 0, this gate will never trigger. Additionally, ensure that the comparison uses proper syntax - in bash conditionals within GitHub Actions, this should be checking the environment variable properly.\n```suggestion\n        run: |\n          echo \"Dockle exit: $DOCKLE_EXIT\"\n          if [ \"${DOCKLE_EXIT}\" != \"0\" ]; then\n            exit 1\n          fi\n```"
+    },
+    {
+      "id": "2662360281",
+      "author": "jonpspri",
+      "created_at": "2026-01-05T17:59:36+00:00",
+      "body": "Backed off...  For security reasons, we can't allow Pull Requests to push images at all."
+    },
+    {
+      "id": "2662361885",
+      "author": "jonpspri",
+      "created_at": "2026-01-05T18:00:16+00:00",
+      "body": "We are, in fact, doing just what is suggested."
+    },
+    {
+      "id": "2662363841",
+      "author": "jonpspri",
+      "created_at": "2026-01-05T18:01:01+00:00",
+      "body": "the bug that is cited does not actually exist.  See above."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "3627856838",
+      "author": "copilot-pull-request-reviewer[bot]",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-05T17:50:26+00:00",
+      "body": "## Pull request overview\n\nThis PR consolidates Docker workflows by removing the single-architecture `docker-image.yml` and enhancing `docker-multiplatform.yml` to always build and push multiplatform images (amd64, arm64, s390x), even for pull requests. The changes improve reliability by preventing single-arch builds from overwriting multiplatform images and add enhanced security features.\n\n- Remove the single-arch Docker workflow that was overwriting multiplatform images\n- Modify multiplatform workflow to always build and push platform-specific images, with conditional `:latest` tagging only for main branch pushes\n- Add Dockle image linting with SARIF upload and SBOM attestation via Cosign\n\n### Reviewed changes\n\nCopilot reviewed 2 out of 2 changed files in this pull request and generated 3 comments.\n\n| File | Description |\n| ---- | ----------- |\n| `.github/workflows/docker-image.yml` | Completely removed single-arch workflow that was causing ARM64 support issues |\n| `.github/workflows/docker-multiplatform.yml` | Updated to always push images (even on PRs), added Dockle linting, SBOM attestation, and SHA-based security scanning with conditional `:latest` tagging |\n\n\n\n\n\n---\n\n💡 <a href=\"/IBM/mcp-context-forge/new/main/.github/instructions?filename=*.instructions.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add Copilot custom instructions</a> for smarter, more guided reviews. <a href=\"https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn how to get started</a>."
+    },
+    {
+      "id": "3627899562",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-05T17:59:36+00:00",
+      "body": ""
+    },
+    {
+      "id": "3627901844",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-05T18:00:17+00:00",
+      "body": ""
+    },
+    {
+      "id": "3627904120",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-01-05T18:01:02+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "82be8ba8e99c1fe8746aff37f5319b928c29e444",
+      "message": "fix: consolidate Docker workflow for reliable multiplatform builds\n\n- Remove docker-image.yml (single-arch workflow that was overwriting\n  multiplatform images with amd64-only builds)\n- Modify docker-multiplatform.yml to always build and push platform-specific\n  images (amd64, arm64, s390x), even on PRs\n- Add Dockle image linting with SARIF upload\n- Add SBOM attestation via Cosign alongside image signing\n- Only tag as :latest on push to main (not PRs), but always tag with SHA\n- Use SHA-based tags for scanning to ensure correct image is analyzed\n\nCloses #1913\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-06T14:42:46+00:00"
+    },
+    {
+      "sha": "e871fba3c79137498af59902bc352ebbcf52d7bd",
+      "message": "refactor: extract security scanning to separate workflow\n\n- Create docker-scan.yml for Dockerfile linting and image security scans\n- Runs on PRs and pushes, builds locally without pushing to registry\n- Includes Hadolint, Dockle, Syft SBOM, Trivy, and Grype scans\n- Remove lint and scan jobs from docker-multiplatform.yml\n- Multiplatform workflow now focuses on build, manifest, and signing\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-06T14:42:54+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 199,
+  "deletions": 349,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:18:42.645209",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:42.647169",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1921,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1921.json"
+  }
+}

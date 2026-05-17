@@ -1,0 +1,173 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4087,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4087"
+  },
+  "metadata": {
+    "title": "refactor: consolidate rust workspace under crates",
+    "state": "closed",
+    "created_at": "2026-04-08T12:07:10+00:00",
+    "updated_at": "2026-04-15T09:54:28+00:00",
+    "closed_at": "2026-04-15T09:54:27+00:00",
+    "merged_at": "2026-04-15T09:54:27+00:00",
+    "author": "lucarlig",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "# ✨ Feature / Enhancement PR\n\n## 🔗 Epic / Issue\nCloses #3027\n\n---\n\n## 🚀 Summary (1-2 sentences)\nThis PR finishes the Rust workspace move under `crates/`, adds the new local PyO3 native extension crate, and updates CI, supply-chain policy, docs, and container build paths to match the current layout. It also restores full Rust validation on non-draft PRs and adds regression tests so the repo keeps the intended crate, workflow, and container boundaries.\n\n---\n\n## 🧪 Checks\n\n- [ ] CI fully green\n- [x] Local workflow guard tests updated\n- [ ] CHANGELOG updated (if user-facing)\n\n---\n\n## 📓 Notes (optional)\n- Rust crates now live directly under `crates/`:\n  - `crates/mcp_runtime`\n  - `crates/wrapper`\n  - `crates/request_logging_masking_native_extension`\n- Standalone Rust MCP servers remain outside the root workspace. Their manifests and license handling were adjusted, but they are not workspace members.\n- Rust CI now runs the full non-draft PR matrix instead of the reduced `pr-*` hot path.\n- `rust fmt` and `rust clippy` now run on Ubuntu only; build/test coverage remains on both Ubuntu and macOS.\n- License, deny, and vet policy were updated for the new Rust layout and the new native extension dependency tree.\n- `Containerfile.lite` now:\n  - builds local native extensions dynamically from `crates/**` when a crate has `Cargo.toml` + `pyproject.toml` + `maturin`\n  - builds Rust sidecars dynamically from `crates/**` bin targets\n  - uses a UBI 10 Rust builder path instead of the earlier x86-only manylinux builder\n  - has a dedicated Rust-enabled CI smoke build so `ENABLE_RUST=true` is validated on PRs\n- Wrapper hardening in this branch includes:\n  - redacted URL credentials in debug config output\n  - no raw MCP payload logging at debug\n  - bounded internal queues instead of unbounded channels\n- Guard tests were added/updated for:\n  - workspace layout\n  - Rust workflow behavior\n  - docker scan workflow coverage for Rust-enabled container builds\n  - wrapper workflow triggers\n  - license-check workflow triggers\n- Docs and ADRs were updated to reflect the new crate layout, CI shape, and runtime/container behavior.\n",
+  "comments": [
+    {
+      "id": "3077835163",
+      "author": "jonpspri",
+      "created_at": "2026-04-14T07:37:03+00:00",
+      "body": "We can't filter for so long as this remains a requirement of EVERY merge.  @brian-hussey I'd like to re-assess how we handle this -- our folks with merge-button access should know enough to look for the test."
+    },
+    {
+      "id": "3077840082",
+      "author": "jonpspri",
+      "created_at": "2026-04-14T07:38:09+00:00",
+      "body": "While I'm tempted to remove doctest, I think we need to do so as part of a broader cleanup initiative."
+    },
+    {
+      "id": "3078249270",
+      "author": "lucarlig",
+      "created_at": "2026-04-14T08:54:40+00:00",
+      "body": "commented out"
+    },
+    {
+      "id": "3078250563",
+      "author": "lucarlig",
+      "created_at": "2026-04-14T08:54:53+00:00",
+      "body": "restored"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "4081114676",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-09T09:16:07+00:00",
+      "body": ""
+    },
+    {
+      "id": "4104152594",
+      "author": "jonpspri",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-14T07:39:10+00:00",
+      "body": "Can we double-check the numbering of the ADRs?  Feels like we may have some overlap."
+    },
+    {
+      "id": "4104598851",
+      "author": "lucarlig",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-14T08:54:40+00:00",
+      "body": ""
+    },
+    {
+      "id": "4104600064",
+      "author": "lucarlig",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-14T08:54:53+00:00",
+      "body": ""
+    },
+    {
+      "id": "4105013975",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-14T09:56:15+00:00",
+      "body": "I am happy we can run cargo test, cargo check , etc from the root folder to check everything. Must have option.\n\nSome things to consider later:\n| # | Severity | Description | Recommendation |\n|---|----------|-------------|----------------|\n| 1 | **Medium** | Root `Cargo.toml` glob `crates/*` auto-includes all crates | Consider explicit `members = [\"crates/mcp_runtime\", \"crates/wrapper\", \"crates/request_logging_masking_native_extension\"]` or document the glob policy |\n| 2 | **Low** | 88 cargo-vet exemptions | Track as a follow-up issue; aim to reduce over next sprint(s) |\n| 3 | **Low** | `deny.toml` allowlist is long | Audit for unused entries; `unused-allowed-license = \"allow\"` makes this non-blocking |\n| 4 | **Low** | Removed Makefile venv policy comments | Add a shorter note back for contributor onboarding |\n| 5 | **Low** | CHANGELOG not updated | Add entry for Rust workspace consolidation |\n| 6 | **Info** | `mcp-servers/rust/*` excluded from workspace | Document rationale in ADR-041 or root `Cargo.toml` comment |\n| 7 | **Low** | `rust.yml` at 668 lines | Factor reusable steps into composite actions for maintainability |"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "0d4f1bb2dab925c52b8ee237fd3bf88a35b7796d",
+      "message": "refactor: move rust crates into the root workspace\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-14T10:54:22+00:00"
+    },
+    {
+      "sha": "c478d14881f99491ddf1be4d2125e28c6b9dca65",
+      "message": "ci: consolidate rust workflows and supply-chain checks\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-14T14:44:57+00:00"
+    },
+    {
+      "sha": "cb1deaeba295ef1cd1ad61b66947d59ff80c1b2f",
+      "message": "docs: clarify rust workspace policy and follow-ups\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-14T14:45:07+00:00"
+    },
+    {
+      "sha": "6b9e735fe0986bd11671e8087ec29eaf98622b58",
+      "message": "ci: restore rust workspace make targets\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-14T15:02:52+00:00"
+    },
+    {
+      "sha": "2d00864f08b876bfb80e0139ad2ed58112921af8",
+      "message": "test: align rust workflow CI assertions\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T08:06:52+00:00"
+    },
+    {
+      "sha": "69a82555a8f8d7e3ab72fe8a84802896aa0420c9",
+      "message": "docs: restore rust mcp env example\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T08:08:39+00:00"
+    },
+    {
+      "sha": "28c05f255c94a2c5c33011dd4e497954a66cd358",
+      "message": "docs: restore unrelated AGENTS and workflow comments\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T08:47:10+00:00"
+    },
+    {
+      "sha": "8bdd9b070e1da1b8507e1e45e57d68da69c803cd",
+      "message": "chore: address follow-up rust workspace review comments\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T08:56:24+00:00"
+    },
+    {
+      "sha": "d4c8266a7075ed87ba22bc2fe25d9faa3a7453c7",
+      "message": "fix: address rust workspace CI regressions\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T09:14:50+00:00"
+    },
+    {
+      "sha": "a77f67efde21e86067a3d835e5c9086d88c6e944",
+      "message": "fix: resolve remaining rust CI failures\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T09:24:01+00:00"
+    },
+    {
+      "sha": "294ceca576cbc289f66096c4bcab7da5c53f1a41",
+      "message": "fix: drop unrelated compose tag changes\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T09:26:13+00:00"
+    },
+    {
+      "sha": "0655583d8f2c9be95b571bc1422fccd52e799ca3",
+      "message": "fix: restore ubi rust builder for ci\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T09:40:11+00:00"
+    }
+  ],
+  "files_changed": 129,
+  "additions": 10057,
+  "deletions": 5028,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:36.006508",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:36.008513",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4087,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4087.json"
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2326,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2326"
+  },
+  "metadata": {
+    "title": "fix: use fresh_db_session() in list endpoints to prevent connection holding",
+    "state": "closed",
+    "created_at": "2026-01-22T10:05:58+00:00",
+    "updated_at": "2026-02-15T13:04:33+00:00",
+    "closed_at": "2026-02-15T12:39:29+00:00",
+    "merged_at": null,
+    "author": "crivetimihai",
+    "labels": [
+      "performance"
+    ],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## Summary\n\n- Updated 6 high-traffic list endpoints in main.py to use `fresh_db_session()` instead of `Depends(get_db)`, preventing database connections from being held during response serialization.\n\nEndpoints modified:\n- `list_servers`\n- `list_a2a_agents`\n- `list_tools`\n- `list_resources`\n- `list_prompts`\n- `list_gateways`\n\nEach endpoint now:\n1. Uses `fresh_db_session()` context manager for short-lived DB access\n2. Converts ORM objects to dicts (`model_dump`) before session closes\n3. Returns dict representations to avoid lazy loading after session close\n\nThis is a follow-up to PR #2319 (RBAC fix) to address the remaining endpoint handlers that were still holding database sessions during slow operations, causing connection pool exhaustion under high load.\n\n## Test plan\n\n- [x] All 277 unit tests pass\n- [ ] Load test with 4000+ concurrent users to verify connection pool stability\n- [ ] Monitor PostgreSQL for \"idle in transaction\" connections during load test\n\nCloses #2323",
+  "comments": [],
+  "reviews": [],
+  "commits": [
+    {
+      "sha": "2402bef637d9a4d86f8ebde1d3b1c0afef9127a4",
+      "message": "fix: use fresh_db_session() in list endpoints to prevent connection holding\n\nUpdated 6 high-traffic list endpoints in main.py to use fresh_db_session()\ninstead of Depends(get_db), preventing database connections from being held\nduring response serialization.\n\nEndpoints modified:\n- list_servers\n- list_a2a_agents\n- list_tools\n- list_resources\n- list_prompts\n- list_gateways\n\nEach endpoint now:\n1. Uses fresh_db_session() context manager for short-lived DB access\n2. Converts ORM objects to dicts (model_dump) before session closes\n3. Returns dict representations to avoid lazy loading after session close\n\nCloses #2323\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T10:04:54+00:00"
+    },
+    {
+      "sha": "3ba0645eb8571ecda8aa219fe4802a5c9e3bb8ba",
+      "message": "fix: make fresh_db_session() testable with configurable session factory\n\nAdded set_fresh_session_factory() and reset_fresh_session_factory() functions\nto allow tests to redirect fresh_db_session() to use a test database instead\nof the production database.\n\nUpdated tests/e2e/test_main_apis.py to use this mechanism, fixing the\n\"no such table\" errors that occurred when fresh_db_session() was introduced\nin the endpoint handler fix.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T10:35:37+00:00"
+    },
+    {
+      "sha": "fef7a92aa19f3d293e509968f34f700fd7c8f891",
+      "message": "fix: add set_fresh_session_factory to oauth e2e tests for consistency\n\nUpdated tests/e2e/test_oauth_protected_resource.py to also override the\nfresh_db_session factory, ensuring consistency across all e2e tests that\nuse test databases.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T10:43:13+00:00"
+    },
+    {
+      "sha": "961086c162e63813572a5a5ba891819c1abdd045",
+      "message": "fix: add set_fresh_session_factory to conftest fixtures and fix doctest\n\n- Updated tests/conftest.py app and app_with_temp_db fixtures to also\n  override the fresh_db_session factory, ensuring all tests that use\n  these fixtures work correctly with the new endpoint handler changes.\n\n- Fixed doctest example in set_fresh_session_factory() that was using\n  undefined test_engine variable.\n\n- Added pylint disable comments for intentional global statement usage\n  in the session factory override functions.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T11:16:29+00:00"
+    },
+    {
+      "sha": "21ae64dfdb5422035c01a76a04711733173dd1a4",
+      "message": "fix: use fresh_db_session() in RPC handler and token scoping middleware\n\nApply the fresh_db_session() pattern to prevent connection pool exhaustion\nunder high load (Issue #2323, #2330):\n\nRPC handler (main.py):\n- Remove Depends(get_db) from handle_rpc() signature\n- Wrap all database operations in fresh_db_session() context managers\n- For tools/call, connection is released before downstream HTTP calls\n- Affects: tools/list, resources/list, prompts/list, tools/call,\n  resources/read, sampling/createMessage, completion/complete, etc.\n\nToken scoping middleware:\n- Use fresh_db_session() for team membership checks\n- Use fresh_db_session() for resource ownership checks\n- Connection released before call_next() processes the request\n\ndocker-compose.yml:\n- Increase DB_POOL_SIZE from 20 to 80 per worker\n- Increase DB_MAX_OVERFLOW from 10 to 20\n- Adjust PostgreSQL and pgBouncer timeout settings\n\nThis prevents the pattern where connections were held for the entire\nrequest lifecycle (including 500-5000ms downstream HTTP calls), which\ncaused QueuePool exhaustion and system crashes under load.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T17:51:23+00:00"
+    },
+    {
+      "sha": "d3f2ea15e266fcd095a30b17278966b5650de2a9",
+      "message": "fix: reduce GRANIAN_WORKERS from 16 to 8 to prevent OOM kills\n\nLoad testing with 4000 Locust users revealed gateway workers being OOM\nkilled when container memory exceeded 8GB limit.\n\nMemory analysis:\n- Each worker uses ~350-450MB RSS baseline, spiking to 0.7-1.9GB under load\n- 16 workers × 450MB = 7.2GB baseline, only 0.8GB headroom → OOM kills\n- 8 workers × 450MB = 3.6GB baseline, 4.4GB headroom → safe\n\nChanges:\n- GRANIAN_WORKERS: 16 → 8\n- GRANIAN_BACKPRESSURE: 128 → 256 (maintains 2048 concurrent capacity)\n\nWith 3 replicas, total worker count is 24 (was 48), which is still\nsufficient for high concurrency while avoiding memory pressure.\n\nRelated: #2334, #2323, #2330\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T18:42:35+00:00"
+    },
+    {
+      "sha": "d50c9107a3fb3e5cc34179bc6afe55dd88a58ada",
+      "message": "docs: add memray memory profiling guide to profiling documentation\n\nAdd comprehensive memray section covering:\n- Installation instructions for local and container environments\n- Local profiling with memray run\n- Attaching to running processes\n- Report generation (flamegraph, table, tree, stats, summary)\n- Live mode for real-time monitoring\n- Container profiling workflow\n- Container profiling limitations and workarounds\n- py-spy vs memray comparison table\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T19:05:14+00:00"
+    },
+    {
+      "sha": "30326230c7f7fe48ac1081527fa795d52484716d",
+      "message": "Update compose\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T22:15:30+00:00"
+    },
+    {
+      "sha": "1d33032a3fd800e9e09d08635c73aea8b7c8e3b9",
+      "message": "fix: RBAC middleware uses fresh_db_session() to prevent session accumulation\n\nThe RBAC middleware was holding database sessions for the entire request\nduration via Depends(get_db), causing idle-in-transaction connections to\naccumulate under high load.\n\nChanges:\n- Remove Depends(get_db) from get_current_user_with_permissions()\n- Remove \"db\" from user context return dicts\n- Update require_permission() to use fresh_db_session()\n- Update require_admin_permission() to use fresh_db_session()\n- Update require_any_permission() to use fresh_db_session()\n- Update PermissionChecker class to use fresh_db_session()\n- Update admin.py to not rely on user[\"db\"]\n- Update tests to mock fresh_db_session()\n\nCloses #2340\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T23:25:01+00:00"
+    },
+    {
+      "sha": "671248b58bd8d50fced33b595686de1590a1415e",
+      "message": "fix: convert all endpoints to use fresh_db_session() pattern\n\nTransforms 267 endpoints from Depends(get_db) to fresh_db_session()\nto prevent database session accumulation under high load.\n\nFiles modified:\n- main.py (52 endpoints)\n- admin.py (133 endpoints)\n- routers/auth.py (1 endpoint)\n- routers/email_auth.py (4 endpoints)\n- routers/llm_config_router.py (1 endpoint)\n- routers/llm_proxy_router.py (2 endpoints)\n- routers/log_search.py (5 endpoints)\n- routers/oauth_router.py (7 endpoints)\n- routers/observability.py (8 endpoints)\n- routers/rbac.py (12 endpoints)\n- routers/reverse_proxy.py (1 endpoint)\n- routers/server_well_known.py (2 endpoints)\n- routers/sso.py (10 endpoints)\n- routers/teams.py (15 endpoints)\n- routers/tokens.py (10 endpoints)\n- routers/toolops_router.py (3 endpoints)\n- routers/well_known.py (1 endpoint)\n\nBefore: idle_in_tx grew to 100+ connections with 80-120s age, causing\nsystem degradation from 2180 RPS to 300 RPS under load.\n\nAfter: idle_in_tx stays at 12-34 connections with 0-17s max age,\nRPS stable at 1600-2260 with 0 failures.\n\nCloses #2335\nCloses #2336\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-22T23:39:18+00:00"
+    },
+    {
+      "sha": "c1e0f3175b73977fb20d8393d7a5c60beffc7666",
+      "message": "Messy test fixes - not all done\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-01-23T11:30:36+00:00"
+    }
+  ],
+  "files_changed": 43,
+  "additions": 12541,
+  "deletions": 12802,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:18:10.649468",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:18:10.650877",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2326,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2326.json"
+  }
+}

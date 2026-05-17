@@ -1,0 +1,42 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4687,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4687"
+  },
+  "metadata": {
+    "title": "[FEATURE]: Add post-add capability probe and OS prerequisite warnings for MCP quick-add",
+    "state": "open",
+    "created_at": "2026-05-09T08:48:16+00:00",
+    "updated_at": "2026-05-09T19:41:42+00:00",
+    "closed_at": null,
+    "author": "jonpspri",
+    "labels": [
+      "enhancement",
+      "triage",
+      "mcp-servers",
+      "ui",
+      "ui-rewrite"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\nThe quick-add registration workflow should not declare an MCP server fully successful based only on config validity. For catalog-driven one-click installs, add a post-registration capability probe and catalog metadata for OS prerequisites so users do not get a false-success state for servers that require platform permissions.\n\nContext: follow-up concern from #4681.\n\n## Scenario\n\nA catalog includes a macOS MCP server for WhatsApp. The user clicks quick-add, and the dialog pre-fills command, transport, and args. Registration succeeds and shows green because the config is valid.\n\nOn the first real tool call, macOS triggers a TCC prompt for Accessibility, Screen Recording, Full Disk Access, or a similar OS permission. If the prompt is parented to the Admin UI process or otherwise cannot be completed correctly, the call silently denies. The user sees a broken server, while the catalog/registration flow reports success.\n\nThe gap: the catalog's definition of \"registered\" stops at configuration validity, not runtime capability.\n\n## Proposed behavior\n\n- After quick-add registration, run a real post-add probe against the registered server before declaring success.\n- The probe should execute a safe, catalog-defined capability check or tool call that proves the server can actually perform its expected function in the current environment.\n- If the probe fails due to missing OS permissions or environmental prerequisites, show a clear actionable warning instead of a green success state.\n- Extend catalog metadata so entries can declare OS prerequisites up front, for example:\n  - macOS Accessibility permission\n  - Screen Recording permission\n  - Full Disk Access\n  - Automation permissions\n  - required local apps or CLIs\n  - other platform-specific setup steps\n- Surface those prerequisites in the quick-add dialog before the user clicks add.\n\n## Acceptance criteria\n\n- Quick-add distinguishes config-valid from capability-verified states.\n- Catalog entries can declare OS/environment prerequisites and user-facing setup guidance.\n- Quick-add dialog warns about declared prerequisites before registration.\n- Post-add workflow runs a safe probe before showing final success for catalog entries that define one.\n- Probe failure produces actionable UI copy and does not mark the server as fully ready.\n- Registration state remains inspectable, e.g. pending verification / verified / registered but needs permissions / failed probe.\n- Tests cover a catalog entry with macOS TCC-style prerequisites, a successful probe, and a failed probe with actionable warning output.\n\n## Notes\n\nThis is especially important for OS-dependent MCP servers where installation/configuration can be valid while the first meaningful tool call fails due to runtime permissions. One-click flows should avoid implying the server is ready until a real capability check passes.",
+  "comments": [
+    {
+      "id": "4413513904",
+      "author": "m13v",
+      "created_at": "2026-05-09T19:41:42+00:00",
+      "body": "this is the tccd silent-deny-cache trap. once a bundle ID gets denied once (often because the prompt fired parented to a non-foreground process and timed out, or the user dismissed it), tccd records the deny and every subsequent capability call returns denied without re-prompting. so a probe that says 'works' on a fresh install can flip to 'fails' permanently after one bad attempt, and the only fix is the user manually toggling the permission in System Settings. the probe needs AXIsProcessTrustedWithOptions / IOHIDCheckAccess style pre-flight checks before the actual tool call too, else the verified state lies in both directions."
+    }
+  ],
+  "ingested_at": "2026-05-17T17:21:47.908268",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:21:47.909143",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4687,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4687.json"
+  }
+}

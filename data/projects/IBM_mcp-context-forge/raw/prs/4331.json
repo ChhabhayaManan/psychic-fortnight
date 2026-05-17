@@ -1,0 +1,177 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4331,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4331"
+  },
+  "metadata": {
+    "title": "feat: Add SpanAttributeCustomizer plugin for customizable OpenTelemetry span attributes",
+    "state": "closed",
+    "created_at": "2026-04-20T09:47:34+00:00",
+    "updated_at": "2026-04-21T13:25:54+00:00",
+    "closed_at": "2026-04-21T13:25:51+00:00",
+    "merged_at": "2026-04-21T13:25:51+00:00",
+    "author": "vishu-bh",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "brian-hussey"
+    ]
+  },
+  "description": "## Summary\r\nImplements GitHub issue #4274 - Add customizable OpenTelemetry span attributes to observability system.\r\n\r\n## Changes\r\n\r\n### Plugin Implementation\r\n- Created `SpanAttributeCustomizerPlugin` with comprehensive feature set\r\n- Global attributes for all spans\r\n- Per-tool attribute overrides\r\n- Attribute transformations (hash, uppercase, lowercase, truncate)\r\n- Conditional attributes based on tool name matching\r\n- Attribute removal for privacy/compliance\r\n\r\n### Integration\r\n- Modified `ObservabilityService` to accept plugin context\r\n- Added context parameter to `start_span()`, `trace_span()`, and `trace_tool_invocation()`\r\n- Producer-consumer pattern via `GlobalContext.state`\r\n\r\n### Testing\r\n- **Unit Tests**: 28 tests with 92% code coverage ✅\r\n- **Integration Tests**: 7 end-to-end tests ✅\r\n- All unit tests passing\r\n\r\n### Configuration\r\n- Added example configuration to `plugins/config.yaml`\r\n- Comprehensive README with usage examples\r\n\r\n## Files Changed\r\n- `plugins/span_attribute_customizer/` (new plugin)\r\n- `mcpgateway/services/observability_service.py` (integration)\r\n- `plugins/config.yaml` (configuration example)\r\n- `tests/unit/mcpgateway/plugins/span_attribute_customizer/` (unit tests)\r\n- `tests/integration/plugins/` (integration tests)\r\n\r\n## Testing Plan\r\n- ✅ Unit tests: 28/28 passing, 92% coverage\r\n- ✅ Ruff linting: Passing\r\n- ✅ Full linting suite: bandit, interrogate, pylint\r\n\r\n## Closes\r\nCloses #4274",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4141580717",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-20T16:06:48+00:00",
+      "body": "Thanks allot for the PR @vishu-bh . Really appreciate it. Please can you implement following changes. \n\n## Security\n \nThe plugin operates below the auth/RBAC layer (observability data only). No auth invariants are violated. Security concerns are scoped to PII masking correctness and state handling.\n \n| # | File | Line | Severity | CWE | Description |\n|---|------|------|----------|-----|-------------|\n| 1 | `span_attribute_customizer.py:130` | 130 | High | CWE-916/327 | SHA-256 truncated to 16 hex chars, no salt — insufficient for PII masking; rainbow-table reversible for common emails |\n| 2 | `span_attribute_customizer.py:211` | 211–212 | High | CWE-668 | `resource_pre_fetch` only sets `custom_span_attributes` but does not reset `remove_span_attributes` / `span_attribute_mapping`; stale tool-invocation state bleeds into resource spans |\n| 3 | `span_attribute_customizer.py:105` | 105 | Medium | CWE-20 | `condition.split(\"==\")` raises `ValueError` silently caught for any condition value containing `==`; intended security attributes (`audit_required`, `compliance_level`) silently dropped |\n| 4 | `config_schema.py:40` | 40–58 | Medium | CWE-400 | `global_attributes: Dict[str, Any]` and `conditions[*].add` accept unbounded nested objects; OTEL SDKs only accept `str/int/float/bool` — oversized or wrong-typed values cause silent data loss |\n| 5 | `observability_service.py:505` + `manager.py:447` | multiple | Medium | CWE-668 | Attribute rename loop duplicated verbatim 3 times across two files; future security behavior added to one copy will silently diverge |\n| 6 | `span_attribute_customizer.py:101` | 101 | Low | CWE-95 | Comment `\"can be enhanced with safe eval\"` invites `eval()` injection by future developers |\n| 7 | `span_attribute_customizer.py:173` | 173–180 | Low | CWE-362 | `GlobalContext.state` is an unguarded plain dict; non-atomic read-modify-write in multi-thread Gunicorn/Granian modes |\n| 8 | `span-attribute-customization.md:208` | 208, 258 | Low | CWE-94 | Docs show `\"{{ tenant_id }}\"` / `\"{{ POD_NAME }}\"` implying Jinja2 support that does not exist; invites SSTI if ever implemented without review |\n \n### Remediation suggestions\n \n- **Finding 1:** Use HMAC-SHA-256 with `settings.auth_encryption_secret`, keep ≥32 hex chars. Document it as pseudonymization, not anonymization.\n- **Finding 2:** In `resource_pre_fetch`, set all three state keys (`custom_span_attributes`, `remove_span_attributes`, `span_attribute_mapping`) explicitly.\n- **Finding 3:** Change `condition.split(\"==\")` → `condition.split(\"==\", 1)`. Add startup validation against `^[a-zA-Z_.]+\\s*==\\s*\"[^\"]*\"$`.\n- **Finding 4:** Add Pydantic `field_validator` on attribute dicts limiting values to `str|int|float|bool` and capping key/count sizes.\n- **Finding 5:** Extract to a single `apply_attribute_mapping(attrs, mapping)` helper.\n---\n \n## Redundant Code\n \n| # | File | Line(s) | Type | Description | Suggestion |\n|---|------|---------|------|-------------|------------|\n| 1 | `manager.py:447` + `observability_service.py:510` | multiple | Duplicated logic | Attribute rename dict comprehension copy-pasted verbatim across 3 sites | Extract to `apply_attribute_mapping()` helper |\n| 2 | `test_span_attribute_mapping_integration.py:60` | 60–90 | Duplicated test logic | Several integration tests manually replicate the `manager.py`/`observability_service.py` mapping loop rather than testing the actual implementation | Replace with tests that call the real code and assert observable outcomes |\n| 3 | `test_upstream_session_registry_attribute_mapping` | full function | Dead test | Only asserts that a key exists in a manually-constructed dict — no actual behavior under test | Remove or replace with a meaningful assertion |\n| 4 | `span_attribute_customizer.py:205` | 205–209 | Empty hook | `tool_post_invoke` returns immediately with no action; declared comment `# Can add attributes based on tool results` is stale intent | Either implement or remove the method and the hook from the hooks list |\n "
+    },
+    {
+      "id": "4147481491",
+      "author": "Lang-Akshay",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-21T12:06:23+00:00",
+      "body": "Thanks for the addressing previously mentioned issue @vishu-bh \n\n- ✅ SHA-256 → HMAC-SHA-256\n- ✅ split(\"==\", 1)\n- ✅ global_attributes field_validator\n- ✅ apply_attribute_mapping helper extracted\n- ✅ plugin disabled by default\n- ✅ resource_pre_fetch resets all 3 state keys\n\n---\nPlease address this issue \n\n## Finding 1: Race Condition in State Access\n\n**File:** span_attribute_customizer.py:195\n**Lines:** 195–228\n**Severity:** High\n**CWE:** CWE-362 (Concurrent Execution using Shared Resource with Improper Synchronization)\n\n### Description\n\n`_state_lock` guards writes only. `observability_service.start_span` reads all 3 state keys locklessly. Concurrent `resource_pre_fetch` (which resets `span_attribute_mapping={}`) can execute between consecutive reads in `start_span`, producing a torn read: tool-phase custom_attrs + empty mapping/removal from resource phase.\n\n### Remediation\n\nSnapshot all 3 state keys under `_state_lock` before passing to `start_span`, or use `contextvars.ContextVar` per async task.\n\n**Example Implementation:**\n\n```python\nwith self._state_lock:\n    snapshot = {\n        'custom_attrs': self._custom_attrs.copy(),\n        'mapping': self._get_attribute_mapping().copy(),\n        'removal': self._attributes_to_remove.copy()\n    }\n# Pass snapshot to start_span\n```\n\n---\n\n## Finding 2: Insufficient Input Validation\n\n**File:** config_schema.py:22\n**Lines:** 22, 31\n**Severity:** Medium\n**CWE:** CWE-20 (Improper Input Validation)\n\n### Description\n\n`ToolOverride.attributes` and `ConditionalAttribute.add` are typed `Dict[str, Any]` with no validators — allows nested objects, lists, None. OTEL SDK silently rejects non-primitive types. No entry count or value size limits.\n\n### Remediation\n\nAdd `@field_validator` to `ToolOverride.attributes` and `ConditionalAttribute.add` mirroring `validate_global_attributes`.\n\n**Example Implementation:**\n\n```python\n@field_validator(\"attributes\")\n@classmethod\ndef validate_attributes(cls, v: Dict[str, Any]) -> Dict[str, Any]:\n    \"\"\"Validate that all attribute values are primitives.\"\"\"\n    if not v:\n        return v\n    for key, value in v.items():\n        if not isinstance(value, (str, int, float, bool)):\n            raise ValueError(\n                f\"Attribute '{key}' has invalid type {type(value).__name__}. \"\n                \"Only str, int, float, bool are allowed.\"\n            )\n    return v\n```\n\n---\n\n## Finding 3: Inconsistent Attribute Mapping Application\n\n**File:** span_attribute_customizer.py:219\n**Lines:** 219–228\n**Severity:** Medium\n**CWE:** CWE-840 (Business Logic Errors)\n\n### Description\n\n`resource_pre_fetch` resets `span_attribute_mapping={}` — attribute renaming never applies to resource spans. README/docs state mapping applies to all spans. Operators configuring renaming for privacy/compliance receive no sanitisation on resource spans — silent security-policy bypass.\n\n### Evidence\n\n**1. README.md (line ~40) claims:**\n\n```yaml\nattribute_mapping:\n  # Rename plugin span attributes\n  \"plugin.name\": \"controls.artifact.name\"\n  \"plugin.uuid\": \"controls.artifact.id\"\n```\n\n> **Key Points:**\n>\n> - Applies to ALL spans (tools, resources, plugins)\n> - Original names are replaced with mapped names\n\n**2. Code reality (span_attribute_customizer.py:219):**\n\n```python\nasync def resource_pre_fetch(...):\n    # Reset all state keys to prevent stale tool-invocation state\n    with self._state_lock:\n        context.global_context.state[\"custom_span_attributes\"] = custom_attrs\n        context.global_context.state[\"remove_span_attributes\"] = []\n        context.global_context.state[\"span_attribute_mapping\"] = {}  # ← EMPTY!\n```\n\n**3. Security Impact:**\n\n- Operators configure attribute renaming for compliance (e.g., `\"user.email\" → \"user.id_hash\"`)\n- They believe mapping applies to ALL spans per README documentation\n- Resource spans retain original attribute names, potentially exposing sensitive data\n- **Silent failure** - no warning that mapping doesn't apply to resources\n- This constitutes a **security-policy bypass** for compliance/privacy requirements\n\n### Remediation\n\nPass `self._get_attribute_mapping()` through `resource_pre_fetch` instead of `{}`, or document intentionally and test it.\n\n**Option 1 - Apply mapping to resource spans:**\n\n```python\nasync def resource_pre_fetch(\n    self, payload: ResourcePreFetchPayload, context: PluginContext\n) -> ResourcePreFetchResult:\n    with self._state_lock:\n        self._custom_attrs = {}\n        self._span_attribute_mapping = self._get_attribute_mapping()  # Keep mapping\n        self._attributes_to_remove = set()\n```\n\n**Option 2 - Document and test the intentional behavior:**\n\n- Update README to explicitly state: \"Attribute mapping applies only to tool and prompt spans, not resource spans\"\n- Add test case verifying resource spans use original attribute names\n\n---\n\n## Finding 4: Resource Exhaustion via Unbounded Configuration\n\n**File:** config_schema.py:57\n**Lines:** 57–70\n**Severity:** Medium\n**CWE:** CWE-400 (Uncontrolled Resource Consumption)\n\n### Description\n\n`tool_overrides`, `conditions`, `transformations`, and `attribute_mapping` have no entry-count limits. Config-write access (admin role) can push thousands of entries, causing O(n²) per-span work — sustained DoS.\n\n### Remediation\n\nAdd count limits (≤ 200 tool_overrides, ≤ 50 conditions/transformations, ≤ 100 attribute_mapping).\n\n**Example Implementation:**\n\n```python\n@field_validator(\"tool_overrides\")\n@classmethod\ndef validate_tool_overrides_count(cls, v: List[ToolOverride]) -> List[ToolOverride]:\n    \"\"\"Limit tool_overrides to prevent resource exhaustion.\"\"\"\n    if len(v) > 200:\n        raise ValueError(\n            f\"tool_overrides count ({len(v)}) exceeds maximum allowed (200)\"\n        )\n    return v\n\n@field_validator(\"conditions\")\n@classmethod\ndef validate_conditions_count(cls, v: List[ConditionalAttribute]) -> List[ConditionalAttribute]:\n    \"\"\"Limit conditions to prevent resource exhaustion.\"\"\"\n    if len(v) > 50:\n        raise ValueError(\n            f\"conditions count ({len(v)}) exceeds maximum allowed (50)\"\n        )\n    return v\n\n@field_validator(\"transformations\")\n@classmethod\ndef validate_transformations_count(cls, v: List[AttributeTransformation]) -> List[AttributeTransformation]:\n    \"\"\"Limit transformations to prevent resource exhaustion.\"\"\"\n    if len(v) > 50:\n        raise ValueError(\n            f\"transformations count ({len(v)}) exceeds maximum allowed (50)\"\n        )\n    return v\n\n@field_validator(\"attribute_mapping\")\n@classmethod\ndef validate_attribute_mapping_count(cls, v: Dict[str, str]) -> Dict[str, str]:\n    \"\"\"Limit attribute_mapping to prevent resource exhaustion.\"\"\"\n    if len(v) > 100:\n        raise ValueError(\n            f\"attribute_mapping count ({len(v)}) exceeds maximum allowed (100)\"\n        )\n    return v\n```"
+    },
+    {
+      "id": "4147742860",
+      "author": "Lang-Akshay",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-21T12:48:38+00:00",
+      "body": "Thanks for the PR @vishu-bh "
+    },
+    {
+      "id": "4147987931",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-21T13:25:36+00:00",
+      "body": "Approved based on other reviews from the team."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "95ae3c33cc322371020843890d436aea4fda0424",
+      "message": "feat: Add SpanAttributeCustomizer plugin for customizable OpenTelemetry span attributes\n\nImplements GitHub issue #4274 - Add customizable span attributes to observability.\n\nChanges:\n- Created SpanAttributeCustomizer plugin with full configuration schema\n- Added support for global attributes, per-tool overrides, transformations, and conditional attributes\n- Integrated plugin with ObservabilityService via context parameter passing\n- Updated start_span(), trace_span(), and trace_tool_invocation() to accept context\n- Plugin reads custom_span_attributes and remove_span_attributes from GlobalContext.state\n- Added example configuration to plugins/config.yaml\n\nPlugin features:\n- Global attributes for all spans\n- Per-tool attribute overrides\n- Attribute transformations (hash, uppercase, lowercase, truncate)\n- Conditional attributes based on runtime conditions\n- Attribute removal for privacy/compliance\n\nIntegration pattern:\n- Plugin stores attributes in context.global_context.state during pre-invoke hooks\n- ObservabilityService reads from context during span creation\n- Follows established plugin framework patterns\n\nSigned-off-by: Bob Shell <bob@contextforge.dev>\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-19T21:58:33+00:00"
+    },
+    {
+      "sha": "62f04f30445c396b175821776959107741185793",
+      "message": "test: Add comprehensive unit tests for SpanAttributeCustomizer plugin\n\nAdds 28 unit tests covering all plugin functionality with 92% code coverage.\n\nTest coverage:\n- Plugin initialization (basic and empty config)\n- Global attributes injection\n- Per-tool attribute overrides\n- Attribute transformations (hash, uppercase, lowercase, truncate)\n- Conditional attributes based on tool name\n- Attribute removal (global and per-tool)\n- Multiple transformations in sequence\n- Error handling for unknown operations\n- All hook types (tool_pre_invoke, tool_post_invoke, resource_pre_fetch, resource_post_fetch)\n- Configuration schema validation\n- Complex multi-feature scenarios\n\nCoverage: 92% (99 statements, 8 missed)\n- Missed lines are edge cases in condition evaluation\n\nAll tests pass successfully.\n\nSigned-off-by: Bob Shell <bob@contextforge.dev>\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-19T22:01:47+00:00"
+    },
+    {
+      "sha": "f11d91a6306dc4487d30ccdc86f454ef0e4d118a",
+      "message": "test: Add integration tests and fix docstring linting issues\n\nAdds 7 integration tests for end-to-end verification of SpanAttributeCustomizer plugin.\n\nIntegration tests:\n- Global attributes injected into spans\n- Transformed attributes in spans (hash, uppercase)\n- Attribute removal from spans\n- Tool-specific overrides\n- Conditional attributes\n- Backward compatibility (spans without plugin context)\n- Complex multi-feature scenario\n\nAlso fixes ruff linting issues:\n- Added missing 'context' parameter documentation in trace_span() docstring\n- Added missing 'context' parameter documentation in trace_tool_invocation() docstring\n\nNote: Integration tests require database initialization (observability tables) to run.\nTests demonstrate correct functionality via captured logs showing proper attribute injection.\n\nSigned-off-by: Bob Shell <bob@contextforge.dev>\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-20T09:46:58+00:00"
+    },
+    {
+      "sha": "40b876021d1fd97f04a26f89a698cb216f0ba761",
+      "message": "docs: Add comprehensive documentation for SpanAttributeCustomizer plugin\n\nAdds detailed documentation for customizing OpenTelemetry span attributes:\n\nNew documentation:\n- docs/docs/manage/span-attribute-customization.md - Complete user guide with:\n  - Quick start guide\n  - Configuration options (global, per-tool, transformations, conditions, removal)\n  - Use cases (cost attribution, compliance, multi-region, service mesh, audit)\n  - Complete configuration example\n  - Verification steps (Jaeger, Prometheus)\n  - Performance and security considerations\n  - Troubleshooting guide\n\nUpdated documentation:\n- docs/docs/architecture/otel-span-attributes.md - Added section on customizing span attributes\n  - Setup instructions\n  - Configuration example\n  - Link to detailed plugin README\n\nDocumentation covers:\n- 5 core capabilities\n- 6 real-world use cases\n- Complete configuration examples\n- Verification and troubleshooting\n\nSigned-off-by: Bob Shell <bob@contextforge.dev>\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-20T10:04:03+00:00"
+    },
+    {
+      "sha": "ef125e08bf29743e3b0870f30a395d2f9a8e7b4f",
+      "message": "fix: resolve bandit and pylint security/quality issues\n\n- Add nosec comment for non-cryptographic random usage in plugin backoff\n- Add nosec comments for intentional try/except/pass fallback patterns\n- Replace assert with proper runtime check in upstream session registry\n- Fix implicit string concatenation in tool plugin binding service\n- Add pylint disable for too-many-locals in observability service\n\nAll security scans now pass with 0 issues.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-20T10:44:54+00:00"
+    },
+    {
+      "sha": "c75b5e8d0045dbdba457745b1f83e9ca90cf0f51",
+      "message": "test: add coverage for plugin context attributes in observability\n\n- Add test for custom span attributes from plugin context\n- Add test for removing span attributes via plugin context\n- Covers observability_service.py lines 506-516\n\nThese tests verify the SpanAttributeCustomizerPlugin integration with\nthe observability service's start_span method.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-20T12:16:25+00:00"
+    },
+    {
+      "sha": "3a57b8c28567138ee9e3c82f354ff96ae4e10189",
+      "message": "style: fix trailing whitespace in observability tests\n\nRemove trailing whitespace from test functions for code style consistency.\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-20T12:29:14+00:00"
+    },
+    {
+      "sha": "0b99880de555844886915428525097560a1e9cf2",
+      "message": "feat: add attribute name mapping to SpanAttributeCustomizer plugin\n\n- Add attribute_mapping config field to rename span attribute keys\n- Apply mapping to both tool spans (ObservabilityService) and plugin spans (PluginManager)\n- Store mapping in context.global_context.state for runtime access\n- Add 5 unit tests covering mapping scenarios\n- Update documentation with mapping examples\n- Backward compatible: empty/missing mapping = no renaming\n\nCloses #4331\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-20T13:41:06+00:00"
+    },
+    {
+      "sha": "93f39dfd2566f21e1e465d82fdad86b26527a83d",
+      "message": "feat: increasing coverage\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-20T14:50:09+00:00"
+    },
+    {
+      "sha": "208de8ffa7bb496deee131edef2d4480f263acba",
+      "message": "feat: disabling span plugin by default\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-20T15:04:05+00:00"
+    },
+    {
+      "sha": "1cbd15be05eb8998e353fe37719b3f8cc72ad8f4",
+      "message": "fix: address PR #4331 security and redundant code issues\n\nSecurity fixes:\n- Use HMAC-SHA-256 with auth_encryption_secret for hash transformation\n- Fix condition.split() to handle multiple == in values safely\n- Add Pydantic validators for global_attributes type safety\n- Add thread-safe state access with threading.Lock\n- Reset all state keys in resource_pre_fetch\n- Remove unsafe eval comment\n- Fix misleading Jinja2 documentation examples\n\nCode quality improvements:\n- Extract attribute mapping logic to centralized helper function\n- Update integration tests to use real implementation\n- Remove dead test with no behavior validation\n- Remove empty tool_post_invoke hook\n\nAll linters passing (ruff, bandit, interrogate, pylint 10.00/10)\nAll tests passing (17,677 passed, 549 skipped)\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-21T07:24:42+00:00"
+    },
+    {
+      "sha": "accb56cf88310a0a303cb1a0f46e555fee46b5e7",
+      "message": "feat: review comments addressed\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-21T07:50:52+00:00"
+    },
+    {
+      "sha": "6912db7b25ff6afdef884cb56d971df6797dd97a",
+      "message": "feat:coverage address\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-21T08:44:57+00:00"
+    },
+    {
+      "sha": "d79d4fdb95c0573f325c5d3d9f642be3cad5905b",
+      "message": "fix: linter fix\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-21T10:18:31+00:00"
+    },
+    {
+      "sha": "c8bbbac519d3a9ccda4a6aa6e1808f65ec9b41fa",
+      "message": "fix: removing unwanted tests\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-21T10:25:40+00:00"
+    },
+    {
+      "sha": "a9bae702ffe2aa6ce2d8a2d6939a5f1ec1c07edb",
+      "message": "test: add comprehensive unit tests for attribute mapping feature\n\n- Add test_executor_observability_span.py with span attribute tests\n- Add test_executor_otel_mapping.py with OTEL mapping tests\n- Improves diff-coverage from 22% to 49%\n- Core attribute mapping functionality now has 100% coverage\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-21T11:09:46+00:00"
+    },
+    {
+      "sha": "60212c32d6904751b2a92ba4467c0bad58d51804",
+      "message": "feat: addressing lint failures\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-21T11:31:19+00:00"
+    },
+    {
+      "sha": "0300ca3e043b13600f758b48bc5886a1ecb524df",
+      "message": "feat: updated code to address findings\n\nSigned-off-by: Vishu Bhatnagar <vishu.bhatnagar@ibm.com>",
+      "author": "Vishu Bhatnagar",
+      "date": "2026-04-21T12:19:53+00:00"
+    }
+  ],
+  "files_changed": 42,
+  "additions": 4068,
+  "deletions": 161,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:06:36.071592",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:06:36.072028",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4331,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4331.json"
+  }
+}

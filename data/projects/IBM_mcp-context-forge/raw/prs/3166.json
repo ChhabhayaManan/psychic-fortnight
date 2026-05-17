@@ -1,0 +1,64 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3166,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3166"
+  },
+  "metadata": {
+    "title": "[FIX][API]: Fix import endpoint JSON parameter handling",
+    "state": "closed",
+    "created_at": "2026-02-24T09:29:21+00:00",
+    "updated_at": "2026-03-19T21:17:48+00:00",
+    "closed_at": "2026-03-19T21:17:46+00:00",
+    "merged_at": "2026-03-19T21:17:46+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "MUST",
+      "release-fix",
+      "merge-queue"
+    ],
+    "milestone": "Release 1.0.0-RC3",
+    "assignees": []
+  },
+  "description": "> **Note:** This PR was re-created from #3053 due to repository maintenance. Your code and branch are intact. @shoummu1 please verify everything looks good.\n\n## Summary\n\nFixes issue #2960 by adding explicit `Body()` annotations to the `/import` endpoint parameters that FastAPI was incorrectly treating as query parameters.\n\n## Related Issue\n\nCloses: #2960\n\n## Root Cause\n\n**Location**: `mcpgateway/main.py` — `import_configuration()` function\n\n**Problem**: The `conflict_strategy`, `dry_run`, `rekey_secret`, and `selected_entities` parameters used plain Python defaults (e.g. `conflict_strategy: str = \"update\"`). FastAPI interprets bare defaults as **query parameters**, so these values were silently ignored when clients sent them in the JSON request body as documented. Additionally, the `except Exception` handler was catching `HTTPException` raised for invalid `conflict_strategy`, re-wrapping a valid 400 as a 500.\n\n## Fix Description\n\n1. **Annotate body parameters**: Changed bare defaults to `Body()` annotations so FastAPI reads all parameters from the JSON request body:\n\n   ```python\n   # Before (treated as query params):\n   conflict_strategy: str = \"update\",\n   dry_run: bool = False,\n\n   # After (correctly treated as body params):\n   conflict_strategy: str = Body(\"update\"),\n   dry_run: bool = Body(False),\n   ```\n\n2. **Re-raise HTTPException**: Added `except HTTPException: raise` before the generic `except Exception` handler so validation errors (e.g. invalid conflict strategy) return the correct 400 status instead of being wrapped as 500.\n\n**Benefits**:\n- All parameters correctly read from JSON body (matches documented API contract)\n- Invalid conflict strategy now returns 400 (not 500)\n- Preserves FastAPI's automatic OpenAPI schema generation and type validation\n\n## Behavioral Change Note\n\nAny clients that previously sent `conflict_strategy`, `dry_run`, or other import options as **query parameters** (e.g. `/import?dry_run=true&conflict_strategy=skip`) will now have those values silently ignored — FastAPI will use body defaults instead (`dry_run=False`, `conflict_strategy=\"update\"`). This aligns implementation with the documented API contract, which always specified these as JSON body fields. Clients must send all import parameters in the JSON request body.\n\n## Files Changed\n\n1. `mcpgateway/main.py` — `Body()` annotations + `except HTTPException` re-raise\n2. `tests/unit/mcpgateway/test_main_extended.py` — Updated expected status code from 500 to 400 for invalid conflict strategy; removed stale comments\n3. `tests/playwright/operations/test_export_import.py` — Fixed tests that incorrectly sent import parameters as query params instead of in the JSON body\n4. `tests/loadtest/locustfile.py` — Fixed load test to send import params in JSON body\n5. `llms/api.md` — Fixed curl example to use JSON body instead of query params\n6. `docs/docs/manage/export-import.md` — Fixed curl examples to wrap export data in `import_data` field\n\n## Checklist\n\n- [x] Code formatted (`make black isort pre-commit`)\n- [x] No secrets/credentials committed\n- [x] Backward compatible (aligns implementation with documented API contract)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3870901361",
+      "author": "jonpspri",
+      "state": "DISMISSED",
+      "submitted_at": "2026-02-28T23:43:51+00:00",
+      "body": "## Review\n\nThe core fix is correct and well-targeted:\n\n- **`Body()` annotations** on `conflict_strategy`, `dry_run`, `rekey_secret`, and `selected_entities` are consistent with 20+ existing uses in `main.py` and properly force FastAPI to read these from the request body instead of query params.\n- **`except HTTPException: raise`** is the standard FastAPI pattern to prevent the broad `except Exception` handler from swallowing typed HTTP errors (fixes 500 → 400 for invalid conflict strategy).\n- **Tests** properly updated: unit test expects 400, playwright/loadtest send params in JSON body.\n- **Positive security side-effect**: `rekey_secret` no longer exposed in URL/logs.\n\nAll unit tests pass. Linters pass on modified files (pre-existing formatting issues exist only in unmodified lines).\n\nMinor fix applied: replaced brittle shell-expansion curl patterns (`-d '{\"import_data\": '\"$(cat file)\"'}'`) in `export-import.md` and `api.md` with `jq -n --slurpfile` piped to `curl -d @-`, which handles special characters and large payloads safely."
+    },
+    {
+      "id": "3924113020",
+      "author": "ja8zyjits",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-03-10T17:21:15+00:00",
+      "body": "Please check if `import_data` is present in the request data else raise an error."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6d4d850292f27bdc513c701b1f8b62543084e2cf",
+      "message": "fix(api): annotate import endpoint params as Body() and validate import_data\n\nThe /import endpoint parameters (conflict_strategy, dry_run, rekey_secret,\nselected_entities) used plain Python defaults which FastAPI treated as query\nparameters. Clients sending these in the JSON body (as documented) had them\nsilently ignored. Additionally, the generic except Exception handler was\ncatching HTTPException, wrapping valid 400 errors as 500.\n\nChanges:\n- Annotate all import parameters with Body() so FastAPI reads them from JSON\n- Add explicit import_data emptiness check (matches admin endpoint pattern)\n- Add except HTTPException: raise before generic handler (fixes 500 → 400)\n- Update tests: fix expected status codes, add missing import_data test\n- Fix playwright/loadtest to send params in JSON body instead of query params\n- Fix docs curl examples to wrap export data in import_data field\n\nCloses #2960\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-19T21:00:55+00:00"
+    }
+  ],
+  "files_changed": 6,
+  "additions": 38,
+  "deletions": 24,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:56.942971",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:56.944591",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3166,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3166.json"
+  }
+}

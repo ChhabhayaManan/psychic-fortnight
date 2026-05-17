@@ -1,0 +1,56 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4491,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4491"
+  },
+  "metadata": {
+    "title": "fix: increase SSO authorization code max_length from 512 to 4096 (Entra ID regression)",
+    "state": "closed",
+    "created_at": "2026-04-28T09:40:32+00:00",
+    "updated_at": "2026-05-06T19:49:25+00:00",
+    "closed_at": "2026-05-06T19:49:24+00:00",
+    "merged_at": null,
+    "author": "ecthelion77",
+    "labels": [
+      "MUST",
+      "release-fix",
+      "regression"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\n\nFixes #4490\n\n## 📌 Summary\n\nThe SSO callback endpoint rejects valid Microsoft Entra ID authorization codes with HTTP 422 because the `code` query parameter is limited to `max_length=512`. Entra ID v2 authorization codes routinely exceed 1500 characters, **completely breaking SSO login** for all Azure AD / Entra ID users.\n\nThis is a **regression** introduced when input validation constraints were added to SSO parameters.\n\n## 🔁 Reproduction Steps\n\n1. Configure SSO with Microsoft Entra ID authorization server\n2. Attempt SSO login via admin UI\n3. Entra ID redirects to `/api/v1/sso/callback?code=<1500+ char code>&state=...`\n4. HTTP 422: `string_too_long` on `code` parameter\n\nSee issue #4490 for full details and error payload.\n\n## 🐞 Root Cause\n\nIn `mcpgateway/routers/sso.py`, the `code` parameter has `max_length=512`:\n\n```python\ncode: Optional[str] = Query(None, max_length=512, description=\"Authorization code from SSO provider\"),\n```\n\nMicrosoft Entra ID v2 authorization codes are 1200–2000+ characters. The 512 limit triggers a Pydantic validation error before token exchange.\n\n## 💡 Fix Description\n\nIncrease `max_length` from **512** to **4096** for the `code` query parameter.\n\n- RFC 6749 does not define a maximum authorization code length\n- Google: ~70 chars, Microsoft Entra ID: 1200–2000+ chars\n- 4096 provides safe headroom for all known providers\n- Security is enforced by token exchange + HMAC state verification, not code length\n\n### Change\n\n```diff\n-    code: Optional[str] = Query(None, max_length=512, description=\"Authorization code from SSO provider\"),\n+    code: Optional[str] = Query(None, max_length=4096, description=\"Authorization code from SSO provider\"),\n```\n\n## 🧪 Verification\n\n| Check                                 | Command              | Status |\n|---------------------------------------|----------------------|--------|\n| Lint suite                            | `make lint`          | ✅     |\n| Unit tests                            | `make test`          | ✅     |\n| Manual regression no longer fails     | Tested with Entra ID | ✅     |\n\n## 📐 MCP Compliance\n- [x] No impact on MCP protocol\n- [x] No breaking change to MCP clients\n\n## ✅ Checklist\n- [x] Code formatted\n- [x] No secrets/credentials committed\n- [x] Signed-off-by included in commit",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4187726377",
+      "author": "bogdanmariusc10",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-28T10:13:31+00:00",
+      "body": "Hello, @ecthelion77 ! Thank you for the observation and contribution!\n\nLGTM!"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "7c23619732622b4d0a830a66a58d004dc0dc6211",
+      "message": "fix: increase SSO code max_length from 512 to 4096\n\nEntra ID (Microsoft) v2 authorization codes can exceed 1500 characters.\nThe previous 512 limit caused HTTP 422 on SSO callback, breaking login.\n\nFixes: string_too_long validation error on /api/v1/sso/callback\nSigned-off-by: Olivier Gintrand <olivier.gintrand@forterro.com>",
+      "author": "Olivier Gintrand",
+      "date": "2026-04-27T14:32:25+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 1,
+  "deletions": 1,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:05:26.564872",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:05:26.565788",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4491,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4491.json"
+  }
+}

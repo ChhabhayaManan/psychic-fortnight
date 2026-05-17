@@ -1,0 +1,174 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2202,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2202"
+  },
+  "metadata": {
+    "title": "Optimize_Database_Session_Creation_and_Management",
+    "state": "closed",
+    "created_at": "2026-01-20T07:24:05+00:00",
+    "updated_at": "2026-02-15T13:04:32+00:00",
+    "closed_at": "2026-02-15T12:44:55+00:00",
+    "merged_at": null,
+    "author": "Nayana-R-Gowda",
+    "labels": [],
+    "milestone": "Release 1.0.0-RC1",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "Signed-off-by: NAYANAR <nayana.r7813@gmail.com>\r\ncloses #1685 \r\n\r\nrequest-scoped database sessions to reduce overhead and ensure a single session is reused across middleware and route handlers during a request lifecycle. This addresses multiple unnecessary session creations per request, which previously led to increased connection usage, minor latency (~5–10ms per request), and potential pool exhaustion under load.\r\n\r\n\r\nDB Helpers (db.py)\r\n\r\nIntroduced _request_session (ContextVar) to store a request-scoped session.\r\n\r\nAdded get_request_session() to lazily create or reuse the session per request.\r\n\r\nAdded close_request_session() to cleanup sessions after request completion.\r\n\r\nUpdated get_db() to use get_request_session() (removing premature close calls).\r\n\r\nSession Middleware (session_middleware.py)\r\n\r\nMiddleware ensures request-scoped session is closed at the end of each request.\r\n\r\nUpdated Middleware\r\n\r\nauth_middleware.py, rbac.py, observability_middleware.py, request_logging_middleware.py updated to reuse the request-scoped session instead of creating new sessions.\r\n\r\nApplication Setup (main.py)\r\n\r\nRegistered SessionMiddleware to guarantee session cleanup at request end.\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3796061666",
+      "author": "crivetimihai",
+      "state": "COMMENTED",
+      "submitted_at": "2026-02-13T09:26:16+00:00",
+      "body": "Thanks for tackling session lifecycle management, @Nayana-R-Gowda — reducing redundant session creation is a worthwhile goal. However, there are several issues that need to be addressed:\n\n**1. ContextVar + BaseHTTPMiddleware = session leak (critical)**\n`BaseHTTPMiddleware.call_next` runs downstream handlers in a copied context. When the outer middleware sets `_request_session`, the inner `SessionMiddleware.close_request_session()` only mutates the inner context copy — the outer middleware then operates on a closed session. Conversely, if the session is created inside a route handler (inside `call_next`), the ContextVar change never propagates back, so the session is never cleaned up.\n\n**2. `close_after` check is always False (`auth_middleware.py:150,174`)**\n`SessionLocal = get_request_session` makes them the same object, so `SessionLocal is not get_request_session` is always `False`. The conditional close is dead code.\n\n**3. Duplicate `fresh_db_session` (`rbac.py:280-316`)**\nThis redefines `fresh_db_session` locally with different semantics (explicit commit on success) while `mcpgateway/db.py:5494` still exports the original. Seven other modules import from `db.py`. Two divergent implementations will cause subtle transaction behavior differences.\n\n**4. Middleware ordering (`main.py:1736`)**\n`SessionMiddleware` is added before compression/security/auth middlewares. In Starlette's LIFO order, it executes innermost — its `finally` fires before outer middlewares finish using the session.\n\n**Suggestion:** Consider a pure ASGI middleware instead of `BaseHTTPMiddleware` to avoid the ContextVar propagation issue, or use `request.state` instead of `ContextVar` to store the session reference."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "6f6abc1285e9b2a7c41975871da5c96f8578f53e",
+      "message": "Optimize_Database_Session_Creation_and_Management\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-01-20T07:20:14+00:00"
+    },
+    {
+      "sha": "26899a3176245028f9cd3279f105ad4b5158cef1",
+      "message": "pylint fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-01-20T08:28:54+00:00"
+    },
+    {
+      "sha": "e3e5caffb17331edeb6421d75a8faf44c73f9457",
+      "message": "pylint fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-01-20T08:51:10+00:00"
+    },
+    {
+      "sha": "881c7988265864778e37887b520e90ebe2cf172a",
+      "message": "flake8 fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-01-20T09:06:53+00:00"
+    },
+    {
+      "sha": "df0c5e2acfb0405de1982969f4f2668676401525",
+      "message": "Expanded SessionMiddleware.dispatch() docstring with Args and Returns\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-01-20T09:36:11+00:00"
+    },
+    {
+      "sha": "cc8847aeed4661941a3eb337e593a293e8dc5ae3",
+      "message": "make test fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-01-20T13:04:14+00:00"
+    },
+    {
+      "sha": "4c163e6c7b23a560215c0c45a7d1d1bb90527e01",
+      "message": "flake8 fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-01-20T13:29:05+00:00"
+    },
+    {
+      "sha": "9e1e3745ac13dacf59cd4bdffb6d5063c36745fa",
+      "message": "bandit fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-01-20T13:37:36+00:00"
+    },
+    {
+      "sha": "af736075d0c7ae466d3108607c6a1a8260307a20",
+      "message": "pylint fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-01-20T14:00:32+00:00"
+    },
+    {
+      "sha": "a87329e0f4afe3bbc1c5d58fada8ea3b4f8884c5",
+      "message": "Cleared stray merge marker from rbac.py and removed a duplicated get_db() implementation\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-04T08:36:04+00:00"
+    },
+    {
+      "sha": "b10f8fa6f70c4b8a9f6bea3f7b760a7a5ee8897b",
+      "message": "flake8 and bandit fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-04T09:00:02+00:00"
+    },
+    {
+      "sha": "e1594bf4e546b79fd67114217c1ac9120ed366d7",
+      "message": "pylint fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-04T09:19:47+00:00"
+    },
+    {
+      "sha": "641a17f842de06537aa393de6d4edcd2574afec7",
+      "message": "ixed the docstring issues (added Yields and Raises to fresh_db_session) and re-ran flake8 — no DAR errors remain for that file\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-04T09:36:19+00:00"
+    },
+    {
+      "sha": "0e5473ff25f045900b8f513bf7a4c759be936c03",
+      "message": "middleware/session fixes you suggested and removed the duplicated session helper\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-13T10:46:51+00:00"
+    },
+    {
+      "sha": "13b50812c13d13bc9d1d1c486f92acca228028a0",
+      "message": "flake8 fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-13T10:58:55+00:00"
+    },
+    {
+      "sha": "3485cc7faec244eeb7b2481158cc90b8ab2ddb7c",
+      "message": "make test fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-13T11:46:04+00:00"
+    },
+    {
+      "sha": "e7942d53b34b2a647608d7b759fb07d64254e068",
+      "message": " flake8 fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-13T11:56:15+00:00"
+    },
+    {
+      "sha": "81b8343fc81ca44037dd7bc07c7c923241b995b7",
+      "message": "SessionLocal() and to rollback+close the DB session on trace-setup failure (logging close failures at debug)\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-13T14:43:06+00:00"
+    },
+    {
+      "sha": "289e9b9c3f8430d8c59148fb64d36617cc0fcd26",
+      "message": "coverage fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-13T14:56:54+00:00"
+    },
+    {
+      "sha": "8c9ccb1e6c8d22847e4e3885e4ca70a0919156cd",
+      "message": "coverage fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-13T15:27:31+00:00"
+    },
+    {
+      "sha": "d10571429a22710f96f865d6d309460653279c6f",
+      "message": "coverage fix\n\nSigned-off-by: NAYANAR <nayana.r7813@gmail.com>",
+      "author": "NAYANAR",
+      "date": "2026-02-13T16:30:43+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 475,
+  "deletions": 130,
+  "merged": false,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:53.840963",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:53.841823",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2202,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2202.json"
+  }
+}

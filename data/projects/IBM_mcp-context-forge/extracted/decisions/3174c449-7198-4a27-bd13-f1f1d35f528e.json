@@ -1,0 +1,35 @@
+{
+  "id": "3174c449-7198-4a27-bd13-f1f1d35f528e",
+  "title": "Wrapper Performance Optimization: Byte-based I/O and O(n) Stream Parsing",
+  "summary": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nCloses #1613 \r\n\r\nFixed some performance bottlenecks in the MCP wrapper's stdio bridge and stream parsers. The previous implementation suffered from O(n²) time complexity during stream processing and incurred unnecessary CPU overhead from frequent UTF-8 encoding/decoding cycles. These changes significantly improve throughput and reduce memory pressure for large NDJSON and SSE streams.\r\n\r\n## 🔁 Reproduction Steps\r\nPerformance issue identified via code analysis and load simulation:\r\n\r\n1. Simulate an MCP server response with a large NDJSON or SSE stream (e.g., 10MB+ consisting of many small chunks).\r\n2. Monitor the mcpgateway.wrapper process.\r\n3. Observation: CPU usage spikes and processing latency increases non-linearly as the internal buffer grows.\r\n\r\n## 🐞 Root Cause\r\n1. Quadratic String Copying: The ndjson_lines and sse_events parsers used buffer += chunk and string slicing within tight loops. Since Python strings are immutable, this forced a full memory copy of the buffer for every new chunk, leading to O(n²) complexity.\r\n2. Encoding Overhead: The wrapper was decoding every incoming network byte to a UTF-8 string and then re-encoding it to writes to stdout. This added significant CPU overhead for what is essentially a pass-through operation.\r\n\r\n## 💡 Fix Description\r\n1. O(n) Split-Based Parsing: Refactored stream parsers to use the standard (partial + chunk).split(b'\\n') pattern. This processes chunks in linear time and eliminates the expensive buffer copying loop.\r\n2. Byte-Level I/O: Switched stdin_reader and send_to_stdout to use sys.stdin.buffer and sys.stdout.buffer. This allows raw JSON bytes to be read from the network and written to stdout directly without unnecessary UTF-8 round-trips.\r\n3. Optimized Parsers: Updated ndjson_lines and sse_events to operate entirely on bytes, yielding byte objects that are immediately ready for output.\r\n\r\n\r\n Performance Impact Analysis\r\n| Metric                  | Previous Implementation                     | New Optimized Implementation              | Improvement                                                                 |\r\n|-------------------------|---------------------------------------------|-------------------------------------------|-----------------------------------------------------------------------------|\r\n| Algorithmic Complexity  | O(N²)                            | O(N)                           | Exponential scaling gain. Crucial for large payloads.                        |\r\n| Memory Allocation       | New string copy for entire buffer per chunk  | Zero-copy views / small splits only       | Massive reduction in GC pressure and memory churn.                           |\r\n| Data Path               | Network (Bytes) → Decode (Str) → Encode (Bytes) | Network (Bytes) → Output (Bytes)      | ~30% CPU savings by eliminating redundant UTF-8 cycles.                     |\r\n\r\n\r\n## 📊 Benchmark Estimates\r\nFor a 10MB streaming response (common in RAG with large contexts or long reasoning chains):\r\n\r\n**Before (The Bottleneck):**\r\n\r\n- As the buffer filled (e.g., reaching 5MB), appending a tiny 4KB chunk required copying the full 5MB of data to a new memory location.\r\n- Result: Processing speed degraded rapidly. The last 1MB of the stream could take 100x longer to process than the first 1MB. High probability of CPU spikes causing timeouts.\r\n\r\n\r\n**After (The Fix):**\r\n\r\n- Every chunk is processed independently with constant time operations.\r\n- Result: Stable, flat latency. A 10MB stream is processed seamlessly, limited only by the network bandwidth, not CPU time.\r\n\r\n**Throughput Projection:**\r\n\r\n- Small Responses (<50KB): ~15% faster (due to removed encoding overhead).\r\n- Medium Responses (1MB): ~2-5x faster.\r\n- Large Responses (>10MB): 10x - 50x faster (eliminating the quadratic buffering freeze).\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |   ✅     |\r\n| Unit tests                            | `make test`          |   ✅     |\r\n| Coverage ≥ 90 %                       | `make coverage`      |        |\r\n| Manual regression no longer fails     | steps / screenshots  |        |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "reasoning": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\n\r\nCloses #1613 \r\n\r\nFixed some performance bottlenecks in the MCP wrapper's stdio bridge and stream parsers. The previous implementation suffered from O(n²) time complexity during stream processing and incurred unnecessary CPU overhead from frequent UTF-8 encoding/decoding cycles. These changes significantly improve throughput and reduce memory pressure for large NDJSON and SSE streams.\r\n\r\n## 🔁 Reproduction Steps\r\nPerformance issue identified via code analysis and load simulation:\r\n\r\n1. Simulate an MCP server response with a large NDJSON or SSE stream (e.g., 10MB+ consisting of many small chunks).\r\n2. Monitor the mcpgateway.wrapper process.\r\n3. Observation: CPU usage spikes and processing latency increases non-linearly as the internal buffer grows.\r\n\r\n## 🐞 Root Cause\r\n1. Quadratic String Copying: The ndjson_lines and sse_events parsers used buffer += chunk and string slicing within tight loops. Since Python strings are immutable, this forced a full memory",
+  "confidence": 0.85,
+  "related_services": [],
+  "contributors": [
+    "crivetimihai",
+    "kevalmahajan"
+  ],
+  "tags": [
+    "decision"
+  ],
+  "source_refs": [
+    {
+      "id": "64c8f1af-d3c1-4795-997d-6a1715b041f5",
+      "source_type": "pr",
+      "source_id": "1713",
+      "url": "https://github.com/IBM/mcp-context-forge/pull/1713",
+      "contributor": "kevalmahajan",
+      "timestamp": "2025-12-22T17:30:23Z",
+      "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1713.json"
+    }
+  ],
+  "timestamp": "2025-12-22T17:30:23Z",
+  "created_at": "2026-05-17T17:24:29.279002",
+  "updated_at": "2026-05-17T17:24:29.279004",
+  "metadata": {},
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:24:29.279894",
+    "artifact_type": "decisions",
+    "artifact_id": "3174c449-7198-4a27-bd13-f1f1d35f528e"
+  }
+}

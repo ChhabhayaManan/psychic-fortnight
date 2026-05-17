@@ -1,0 +1,80 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3995,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3995"
+  },
+  "metadata": {
+    "title": "fix: Fix playwright gateway action tests",
+    "state": "closed",
+    "created_at": "2026-04-02T08:26:12+00:00",
+    "updated_at": "2026-04-03T08:00:16+00:00",
+    "closed_at": "2026-04-03T08:00:14+00:00",
+    "merged_at": "2026-04-03T08:00:14+00:00",
+    "author": "gcgoncalves",
+    "labels": [],
+    "milestone": null,
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## 📌 Summary\r\nCloses #3982\r\n\r\n## 🔁 Reproduction Steps\r\n1. Run the playwright tests\r\n\r\n## 🐞 Root Cause\r\nThe playwright test updates got lost on a PR rework.\r\n\r\n## 💡 Fix Description\r\nAdded a step to open the overflow menu to the gateway action tests\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    ✅    |\r\n| Unit tests                            | `make test`          |    ✅    |\r\n| Coverage ≥ 80 %                       | `make coverage`      |    ✅   |\r\n| Manual regression no longer fails     | steps / screenshots  |    ✅    |\r\n\r\n## ✅ Checklist\r\n- [✅] Code formatted (`make black isort pre-commit`)\r\n- [✅] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4050498513",
+      "author": "vishu-bh",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-02T13:00:28+00:00",
+      "body": "LGTM"
+    },
+    {
+      "id": "4050592467",
+      "author": "marekdano",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-04-02T13:17:03+00:00",
+      "body": "The test `tests/playwright/test_gateways.py::TestGatewayActions::test_gateway_row_actions_visible` fails with the error\n```bash \n def test_gateway_row_actions_visible(self, gateways_page: GatewaysPage):\n        \"\"\"Test that all gateway row action buttons are visible.\"\"\"\n        gateways_page.navigate_to_gateways_tab()\n        gateways_page.wait_for_gateways_table_loaded()\n\n        # Skip if no gateways exist\n        if gateways_page.get_gateway_count() == 0:\n            pytest.skip(\"No gateways available for testing\")\n\n        # Get first gateway row\n        first_row = gateways_page.get_gateway_row(0)\n\n        # Verify all action buttons exist\n>       expect(first_row.locator('button:has-text(\"Test\")')).to_be_visible()\nE       AssertionError: Locator expected to be visible\nE       Actual value: hidden\nE       Call log:\nE         - Expect \"to_be_visible\" with timeout 5000ms\nE         - waiting for locator(\"#gateways-table-body\").locator(\"tr\").first.locator(\"button:has-text(\\\"Test\\\")\")\nE           9 × locator resolved to <button type=\"button\" role=\"menuitem\" @click=\"menuOpen = false; testGateway(\"http://fast_time_server:8080/sse\")\" class=\"w-full flex items-center px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700\">Test</button>\nE             - unexpected value \"hidden\"\n\ntests/playwright/test_gateways.py:528: AssertionError\n```\n\nThe test is failing because the action buttons (Test, View, Edit, etc.) are inside a dropdown menu that is hidden by default. According to PR #3802 mentioned in the page object, all action buttons were moved inside an Alpine.js-controlled dropdown with menuOpen: false by default.\n\nTo fix this error, the `test_gateway_row_actions_visible` test  should be updated with \n```bash\n# Open the action dropdown (PR #3802 moved buttons inside dropdown)\ngateways_page._open_action_dropdown(first_row)\n\n# Verify all action buttons exist in the dropdown menu\nexpect(first_row.locator('button[role=\"menuitem\"]:has-text(\"Test\")')).to_be_visible()\nexpect(first_row.locator('button[role=\"menuitem\"]:has-text(\"View\")')).to_be_visible()\nexpect(first_row.locator('button[role=\"menuitem\"]:has-text(\"Edit\")')).to_be_visible()\n\n# Either Activate or Deactivate should be visible\nactivate_btn = first_row.locator('button[role=\"menuitem\"]:text-is(\"Activate\")')\ndeactivate_btn = first_row.locator('button[role=\"menuitem\"]:text-is(\"Deactivate\")')\nassert activate_btn.is_visible() or deactivate_btn.is_visible()\n\n# Delete button should be visible (inside a form)\nexpect(first_row.locator('form[action*=\"/delete\"] button[type=\"submit\"]:has-text(\"Delete\")')).to_be_visible()\n```\n\n"
+    },
+    {
+      "id": "4054698925",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-03T07:49:47+00:00",
+      "body": "Looks good, nice catch on the regression from PR #3802.\n\nI rebased onto main (clean, no conflicts) and added two follow-up commits:\n\n**Commit 2** — `fix: add missing _open_action_dropdown call in delete_gateway_by_url`\n- `delete_gateway_by_url()` was the one action method in the page object that was missed — it also clicks the Delete button which lives inside the dropdown now. Added the `_open_action_dropdown` call + black/isort formatting cleanup.\n\n**Commit 3** — `fix: open action dropdown in remaining test files that bypass page object`\n- Three other test files click gateway action buttons directly (bypassing the page object), so they were broken by the same #3802 change:\n  - `test_rbac_permissions.py` — `test_admin_delete_gateway` located the delete button on the row directly\n  - `test_admin_url_context.py` — `_get_delete_gateway_btn` helper used by multiple URL-context and iframe delete tests\n  - `test_iframe_embedding_security.py` — delete and toggle iframe tests operated on `FrameLocator` directly\n- Each now opens the actions dropdown before clicking. Added `wait_for(state=\"attached\")` guards in the iframe tests and moved the skip guard before the dropdown interaction in `_get_delete_gateway_btn`.\n\nSelectors verified against `gateways_partial.html` — all match (`button[aria-expanded]`, `[role=\"menu\"]`, `button[role=\"menuitem\"]`, `form[action*=\"/delete\"]`)."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "baa3d962cf862a637ccb992686374296dd4bddde",
+      "message": "fix: Fix playwright gateway action tests\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-02T08:21:55+00:00"
+    },
+    {
+      "sha": "74d50e62fe537361f8869b68dedaff0d01f0bf9b",
+      "message": "fix: add missing _open_action_dropdown call in delete_gateway_by_url\n\nThe delete_gateway_by_url method was missing the _open_action_dropdown\ncall added by the previous commit. Since PR #3802 moved all action\nbuttons (including Delete) inside an Alpine.js dropdown menu, the\ndelete button is not directly clickable without first opening the menu.\n\nCloses #3982\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T02:51:34+00:00"
+    },
+    {
+      "sha": "25baf891f4f9399976dd2cf9d2ed3bdc01dd10bb",
+      "message": "fix: open action dropdown in remaining test files that bypass page object\n\nThree test files directly click gateway action buttons without going\nthrough the GatewaysPage page object, so they were also broken by\nPR #3802's move to the Alpine.js overflow menu:\n\n- test_rbac_permissions.py: test_admin_delete_gateway bypassed page\n  object to inspect HTTP response status directly\n- test_admin_url_context.py: _get_delete_gateway_btn helper used by\n  multiple URL-context tests and iframe delete tests\n- test_iframe_embedding_security.py: delete and toggle tests operated\n  directly on iframe FrameLocator\n\nEach now opens the actions dropdown before clicking the menu item.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-04-03T07:26:21+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 178,
+  "deletions": 256,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:07:05.661228",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:05.661706",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3995,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3995.json"
+  }
+}

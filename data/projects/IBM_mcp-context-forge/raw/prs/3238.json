@@ -1,0 +1,66 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3238,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3238"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Correct pagination display when DB-to-Pydantic conversion fails (#2851)",
+    "state": "closed",
+    "created_at": "2026-02-25T09:16:27+00:00",
+    "updated_at": "2026-03-10T23:04:03+00:00",
+    "closed_at": "2026-03-10T23:04:01+00:00",
+    "merged_at": "2026-03-10T23:04:01+00:00",
+    "author": "suciu-daniel",
+    "labels": [
+      "bug",
+      "ui",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "suciu-daniel"
+    ]
+  },
+  "description": "## Problem\n\nFixes #2851\n\nWhen items fail Pydantic validation during admin list views, the pagination \"Showing X - Y of Z\" display was incorrect. The server correctly adjusted `total_items` (Z value) via `_adjust_pagination_for_conversion_failures()`, but the X-Y range was computed client-side using `currentPage * perPage` instead of the actual number of rendered items.\n\n**Example:** If 2 of 20 rows fail conversion, the UI displayed \"Showing 1 - 20 of 98 items\" while only 18 rows were actually rendered.\n\n## Solution\n\nAdded `page_items` field to track actual rendered item count and updated the template to use it when available.\n\n### Changes\n\n1. **Schema Enhancement** (`mcpgateway/schemas.py`)\n   - Added optional `page_items` field to `PaginationMeta` class\n\n2. **Helper Function Update** (`mcpgateway/admin.py`)\n   - Updated `_adjust_pagination_for_conversion_failures()` to accept `rendered_count` parameter\n   - Sets `pagination.page_items = rendered_count`\n\n3. **Endpoint Updates** (`mcpgateway/admin.py`)\n   - Updated 6 admin partial endpoints to pass `len(items_pydantic)`:\n     - `/admin/servers/partial`\n     - `/admin/tools/partial`\n     - `/admin/prompts/partial`\n     - `/admin/gateways/partial`\n     - `/admin/resources/partial`\n     - `/admin/a2a/partial`\n\n4. **Template Update** (`mcpgateway/templates/pagination_controls.html`)\n   - Added `pageItems` to Alpine.js data initialization\n   - Updated display logic to use `pageItems` when available, falling back to calculated value\n\n5. **Test Updates** (`tests/unit/mcpgateway/test_admin.py`)\n   - Updated `TestAdjustPaginationForConversionFailures` class (8 test methods)\n   - Added assertions for `page_items` field\n\n## Result\n\n**Before:** 20 items requested, 2 fail → \"Showing 1 - 20 of 98 items\" (18 rows displayed) ❌  \n**After:** 20 items requested, 2 fail → \"Showing 1 - 18 of 98 items\" (18 rows displayed) ✅\n\n## Backward Compatibility\n\n✅ Fully backward compatible:\n- `page_items` is optional (defaults to `None`)\n- Template checks `pageItems !== null` before using it\n- Endpoints not using conversion failure tracking continue working unchanged\n\n## Related\n\n- Builds on PR #2846 which introduced `_adjust_pagination_for_conversion_failures()`\n- Fixes issue #2851\n\n## Testing\n\nAll pagination-related test failures have been fixed. Remaining test failures are pre-existing issues unrelated to this change (auth/RBAC, app naming, plugin settings).",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3920682550",
+      "author": "VladMRusu1",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T08:37:05+00:00",
+      "body": ""
+    },
+    {
+      "id": "3925926849",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-10T22:58:43+00:00",
+      "body": "Rebased onto main (clean, single commit — 3 merge commits squashed out).\n\n**Review notes:**\n\n- All 6 admin partial endpoints with DB-to-Pydantic conversion loops are correctly updated — no callers missed.\n- The invariant `len(items_pydantic) + failed_count == len(items_db)` holds by construction at every call site.\n- `page_items` defaults to `None` and the template properly falls back via `pageItems !== null` check — fully backward compatible for endpoints that don't call the adjustment function (teams, tokens, etc.).\n- Schema field uses `Optional[int]` with `ge=0` constraint, consistent with existing `next_cursor`/`prev_cursor` pattern.\n- `page_items` is set outside the `if failed_count > 0` block, which is correct — it always reflects the actual rendered count.\n- No security or performance concerns — purely a UI display fix.\n- All 8 unit tests pass and cover key scenarios (basic decrement, zero failures, overflow, boundary, page non-clamping).\n\n**Minor observation (non-blocking):** If *all* items on a page fail conversion (`rendered_count=0`, `total_items > 0`), the display becomes \"Showing 1 - 0 of N items\" — awkward but better than the old behavior of claiming 20 items shown when 0 are rendered. Could be addressed separately if desired.\n\nLGTM — clean fix, correct logic, good test coverage."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "666dfc6ab88932f31a7747356afa4fb58ad4904e",
+      "message": "fix: correct pagination display when DB-to-Pydantic conversion fails\n\nFixes #2851\n\nWhen items fail Pydantic validation during admin list views, the pagination\n'Showing X - Y of Z' display was incorrect. The server adjusted total_items (Z)\nbut the X-Y range was computed client-side using requested items, not actual\nrendered count.\n\nChanges:\n- Add optional page_items field to PaginationMeta schema\n- Update _adjust_pagination_for_conversion_failures() to set page_items\n- Update 6 admin partial endpoints to pass rendered item count\n- Update pagination_controls.html to use page_items when available\n- Update tests to match new function signature\n\nExample: 20 items requested, 2 fail conversion\n- Before: 'Showing 1 - 20 of 98 items' (18 rows displayed)\n- After: 'Showing 1 - 18 of 98 items' (18 rows displayed)\n\nBuilds on PR #2846 which introduced _adjust_pagination_for_conversion_failures()\n\nSigned-off-by: SuciuDaniel <Daniel.Vasile.Suciu@ibm.com>",
+      "author": "SuciuDaniel",
+      "date": "2026-02-25T09:15:40+00:00"
+    }
+  ],
+  "files_changed": 4,
+  "additions": 30,
+  "deletions": 16,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:11:21.707607",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:11:21.709089",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3238,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3238.json"
+  }
+}

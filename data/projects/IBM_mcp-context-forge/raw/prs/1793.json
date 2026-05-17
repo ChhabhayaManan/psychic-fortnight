@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1793,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1793"
+  },
+  "metadata": {
+    "title": "Fix bugs in performance docker compose",
+    "state": "closed",
+    "created_at": "2025-12-30T10:55:16+00:00",
+    "updated_at": "2025-12-30T11:33:07+00:00",
+    "closed_at": "2025-12-30T11:33:05+00:00",
+    "merged_at": "2025-12-30T11:33:05+00:00",
+    "author": "madhav165",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n---\r\n\r\n## 📌 Summary\r\n\r\nFixes two issues in the nginx load balancer configuration in pefrormance tests that prevented proper operation when running the performance testing stack with multiple gateway instances behind nginx.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n```bash\r\n# 1. Generate performance docker-compose file\r\npython tests/performance/utils/generate_docker_compose.py \r\n  --infrastructure staging \r\n  --output docker-compose.perf.yml \r\n  --config tests/performance/config.yaml\r\n\r\n# 2. Start the performance stack\r\ndocker compose -f docker-compose.perf.yml up -d\r\n\r\n# 3. BUG 1:\r\n# Open http://localhost:8000/admin\r\n# Add a gateway\r\n# ❌ Redirects to:\r\n#    http://localhost/gateways\r\n# ✅ Expected:\r\n#    http://localhost:8000/admin#gateways\r\n\r\n# 4. BUG 2:\r\n# On initial startup, nginx returns:\r\n# 502 Bad Gateway\r\n# \"no live upstreams\"\r\n```\r\n\r\n## 🐞 Root Cause\r\n\r\n**Bug 1 - Lost Port in Redirects:**\r\n- nginx was using `proxy_set_header Host $host` which strips the port number\r\n- JavaScript redirect in admin.js constructs URLs based on the current `window.location`, which lost port information\r\n- Result: `localhost:8000` → `localhost` in redirects\r\n\r\n**Bug 2 - Race Condition on Startup:**\r\n- nginx `depends_on` used simple array format without health check conditions\r\n- nginx started as soon as gateway containers were created, not when they were healthy\r\n- Initial requests failed, marking upstreams as down for 30s (max_fails=3, fail_timeout=30s)\r\n\r\n## 💡 Fix Description\r\n\r\n**For Bug 1 - Preserve Port in Proxy Headers:**\r\n- Changed `proxy_set_header Host $host` → `proxy_set_header Host $http_host`\r\n- Added `proxy_set_header X-Forwarded-Host $http_host`\r\n- Added `proxy_redirect off` to prevent nginx from rewriting backend redirects\r\n- `$http_host` preserves the full Host header including port (e.g., `localhost:8000`)\r\n\r\n**For Bug 2 - Wait for Gateway Health Checks:**\r\n- Changed nginx `depends_on` from simple array to health check conditions:\r\n  ```yaml\r\n  depends_on:\r\n    gateway_1:\r\n      condition: service_healthy\r\n    gateway_2:\r\n      condition: service_healthy\r\n  ```\r\n- nginx now waits for both gateways to pass health checks before starting\r\n\r\n**Files Modified:**\r\n- `tests/performance/utils/generate_docker_compose.py` - Template generator updated so future regenerations include the fix\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    pass    |\r\n| Unit tests                            | `make test`          |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3617956230",
+      "author": "kevalmahajan",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-30T11:32:45+00:00",
+      "body": "Tested the PR, 502 bad gateway issue is fixed in the initial startup, and also redirects to the correct URL"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "91b8cea85a354146c852e31120a78c6a693789b9",
+      "message": "Fix bugs in locust docker compose\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-30T10:54:35+00:00"
+    }
+  ],
+  "files_changed": 1,
+  "additions": 11,
+  "deletions": 3,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:20:22.611300",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:20:22.612259",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1793,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1793.json"
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3159,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3159"
+  },
+  "metadata": {
+    "title": "fix(api): move JSONPath modifier to query parameter with improved error handling",
+    "state": "closed",
+    "created_at": "2026-02-24T09:26:50+00:00",
+    "updated_at": "2026-03-18T12:23:45+00:00",
+    "closed_at": "2026-03-18T12:23:40+00:00",
+    "merged_at": "2026-03-18T12:23:40+00:00",
+    "author": "crivetimihai",
+    "labels": [
+      "bug",
+      "ica",
+      "SHOULD",
+      "release-fix"
+    ],
+    "milestone": "Release 1.1.0",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "> **Note:** This PR was re-created from #3023 due to repository maintenance. Your code and branch are intact. @rakdutta please verify everything looks good.\n\ncloses #2848 \r\nThis PR enhances the tools API endpoints (`/tools` and `/tools/{tool_id}`) by refactoring JSONPath modifier support from request body to query parameters, improving error handling, and adding comprehensive logging for better debugging.\r\n\r\n### Changes\r\n\r\n**API Parameter Changes**\r\n- Moved `apijsonpath` parameter from request body to optional query parameter in both `list_tools` and `get_tool` endpoints\r\n- Enables JSONPath modifiers to be passed as JSON strings in GET requests, improving API usability\r\n- Added unified parsing logic to handle `apijsonpath` as either a string (HTTP requests) or model instance (internal calls/tests)\r\n\r\n**Response Handling**\r\n- Changed endpoints to return `ORJSONResponse` when JSONPath modifiers are applied, bypassing FastAPI's response model validation\r\n- Ensures correct response format and prevents validation errors on modified responses\r\n\r\n**Error Handling**\r\n- Improved error reporting for invalid JSONPath modifier input with appropriate HTTP exceptions\r\n- Added detailed error messages for parsing and processing failures\r\n\r\n**Test Updates**\r\n- Updated unit tests to use new query parameter format for `apijsonpath`\r\n- Switched tests to use `JsonPathModifier` model instances\r\n- Validated that endpoints return `ORJSONResponse` objects when modifiers are applied\r\n\r\n**Documentation**\r\n- Added docstring notes about raised exceptions\r\n- Clarified parameter descriptions in endpoint documentation\r\n\r\n### Impact\r\n\r\nThese changes improve API flexibility by allowing JSONPath modifiers in GET requests, enhance reliability through better error handling, and improve maintainability with comprehensive logging and updated tests.\r\n\r\n### Testing\r\n\r\nAll existing unit tests have been updated and pass successfully. The changes maintain backward compatibility for internal calls while adding new query parameter support for HTTP requests.",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3915580553",
+      "author": "TS0713",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-09T13:54:21+00:00",
+      "body": "## Review: `apijsonpath` query parameter change\n\nTested all edge cases for the `apijsonpath` query parameter change. All tests pass as expected.\n\n### Tests executed\n\n| # | Test | Result |\n|---|---|---|\n| 1 | No `apijsonpath` — full object returned | ✅ |\n| 2 | `{\"jsonpath\":\"$[*].name\"}` — filters names | ✅ |\n| 3 | `{\"jsonpath\":\"$[*].id\"}` — filters IDs | ✅ |\n| 4 | Mapping `{\"tool_name\":\"name\",\"tool_id\":\"id\"}` — renames fields | ✅ |\n| 5 | `{\"jsonpath\":null}` — defaults gracefully | ✅ |\n| 6 | `{\"jsonpath\":\"\"}` — empty string defaults to `$[*]` | ✅ |\n| 7 | Invalid JSON string — returns `400` with clear message | ✅ |\n| 8 | Unknown fields `{\"unexpected_field\":123}` — returns `400 Extra inputs are not permitted` | ✅ |\n| 9 | Invalid JSONPath syntax `$$[invalid` — returns `400` | ✅ |\n| 10 | JSONPath matches nothing — returns `[]` | ✅ |\n| 11 | Body on GET ignored — full object returned, not filtered | ✅ regression confirmed fixed |\n| 12 | Access to non-existent resource ID — returns `403`, consistent with existing access control behaviour across all endpoints | ✅ working as designed |\n\n### Verdict: Approved ✅"
+    },
+    {
+      "id": "3954172994",
+      "author": "TS0713",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-16T14:14:45+00:00",
+      "body": "Tested the updated implementation for `/tools` and `/tools/{tool_id}` endpoints. All scenarios behave as expected.\n\n### Tests executed\n\n| # | Test | Result |\n|---|------|-------|\n| 1 | No `apijsonpath` — full object returned | ✅ |\n| 2 | `{\"jsonpath\":\"$[*].name\"}` — filters tool names | ✅ |\n| 3 | `{\"jsonpath\":\"$[*].id\"}` — filters tool IDs | ✅ |\n| 4 | Mapping `{\"tool_name\":\"name\",\"tool_id\":\"id\"}` — renames fields correctly | ✅ |\n| 5 | `{\"jsonpath\":null}` — defaults gracefully | ✅ |\n| 6 | `{\"jsonpath\":\"\"}` — empty string defaults to `$[*]` | ✅ |\n| 7 | Invalid JSON string — returns **400 Bad Request** | ✅ |\n| 8 | Unknown fields `{\"unexpected_field\":123}` — returns **400** | ✅ |\n| 9 | Invalid JSONPath syntax — returns **400** | ✅ |\n|10 | JSONPath matches nothing — returns `[]` | ✅ |\n|11 | Body on GET ignored — full object returned (regression fixed) | ✅ |\n|12 | Access to non-existent resource ID — returns **403** | ✅ |\n|13 | Pagination works with JSONPath (`include_pagination=true`) | ✅ |\n\n### Pagination verification\n\nVerified pagination works correctly when JSONPath is used.\n\n```bash\ncurl -G \"$BASE/tools\" \\\n  -H \"Authorization: Bearer $MY_BEARER\" \\\n  --data-urlencode \"include_pagination=true\" \\\n  --data-urlencode 'apijsonpath={\"jsonpath\":\"$[*].name\"}'\n```\n\n### Approved!"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2a9ac7dfa44b53bd984a31657d6014d0b6b7264f",
+      "message": "fix(api): change apijsonpath from Body to Query parameter for GET endpoints\n\n- Move apijsonpath parameter from request body to query string for list_tools and get_tool endpoints\n- Add _parse_apijsonpath() helper to handle both JSON string and JsonPathModifier inputs\n- Return ORJSONResponse to bypass FastAPI response_model validation when using JSONPath modifiers\n- Add comprehensive error handling with proper HTTPException status codes\n- Add test coverage for Query parameter handling and error cases\n\nThis change resolves issue #2848 by making GET requests RESTful-compliant (no request body).\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-16T06:48:31+00:00"
+    },
+    {
+      "sha": "ed42d2337dc07882e8ab9583f17fa277c37c6af3",
+      "message": "fix(security): improve error handling and reduce information disclosure in apijsonpath parsing\n\nAddress code review feedback with three security and performance improvements:\n\n1. Specific Exception Handling (Issue #1)\n   - Catch specific exceptions (json.JSONDecodeError, ValueError, ValidationError)\n   - Separate user errors (400) from system errors (500)\n   - Log unexpected errors with full context for debugging\n\n2. Sanitize Exception Messages (Issue #2)\n   - Return generic error messages in production (non-DEBUG mode)\n   - Prevent information disclosure about internal types and stack traces\n   - Detailed messages only shown when LOG_LEVEL=DEBUG for troubleshooting\n\n3. Optimize Debug Logging (Issue #3)\n   - Check if debug logging is enabled before building log message\n   - Avoid string formatting overhead in production\n   - Improves performance in high-traffic scenarios\n\nUpdated test assertions to verify generic error messages (security improvement).\nAll tests pass (18 jsonpath tests verified).\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-16T06:58:03+00:00"
+    },
+    {
+      "sha": "cdfb7bc8cb59df8b88f8d1ff66d394414e22ae21",
+      "message": "doc\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-16T07:03:03+00:00"
+    },
+    {
+      "sha": "9a0450c065f921edc1481dc14f3eeef8f94f35aa",
+      "message": "except\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-16T07:07:12+00:00"
+    },
+    {
+      "sha": "6169c6377335e4def74ff3112fff5d8b8f8b4da2",
+      "message": "test coverage\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-16T07:40:23+00:00"
+    },
+    {
+      "sha": "4e8ff11ac3e7345d156cfab47ac5babcc33228d2",
+      "message": "pagination\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-16T08:19:46+00:00"
+    },
+    {
+      "sha": "c8cd6af7c8a935689eaa1fc355dba74ff5a460de",
+      "message": "review\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-16T10:36:35+00:00"
+    },
+    {
+      "sha": "241e9381b650a831f6f98e55cf16edd7b22f3ebd",
+      "message": "head remove\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-17T04:27:29+00:00"
+    },
+    {
+      "sha": "b10fa513ae1ba63d34492b80121855005ea2e411",
+      "message": "flake\n\nSigned-off-by: Rakhi Dutta <rakhibiswas@yahoo.com>",
+      "author": "Rakhi Dutta",
+      "date": "2026-03-17T04:40:18+00:00"
+    },
+    {
+      "sha": "0260232a9187e46c37dd5ef29529d509f4e304b5",
+      "message": "fix: validate apijsonpath before DB query and add missing test coverage\n\n- Move _parse_apijsonpath() call before the database query in list_tools\n  to fail fast on invalid input without wasting a DB round-trip\n- Add tests for the ValidationError path (extra fields rejected by\n  extra=\"forbid\" on JsonPathModifier)\n- Run black/isort on test file\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T11:08:54+00:00"
+    },
+    {
+      "sha": "1ba2c5b0e9b6736acd9b8cb86348396685838d33",
+      "message": "fix: correct nextCursor wire key, sanitize JSONPath in debug log, add e2e tests\n\n- Fix pagination+JSONPath response to use \"nextCursor\" (camelCase) matching\n  the CursorPaginatedToolsResponse alias contract. The hand-built dict\n  bypassed Pydantic aliasing via ORJSONResponse, emitting \"next_cursor\"\n  which broke any client relying on the documented field name.\n  Confirmed regression against live server at localhost:8080.\n\n- Sanitize user-supplied JSONPath expression in debug log via\n  SecurityValidator.sanitize_log_message() to prevent CWE-117 log\n  forging (newlines, ANSI escapes in crafted jsonpath values).\n\n- Add end-to-end HTTP tests (TestApijsonpathHTTP) exercising the\n  apijsonpath query parameter through FastAPI TestClient, covering\n  the full HTTP binding path that __wrapped__() unit tests skip.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-18T12:03:52+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 1215,
+  "deletions": 52,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:52.236472",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:52.238067",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3159,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3159.json"
+  }
+}

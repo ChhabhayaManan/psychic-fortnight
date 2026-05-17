@@ -1,0 +1,77 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3396,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3396"
+  },
+  "metadata": {
+    "title": "fix(ui): pagination Next Page shows blank table after search",
+    "state": "closed",
+    "created_at": "2026-03-02T14:23:52+00:00",
+    "updated_at": "2026-03-03T20:42:54+00:00",
+    "closed_at": "2026-03-03T20:42:52+00:00",
+    "merged_at": "2026-03-03T20:42:52+00:00",
+    "author": "shoummu1",
+    "labels": [
+      "bug",
+      "ui",
+      "ica"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "## 📌 Summary\r\nClicking **Next Page** in any Admin UI table after a search (Tools, Gateways, Resources, Prompts, Servers, A2A Agents) produces a blank/broken table instead of showing the next page of results. This breaks pagination entirely whenever search results span more than one page.\r\n\r\n## 🔗 Related Issue\r\nCloses #3394 \r\n\r\n## 🐞 Root Cause\r\n`pagination_controls.html` defaults `swapStyle` to `innerHTML` when no `hx_swap` variable is set by the caller. After the first search, `loadSearchablePanel()` replaces `<div id=\"tools-table\">` (a wrapper div) with `<table id=\"tools-table\">` via `outerHTML` swap. From that point on, `loadPage()` fires `htmx.ajax` with `swap: 'innerHTML'` targeting `<table id=\"tools-table\">`. An `innerHTML` swap on a `<table>` with a response body that starts with `<table>` produces invalid nested HTML — the browser automatically ejects the inner table as a sibling, leaving the visible table empty.\r\n\r\nThe bug affects all six entity tables: Tools, Servers, Resources, Prompts, Gateways, A2A Agents.\r\n\r\n## 🔁 Reproducing the bug\r\n\r\nI have added 50+ tools with the name pattern \"search-repro-....\", when I try searching with the keyword 'search', it should show more pages but the next pages aren't loading.\r\n\r\nhttps://github.com/user-attachments/assets/4679f6b4-b8b3-46b6-be2a-33f6012b7c2c\r\n\r\n\r\n## 💡 Fix Description\r\nAdded `{% set hx_swap = 'outerHTML' %}` before `{% include 'pagination_controls.html' %}` in the OOB pagination block of each of the six affected partial templates. This sets `swapStyle: 'outerHTML'` in the Alpine component at render time, so `loadPage()` correctly replaces the entire `<table>` element rather than setting its inner HTML.\r\n\r\nKey design points:\r\n- The fix is in the partial templates only — `pagination_controls.html` itself is unchanged and remains `innerHTML` by default for callers with non-table targets (e.g. tokens, which targets a `<div>`).\r\n- The pagination controls `<div>` is a sibling of the table, not inside it, so `outerHTML` swap never destroys the controls.\r\n- `loadSearchablePanel()` always uses `outerHTML` explicitly — unaffected.\r\n- The OOB `hx-swap-oob` mechanism is independent of `swapStyle` — unaffected.\r\n\r\n## 🧪 Verification\r\n\r\n| Check | Command | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite | `make lint` | Pass |\r\n| Unit tests | `make test` | Pass |\r\n| Coverage ≥ 90 % | `make coverage` | Pass |\r\n| Manual: search 55+ tools → click Next Page → page 2 loads | Browser — Tools tab | Pass |\r\n| Manual: search 55+ gateways → click Next Page → page 2 loads | Browser — Gateways tab | Pass |\r\n| Manual: page size change still works after outerHTML swap | Browser — change to 10/page | Pass |\r\n| Manual: tokens Next Page still works (innerHTML, unchanged) | Browser — Tokens tab | Pass |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3884513019",
+      "author": "madhav165",
+      "state": "DISMISSED",
+      "submitted_at": "2026-03-03T19:01:22+00:00",
+      "body": "Functionality fixed as expected. Pagination correctly loads the next set of items even with a search query in search box."
+    },
+    {
+      "id": "3884653391",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-03T19:36:29+00:00",
+      "body": "LGTM — the root-cause analysis is accurate and the fix is minimal and correct.\n\n**Review notes:**\n\n1. **Original fix (6 templates)** — Adding `{% set hx_swap = 'outerHTML' %}` in the OOB pagination block of tools, servers, gateways, prompts, resources, and agents partials correctly prevents the nested `<table>` bug. The default `innerHTML` swap is preserved for non-table targets (tokens, teams) which don't have this issue.\n\n2. **Added fix for `metrics_top_performers_partial.html`** — This template has the same pattern (returns a `<table id=\"top-{type}-content-visible\">` in its OOB block) and was missing the `outerHTML` swap. Added it for consistency.\n\n3. **Regression tests added** — 12 new tests (9 Python + 3 JS):\n   - Python `TestPaginationSwapStyle`: verifies `pagination_controls.html` renders the correct `swapStyle` value, and source-checks all 7 table-targeted partials for `hx_swap = 'outerHTML'` in their OOB blocks.\n   - JS `pagination loadPage swapStyle`: verifies the swap value is correctly forwarded to `htmx.ajax` calls.\n\n4. **No security or performance concerns** — purely a client-side swap mode change with no new attack surface or overhead.\n\nRebased cleanly onto main."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "412403bf76bc93798171fda8d2654c470e802ae8",
+      "message": "fix(ui): use outerHTML swap for table pagination to prevent nested table on Next Page\n\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>",
+      "author": "Shoumi",
+      "date": "2026-03-02T14:11:46+00:00"
+    },
+    {
+      "sha": "20043a380e0da9162398aebaeb92c49d08469f2a",
+      "message": "fix(ui): add outerHTML swap to metrics top performers pagination\n\nThe metrics_top_performers_partial.html template has the same\ninnerHTML-on-table nesting bug fixed in the other six partials.\nWithout outerHTML, paginating the top performers table nests a\n<table> inside the existing <table>, producing a blank view.\n\nCloses #3394\nSigned-off-by: Shoumi <shoumimukherjee@gmail.com>\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T19:25:02+00:00"
+    },
+    {
+      "sha": "c6cb88e3983e28221069fd02dad4037eeb031caf",
+      "message": "test(ui): add regression tests for pagination outerHTML swap (#3396)\n\n- Python: TestPaginationSwapStyle verifies pagination_controls.html\n  renders swapStyle correctly and all table-targeted partials set\n  hx_swap='outerHTML' in their OOB pagination blocks.\n- JS: loadPage swapStyle tests verify the swap value is forwarded\n  to htmx.ajax calls for both outerHTML and innerHTML targets.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-03T19:25:09+00:00"
+    }
+  ],
+  "files_changed": 9,
+  "additions": 176,
+  "deletions": 0,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:14.618831",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:14.620523",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3396,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3396.json"
+  }
+}

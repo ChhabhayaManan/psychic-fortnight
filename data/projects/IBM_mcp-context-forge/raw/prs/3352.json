@@ -1,0 +1,72 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3352,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3352"
+  },
+  "metadata": {
+    "title": "[FIX][UI]: Fix _navigateAdmin refresh issue in proxy/iframe deployments",
+    "state": "closed",
+    "created_at": "2026-03-01T09:55:48+00:00",
+    "updated_at": "2026-03-02T00:54:37+00:00",
+    "closed_at": "2026-03-02T00:54:35+00:00",
+    "merged_at": "2026-03-02T00:54:35+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug",
+      "ui",
+      "ica",
+      "MUST"
+    ],
+    "milestone": "Release 1.0.0-RC2",
+    "assignees": [
+      "crivetimihai"
+    ]
+  },
+  "description": "# 🐛 Bug-fix PR\r\nCloses #3351\r\n\r\n---\r\n\r\n## 📌 Summary\r\n\r\nFixed the `_navigateAdmin` refresh issue in proxy/iframe deployments where navigating to the same URL (same path, query, and hash) was treated as an in-page anchor scroll instead of triggering a full page reload, causing stale UI data after add/edit operations.\r\n\r\n## 🔁 Reproduction Steps\r\n\r\n1. Embed MCP admin UI in an iframe behind a server-side proxy (e.g., `/api/proxy/mcp`)\r\n2. Perform an add/edit action in the embedded admin UI\r\n3. Observe that backend mutation succeeds but UI does not refresh to reflect the changes\r\n4. Manual page reload shows the data was persisted\r\n\r\n## 🐞 Root Cause\r\n\r\nIn proxy/iframe mode, the URL path has no trailing slash (`/api/proxy/mcp/admin`), so `_navigateAdmin` computes the exact same URL as the current one. Browsers treat `location.href = sameURL#sameHash` as an in-page anchor scroll and skip the network reload, leaving stale data on screen.\r\n\r\nIn direct mode, the bug is masked because FastAPI redirects `/admin` → `/admin/` (trailing slash), creating a URL difference that triggers a real reload.\r\n\r\n## 💡 Fix Description\r\n\r\nAdded a check in `_navigateAdmin` to detect when the target URL is identical to the current URL. When identical, explicitly call `window.location.reload()` to force a full reload instead of just setting `window.location.href`. This ensures the UI always reflects the latest server state in proxy/iframe deployments.\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Manual regression no longer fails     | New playwright test for refresh in iframe  |  pass   |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3873643475",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-02T00:42:28+00:00",
+      "body": "## Review Summary\n\n**Approved** — the fix is correct, well-scoped, and properly tested.\n\n### What was reviewed\n\n- **JS fix** (`_navigateAdmin` in `admin.js`): When the target URL is identical to the current URL (happens in proxy/iframe mode where there's no trailing-slash redirect), `window.location.reload()` is called instead of the no-op `location.href = sameURL`. Logic is sound — both sides of the comparison derive from `window.location` properties, so normalization is consistent.\n- **Test** (`test_admin_url_context.py`): Marker-variable approach correctly detects whether a full page reload occurred.\n\n### Checks performed\n\n| Check | Result |\n|---|---|\n| Logic correctness | Pass — string equality comparison is reliable for admin URLs |\n| Security | No issues — no new attack vectors, `reload()` already used elsewhere |\n| Performance | Negligible — one string comparison per navigation |\n| Codebase consistency | Follows established patterns (`window.location.reload()` at lines 20102, 20294, 23809) |\n| Differential test coverage | 100% — new test covers the `if` branch; 20+ existing tests cover the `else` branch |\n\n### Minor improvements applied (commit a8b423b)\n\n1. Updated issue references from #3324 (closed) to #3351 (the open tracking issue)\n2. Replaced `wait_for_timeout(3000)` with `expect_navigation()` to match the established test pattern and improve CI reliability"
+    },
+    {
+      "id": "3873652524",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-03-02T00:49:21+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "e79cb9e335a8dcb956f9f43be4fcfc0c01b355eb",
+      "message": "Fixed _navigateAdmin refresh issue in proxy/iframe\n\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-03-01T09:55:02+00:00"
+    },
+    {
+      "sha": "a8b423b0b8fd6b366ed4564751671b50ce8cda50",
+      "message": "fix(ui): improve _navigateAdmin reload test reliability and issue refs\n\n- Reference #3351 (the open issue) instead of only #3324 (already closed)\n  in JS comment and test docstrings for accurate issue tracking\n- Replace flaky wait_for_timeout(3000) with expect_navigation() pattern\n  matching established conventions in the test file\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2026-03-02T00:33:06+00:00"
+    }
+  ],
+  "files_changed": 2,
+  "additions": 63,
+  "deletions": 1,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:12:04.321819",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:12:04.323886",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3352,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3352.json"
+  }
+}

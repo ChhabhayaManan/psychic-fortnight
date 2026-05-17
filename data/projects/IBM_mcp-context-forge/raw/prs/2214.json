@@ -1,0 +1,52 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 2214,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/2214"
+  },
+  "metadata": {
+    "title": "Fix pagination URL parameter mixing across tables",
+    "state": "closed",
+    "created_at": "2026-01-20T11:36:35+00:00",
+    "updated_at": "2026-01-21T00:21:12+00:00",
+    "closed_at": "2026-01-21T00:21:10+00:00",
+    "merged_at": "2026-01-21T00:21:10+00:00",
+    "author": "madhav165",
+    "labels": [],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\nFixes #2213 \r\n\r\n---\r\n\r\n## Summary\r\n\r\nFixes pagination controls to properly namespace and clean up query parameters when navigating between different tables (tools, prompts, resources) in the admin UI.\r\n\r\n## Problem\r\n\r\nPagination query parameters were accumulating across different tables, resulting in URLs like:\r\n```\r\n?tools_page=3&tools_size=10&tools_inactive=false&prompts_page=2&prompts_size=10&prompts_inactive=false&resources_page=2&resources_size=10&resources_inactive=false\r\n```\r\n\r\nEach tab should only have its own table's parameters in the URL.\r\n\r\n## Changes\r\n\r\n### 1. Fixed `updateBrowserUrl()` in `pagination_controls.html`\r\n- Changed from creating fresh URLSearchParams to preserving existing params\r\n- Now only updates current table's params (page, size, inactive)\r\n- Preserves all params from other tables\r\n\r\n### 2. Fixed `updateInactiveUrlState()` in `admin.html`\r\n- Changed from creating fresh URLSearchParams to preserving existing params\r\n- Now only updates current table's inactive state and resets page to 1\r\n- Preserves all params from other tables\r\n\r\n### 3. Enhanced `showTab()` in `admin.js`\r\n- Added `getTableNamesForTab()` function that scans DOM for pagination controls (`id=\"*-pagination-controls\"`)\r\n- Added `cleanUpUrlParamsForTab()` function that removes params for tables not in current tab\r\n- Calls cleanup function when switching tabs to remove stale params\r\n- Uses convention-based detection instead of hardcoded mapping\r\n\r\n## Behavior After Fix\r\n\r\n### Navigation within a table\r\n- Tools page 1 → Tools page 3: Only updates `tools_page`\r\n- Changing page size: Only updates `tools_size`, resets `tools_page` to 1\r\n- Toggling inactive: Only updates `tools_inactive`, resets `tools_page` to 1\r\n\r\n### Switching between tabs\r\n- On Tools tab: `?tools_page=3&tools_size=10&tools_inactive=false#tools`\r\n- Switch to Prompts: `?prompts_page=1&prompts_size=10&prompts_inactive=false#prompts`\r\n- Switch back to Tools: `?tools_page=3&tools_size=10&tools_inactive=false#tools`\r\n\r\n### Global params preservation\r\n- `team_id` parameter is always preserved across all operations\r\n\r\n## Implementation Details\r\n\r\n**Dynamic Detection:**\r\nThe solution uses convention-based DOM scanning to detect pagination tables. When switching tabs, it:\r\n\r\n1. Queries the panel for elements matching `[id$=\"-pagination-controls\"]`\r\n2. Extracts table names from the ID pattern (e.g., `\"tools-pagination-controls\"` → `\"tools\"`)\r\n3. Keeps only params for detected tables plus global params (`team_id`)\r\n\r\n**Example:** Switching to Tools tab finds `<div id=\"tools-pagination-controls\">`, extracts `\"tools\"`, and keeps only `tools_page`, `tools_size`, `tools_inactive`, and `team_id` params.\r\n\r\nThis approach requires zero maintenance when adding new paginated tables - just follow the existing `{tableName}-pagination-controls` naming convention.\r\n\r\n## Notes\r\n\r\n- All existing functionality is preserved\r\n- No breaking changes to API or data handling\r\n- URLs are now cleaner and more bookmarkable\r\n- Each tab maintains its own independent pagination state\r\n\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    pass    |\r\n| Unit tests                            | `make test`          |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3684827970",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2026-01-21T00:20:31+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c248865d92189adff2797dbd1229748d25d65ad3",
+      "message": "fix(ui): prevent pagination URL parameter mixing across tables\n\nFixes pagination controls to properly namespace and clean up query\nparameters when navigating between different tables (tools, prompts,\nresources) in the admin UI.\n\nProblem: Pagination parameters were accumulating across tabs, resulting\nin messy URLs like ?tools_page=3&prompts_page=2&resources_page=1\n\nSolution: Each tab now maintains its own clean URL state. When switching\ntabs, URL params are cleaned to only include the current tab's params\nplus global params (team_id).\n\nChanges:\n- Fixed updateBrowserUrl() in pagination_controls.html to preserve\n  existing params while updating current table's params\n- Fixed updateInactiveUrlState() in admin.html to preserve params\n  from other tables when toggling inactive filter\n- Added getTableNamesForTab() for dynamic table detection via DOM\n- Added cleanUpUrlParamsForTab() to clean stale params on tab switch\n\nNote: Tab pagination state is not preserved across tab switches.\nWhen returning to a tab, pagination starts fresh at page 1.\n\nCloses #2213\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2026-01-20T23:56:46+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 90,
+  "deletions": 9,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:17:56.972278",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:17:56.977097",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 2214,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\2214.json"
+  }
+}

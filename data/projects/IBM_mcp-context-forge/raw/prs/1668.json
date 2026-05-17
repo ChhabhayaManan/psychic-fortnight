@@ -1,0 +1,78 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 1668,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/1668"
+  },
+  "metadata": {
+    "title": "Database Initialization Race Condition Fix",
+    "state": "closed",
+    "created_at": "2025-12-19T18:03:51+00:00",
+    "updated_at": "2025-12-19T21:54:34+00:00",
+    "closed_at": "2025-12-19T21:54:27+00:00",
+    "merged_at": "2025-12-19T21:54:27+00:00",
+    "author": "madhav165",
+    "labels": [
+      "bug"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# 🐛 Bug-fix PR\r\n\r\n## Overview\r\n\r\nThis PR resolves critical race conditions in database initialization when running multiple `mcpgateway` instances and improves Nginx load balancing with health checks.\r\n\r\n## Problem Statement\r\n\r\n### 1. Database Initialization Race Conditions\r\nWhen running multiple `mcpgateway` instances (e.g., 4 replicas in Docker Compose), concurrent database initialization attempts led to:\r\n- `psycopg2.errors.UndefinedTable` - Tables not found during migration\r\n- `psycopg2.errors.UniqueViolation` - Duplicate key violations in bootstrap operations\r\n\r\n**Root Cause**: Container-local file locks (`/tmp/mcpgateway_migration.lock`) didn't prevent concurrent access across different containers. Additionally, post-migration bootstrap steps executed outside the lock's scope.\r\n\r\n### 2. Ineffective Nginx Load Balancing\r\nNginx configuration used `max_fails=0`, disabling health checks and causing traffic to be routed to unhealthy backend instances.\r\n\r\n## Changes Made\r\n\r\n### 1. Database Bootstrap (`mcpgateway/bootstrap_db.py`)\r\n\r\n#### Distributed Advisory Locks\r\nImplemented database-level advisory locks to ensure atomic initialization across all instances:\r\n\r\n```python\r\n@contextmanager\r\ndef advisory_lock(conn: Connection, lock_id: int = 123456789):\r\n    \"\"\"Acquire distributed advisory lock based on database type.\"\"\"\r\n    dialect = conn.dialect.name\r\n    \r\n    if dialect == \"postgresql\":\r\n        conn.execute(text(\"SELECT pg_advisory_lock(:lock_id)\"), {\"lock_id\": lock_id})\r\n        try:\r\n            yield\r\n        finally:\r\n            conn.execute(text(\"SELECT pg_advisory_unlock(:lock_id)\"), {\"lock_id\": lock_id})\r\n    elif dialect == \"mysql\":\r\n        conn.execute(text(\"SELECT GET_LOCK(:lock_name, -1)\"), {\"lock_name\": f\"mcpgateway_{lock_id}\"})\r\n        try:\r\n            yield\r\n        finally:\r\n            conn.execute(text(\"SELECT RELEASE_LOCK(:lock_name)\"), {\"lock_name\": f\"mcpgateway_{lock_id}\"})\r\n    else:  # SQLite\r\n        # Use file-based locking for SQLite\r\n        lock_file = Path(\"/tmp\") / f\"mcpgateway_bootstrap_{lock_id}.lock\"\r\n        with FileLock(str(lock_file), timeout=300):\r\n            yield\r\n```\r\n\r\n#### Refactored Bootstrap Functions\r\nAll bootstrap functions now accept a `conn: Connection` parameter to use the locked connection:\r\n\r\n- `bootstrap_admin_user(conn: Connection)`\r\n- `bootstrap_default_roles(conn: Connection)`\r\n- `normalize_team_visibility(conn: Connection)`\r\n- `bootstrap_resource_assignments(conn: Connection)`\r\n\r\n#### Strict Serialization\r\nAll database operations now execute within the advisory lock scope:\r\n\r\n```python\r\nasync def main() -> None:\r\n    engine = create_engine(settings.database_url)\r\n    \r\n    with engine.connect() as conn:\r\n        with advisory_lock(conn):\r\n            # Schema creation/migration\r\n            if not existing_tables:\r\n                Base.metadata.create_all(bind=conn)\r\n                command.stamp(cfg, \"head\")\r\n            else:\r\n                command.upgrade(cfg, \"head\")\r\n            \r\n            # All bootstrap operations use the locked connection\r\n            normalized_count = normalize_team_visibility(conn)\r\n            await bootstrap_admin_user(conn)\r\n            await bootstrap_default_roles(conn)\r\n            await bootstrap_resource_assignments(conn)\r\n            \r\n            conn.commit()\r\n```\r\n\r\n**Key Changes:**\r\n- Replaced `SessionLocal()` with `Session(bind=conn)` to bind sessions to the locked connection\r\n- Moved all post-migration steps inside the advisory lock block\r\n- Added explicit `conn.commit()` after all operations complete\r\n\r\n### 2. Nginx Configuration (`nginx/nginx.conf`)\r\n\r\n#### Added Health Checks\r\nUpdated upstream configuration to enable passive health checks:\r\n\r\n```nginx\r\nupstream gateway_backend {\r\n    server gateway:4444 max_fails=3 fail_timeout=30s;\r\n}\r\n```\r\n\r\n**Before:** `max_fails=0` (health checks disabled)  \r\n**After:** `max_fails=3 fail_timeout=30s` (marks backend unhealthy after 3 failures, retry after 30s)\r\n\r\n### 3. Docker Compose Generator (`tests/performance/utils/generate_docker_compose.py`)\r\n\r\n#### Added Health Checks to Generated Config\r\nUpdated the generated `nginx.conf` to include health check parameters:\r\n\r\n```python\r\nupstream_servers.append(f\"    server gateway_{i}:4444 max_fails=3 fail_timeout=30s;\")\r\n```\r\n\r\n### 4. Git Ignore (`.gitignore`)\r\n\r\nAdded generated performance test files to prevent accidental commits:\r\n\r\n```\r\n# Performance test generated files\r\nnginx.conf\r\ndocker-compose.perf.yml\r\n```\r\n\r\n### 5. Test Fixes (`tests/unit/mcpgateway/test_bootstrap_db.py`)\r\n\r\nUpdated all 25 tests to match the new bootstrap function signatures:\r\n\r\n#### Added Mock Connection Fixture\r\n```python\r\n@pytest.fixture\r\ndef mock_conn():\r\n    \"\"\"Create mock database connection.\"\"\"\r\n    conn = Mock()\r\n    conn.commit = Mock()\r\n    conn.rollback = Mock()\r\n    conn.close = Mock()\r\n    return conn\r\n```\r\n\r\n#### Updated All Test Methods\r\n- Added `mock_conn` parameter to all test methods\r\n- Updated bootstrap function calls to pass `mock_conn`\r\n- Fixed `Session` context manager mocking\r\n- Fixed `engine.connect()` mocking in `TestMain` tests\r\n\r\n**Test Results:** ✅ All 25 tests passing\r\n\r\n## Benefits\r\n\r\n### 1. Eliminates Race Conditions\r\n- ✅ Only one instance performs database initialization at a time\r\n- ✅ All bootstrap operations are atomic and serialized\r\n- ✅ Works across multiple containers and database types (PostgreSQL, MySQL, SQLite)\r\n\r\n### 2. Improved Reliability\r\n- ✅ Nginx automatically detects and routes around unhealthy backends\r\n- ✅ Faster failover and recovery\r\n- ✅ Better handling of instance restarts\r\n\r\n## Testing\r\n\r\n### Verification Steps\r\n1. **Build Docker image:**\r\n   ```bash\r\n   make docker-prod\r\n   ```\r\n\r\n2. **Generate configuration:**\r\n   ```bash\r\n   python tests/performance/utils/generate_docker_compose.py --infrastructure production --output docker-compose.perf.yml --config tests/performance/config.yaml\r\n   ```\r\n\r\n3. **Start services:**\r\n   ```bash\r\n   docker compose -f docker-compose.perf.yml up -d\r\n   ```\r\n\r\n4. **Verify logs:**\r\n   - Check that only one instance performs database initialization\r\n   - Verify all instances start successfully\r\n   - Confirm no race condition errors\r\n\r\n5. **Run unit tests:**\r\n   ```bash\r\n   uv run pytest tests/unit/mcpgateway/test_bootstrap_db.py -v\r\n   ```\r\n\r\n### Expected Behavior\r\n- First instance acquires advisory lock and performs full initialization\r\n- Subsequent instances wait for lock, then skip initialization (already complete)\r\n- All instances log \"Database ready\" and start serving requests\r\n- Nginx distributes load across healthy instances only\r\n\r\n## Migration Notes\r\n\r\n### Breaking Changes\r\nNone - this is a backward-compatible internal refactoring.\r\n\r\n### Deployment Considerations\r\n- **PostgreSQL/MySQL:** Advisory locks are automatically released on connection close\r\n- **SQLite:** File locks are cleaned up automatically\r\n- **Lock Timeout:** 300 seconds (5 minutes) - sufficient for large migrations\r\n- **Concurrent Startups:** Safe to start all instances simultaneously\r\n\r\n## Files Changed\r\n\r\n- `mcpgateway/bootstrap_db.py` - Core database initialization logic\r\n- `nginx/nginx.conf` - Nginx health check configuration\r\n- `tests/performance/utils/generate_docker_compose.py` - Docker Compose generator\r\n- `.gitignore` - Ignore generated files\r\n- `tests/unit/mcpgateway/test_bootstrap_db.py` - Test updates (25 tests)\r\n\r\n## Related Issues\r\n\r\nFixes race conditions when running multiple gateway instances in Docker Compose, particularly evident in performance testing scenarios with 4+ replicas.\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                                 | Command              | Status |\r\n|---------------------------------------|----------------------|--------|\r\n| Lint suite                            | `make lint`          |    pass    |\r\n| Unit tests                            | `make test`          |    pass    |\r\n\r\n## 📐 MCP Compliance (if relevant)\r\n- [x] Matches current MCP spec\r\n- [x] No breaking change to MCP clients\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] No secrets/credentials committed\r\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "3600170407",
+      "author": "crivetimihai",
+      "state": "APPROVED",
+      "submitted_at": "2025-12-19T21:21:38+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "83685fdef0609f01c116f510d71e5d41a4ed0a79",
+      "message": "Fix db lock for multiple gateways\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-19T17:33:15+00:00"
+    },
+    {
+      "sha": "429a6dd8af7bb2fad6ddc9516c49722fcc8e69df",
+      "message": "Update test_db_bootstrap\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-19T18:01:56+00:00"
+    },
+    {
+      "sha": "c7fe4e3ece9196258f68e12ca123d9f67a0fdce3",
+      "message": "Flake8 and pylint fixes\nSigned-off-by: Madhav Kandukuri <madhav165@gmail.com>",
+      "author": "Madhav Kandukuri",
+      "date": "2025-12-19T18:25:32+00:00"
+    },
+    {
+      "sha": "bc9776ae566ef849df52c4e2361696654dfa04dd",
+      "message": "Fix unused variable warnings in bootstrap_db tests\n\nRemove unused mock_logger assignments in tests where the variable\nwas not being used for assertions.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-19T20:44:58+00:00"
+    },
+    {
+      "sha": "cdc1e76cd55d16b477a8eb858e21a9088e4b9830",
+      "message": "Fix stale comment in nginx.conf\n\nUpdate comment to reflect actual max_fails=3 fail_timeout=30s\nconfiguration instead of the old max_fails=0 description.\n\nSigned-off-by: Mihai Criveti <crivetimihai@gmail.com>",
+      "author": "Mihai Criveti",
+      "date": "2025-12-19T21:28:48+00:00"
+    }
+  ],
+  "files_changed": 5,
+  "additions": 369,
+  "deletions": 271,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:19:48.961394",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:19:48.962534",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 1668,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\1668.json"
+  }
+}

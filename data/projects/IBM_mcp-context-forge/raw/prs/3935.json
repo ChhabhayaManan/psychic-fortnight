@@ -1,0 +1,106 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 3935,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/3935"
+  },
+  "metadata": {
+    "title": "feat(ui): allow non-owner users to authorize on accessible OAuth gateways",
+    "state": "closed",
+    "created_at": "2026-03-31T02:36:52+00:00",
+    "updated_at": "2026-04-21T10:32:26+00:00",
+    "closed_at": "2026-04-21T10:32:26+00:00",
+    "merged_at": "2026-04-21T10:32:25+00:00",
+    "author": "kimsehwan96",
+    "labels": [
+      "ui",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": [
+      "marekdano",
+      "gcgoncalves",
+      "brian-hussey"
+    ]
+  },
+  "description": "## 🔗 Related Issue\r\nCloses #3934\r\n\r\n---\r\n\r\n## 📝 Summary\r\nNon-owner team members and public gateway users cannot see the \"🔐 Authorize\" button on OAuth gateways, preventing them from completing the OAuth flow. The backend already stores tokens per-user (oauth_tokens.app_user_email), so this is purely a UI visibility fix.\r\n\r\n- Add can_authorize template variable (broader than can_modify) for Authorize/Fetch Tools buttons\r\n- Keep can_modify for Edit/Deactivate/Delete (unchanged)\r\n---\r\n\r\n## 🏷️ Type of Change\r\n- [ ] Bug fix\r\n- [x] Feature / Enhancement\r\n- [ ] Documentation\r\n- [ ] Refactor\r\n- [ ] Chore (deps, CI, tooling)\r\n- [ ] Other (describe below)\r\n\r\n---\r\n\r\n## 🧪 Verification\r\n\r\n| Check                     | Command         | Status |\r\n|---------------------------|-----------------|--------|\r\n| Lint suite                | `make lint`     |   pass     |\r\n| Unit tests                | `make test`     |   pass    |\r\n| Coverage ≥ 80%            | `make coverage` |        |\r\n\r\n---\r\n\r\n## ✅ Checklist\r\n- [x] Code formatted (`make black isort pre-commit`)\r\n- [x] Tests added/updated for changes\r\n- [ ] Documentation updated (if applicable)\r\n- [x] No secrets or credentials committed\r\n\r\n---\r\n\r\n## 📓 Notes (optional)\r\n\r\nChanged files:\r\n- gateways_partial.html: 1 line added + 1 line modified\r\n- test_admin.py: 5 tests added (2 positive, 2 regression, 1 negative)\r\n\r\nVisibility logic:\r\n\r\n```\r\n  ┌─────────────────────────────────┬───────────┬─────────────┐\r\n  │            User type            │ Authorize │ Edit/Delete │\r\n  ├─────────────────────────────────┼───────────┼─────────────┤\r\n  │ Admin                           │    ✅     │     ✅      │\r\n  ├─────────────────────────────────┼───────────┼─────────────┤\r\n  │ Gateway owner                   │    ✅     │     ✅      │\r\n  ├─────────────────────────────────┼───────────┼─────────────┤\r\n  │ Team member (non-gateway-owner) │    ✅     │     ❌      │\r\n  ├─────────────────────────────────┼───────────┼─────────────┤\r\n  │ Any user (public gw)            │    ✅     │     ❌      │\r\n  ├─────────────────────────────────┼───────────┼─────────────┤\r\n  │ Non-member (team gw)            │    ❌     │     ❌      │\r\n  └─────────────────────────────────┴───────────┴─────────────┘\r\n```\r\n\r\nScreenshot as team member but not the mcp owner.\r\n\r\n<img width=\"549\" height=\"372\" alt=\"스크린샷 2026-03-31 오전 11 30 46\" src=\"https://github.com/user-attachments/assets/676324a4-6d61-4998-81b6-19ce1e35ca48\" />\r\n\r\n(AWS Docs MCP set as no auth type)\r\n\r\nE2E Verification (manual):\r\n- Built and deployed from this commit to a live K8s cluster\r\n- Tested as a team member who is not the gateway owner\r\n- Confirmed Authorize button is visible and OAuth flow completes successfully\r\n- As team owner: authorization, tool fetch, and tool invocation all work with the user's own token\r\n- As team member: authorization works, but tool fetch/invocation is blocked due to missing tools.execute permission (pending #3882)",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4089187744",
+      "author": "marekdano",
+      "state": "COMMENTED",
+      "submitted_at": "2026-04-10T11:11:28+00:00",
+      "body": "@kimsehwan96 - thanks for your contribution!!!\r\n\r\n ### Summary\r\n\r\n  Fixes a UI gap where non-owner team members and users of public gateways could not see the \"Authorize\" button on OAuth gateways, even though the backend already stores tokens per user. The change is clean and minimal — one new Jinja\r\n  variable, one guarded block updated — with solid test coverage.\r\n\r\n### Findings\r\n\r\n- `tests/unit/mcpgateway/test_admin.py:19151` — Test coverage gap in existing test\r\n\r\n  The existing test_gateways_hides_buttons_for_non_owner uses authType: \"none\", so it doesn't exercise the OAuth path for a non-owner. Low risk since Authorize is gated on `authType == 'oauth'`, but there's a small gap in the negative-case matrix. Worth adding a case with authType: \"oauth\" and a non-owner to confirm the Authorize link is absent when it should be (e.g. a non-member on a team gateway).\r\n\r\n- fix pre-commit check for `.secrets.baseline` issue\r\n\r\n ### Notes (no action required)\r\n\r\n  - The five new tests cover the matrix well: two positive (team member, public gateway), two regression (owner, admin), one negative (non-member). Good shape.\r\n  - The can_authorize logic — can_modify OR public OR team-member — is correct and the short-circuit order is sound.\r\n  - Template-only change; the OAuth endpoint at /oauth/authorize/{gateway_id} retains responsibility for backend authorization enforcement.\r\n  - No linter issues observed in the patch."
+    },
+    {
+      "id": "4090642876",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-10T15:19:00+00:00",
+      "body": "## Summary\n\nThis is a clean, well-tested UI fix that correctly broadens OAuth authorization button visibility to team members and public gateway users while maintaining proper access control for destructive operations.\n\n---\n\n## What Changed\n\n### Template Change (`gateways_partial.html`)\n- Added `can_authorize` variable: `can_modify OR public OR team-member`\n- Changed Authorize button condition from `can_modify` to `can_authorize`\n- Edit/Delete/Deactivate remain gated by `can_modify` (unchanged)\n\n### Test Coverage (`test_admin.py`)\n- ✅ 5 new OAuth-specific tests added\n- ✅ Covers positive cases (team member, public gateway)\n- ✅ Covers regression cases (owner, admin)\n- ✅ Covers negative case (non-member on team gateway)\n\n## Security Analysis\n\n✅ **No Security Concerns**:\n- Template-only change, no backend logic modified\n- Destructive operations (Edit/Delete) remain properly gated\n- OAuth authorization is a per-user operation (not destructive)\n- Backend token storage is already per-user (`oauth_tokens.app_user_email`)\n- Non-members correctly blocked from team gateways\n\nLGTM 🚀 "
+    },
+    {
+      "id": "4098013643",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-13T10:30:36+00:00",
+      "body": "LGTM 🚀 "
+    },
+    {
+      "id": "4104169205",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-14T07:40:26+00:00",
+      "body": ""
+    },
+    {
+      "id": "4121752734",
+      "author": "marekdano",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-16T14:36:13+00:00",
+      "body": ""
+    },
+    {
+      "id": "4146967293",
+      "author": "brian-hussey",
+      "state": "APPROVED",
+      "submitted_at": "2026-04-21T10:32:15+00:00",
+      "body": "Based on previous approvals, this is approved."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2b39931c849dc08b3fcfe42550a9d51432348d57",
+      "message": "feat(ui): allow non-owner users to authorize on accessible OAuth gateways\n\nNon-owner team members and public gateway users could not see the\nAuthorize button, preventing them from completing the OAuth flow and\nstoring their own tokens. The backend already supports per-user OAuth\ntokens (keyed by gateway_id + app_user_email), but the UI gated the\nAuthorize button behind can_modify which requires owner/admin status.\n\nIntroduce can_authorize — a broader visibility check that includes\nteam members and public gateway users — and apply it to the Authorize\nand Fetch Tools buttons while keeping Edit/Deactivate/Delete behind\ncan_modify.\n\nCloses: #3934\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-03-31T02:29:44+00:00"
+    },
+    {
+      "sha": "a52c5587df811f4776232c451d05e550d60192d8",
+      "message": "chore: update .secrets.baseline line numbers for rebased test_admin.py\n\nSigned-off-by: kimsehwan96 <sktpghks138@gmail.com>",
+      "author": "kimsehwan96",
+      "date": "2026-04-10T13:36:21+00:00"
+    },
+    {
+      "sha": "6895af91a9512339a87f60869e9af17d6b20ff22",
+      "message": "pre-commit\n\nSigned-off-by: Gabriel Costa <gabrielcg@proton.me>",
+      "author": "Gabriel Costa",
+      "date": "2026-04-13T10:05:38+00:00"
+    }
+  ],
+  "files_changed": 3,
+  "additions": 102,
+  "deletions": 11,
+  "merged": true,
+  "mergeable": null,
+  "ingested_at": "2026-05-17T15:08:50.499142",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:08:50.500786",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 3935,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\3935.json"
+  }
+}

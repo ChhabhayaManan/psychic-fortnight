@@ -1,0 +1,39 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "issue_number": 4758,
+    "url": "https://github.com/IBM/mcp-context-forge/issues/4758"
+  },
+  "metadata": {
+    "title": "[TESTING]: Replace headless Chromium in Playwright e2e with Obscura for faster test runs\" labels: testing, enhancement, triage",
+    "state": "open",
+    "created_at": "2026-05-14T09:19:49+00:00",
+    "updated_at": "2026-05-15T11:14:46+00:00",
+    "closed_at": null,
+    "author": "Lang-Akshay",
+    "labels": [
+      "triage",
+      "testing"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "## Summary\n\n`make test-ui-headless` and `make test-ui-headless-parallel` use headless Chromium via `pytest-playwright`, which is slow to start, memory-heavy, and adds significant wall-clock time to CI and local dev loops.\n\nReplace the browser backend with [Obscura](https://github.com/h4ckf0r0day/obscura) — a lightweight browser automation layer — to cut e2e test cycle time.\n\n## Current Behaviour\n\n```makefile\n# Makefile (lines ~7438-7445)\nplaywright-install: uv\n    @$(UV_BIN) run playwright install $(PLAYWRIGHT_INSTALL_FLAGS) chromium\n\ntest-ui-headless:\n    # runs tests/playwright/ suite against headless Chromium\n\ntest-ui-headless-parallel:\n    # same suite via pytest-xdist workers, each spawning a Chromium process\n```\n\nProblems:\n\n- Chromium binary is ~300 MB; cold install blocks CI\n- Each `pytest-xdist` worker spawns an independent Chromium process → high memory, slow parallelism\n- Browser launch overhead dominates short tests (smoke, HTMX, CRUD)\n\n## Proposed Change\n\nIntegrate [Obscura](https://github.com/h4ckf0r0day/obscura) as the browser backend for the two headless make targets:\n\n1. Add `obscura` as a dev dependency (or install via the existing `playwright-install` target)\n2. Wire `conftest.py` `browser_type_launch_args` / `browser` fixture to use Obscura when `PLAYWRIGHT_BROWSER=obscura` env is set\n3. Update `test-ui-headless` and `test-ui-headless-parallel` to set `PLAYWRIGHT_BROWSER=obscura`\n4. Keep `test-ui` (headed) and `test-ui-debug` on Chromium — Obscura is headless-only path\n\nMakefile sketch:\n\n```makefile\ntest-ui-headless: playwright-preflight\n\tPLAYWRIGHT_BROWSER=obscura \\\n\t$(UV_BIN) run pytest $(PLAYWRIGHT_DIR) --headless --tb=short $(PLAYWRIGHT_EXTRA_ARGS)\n\ntest-ui-headless-parallel: playwright-preflight\n\tPLAYWRIGHT_BROWSER=obscura \\\n\t$(UV_BIN) run pytest $(PLAYWRIGHT_DIR) --headless -n auto --tb=short $(PLAYWRIGHT_EXTRA_ARGS)\n```\n\n## Acceptance Criteria\n\n- [ ] `make test-ui-headless` completes faster than current Chromium baseline (measure with `time make test-ui-headless`)\n- [ ] `make test-ui-headless-parallel` scales without per-worker Chromium memory spike\n- [ ] All existing smoke markers (`smoke`, `ui`, `htmx`, `crud`) pass under Obscura\n- [ ] `make test-ui` (headed/debug) still uses Chromium — no regression\n- [ ] `playwright-install` target unchanged; Obscura install added as separate `obscura-install` target or folded into `playwright-preflight`\n- [ ] CI workflow (`.github/workflows/`) updated to call `obscura-install` before headless test jobs\n\n## Scope\n\n- `Makefile` — `test-ui-headless`, `test-ui-headless-parallel`, `playwright-preflight`\n- `tests/playwright/conftest.py` — browser fixture env-switch\n- `.github/workflows/` — CI install step\n\n## References\n\n- Obscura: https://github.com/h4ckf0r0day/obscura\n- Current install: `Makefile:7438` (`playwright-install`)\n- Current headless targets: `Makefile:7400` (`.PHONY` list)\n- Playwright conftest: `tests/playwright/conftest.py`",
+  "comments": [
+    {
+      "id": "4459273780",
+      "author": "gcgoncalves",
+      "created_at": "2026-05-15T11:14:46+00:00",
+      "body": "Reading Obscura's docs, it doesn't seem like a good replacement for Chromium as the main playwright browser. Although it's amazingly fast, it will not reflect the behaviour of a chrome-based browser, which is the main goal of the UI tests. "
+    }
+  ],
+  "ingested_at": "2026-05-17T17:22:34.562610",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T17:22:34.563113",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "issue",
+    "item_number": 4758,
+    "raw_data_path": "G:\\Think\\Project-X\\psychic-fortnight\\data\\projects\\IBM_mcp-context-forge\\raw\\issues\\4758.json"
+  }
+}

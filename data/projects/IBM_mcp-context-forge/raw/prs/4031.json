@@ -1,0 +1,398 @@
+{
+  "source": {
+    "type": "github",
+    "repository": "IBM/mcp-context-forge",
+    "pr_number": 4031,
+    "url": "https://github.com/IBM/mcp-context-forge/pull/4031"
+  },
+  "metadata": {
+    "title": "feat: add experimental rust validation middleware",
+    "state": "closed",
+    "created_at": "2026-04-03T13:32:02+00:00",
+    "updated_at": "2026-05-05T10:50:21+00:00",
+    "closed_at": "2026-05-05T10:50:20+00:00",
+    "merged_at": null,
+    "author": "lucarlig",
+    "labels": [
+      "experimental",
+      "rust",
+      "release-fix"
+    ],
+    "milestone": null,
+    "assignees": []
+  },
+  "description": "# ✨ Feature / Enhancement PR\n\n## 🔗 Epic / Issue\nNo linked issue.\n\n---\n\n## 🚀 Summary (1-2 sentences)\nAdds an experimental opt-in Rust implementation for `mcpgateway/middleware/validation_middleware.py` that moves the validation hot path into a compiled PyO3 extension while preserving Python fallback behavior when the extension is unavailable.\n\n---\n\n## 🧪 Checks\n\n- [ ] `make lint` passes\n- [ ] `make test` passes\n- [ ] CHANGELOG updated (if user-facing)\n\n---\n\n## 📓 Notes (optional)\nThis branch was benchmarked in two ways against the Python baseline. Focused validation numbers below were refreshed on 2026-04-24 after the latest review fixes.\n\n1. Focused validation microbenchmark\nThis benchmark isolates the validation middleware hot path and measures validation cost directly on representative payload shapes. It is useful for showing the Rust validator speedup without unrelated framework overhead.\n\n| Scenario | What is being tested | Python median | Rust median | Speedup |\n|---|---|---:|---:|---:|\n| `resource_path` | Allowed-root resource path validation | 0.031 ms | 0.012 ms | 2.51x |\n| `parameter_batch` | Batched path/query parameter validation | 0.005 ms | 0.002 ms | 2.53x |\n| `response_sanitization` | Control-character removal from response body | 0.052 ms | 0.011 ms | 4.84x |\n| `response_sanitization_safe` | Safe ASCII response body sanitizer fast path | 0.025 ms | 0.006 ms | 4.52x |\n| `small_safe` | Small safe JSON payload | 0.003 ms | 0.001 ms | 2.93x |\n| `first_field_reject` | Early rejection of dangerous content | 0.002 ms | 0.002 ms | 1.14x |\n| `unicode_safe_long` | Long safe Unicode-heavy string validation | 0.014 ms | 0.005 ms | 2.63x |\n| `nested_safe` | Large nested safe JSON payload traversal | 0.335 ms | 0.033 ms | 10.09x |\n| `deep_nested` | Deep nested JSON traversal and depth-safe validation | 2.424 ms | 0.340 ms | 7.13x |\n| `dangerous_string` | Rejection of dangerous content in JSON strings | 1.025 ms | 0.092 ms | 11.09x |\n| `mixed_params_json` | Request path combining parameter checks with JSON validation | 0.003 ms | 0.001 ms | 2.55x |\n\n2. End-to-end validation benchmark\nThis benchmark uses Locust against `/protocol/initialize` with validation enabled and a validation-heavy mix of accepted and rejected JSON payloads. It exercises the real FastAPI request path, including request parsing, auth, middleware validation, and route handling.\n\n| Scenario | What is being tested | Python median | Rust median | Python RPS | Rust RPS | Latency speedup | Throughput gain |\n|---|---|---:|---:|---:|---:|---:|---:|\n| `safe-large` | Accepted large initialize payload through the full request path | 180 ms | 160 ms | 244.94 | 255.95 | 1.12x | 1.04x |\n| `rejected-large` | Rejected large initialize payload returning `422` through the full request path | 110 ms | 100 ms | 82.09 | 86.99 | 1.10x | 1.06x |\n| `aggregated` | Combined accepted and rejected validation-heavy traffic | 160 ms | 150 ms | 327.03 | 342.94 | 1.07x | 1.05x |\n\nThe end-to-end run was executed in production-mode validation semantics so rejected payloads were actually blocked instead of only logged.\n\nNo ADR added because this remains an experimental opt-in implementation behind a feature flag and does not change the default architecture.\n\n\n\n---\nRefs #1807\n",
+  "comments": [],
+  "reviews": [
+    {
+      "id": "4098991826",
+      "author": "dima-zakharov",
+      "state": "DISMISSED",
+      "submitted_at": "2026-04-13T13:24:25+00:00",
+      "body": ""
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c09f6f7d7969756af36c7eb58cbb6fa849cb6715",
+      "message": "feat: add rust validation middleware sidecar\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T13:21:08+00:00"
+    },
+    {
+      "sha": "0fa8f56752bfdbd1a25583cd1fd4b53f315d6202",
+      "message": "perf: optimize rust validation sidecar matching\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T13:28:39+00:00"
+    },
+    {
+      "sha": "62bf8638ad0267e8aa38660eb9c2004c8e141295",
+      "message": "fix: harden rust validation middleware sidecar\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T13:58:52+00:00"
+    },
+    {
+      "sha": "51d0336b727d988419be42613cbb39d81acced75",
+      "message": "docs: add validation sidecar design spec\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T14:34:00+00:00"
+    },
+    {
+      "sha": "877be2306dde8c0570a950b0fd3db3e0f0310624",
+      "message": "docs: refine validation sidecar design spec\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T14:43:38+00:00"
+    },
+    {
+      "sha": "059cc477a6463a4166617b79428f35de24091225",
+      "message": "docs: add validation sidecar implementation plan\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T14:55:53+00:00"
+    },
+    {
+      "sha": "ad80b8e7a2f6e816d0c56b7afe4331b8dcf38307",
+      "message": "feat: add validation sidecar client\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T15:21:04+00:00"
+    },
+    {
+      "sha": "5d01bc5067758ee0470cc2fa3eb2f909e08235d0",
+      "message": "feat: route validation middleware through sidecar backend\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T15:25:28+00:00"
+    },
+    {
+      "sha": "e255e58e27cc0c690adee1c82a502cf7a865a39e",
+      "message": "fix: honor strict mode for sidecar validation\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T15:29:31+00:00"
+    },
+    {
+      "sha": "a0ca33d8fe40822cd4a6847073a4988252f20309",
+      "message": "fix: fail closed on malformed sidecar responses\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T15:32:25+00:00"
+    },
+    {
+      "sha": "8b668b4ce2d7486009101149cc87248989e9d2fb",
+      "message": "feat: add rust validation sidecar\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T15:40:41+00:00"
+    },
+    {
+      "sha": "4b83c7d47932f97273d96b4ef358719a38f317c1",
+      "message": "chore: wire validation sidecar docs and benchmarks\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T15:46:54+00:00"
+    },
+    {
+      "sha": "7e3de6192879b61eb4773e07bfa77439d5ca2039",
+      "message": "fix: finalize validation sidecar integration\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T15:58:09+00:00"
+    },
+    {
+      "sha": "88debd58dde8a0be24ec5f9d7ac5903c41d9a68b",
+      "message": "chore: add validation sidecar docstrings\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T16:06:45+00:00"
+    },
+    {
+      "sha": "4e308f99ac1d5e5ea9e35a9238ba4ed744395db4",
+      "message": "perf: reduce validation sidecar overhead\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T16:18:54+00:00"
+    },
+    {
+      "sha": "ad854daba1bc2f7425674e4b46742aafcb19c93c",
+      "message": "refactor: remove simd validation sidecar path\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T16:31:09+00:00"
+    },
+    {
+      "sha": "3a718b5e2091410ef7ba05a883cd5cadb3d4f110",
+      "message": "perf: remove sidecar request base64 overhead\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T16:38:00+00:00"
+    },
+    {
+      "sha": "053123def736dda29429f8cfe264295484bff658",
+      "message": "perf: optimize validation sidecar ok responses\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T16:44:27+00:00"
+    },
+    {
+      "sha": "47b55457fa106167d33c80f9a371cbbe9d15b72e",
+      "message": "refactor: trim validation sidecar cleanup leftovers\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T16:48:36+00:00"
+    },
+    {
+      "sha": "c36e115def13a8bbf2d1d072cac7c55329a75927",
+      "message": "refactor: narrow validation sidecar benchmark scope\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T16:51:09+00:00"
+    },
+    {
+      "sha": "a4bb43cd94bd66749ed137fe75dede1a3023833b",
+      "message": "chore: remove validation sidecar planning docs\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-03T16:52:24+00:00"
+    },
+    {
+      "sha": "3be8056cb9296136376221d1b9bb4493cb910527",
+      "message": "perf: raise validation sidecar client concurrency\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T09:04:37+00:00"
+    },
+    {
+      "sha": "36df70154fcf2538a8ba27ec8ebeda9b67722d9c",
+      "message": "refactor: remove legacy validation middleware sidecar\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T09:17:09+00:00"
+    },
+    {
+      "sha": "7dc6a664c152979721a7449caddfc10637694bbc",
+      "message": "chore: track validation sidecar lockfile\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T09:19:59+00:00"
+    },
+    {
+      "sha": "f02128b54a7499ee66e4a4fc00ff4aa253f2377b",
+      "message": "fix: harden validation sidecar startup and runtime\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T11:51:31+00:00"
+    },
+    {
+      "sha": "05e5e2e3bff5635d75622eb4b0e4a5bb185e0e22",
+      "message": "refactor: revert validation path to pyo3\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T13:18:48+00:00"
+    },
+    {
+      "sha": "7b9e8d1b452d18c9eb14108e0e7ce07de350fe10",
+      "message": "refactor: remove validation sidecar terminology\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T14:05:25+00:00"
+    },
+    {
+      "sha": "90ea8f90c9a23c38594cf8d4fa1bf33c64623407",
+      "message": "refactor: reuse rust validation middleware state\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T14:54:26+00:00"
+    },
+    {
+      "sha": "7a0e950de7b8e0b216a693b5505ba9c77bc9e4b0",
+      "message": "perf: validate request bodies in rust\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T15:18:53+00:00"
+    },
+    {
+      "sha": "cd4ad3e96e946289880ab22a605bd177515354f3",
+      "message": "chore: refresh rust validation lockfile\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T15:19:31+00:00"
+    },
+    {
+      "sha": "1376c4bcf183ac261a4b4f42626401449a56eb0a",
+      "message": "perf: batch validation middleware rust request checks\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T16:10:09+00:00"
+    },
+    {
+      "sha": "4eaa20b63d513d8eeebf27c60e4dae8ab2010d1e",
+      "message": "perf: serialize validation middleware requests for rust\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T16:48:12+00:00"
+    },
+    {
+      "sha": "3abf121aaad4fac15a0bbd90d560e8177391ae5b",
+      "message": "perf: call rust validation middleware with split request parts\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T18:16:59+00:00"
+    },
+    {
+      "sha": "4e255389f664988f8cce55323164babcee728be3",
+      "message": "perf: move validation middleware request path into rust\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T18:33:50+00:00"
+    },
+    {
+      "sha": "6e4e108bcaeed7912a4d37909fc12a944e226703",
+      "message": "test: benchmark safe response sanitization path\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T18:46:57+00:00"
+    },
+    {
+      "sha": "5290ebc4f8c705def67a6db016044c2b131b738c",
+      "message": "fix: close rust validation review findings\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-07T19:55:21+00:00"
+    },
+    {
+      "sha": "35b29a4e4dd788995f42c1b49933ce720c21dbe1",
+      "message": "fix: address validation middleware ci failures\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-08T07:52:20+00:00"
+    },
+    {
+      "sha": "81865e85dd003d20470c81d5401868ab72db833f",
+      "message": "fix: generate validation middleware stubs\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-08T08:07:11+00:00"
+    },
+    {
+      "sha": "4a5667ab2c350b368c65f0eb4b20a03f7cd8bc5b",
+      "message": "refactor: move validation middleware rust crate under crates\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T15:19:32+00:00"
+    },
+    {
+      "sha": "7a7d16af846c2a759c9bd3adf0628625bf128b87",
+      "message": "chore: inherit workspace metadata for validation rust crate\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T15:21:25+00:00"
+    },
+    {
+      "sha": "1139853fe3dbc698986285317cc4ffe2cd3ec70f",
+      "message": "fix: align validation rust stub generator naming\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-15T15:25:35+00:00"
+    },
+    {
+      "sha": "6f4b8abd624965fdead5e21d5867d405c74aca74",
+      "message": "fix: address validation rust CI regressions\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-16T08:43:56+00:00"
+    },
+    {
+      "sha": "30fb3ffe75d77512c6d4833a258578446c16d897",
+      "message": "fix: stabilize detect-secrets pre-commit hook\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-16T10:41:37+00:00"
+    },
+    {
+      "sha": "ab4c20e389638a73751e6729ef29931c1f4d7a7b",
+      "message": "fix: stabilize pre-commit CI hooks\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-16T11:17:59+00:00"
+    },
+    {
+      "sha": "fcf55a77ec069826997784e2617afea7239a3470",
+      "message": "fix: address merged branch CI failures\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-16T13:18:11+00:00"
+    },
+    {
+      "sha": "445c968da2e4c3d66d1242021b6e7e8a26587733",
+      "message": "fix: resolve rust fmt and detect-secrets ci\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-16T13:55:35+00:00"
+    },
+    {
+      "sha": "02af89691f0281d7160858f57a8e39c24282187f",
+      "message": "chore: drop validation rust crate lockfile\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T08:59:11+00:00"
+    },
+    {
+      "sha": "457815551d65f1db7d765025c46c631fed84b8ec",
+      "message": "fix: address rust validation review findings\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T10:02:44+00:00"
+    },
+    {
+      "sha": "0821d85cfba582ca9570d6fbc639380f9769381a",
+      "message": "fix: tighten rust validation follow-up\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T10:19:32+00:00"
+    },
+    {
+      "sha": "ddc2ae978a9a921a6996efc262323afccf6e5625",
+      "message": "fix: address remaining rust validation review findings\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T15:08:25+00:00"
+    },
+    {
+      "sha": "5d045fcefbbcf146e9005d5402986b802c326840",
+      "message": "fix: sync rust validation stub signature\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T16:21:44+00:00"
+    },
+    {
+      "sha": "a6db8b0db6045612d500a274dc908afba440b86f",
+      "message": "test: normalize rust stub signature assertion\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-21T16:30:36+00:00"
+    },
+    {
+      "sha": "9ef0ab7d0a9441ce1061297f4847fc3f20592a63",
+      "message": "fix rust validation path roots on windows\n\nSigned-off-by: lucarlig <20149527+lucarlig@users.noreply.github.com>",
+      "author": "lucarlig",
+      "date": "2026-04-24T07:41:42+00:00"
+    },
+    {
+      "sha": "1e8b4c729eb9d30ec25c113fe460e34ce9751872",
+      "message": "chore: drop unrelated binding service formatting\n\nSigned-off-by: lucarlig <20149527+lucarlig@users.noreply.github.com>",
+      "author": "lucarlig",
+      "date": "2026-04-24T08:11:42+00:00"
+    },
+    {
+      "sha": "90350e8266f228d3a49e723a5e3216b60a44ce22",
+      "message": "refactor: normalize rust validation roots once\n\nSigned-off-by: lucarlig <20149527+lucarlig@users.noreply.github.com>",
+      "author": "lucarlig",
+      "date": "2026-04-24T08:13:02+00:00"
+    },
+    {
+      "sha": "ff3e71b9e3ec84850fd180119db7984566465cfa",
+      "message": "fix: refresh rust validation ci artifacts\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-24T09:15:46+00:00"
+    },
+    {
+      "sha": "0d3632df584f32b504cd870d7e12a8deb33ae463",
+      "message": "refactor: split rust validation middleware modules\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-24T10:38:32+00:00"
+    },
+    {
+      "sha": "85bbb6585f4f9e2fd1245800fac2f18286197489",
+      "message": "fix: harden rust validation middleware\n\nSigned-off-by: lucarlig <luca.carlig@ibm.com>",
+      "author": "lucarlig",
+      "date": "2026-04-24T14:48:34+00:00"
+    }
+  ],
+  "files_changed": 35,
+  "additions": 4543,
+  "deletions": 278,
+  "merged": false,
+  "mergeable": false,
+  "ingested_at": "2026-05-17T15:07:17.029710",
+  "_storage_metadata": {
+    "stored_at": "2026-05-17T15:07:17.030577",
+    "source_id": "IBM_mcp-context-forge",
+    "item_type": "pr",
+    "item_number": 4031,
+    "raw_data_path": "data\\raw\\github\\IBM_mcp-context-forge\\prs\\4031.json"
+  }
+}
