@@ -37,8 +37,15 @@ def main():
     # Launch Streamlit UI
     try:
         import streamlit.web.cli as stcli
+        import streamlit as st
 
-        ui_path = settings.project_root / "app" / "ui" / "app.py"
+        # If we are already running in streamlit, just return
+        # This prevents the "Runtime instance already exists" error
+        if hasattr(st, 'runtime') and st.runtime.exists():
+            logger.info("Already running inside Streamlit runtime")
+            return
+
+        ui_path = settings.project_root / "app" / "ui" / "Home.py"
 
         logger.info("Launching Streamlit UI", ui_path=str(ui_path))
 
@@ -47,7 +54,7 @@ def main():
             "run",
             str(ui_path),
             "--server.port=8501",
-            "--server.address=localhost",
+            "--server.address=0.0.0.0",
             "--browser.gatherUsageStats=false"
         ]
 

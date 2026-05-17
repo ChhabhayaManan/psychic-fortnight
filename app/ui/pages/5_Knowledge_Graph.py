@@ -258,9 +258,17 @@ def main():
     st.title("🕸️ Knowledge Graph")
     st.markdown("Explore relationships between artifacts, entities, and contributors.")
     st.markdown("---")
+
+    config = UIState.load_config()
+    if not config.get("repo_owner") or not config.get("repo_name"):
+        st.warning("⚠️ No repository configured — go to **Setup** first.")
+        return
+
+    source_id = f"{config['repo_owner']}_{config['repo_name']}"
+    api.set_project(source_id)
     
     # Check if graph data is available
-    availability = UIState.check_data_availability()
+    availability = UIState.check_data_availability(source_id)
     
     if not availability.get('graph'):
         st.warning("⚠️ Knowledge graph not available. Please run indexing first.")
@@ -269,7 +277,7 @@ def main():
     
     # Load graph data
     with st.spinner("Loading knowledge graph..."):
-        graph_data = api.get_graph_data()
+        graph_data = api.get_graph_data(source_id)
     
     if not graph_data:
         st.error("❌ Failed to load graph data")

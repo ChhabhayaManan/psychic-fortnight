@@ -200,9 +200,17 @@ def main():
     st.title("📅 Timeline View")
     st.markdown("Explore engineering events chronologically.")
     st.markdown("---")
+
+    config = UIState.load_config()
+    if not config.get("repo_owner") or not config.get("repo_name"):
+        st.warning("⚠️ No repository configured — go to **Setup** first.")
+        return
+
+    source_id = f"{config['repo_owner']}_{config['repo_name']}"
+    api.set_project(source_id)
     
     # Check if data is available
-    availability = UIState.check_data_availability()
+    availability = UIState.check_data_availability(source_id)
     
     if not availability.get('extracted'):
         st.warning("⚠️ No timeline data available. Please run extraction first.")
@@ -218,6 +226,7 @@ def main():
             start_date=filters['start_date'],
             end_date=filters['end_date'],
             event_types=filters['event_types'] if filters['event_types'] else None,
+            source_id=source_id
         )
     
     # Display summary

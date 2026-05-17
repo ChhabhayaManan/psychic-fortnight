@@ -1,6 +1,6 @@
 """Indexing worker for updating vector and graph stores."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from app.memory.graph_store import GraphStore
 from app.memory.json_store import JsonStore

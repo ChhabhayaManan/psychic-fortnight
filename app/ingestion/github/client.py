@@ -1,10 +1,13 @@
-"""GitHub API client with rate limiting."""
+"""GitHub client — fast discovery + detailed fetch."""
 
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
-from github import Github, GithubException, Issue, PullRequest, Repository
+from github import Github, GithubException
+from github.Issue import Issue
+from github.PullRequest import PullRequest
+from github.Repository import Repository
 
 from app.utils.logging import get_logger
 from app.utils.rate_limiter import RateLimiter
@@ -14,235 +17,149 @@ logger = get_logger(__name__)
 
 class GitHubClient:
     """
-    GitHub API client with rate limiting.
+    GitHub API client.
 
-    Wraps PyGithub library with async support and rate limiting
-    to prevent API quota violations.
+    Two distinct operations:
+      - list_pr_numbers / list_issue_numbers  → fast; returns only (number, title) tuples
+      - get_pr_details / get_issue_details    → slow; fetches comments, reviews, commits
     """
 
-    def __init__(self, token: str, rate_limiter: RateLimiter, verify_ssl: bool = True):
-        """
-        Initialize GitHub client.
-
-        Args:
-            token: GitHub OAuth token (Personal Access Token)
-            rate_limiter: Rate limiter instance
-            verify_ssl: Whether to verify SSL certificates
-        """
-        # Initialize with retry and timeout for robustness
-        from github import Auth
-        auth = Auth.Token(token)
-        self.github = Github(
-            auth=auth,
-            verify=verify_ssl,
-            timeout=30,
-            retry=5,
-            per_page=100  # Increase per_page for efficient listing
-        )
+    def __init__(
+        self,
+        token: str,
+        rate_limiter: RateLimiter,
+        per_page: int = 100,
+        verify_ssl: bool = True
+    ):
+        self.github = Github(login_or_token=token, per_page=per_page, verify=verify_ssl)
         self.rate_limiter = rate_limiter
-        self.verify_ssl = verify_ssl
+        self.per_page = per_page
 
-        logger.info("GitHub client initialized", verify_ssl=verify_ssl, per_page=100)
+        logger.info(
+            "GitHub client initialized",
+            verify_ssl=verify_ssl,
+            per_page=per_page
+        )
+
+    # ─── Repository ──────────────────────────────────────────────────────────
 
     async def get_repository(self, owner: str, repo: str) -> Repository:
-        """
-        Get repository object.
-
-        Args:
-            owner: Repository owner
-            repo: Repository name
-
-        Returns:
-            Repository object
-        """
         await self.rate_limiter.acquire()
+        repo_obj = await asyncio.to_thread(self.github.get_repo, f"{owner}/{repo}")
+        logger.info("Repository retrieved", owner=owner, repo=repo, full_name=repo_obj.full_name)
+        return repo_obj
 
-        try:
-            repository = await asyncio.to_thread(
-                self.github.get_repo,
-                f"{owner}/{repo}"
-            )
+    # ─── Streaming page-based discovery ──────────────────────────────────────
 
-            logger.info(
-                "Repository retrieved",
-                owner=owner,
-                repo=repo,
-                full_name=repository.full_name
-            )
-
-            return repository
-
-        except GithubException as e:
-            logger.error(
-                "Failed to get repository",
-                owner=owner,
-                repo=repo,
-                error=str(e)
-            )
-            raise
-
-    async def list_pull_requests(
+    async def stream_pr_pages(
         self,
         repo: Repository,
         state: str = "all",
-        limit: int = None
-    ) -> List[PullRequest]:
+    ):
         """
-        List all PRs in repository.
-
-        Args:
-            repo: Repository object
-            state: PR state ("open", "closed", "all")
-            limit: Maximum number of PRs to fetch (None = fetch all)
-
-        Returns:
-            List of PullRequest objects
+        Async generator yielding one page of PR numbers at a time.
+        Each page = one GitHub API call = up to 100 PR numbers.
+        Yields: List[int]
         """
         await self.rate_limiter.acquire()
 
-        try:
-            def _fetch():
-                paginated = repo.get_pulls(state=state)
-                
-                # Use totalCount for early feedback if supported
-                try:
-                    total = paginated.totalCount
-                    if total > 0:
-                        logger.info(f"Listing {total} PRs for {repo.full_name}...")
-                    else:
-                        total = None
-                except Exception:
-                    total = None
-                
-                if limit:
-                    from itertools import islice
-                    return list(islice(paginated, limit))
-                
-                # Fetch all with progress logging
-                results = []
-                for i, pr in enumerate(paginated):
-                    results.append(pr)
-                    if (i + 1) % 100 == 0:
-                        progress = f"{i + 1}/{total}" if total else f"{i + 1}"
-                        logger.info(f"Fetched {progress} PRs")
-                
-                return results
+        def _get_total_and_first_page():
+            paginated = repo.get_pulls(state=state)
+            total = None
+            try:
+                total = paginated.totalCount
+            except Exception:
+                pass
+            page0 = paginated.get_page(0)
+            return total, paginated, page0
 
-            prs = await asyncio.to_thread(_fetch)
+        total, paginated, page0 = await asyncio.to_thread(_get_total_and_first_page)
+        total_pages = ((total or 0) + 99) // 100
 
-            logger.info(
-                f"PRs listed -- {len(prs)}",
-                count=len(prs)
-            )
+        if total:
+            logger.info(f"PR stream: {total} total PRs across ~{total_pages} pages")
+            print(f"[INGEST] {total} PRs to process (~{total_pages} pages of 100)")
 
-            return prs
+        if not page0:
+            return
 
-        except GithubException as e:
-            logger.error(
-                "Failed to list PRs",
-                repo=repo.full_name,
-                error=str(e)
-            )
-            raise
+        yield [pr.number for pr in page0]
 
-    async def list_issues(
+        for page_num in range(1, total_pages + 1):
+            await self.rate_limiter.acquire()
+
+            def _fetch_page(n=page_num):
+                return paginated.get_page(n)
+
+            items = await asyncio.to_thread(_fetch_page)
+            if not items:
+                break
+            yield [pr.number for pr in items]
+
+    async def stream_issue_pages(
         self,
         repo: Repository,
         state: str = "all",
-        limit: int = None
-    ) -> List[Issue]:
+    ):
         """
-        List all issues in repository (excluding PRs).
-
-        Args:
-            repo: Repository object
-            state: Issue state ("open", "closed", "all")
-            limit: Maximum number of issues to fetch (None = fetch all)
-
-        Returns:
-            List of Issue objects (PRs are filtered out)
+        Async generator yielding one page of ISSUE numbers at a time (PRs filtered out).
+        Each page = one GitHub API call, returns up to 100 real issues.
+        Yields: List[int]
         """
         await self.rate_limiter.acquire()
 
-        try:
-            def _fetch_issues():
-                paginated = repo.get_issues(state=state)
-                
-                try:
-                    total = paginated.totalCount
-                    if total > 0:
-                        logger.info(f"Listing {total} potential items (issues+PRs) for {repo.full_name}...")
-                    else:
-                        total = None
-                except Exception:
-                    total = None
+        def _get_total_and_first_page():
+            paginated = repo.get_issues(state=state)
+            total = None
+            try:
+                total = paginated.totalCount
+            except Exception:
+                pass
+            page0 = paginated.get_page(0)
+            return total, paginated, page0
 
-                if limit:
-                    from itertools import islice
-                    # Still need to filter PRs if limited, but we'll fetch 'limit' items first
-                    all_items = list(islice(paginated, limit))
-                    return [item for item in all_items if not item.pull_request]
-                
-                # Fetch all and filter PRs in one pass to avoid double iteration
-                results = []
-                for i, item in enumerate(paginated):
-                    # Only keep issues that are NOT pull requests
-                    # Accessing .pull_request here is generally safe and doesn't trigger 
-                    # a full API call if the item was fetched via get_issues()
-                    if not item.pull_request:
-                        results.append(item)
-                    
-                    if (i + 1) % 100 == 0:
-                        progress = f"{i + 1}/{total}" if total else f"{i + 1}"
-                        logger.info(f"Fetched {progress} items (issues+PRs)")
-                
-                return results
+        total, paginated, page0 = await asyncio.to_thread(_get_total_and_first_page)
+        total_pages = ((total or 0) + 99) // 100
 
-            # Get issues (already filtered in the thread)
-            issues = await asyncio.to_thread(_fetch_issues)
+        if total:
+            logger.info(f"Issue stream: ~{total} items (issues+PRs) across ~{total_pages} pages")
+            print(f"[INGEST] ~{total} issues+PRs to scan for real issues (~{total_pages} pages)")
 
-            logger.info(
-                f"Issues listed -- {len(issues)}",
-                count=len(issues)
-            )
+        if page0 is not None:
+            filtered = [i.number for i in page0 if i.pull_request is None]
+            if filtered:
+                yield filtered
 
-            return issues
+        for page_num in range(1, total_pages + 1):
+            await self.rate_limiter.acquire()
 
-        except GithubException as e:
-            logger.error(
-                "Failed to list issues",
-                repo=repo.full_name,
-                error=str(e)
-            )
-            raise
+            def _fetch_page(n=page_num):
+                return paginated.get_page(n)
 
-    async def get_pr_details(
-        self,
-        pr: PullRequest
-    ) -> Dict[str, Any]:
-        """
-        Get complete PR data including comments, reviews, commits.
+            items = await asyncio.to_thread(_fetch_page)
+            if not items:
+                break
+            filtered = [i.number for i in items if i.pull_request is None]
+            if filtered:
+                yield filtered
 
-        Args:
-            pr: PullRequest object
+    # ─── Detailed fetch (one item at a time, after discovery) ────────────────
 
-        Returns:
-            Dictionary with complete PR data
-        """
+    async def get_pr_details(self, repo: Repository, pr_number: int) -> Dict[str, Any]:
+        """Fetch full PR data including comments, reviews, commits."""
         await self.rate_limiter.acquire()
 
+        def _fetch():
+            pr = repo.get_pull(pr_number)
+            comments = list(pr.get_comments())
+            reviews = list(pr.get_reviews())
+            commits = list(pr.get_commits())
+            return pr, comments, reviews, commits
+
         try:
-            # Fetch comments
-            comments = await asyncio.to_thread(lambda: list(pr.get_comments()))
+            pr, comments, reviews, commits = await asyncio.to_thread(_fetch)
 
-            # Fetch reviews
-            reviews = await asyncio.to_thread(lambda: list(pr.get_reviews()))
-
-            # Fetch commits
-            commits = await asyncio.to_thread(lambda: list(pr.get_commits()))
-
-            # Build complete data structure
-            data = {
+            return {
                 "source": {
                     "type": "github",
                     "repository": pr.base.repo.full_name,
@@ -259,36 +176,36 @@ class GitHubClient:
                     "author": pr.user.login if pr.user else None,
                     "labels": [label.name for label in pr.labels],
                     "milestone": pr.milestone.title if pr.milestone else None,
-                    "assignees": [assignee.login for assignee in pr.assignees]
+                    "assignees": [a.login for a in pr.assignees]
                 },
                 "description": pr.body or "",
                 "comments": [
                     {
-                        "id": str(comment.id),
-                        "author": comment.user.login if comment.user else None,
-                        "created_at": comment.created_at.isoformat() if comment.created_at else None,
-                        "body": comment.body or ""
+                        "id": str(c.id),
+                        "author": c.user.login if c.user else None,
+                        "created_at": c.created_at.isoformat() if c.created_at else None,
+                        "body": c.body or ""
                     }
-                    for comment in comments
+                    for c in comments
                 ],
                 "reviews": [
                     {
-                        "id": str(review.id),
-                        "author": review.user.login if review.user else None,
-                        "state": review.state,
-                        "submitted_at": review.submitted_at.isoformat() if review.submitted_at else None,
-                        "body": review.body or ""
+                        "id": str(r.id),
+                        "author": r.user.login if r.user else None,
+                        "state": r.state,
+                        "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+                        "body": r.body or ""
                     }
-                    for review in reviews
+                    for r in reviews
                 ],
                 "commits": [
                     {
-                        "sha": commit.sha,
-                        "message": commit.commit.message,
-                        "author": commit.commit.author.name if commit.commit.author else None,
-                        "date": commit.commit.author.date.isoformat() if commit.commit.author and commit.commit.author.date else None
+                        "sha": c.sha,
+                        "message": c.commit.message,
+                        "author": c.commit.author.name if c.commit.author else None,
+                        "date": c.commit.author.date.isoformat() if c.commit.author and c.commit.author.date else None
                     }
-                    for commit in commits
+                    for c in commits
                 ],
                 "files_changed": pr.changed_files,
                 "additions": pr.additions,
@@ -297,46 +214,23 @@ class GitHubClient:
                 "mergeable": pr.mergeable,
                 "ingested_at": datetime.now().isoformat()
             }
-
-            logger.info(
-                "PR details fetched",
-                pr_number=pr.number,
-                comments=len(comments),
-                reviews=len(reviews),
-                commits=len(commits)
-            )
-
-            return data
-
         except GithubException as e:
-            logger.error(
-                "Failed to get PR details",
-                pr_number=pr.number,
-                error=str(e)
-            )
+            logger.error("Failed to get PR details", pr_number=pr_number, error=str(e))
             raise
 
-    async def get_issue_details(
-        self,
-        issue: Issue
-    ) -> Dict[str, Any]:
-        """
-        Get complete issue data including comments.
-
-        Args:
-            issue: Issue object
-
-        Returns:
-            Dictionary with complete issue data
-        """
+    async def get_issue_details(self, repo: Repository, issue_number: int) -> Dict[str, Any]:
+        """Fetch full issue data including comments."""
         await self.rate_limiter.acquire()
 
-        try:
-            # Fetch comments
-            comments = await asyncio.to_thread(lambda: list(issue.get_comments()))
+        def _fetch():
+            issue = repo.get_issue(issue_number)
+            comments = list(issue.get_comments())
+            return issue, comments
 
-            # Build complete data structure
-            data = {
+        try:
+            issue, comments = await asyncio.to_thread(_fetch)
+
+            return {
                 "source": {
                     "type": "github",
                     "repository": issue.repository.full_name,
@@ -352,41 +246,25 @@ class GitHubClient:
                     "author": issue.user.login if issue.user else None,
                     "labels": [label.name for label in issue.labels],
                     "milestone": issue.milestone.title if issue.milestone else None,
-                    "assignees": [assignee.login for assignee in issue.assignees]
+                    "assignees": [a.login for a in issue.assignees]
                 },
                 "description": issue.body or "",
                 "comments": [
                     {
-                        "id": str(comment.id),
-                        "author": comment.user.login if comment.user else None,
-                        "created_at": comment.created_at.isoformat() if comment.created_at else None,
-                        "body": comment.body or ""
+                        "id": str(c.id),
+                        "author": c.user.login if c.user else None,
+                        "created_at": c.created_at.isoformat() if c.created_at else None,
+                        "body": c.body or ""
                     }
-                    for comment in comments
+                    for c in comments
                 ],
                 "ingested_at": datetime.now().isoformat()
             }
-
-            logger.info(
-                "Issue details fetched",
-                issue_number=issue.number,
-                comments=len(comments)
-            )
-
-            return data
-
         except GithubException as e:
-            logger.error(
-                "Failed to get issue details",
-                issue_number=issue.number,
-                error=str(e)
-            )
+            logger.error("Failed to get issue details", issue_number=issue_number, error=str(e))
             raise
 
     def close(self):
-        """Close GitHub connection."""
         if hasattr(self.github, 'close'):
             self.github.close()
         logger.info("GitHub client closed")
-
-# Made with Bob

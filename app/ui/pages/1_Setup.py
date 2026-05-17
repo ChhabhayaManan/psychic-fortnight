@@ -197,10 +197,14 @@ def main():
     st.markdown("---")
     st.header("📁 Data Directories")
     
-    paths = UIState.get_data_paths()
-    availability = UIState.check_data_availability()
+    source_id = f"{config['repo_owner']}_{config['repo_name']}" if config.get('repo_owner') and config.get('repo_name') else None
+    paths = UIState.get_data_paths(source_id)
+    availability = UIState.check_data_availability(source_id)
     
-    st.markdown("Current data directory structure:")
+    if source_id:
+        st.markdown(f"Current data directory structure for **{config['repo_owner']}/{config['repo_name']}**:")
+    else:
+        st.markdown("Current global data directory structure (configure a repository to see project-specific paths):")
     
     for name, path in paths.items():
         status = "✅ Available" if availability.get(name) else "❌ Empty"
